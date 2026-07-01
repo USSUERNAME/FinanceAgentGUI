@@ -77,23 +77,6 @@ const ATTRIBUTION_PATTERNS = [
   /라고 경고했습니다/g,
 ];
 
-const TITLE_CONCRETE_ANCHOR_PATTERNS = [
-  {
-    label: "actor_or_asset",
-    pattern: /[A-Z][A-Za-z0-9&.-]{1,}|AI|ETF|R&D|GDP|JOLTS|BOJ|ECB|FDA|SEC|EU|미국|중국|일본|영국|유럽|독일|한국|대만|인도|이란|호르무즈|아마존|엔비디아|삼성|비트코인|암호화폐|제약|빅파마|철강|방위|은행|유틸리티|수소|탄소|엔화|유가|의회|하원|연준|세계은행/,
-  },
-  {
-    label: "event_or_action",
-    pattern: /조사|서한|유출|유입|지출|확대|축소|관세|쿼터|차입|발행|증자|계약|승인|규제|수사|밀수|수출금융|금리|인하|동결|반등|둔화|하락|상승|증가|감소|하향|상향|개입|통항|사찰|비축|임상시험|정치자금|자금|판매|소매판매|수입물가|성장|적자|도입|대응|폐기|공급|경계|압박|목표/,
-  },
-  {
-    label: "market_mechanism_or_number",
-    pattern: /\d|%|달러|엔|원|억|조|톤|bp|자금|수급|정책|규제|공급망|신용|금리|물가|리스크|프리미엄|유동성|운임|수요|수출|조달|재무|자본|가격|비용|마진|실적|파이프라인|밸류에이션|R&D|고용|대출|투자심리|방위|기후금융|공급|대응/,
-  },
-];
-
-const TITLE_OBJECT_METAPHOR_PATTERN = /청구서|계산서|스티커|손가락|장바구니|책상|가격표|영수증|숫자판|문고리|온도계|첫 줄|교범|숨바꼭질|나비효과|축제|공백|점포/;
-
 function stripHtml(html) {
   return String(html || "")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -384,34 +367,6 @@ function countAttributions(html, text) {
   const quoteBlocks = (String(html || "").match(/<blockquote\b/gi) || []).length;
   const attributedText = ATTRIBUTION_PATTERNS.reduce((sum, pattern) => sum + countMatches(text, pattern), 0);
   return quoteBlocks + attributedText;
-}
-
-function checkTitleDiscipline(metadata = {}) {
-  const issues = [];
-  const title = cleanIdentityText(metadata.title || "");
-  if (!title) return issues;
-  const anchors = TITLE_CONCRETE_ANCHOR_PATTERNS
-    .filter(({ pattern }) => pattern.test(title))
-    .map(({ label }) => label);
-  const hasObjectMetaphor = TITLE_OBJECT_METAPHOR_PATTERN.test(title);
-
-  if (anchors.length < 2) {
-    issues.push({
-      level: "warn",
-      code: "title-too-abstract",
-      message: `title should expose at least two concrete anchors (actor/asset, event/action, mechanism/number); found ${anchors.join(", ") || "none"}`,
-    });
-  }
-
-  if (hasObjectMetaphor && anchors.length < 3) {
-    issues.push({
-      level: "warn",
-      code: "title-metaphor-overload",
-      message: "title uses an object metaphor before the concrete news anchor is clear; move the metaphor to deck/body or add actor, event, and market mechanism",
-    });
-  }
-
-  return issues;
 }
 
 function heroImageExtension(src) {
@@ -886,7 +841,7 @@ async function readArticle(articleId) {
 
 function checkArticle({ articleId, metadata, html }, topicCatalog) {
   const issues = [];
-  const visibleMetadata = [metadata.title, metadata.deck, metadata.summary].filter(Boolean).join("\n");
+  const visibleMetadata = [metadata.deck, metadata.summary].filter(Boolean).join("\n");
   const bodyText = stripHtml(html);
   const visibleText = `${visibleMetadata}\n${bodyText}`;
   const articleType = String(metadata.articleType || "analysis");
@@ -906,7 +861,6 @@ function checkArticle({ articleId, metadata, html }, topicCatalog) {
   issues.push(...checkHeroImage(articleId, metadata));
   issues.push(...checkCoverDecision(metadata));
   issues.push(...checkNewsFeedEvidence(metadata));
-  issues.push(...checkTitleDiscipline(metadata));
 
   if (!Array.isArray(metadata.sourceBasis) || metadata.sourceBasis.length < 3) {
     issues.push({ level: "error", code: "source-basis-too-thin", message: "sourceBasis should include at least three source or evidence entries" });
@@ -945,8 +899,8 @@ function checkArticle({ articleId, metadata, html }, topicCatalog) {
     issues.push({ level: "warn", code: "editorial-angle-missing", message: "metadata.editorialAngle helps avoid repeated generic issue explainers" });
   }
 
-  if (/무엇인가|뭡니까|알아야 할|총정리|개론/.test(`${metadata.title || ""}\n${metadata.deck || ""}`)) {
-    issues.push({ level: "warn", code: "generic-explainer-framing", message: "title/deck may read like a repeated generic explainer" });
+  if (/무엇인가|뭡니까|알아야 할|총정리|개론/.test(`${metadata.deck || ""}`)) {
+    issues.push({ level: "warn", code: "generic-explainer-framing", message: "deck may read like a repeated generic explainer" });
   }
 
   if (compactLength < minLength) {

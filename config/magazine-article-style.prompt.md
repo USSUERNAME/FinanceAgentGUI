@@ -35,13 +35,7 @@ Before writing articles, create a short issue slate. The slate should prevent th
   - what the market newly learned,
   - what prior assumption weakened or strengthened,
   - which next data point now matters.
-- Avoid generic titles and decks that sound like `이 이슈는 무엇인가`, but do not solve that by making the title poetic or cryptic. `metadata.title` must be concrete enough that a reader can identify the actor, event, and market mechanism before opening the article.
-- Title discipline:
-  - A title should include at least two of these three anchors: actor/asset/sector, event/action, and market mechanism/number.
-  - Use a light metaphor only after the concrete news anchor is visible. Do not let object metaphors such as `청구서`, `계산서`, `스티커`, `손가락`, `장바구니`, `책상`, or `가격표` replace the actual subject.
-  - Prefer `미 의회, 중국 임상시험 조사로 빅파마 R&D 리스크를 키웠습니다` over `신약의 실험실에 지정학 스티커가 붙었습니다`.
-  - Prefer `비트코인 ETF 자금은 빠지고, 암호화폐 정치자금은 커졌습니다` over `돈은 빠지는데, 로비 장부는 두꺼워졌습니다`.
-  - The deck can carry the more literary turn. The title should first work as a trustworthy finance/news headline.
+- During article drafting, leave `metadata.title` as an empty string. The generator finalizes the title after `article.html` is complete by sending only the body text to a separate title pass.
 - Track `editorialAngle` in metadata when possible: `follow-up`, `low-level-signal`, `company-map`, `data-anomaly`, `external-research`, `human-drama`, or `policy-mechanics`.
 - Track `storyFamily` or `storyKey` in metadata when possible. In a five-article issue, more than two articles from the same story family need an explicit editorial reason.
 - A low-ranked issue can be article-worthy when it has a clean mechanism, surprising implication, useful data point, or good scene. Importance rank is not the same as magazine value.
@@ -58,7 +52,7 @@ Cover story ordering is handled later by `coverRegisteredAt`; this section decid
 - Judge whether the candidate is closer than every article in that comparison window to either:
   - the most important current market issue, or
   - the most recent current market issue.
-- This is an editorial LLM judgment, not a keyword match. Use the evidence bundle, continuity-search hits, article title/deck/summary, topics, `storyFamily`, `editorialAngle`, and the actual news mechanism.
+- This is an editorial LLM judgment, not a keyword match. Use the evidence bundle, continuity-search hits, article body/deck/summary, topics, `storyFamily`, `editorialAngle`, and the actual news mechanism.
 - Promote only when the candidate is the strongest item in that comparison window. Ties should usually not promote unless the candidate is clearly closer to the most recent issue.
 - If promoted, set `metadata.isCoverStory: true`, `metadata.coverRegisteredAt` to the generation timestamp, and add:
 
@@ -110,7 +104,7 @@ Write like a magazine editor walking through the issue with the reader, not a tu
 
 - Avoid scolding or command-heavy phrasing such as repeated `봐야 합니다`, `확인해야 합니다`, `점검해야 합니다`, `잊으면 안 됩니다`, and `투자자는 ...해야 합니다`.
 - Prefer observational phrasing: `눈길이 가는 대목은`, `시장이 헷갈리는 지점은`, `여기서 이야기가 조금 꼬입니다`, `숫자는 차분한데 의미는 꽤 시끄럽습니다`.
-- Keep wit as a thin edge, not a punchline machine. The joke should reveal a market mechanism.
+- Unless the article covers death, war, terrorism, or a severe market collapse, include some restrained Bloomberg-newsletter-style humor and wit in the body. The joke should reveal a market mechanism, not become the point.
 - Use polite endings, but vary sentence endings. `~입니다` and `~합니다` are allowed; do not let every paragraph end like a memo.
 - Do not lecture. Let facts, scenes, quotes, and numbers carry the point.
 
@@ -121,7 +115,8 @@ Write like a magazine editor walking through the issue with the reader, not a tu
 - Vary section length. A short section can be one paragraph; a data section may need four or five.
 - Deep analysis should include at least one chart block when useful, but the body must still read on its own.
 - Use direct or indirect attribution when research contains named stakeholders. Direct quote text should be Korean, with original source/person names preserved in the label.
-- A generated magazine article should usually carry at least five source/evidence entries in `sourceBasis`. There is no fixed quota for direct quotes or indirect attributions in the body.
+- A generated magazine article should usually carry at least five source/evidence entries in `sourceBasis` and at least four direct or indirect attribution moments in the body. Treat this as a writing-balance target, not a license to insert mechanical quote blocks.
+- If research finds a materially relevant actual statement from a named person, company, agency, policymaker, analyst, trader, or other stakeholder, do not flatten it into anonymous summary. Use a direct quote when exact wording is verified; otherwise use explicit indirect attribution.
 - Do not drop quotes or attributions after the article has already explained the same point. Each quoted or attributed moment must advance the flow: introduce a fact the prose has not already stated, sharpen a disagreement, explain why a number matters, name who benefits or pays, or set up the next paragraph.
 - Integrate attribution into the article's logic. The sentence before a quote should create a reason to hear that voice, and the sentence after it should use the quote to move the analysis forward. If a quote only repeats the paragraph, replace it with a tighter indirect attribution or remove it.
 - It is better to publish a coherent article with no direct quotes than to insert mechanical quote blocks. Use quotes and attributions only when they change what the reader understands.
@@ -140,7 +135,7 @@ Write like a magazine editor walking through the issue with the reader, not a tu
 
 ## Reader-Facing Red Lines
 
-Do not expose internal production language in `title`, `deck`, `summary`, or `article.html`:
+Do not expose internal production language in `deck`, `summary`, or `article.html`:
 
 - `World Memory vector search results`
 - `World Memory`

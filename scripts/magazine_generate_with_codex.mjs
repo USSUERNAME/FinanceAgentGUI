@@ -374,6 +374,90 @@ function normalizeGeneratedArticleMetadata(articleDirectory, timestampIso, { exi
   }
 }
 
+function stripHtmlForTitle(html) {
+  return String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanGeneratedTitle(output) {
+  const raw = String(output || "").trim();
+  if (!raw) return "";
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const title = cleanGeneratedTitle(parsed?.title || parsed?.headline || "");
+      if (title) return title;
+    } catch {
+      // Fall back to line-based cleanup.
+    }
+  }
+  const withoutFences = raw.replace(/```(?:json|text)?/gi, "").replace(/```/g, "").trim();
+  const firstLine = withoutFences
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  return String(firstLine || "")
+    .replace(/^[-*•\d.)\s]+/, "")
+    .replace(/^(?:제목|title|headline)\s*[:：]\s*/i, "")
+    .replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, "")
+    .trim();
+}
+
+function buildTitlePrompt({ bodyText }) {
+  return [
+    "아래 기사 본문만 읽고 한국어 기사 제목을 한 줄로 작성한다.",
+    "기사 본문을 잘 설명하는 가독성 높고 이해하기 쉬운 기사 제목을 달성하라.",
+    "제목 작성은 Bloomberg나 Financial Times의 제목 작성 스타일을 한국어로 표현한다고 여기라.",
+    "출력은 최종 제목 한 줄만 한다.",
+    "",
+    "[기사 본문]",
+    bodyText,
+  ].join("\n");
+}
+
+async function finalizeArticleTitles({ provider, codex, approval, sandbox, model, reasoning, timeoutMs, tempDir, articleDirectory, agentLabel }) {
+  for (const [index, articleId] of articleIdsIn(articleDirectory).entries()) {
+    const articleDir = join(articleDirectory, articleId);
+    const metadataPath = join(articleDir, "metadata.json");
+    const htmlPath = join(articleDir, "article.html");
+    if (!existsSync(metadataPath) || !existsSync(htmlPath)) continue;
+    const metadata = readJsonFile(metadataPath);
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) continue;
+    const bodyText = stripHtmlForTitle(readFileSync(htmlPath, "utf8"));
+    if (!bodyText) continue;
+    const outputPath = join(tempDir, `${provider}-title-${index + 1}.txt`);
+    console.log(`\nFinalizing article title from body only: ${articleId}`);
+    await runAgentPrompt({
+      provider,
+      codex,
+      approval,
+      sandbox,
+      model,
+      reasoning,
+      outputPath,
+      prompt: buildTitlePrompt({ bodyText }),
+      timeoutMs,
+      tempDir,
+    });
+    const title = cleanGeneratedTitle(existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "");
+    if (!title) {
+      throw new Error(`${agentLabel} title finalization returned an empty title for ${articleId}`);
+    }
+    writeFileSync(metadataPath, `${JSON.stringify({ ...metadata, title }, null, 2)}\n`, "utf8");
+  }
+}
+
 function buildPrompt({ count, replace, articleDirectory, staged, agentLabel = "Codex CLI" }) {
   const extraPrompt = String(process.env.MAGAZINE_EXTRA_PROMPT || process.env.MAGAZINE_CODEX_EXTRA_PROMPT || "").trim();
   const recentArticles = recentArticleWindowSummary(12);
@@ -394,6 +478,7 @@ function buildPrompt({ count, replace, articleDirectory, staged, agentLabel = "C
         : "- 기존 기사와 충돌하지 않는 새 article-id로 추가한다.",
     `- 기사별로 ${articleDirectory}/<article-id>/metadata.json 과 article.html 을 만든다.`,
     `- 필요하면 ${articleDirectory}/<article-id>/assets/ 를 만들 수 있다.`,
+    "- 초안 작성 단계에서는 metadata.title을 빈 문자열(\"\")로 둔다. 제목은 article.html 본문이 완성된 뒤 생성기가 본문만 따로 읽고 확정한다.",
     "",
     "반드시 먼저 읽을 파일:",
     "- AGENTS.md",
@@ -408,7 +493,7 @@ function buildPrompt({ count, replace, articleDirectory, staged, agentLabel = "C
     "- 보도 후보는 data/world-memory/collector-state.json의 collector.lastSuccessfulAt 이후 항목만 사용할 수 있다. 그 이전 항목은 기사 소재로 쓰지 않는다.",
     "- 최근 확인된 보도 중 속보성, 시장 충격, 정책/기업/거시 메커니즘이 강한 항목이 있으면 그쪽을 기사 주제로 삼을 수 있다. 이 판단은 LLM 편집 판단으로 하며 키워드 매칭 규칙을 만들지 않는다.",
     "- 최근 보도를 주근거로 쓰는 경우에도 연속성 검색을 실행한다. 내부 근거가 약하면 외부 리서치로 보강한다.",
-    "- 감사용 메타데이터에는 metadata.newsFeed={\"selectionPolicy\":\"post-world-memory-update-only\",\"worldMemoryLastSuccessfulAt\":\"ISO timestamp\",\"items\":[{\"id\":\"...\",\"feedId\":\"...\",\"feedTitle\":\"...\",\"title\":\"...\",\"publishedAt\":\"...\",\"fetchedAt\":\"...\",\"translatedAt\":\"...\"}]}를 저장한다. 단, 이 필드명과 레이어 구분을 title, deck, summary, article.html, noveltyNote, coverDecision.rationale, sourceBasis prose에 쓰지 않는다.",
+    "- 감사용 메타데이터에는 metadata.newsFeed={\"selectionPolicy\":\"post-world-memory-update-only\",\"worldMemoryLastSuccessfulAt\":\"ISO timestamp\",\"items\":[{\"id\":\"...\",\"feedId\":\"...\",\"feedTitle\":\"...\",\"title\":\"...\",\"publishedAt\":\"...\",\"fetchedAt\":\"...\",\"translatedAt\":\"...\"}]}를 저장한다. 단, 이 필드명과 레이어 구분을 deck, summary, article.html, noveltyNote, coverDecision.rationale, sourceBasis prose에 쓰지 않는다.",
     "- 같은 metadata.newsFeed.items[].id를 이미 최근 업로드 기사가 사용했다면 같은 뉴스다. 제목·표현·storyFamily를 바꿔도 새 기사로 쓰지 않는다.",
     "- metadata.eventSignature를 반드시 저장한다. 형식: {\"role\":\"primary\",\"actor\":\"주체\",\"action\":\"무엇을 했다\",\"object\":[\"대상/수치\"],\"time\":\"대표 발생/보도 시각\",\"marketMechanism\":\"시장에 작동하는 메커니즘\",\"sourceIds\":[\"nf_...\"]}. 이것은 기사 전체 요약이 아니라 사건 claimlet이다.",
     "- 복수 사건을 엮는 기사라면 metadata.eventSignatures[]를 사용할 수 있다. 단, role='primary' 카드는 정확히 하나여야 하고, supporting 카드는 배경·비교·연쇄 효과만 담는다.",
@@ -420,7 +505,8 @@ function buildPrompt({ count, replace, articleDirectory, staged, agentLabel = "C
     "- 최근 기사와 같은 이슈처럼 보이면 내부적으로 LLM novelty judge를 수행한다: same_event이면 쓰지 않고, independent_followup이면 새 근거 앵커와 달라진 메커니즘을 metadata에 남기며, unrelated이면 별도 기사로 둔다. 사진, 제목, storyFamily 변경만으로 independent_followup이라고 판단하지 않는다.",
     "- 최근 업로드 기사와 storyFamily 및 editorialAngle이 모두 같으면 중복 위험이 높다. follow-up이라도 noveltyNote에 무엇이 새로 생겼는지 명시할 수 없으면 생성하지 않는다.",
     "- metadata.topics는 config/magazine-topics.json의 topics[].label 중 1~3개만 사용한다. 1개 주 토픽은 반드시 고르고, 보조 토픽은 정말 강할 때만 최대 2개까지 붙인다. 3개는 목표가 아니라 상한이다.",
-    "- 기사마다 sourceBasis를 5개 이상 채운다. 본문 직접 인용 또는 간접 귀속에는 고정 횟수 목표가 없다.",
+    "- 기사마다 sourceBasis를 5개 이상 채우고, 본문에는 직접 인용 또는 간접 귀속을 보통 4회 이상 넣는다. 이것은 글의 균형을 잡기 위한 목표이지, 기계적인 quote block 할당량이 아니다.",
+    "- 기사 핵심과 관련 있는 인물·기업·기관·정책당국·분석가·트레이더의 실제 발언을 발견했다면 익명 요약으로 뭉개지 말고 반드시 처리한다. 정확한 원문이 확인되면 직접 인용하고, 정확한 표현이 확인되지 않으면 명시적 간접 귀속으로 쓴다.",
     "- 인용·귀속은 본문이 이미 설명한 내용을 반복하는 장식으로 넣지 않는다. 새 사실, 이해관계자 관점, 수치의 의미, 반론, 비용 부담자, 다음 문단의 전환 중 하나를 반드시 제공해야 한다.",
     "- 인용 앞 문장은 왜 그 목소리가 필요한지 만들어 주고, 인용 뒤 문장은 그 발언을 받아 다음 분석으로 넘어가야 한다. 흐름을 바꾸지 못하는 인용은 짧은 간접 귀속으로 줄이거나 빼고 더 좋은 근거를 찾는다.",
     `- 송고 시각은 기사 소재 시각이 아니라 매거진 생성기가 지정한 현재 송고 시각을 사용한다. metadata.publishedAt, createdAt, updatedAt, uploadedAt, generatedAt을 임의 과거 시각으로 쓰지 않는다.`,
@@ -441,6 +527,7 @@ function buildPrompt({ count, replace, articleDirectory, staged, agentLabel = "C
     "- 직접 인용은 검증된 출처일 때만 쓴다. 확실하지 않으면 따옴표를 쓰지 말고 간접 인용한다.",
     "- 매체명/소속기관/사람 이름은 첫 등장에 original name(Korean name) 형태를 쓴다.",
     "- 존대말로 쓰되 독자를 가르치거나 훈계하지 않는다.",
+    "- 사망, 전쟁, 테러리즘, 심각한 수준의 시장 붕괴처럼 가혹한 상황을 다루는 기사가 아니라면 본문에는 Bloomberg 뉴스레터 스타일의 절제된 유머와 위트를 어느 정도 담는다. 위트는 장식이 아니라 시장 메커니즘을 더 선명하게 보이게 해야 한다.",
     "- 인용은 본문과 유기적으로 연결될 때만 쓴다. 본문과 인용이 같은 말을 반복하면 padding으로 간주하고, 인용 대신 더 구체적인 수치·반론·현장 맥락을 넣는다.",
     count > 1
       ? `- 이번 생성 묶음 ${count}개가 같은 storyFamily에 몰리지 않도록 issue slate를 내부적으로 잡는다.`
@@ -458,9 +545,9 @@ function buildPrompt({ count, replace, articleDirectory, staged, agentLabel = "C
     "- 생성 뒤 node scripts/magazine_article_style_check.mjs --strict 를 통과시킨다. warning도 실패로 간주하고, 경고가 있으면 article.html/metadata.json을 고친 뒤 다시 검사한다.",
     "",
     "출력:",
-    "- 최종 답변은 생성한 article-id, 제목, 검증 결과만 짧게 한국어로 보고한다.",
-    "- 독자-facing title, deck, summary, article.html과 metadata의 prose 필드에서는 내부 출처명을 한 단어로 기계 치환하지 말고 신문 기사 문장으로 풀어 쓴다. 예: 'Bloomberg가 전한 장중 보도', '같은 날 나온 ISNA 인용 발언', '새 가격 반응', '새 기업 공시', '최근 현지 매체 보도'.",
-    "- 독자-facing title, deck, summary, article.html과 metadata의 prose 필드에는 'World Memory', '월드 메모리', '월드메모리', '월드 메모리 벡터 검색 결과', 'News Feed', 'post-cutoff', 'post-World-Memory-update', '컷오프', '수집 기사', '피드', 'semantic-search', '하네스' 같은 내부 표현을 쓰지 않는다.",
+    "- 최종 답변은 생성한 article-id, 본문 저장 여부, 검증 결과만 짧게 한국어로 보고한다.",
+    "- 독자-facing deck, summary, article.html과 metadata의 prose 필드에서는 내부 출처명을 한 단어로 기계 치환하지 말고 신문 기사 문장으로 풀어 쓴다. 예: 'Bloomberg가 전한 장중 보도', '같은 날 나온 ISNA 인용 발언', '새 가격 반응', '새 기업 공시', '최근 현지 매체 보도'.",
+    "- 독자-facing deck, summary, article.html과 metadata의 prose 필드에는 'World Memory', '월드 메모리', '월드메모리', '월드 메모리 벡터 검색 결과', 'News Feed', 'post-cutoff', 'post-World-Memory-update', '컷오프', '수집 기사', '피드', 'semantic-search', '하네스' 같은 내부 표현을 쓰지 않는다.",
     extraPrompt ? `\n추가 사용자 지시:\n${extraPrompt}` : "",
   ].join("\n");
 }
@@ -485,6 +572,7 @@ function buildRepairPrompt({ count, checkOutput, articleDirectory, staged, agent
     staged ? "- production data/magazine/articles/는 직접 수정하지 않는다." : "",
     "- 기존 metadata.json의 storyFamily, sourceBasis, worldMemory.vectorSearch.hits는 보존하거나 더 정확하게 보강한다.",
     "- article.html과 필요한 metadata.json만 수정해서 strict style check를 통과시킨다.",
+    "- metadata.title은 본문 보강 뒤 별도 제목 확정 단계가 다시 쓴다. repair 작업자는 제목 문구나 제목 전용 규칙을 만들지 않는다.",
     "",
     "반드시 먼저 읽을 파일:",
     "- docs/magazine.md",
@@ -493,11 +581,12 @@ function buildRepairPrompt({ count, checkOutput, articleDirectory, staged, agent
     "",
     "보강 원칙:",
     "- 본문 공백 제외 3,000자 미만인 기사는 실제 근거, 이해관계자 발언, 수치, 반론, 다음 데이터 포인트로 확장한다.",
-    "- 직접/간접 인용은 고정 횟수를 채우기 위해 추가하지 않는다. 출처 목소리가 기사 흐름을 실제로 앞으로 밀 때만 직접 인용 또는 간접 귀속 문장을 추가한다.",
+    "- 기사 핵심과 관련 있는 실제 발언이 metadata.sourceBasis, 기사 본문, 리서치 근거에 있는데 본문에서 익명 요약으로만 처리됐다면 직접 인용 또는 명시적 간접 귀속으로 복구한다.",
+    "- 본문에는 직접 인용 또는 간접 귀속을 보통 4회 이상 확보한다. 다만 고정 횟수를 채우기 위한 장식 인용은 넣지 말고, 출처 목소리가 기사 흐름을 실제로 앞으로 밀 때만 추가한다.",
     "- 인용·귀속을 보강할 때는 앞 문장이 그 목소리의 필요성을 만들고, 뒤 문장이 그 발언을 받아 다음 분석으로 넘어가게 고친다. 인용마다 새 사실, 반론, 이해관계자 관점, 수치 해석, 비용 부담자 중 하나를 추가해야 한다.",
     "- 토픽 하네스가 실패했다면 metadata.topics를 config/magazine-topics.json의 topics[].label 중 1~3개로만 고친다. 1개 주 토픽은 반드시 남기고, 4개 이상 반환했다면 앞의 3개만 남긴다.",
     "- 최근 보도 근거를 보강하거나 새로 붙일 때는 기준 업데이트 이후 항목만 사용한다. 과거 보도 항목을 근거로 쓰지 않는다.",
-    "- 감사용 메타데이터에는 metadata.newsFeed.selectionPolicy='post-world-memory-update-only', worldMemoryLastSuccessfulAt, items[]를 남긴다. 단, 이 필드명과 레이어 구분을 title, deck, summary, article.html, noveltyNote, coverDecision.rationale, sourceBasis prose에 쓰지 않는다.",
+    "- 감사용 메타데이터에는 metadata.newsFeed.selectionPolicy='post-world-memory-update-only', worldMemoryLastSuccessfulAt, items[]를 남긴다. 단, 이 필드명과 레이어 구분을 deck, summary, article.html, noveltyNote, coverDecision.rationale, sourceBasis prose에 쓰지 않는다.",
     "- metadata.eventSignature가 없거나 기사 전체 요약처럼 길게 쓰였으면 claimlet 형식으로 보강한다: role, actor, action, object[], time, marketMechanism, sourceIds[]. 복수 카드가 필요하면 eventSignatures[]에 primary 1개와 supporting 0개 이상을 둔다.",
     "- duplicate-news-feed-anchor, duplicate-world-memory-anchor, duplicate-story-angle이 나오면 기사 제목만 바꾸지 말고 실제로 다른 사건/다른 메커니즘으로 바꾼다. 독립 델타가 없으면 해당 기사 폴더를 새 비중복 주제로 다시 작성한다.",
     "- 독립 델타는 기사 전체 임베딩 거리가 아니라 새 근거 앵커다. 새 보도 id, 새 공식/외부 출처 URL, 새 수치, 새 정책 집행, 새 가격 반응, 새 기업 행동 중 적어도 하나가 이전 기사 이후 발생해야 한다.",
@@ -509,9 +598,10 @@ function buildRepairPrompt({ count, checkOutput, articleDirectory, staged, agent
     "- 이미지 수리 절차: 무료/오픈 이미지, 공식 이미지, 공개 보도사진 후보를 모두 검토한다. search_web는 최대 3회까지만 사용하고, 후보 페이지를 찾으면 더 검색하지 말고 이미지 URL 확보와 다운로드 검증으로 넘어간다. Wikimedia Commons는 Special:FilePath 또는 upload.wikimedia.org 직접 URL을 쓰고, 공식/보도사진은 원본 이미지 URL이나 페이지에서 확인되는 대표 이미지를 curl -L --fail --show-error -A 'FinanceAgentGUI/1.0' -o assets/<name>.<ext> 형태로 저장한다. 저장 후 file, ls -lh, strict check를 실행한다.",
     "- 개인 열람용 보도사진을 쓰면 metadata.heroImage.usageNote에 'editorial-private-use; local personal reading only'와 원출처를 남긴다. 오픈/공식 이미지면 license/rights를 남긴다.",
     "- 이미지 다운로드가 실패하면 1px placeholder나 빈 JPEG를 만들지 말고, 실패한 URL/명령/오류를 최종 답변에 남긴다.",
-    "- 독자-facing title, deck, summary, article.html과 metadata의 prose 필드에서는 내부 출처명을 한 단어로 기계 치환하지 말고 신문 기사 문장으로 풀어 쓴다. 예: 'Bloomberg가 전한 장중 보도', '같은 날 나온 ISNA 인용 발언', '새 가격 반응', '새 기업 공시', '최근 현지 매체 보도'.",
-    "- 독자-facing title, deck, summary, article.html과 metadata의 prose 필드에는 'World Memory', '월드 메모리', '월드메모리', '월드 메모리 벡터 검색 결과', 'News Feed', 'post-cutoff', 'post-World-Memory-update', '컷오프', '수집 기사', '피드', 'semantic-search', '하네스' 같은 내부 표현을 쓰지 않는다.",
+    "- 독자-facing deck, summary, article.html과 metadata의 prose 필드에서는 내부 출처명을 한 단어로 기계 치환하지 말고 신문 기사 문장으로 풀어 쓴다. 예: 'Bloomberg가 전한 장중 보도', '같은 날 나온 ISNA 인용 발언', '새 가격 반응', '새 기업 공시', '최근 현지 매체 보도'.",
+    "- 독자-facing deck, summary, article.html과 metadata의 prose 필드에는 'World Memory', '월드 메모리', '월드메모리', '월드 메모리 벡터 검색 결과', 'News Feed', 'post-cutoff', 'post-World-Memory-update', '컷오프', '수집 기사', '피드', 'semantic-search', '하네스' 같은 내부 표현을 쓰지 않는다.",
     "- 존대말을 유지하되 독자를 가르치거나 훈계하는 문장을 줄인다.",
+    "- 사망, 전쟁, 테러리즘, 심각한 수준의 시장 붕괴처럼 가혹한 상황이 아닌데 본문이 건조한 요약문처럼 보이면 Bloomberg 뉴스레터 스타일의 절제된 유머와 위트를 보강한다. 위트는 시장 메커니즘을 선명하게 하는 문장으로만 넣는다.",
     "- 생성 뒤 node scripts/magazine_article_style_check.mjs --strict 를 실행하고 warning 0개가 될 때까지 수정한다.",
     "",
     "참고 근거 묶음:",
@@ -775,6 +865,18 @@ async function runStrictCheckWithRepair({ provider, codex, approval, sandbox, mo
     console.log("\nRunning local magazine style check...");
     try {
       normalizeGeneratedArticleMetadata(articleDirectory, publishedAt, { existingArticleCount, previousArticleIds, generationAgent });
+      await finalizeArticleTitles({
+        provider,
+        codex,
+        approval,
+        sandbox,
+        model,
+        reasoning,
+        timeoutMs,
+        tempDir,
+        articleDirectory,
+        agentLabel,
+      });
       await runCommand(process.execPath, ["scripts/magazine_article_style_check.mjs", "--strict"], {
         cwd: GUIBUILD_ROOT,
         env: {

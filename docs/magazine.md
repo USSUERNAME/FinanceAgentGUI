@@ -126,15 +126,16 @@ Novelty is enforced before publish, not only by prompt wording. Scheduled/staged
 
 Magazine article prose should feel edited, not templated.
 
-- Do not expose internal retrieval language in reader-facing copy. Avoid phrases like "World Memory", "월드 메모리", "월드메모리", "World Memory vector search results", "월드 메모리 벡터 검색 결과", "News Feed", "post-cutoff", "post-World-Memory-update", "컷오프", "수집 기사", or source-pipeline words like "피드" in `title`, `deck`, `summary`, and `article.html`.
+- Do not expose internal retrieval language in reader-facing body copy. Avoid phrases like "World Memory", "월드 메모리", "월드메모리", "World Memory vector search results", "월드 메모리 벡터 검색 결과", "News Feed", "post-cutoff", "post-World-Memory-update", "컷오프", "수집 기사", or source-pipeline words like "피드" in `deck`, `summary`, and `article.html`.
 - Do not mechanically replace those internal labels with one fixed substitute. Write the sentence as a newspaper article would. Examples: `Bloomberg가 전한 장중 보도`, `같은 날 나온 ISNA 인용 발언`, `새 가격 반응`, `새 기업 공시`, `최근 현지 매체 보도`, or another source-specific phrase that fits the paragraph. Never write source labels as `계열 피드`, `새 피드`, or similar data-pipeline language.
-- `metadata.title` should read as a trustworthy finance/news headline before it reads as a clever magazine line. It must show at least two of actor/asset/sector, event/action, and market mechanism/number. Keep object metaphors such as `청구서`, `계산서`, `스티커`, `손가락`, `장바구니`, `책상`, and `가격표` out of the title unless the concrete news anchor is already unmistakable; put literary turns in the deck or body instead.
+- During article drafting, leave `metadata.title` empty. The generator finalizes it after `article.html` exists by sending only the article body text to a separate title pass. That pass asks for a readable Korean headline in a Bloomberg or Financial Times style and writes the returned one-line title into `metadata.json`.
 - Do not include editorial-process placeholders such as "편집회의 체크리스트" in the article body. Store future production notes in metadata or a separate editorial feature when that UI exists.
 - Do not use a fixed `H2 + two paragraphs` rhythm. Assign each section a job and vary paragraph counts naturally. A short lead section may use two paragraphs, a data section may need three to five, a mechanism section may need two or three, and a conclusion may be brief.
 - Do not write as if teaching or scolding the reader. Avoid repeating command-heavy phrasing such as `봐야 합니다`, `확인해야 합니다`, `점검해야 합니다`, `잊으면 안 됩니다`, and `투자자는 ...해야 합니다`. Prefer observational magazine prose that lets facts, scenes, quotes, and numbers carry the point.
 - Avoid generic repeated explainers. If an issue has already been covered recently, the new article should be a follow-up about what changed, what assumption moved, what price reacted differently, or what new data point now matters.
 - For deep analysis articles, include concrete numbers, source-backed comparisons, and chart blocks. The article should explain what moves, why it moves, who pays, and which indicators confirm or falsify the thesis.
 - When research contains attributable comments from executives, analysts, policymakers, traders, agencies, or other named stakeholders, use them as evidence instead of flattening everything into summary prose. In running prose, write attribution naturally, such as `Morgan Stanley(모건스탠리)의 Michael Wilson(마이클 윌슨)은 "..."라고 말했습니다` or `U.S. Energy Information Administration(EIA·미국 에너지정보청)에 따르면 ...입니다`. If the exact wording is not verified, do not use quotation marks; paraphrase with `...라고 설명했습니다`, `...라고 전했습니다`, or `...라고 봤습니다`.
+- If research finds a materially relevant actual statement from a named person, company, agency, policymaker, analyst, trader, or other stakeholder, do not flatten it into anonymous summary. Use a direct quote when exact wording is verified; otherwise use explicit indirect attribution.
 - Quotes and attributions are not decorative proof stamps. Do not explain the whole point in body prose and then repeat it in a quote. A quoted or attributed moment should do one clear job: introduce a new fact, sharpen disagreement, explain the implication of a number, reveal who benefits or pays, or set up the next paragraph's mechanism.
 - Make the prose around a quote do real work. The sentence before the quote should create the need for that source voice, and the sentence after it should use the quote to move the article forward. If the quote does not change what the reader understands, convert it to a tighter indirect attribution or remove it.
 - Media names, organizations, and people names should be written as `original name(Korean name)` on first mention in reader-facing article copy. For well-known acronyms, use `original name(ACRONYM·Korean name)`, such as `International Energy Agency(IEA·국제에너지기구)`. Subsequent mentions can use the acronym or Korean short form when readability benefits.
@@ -151,8 +152,8 @@ Magazine article prose should feel edited, not templated.
 ```
 
 - Direct quote text itself should be Korean in reader-facing magazine articles, even when the source quote is in English. Translate faithfully, preserve the meaning and level of certainty, and keep the original speaker/source attribution in the label. Do not invent quotes, speaker names, titles, dates, or source labels. If the source only supports an indirect summary, use indirect attribution rather than a direct quote block.
-- A production-like generated article should usually include at least five `sourceBasis` entries, but there is no fixed number of body-level quotes or attributions. An article can stand without direct quotes when the reporting evidence is clear. Weak, repetitive, or disconnected quotes should be rewritten as useful attribution or removed.
-- Humor can be present as a light edge in most articles, but reduce the dose for war, casualties, disasters, sanctions, or other sensitive subjects. The joke should sharpen the market point, not distract from the risk.
+- A production-like generated article should usually include at least five `sourceBasis` entries and at least four body-level direct or indirect attribution moments. Treat this as a writing-balance target, not a mechanical quota. Weak, repetitive, or disconnected quotes should be rewritten as useful attribution or removed.
+- Unless an article covers death, war, terrorism, or a severe market collapse, the body should carry some restrained Bloomberg-newsletter-style humor and wit. The joke should sharpen the market point, not distract from the risk.
 - Use polite Korean endings such as `~합니다` and `~입니다`; avoid dry encyclopedia endings like `~한다`.
 
 Deep analysis articles can include ECharts blocks in `metadata.json`:
@@ -185,7 +186,7 @@ Generate a fresh issue through the connected Codex CLI:
 node scripts/magazine_generate_with_codex.mjs --replace --count 5
 ```
 
-The generator runs Codex CLI from the standalone `GuiBuild/` root, reads the magazine harness files, edits only local magazine runtime article folders, and then runs `node scripts/magazine_article_style_check.mjs --strict`.
+The generator runs Codex CLI from the standalone `GuiBuild/` root, reads the magazine harness files, edits only local magazine runtime article folders, finalizes each title from the completed body only, and then runs `node scripts/magazine_article_style_check.mjs --strict`. If a repair round changes the body, the generator runs the body-only title pass again before the next strict check.
 
 For staged scheduler runs, the generator sets `MAGAZINE_BASELINE_ARTICLES_DIR=data/magazine/articles` and `MAGAZINE_BASELINE_ARTICLE_LIMIT=12` so the strict checker can compare candidates with recently uploaded articles before publish.
 
@@ -249,6 +250,8 @@ POST /api/magazine/read-state
 `POST /api/magazine/status` accepts `{"action":"runNow"}` to request an immediate manual scheduler cycle. The cycle still runs the article-count decision harness first, so a valid result can be `targetCount=0` with a reader-visible reason instead of forcing an article. The API starts the cycle in the background, returns the refreshed status snapshot, and rejects the request while a scheduler or generation cycle is already active.
 
 `POST /api/magazine/status` or `PATCH /api/magazine/status` accepts `{"action":"reschedule","nextRunAt":"ISO timestamp"}` to move the next pending scheduler run within the next 24 hours. It does not interrupt an active generation cycle.
+
+The hidden break-glass one-article control can be shown by opening the app with `?magazineGenerateOne=1`; `?magazineGenerateOne=0` hides it again. It calls the article collection API with `count:1` and `replace:false`, bypassing the scheduler count-decision cycle.
 
 `POST /api/magazine/read-state` records the magazine page-open time in `data/magazine/read-state.json`. Unread count is derived from article timestamps after that point; articles do not get individual read flags.
 
@@ -326,7 +329,8 @@ Article deletion is folder based:
 
 ```http
 GET /api/magazine/articles
+POST /api/magazine/articles
 DELETE /api/magazine/articles?id=<article-id>
 ```
 
-`GET` returns `articles`, `coverStories`, `topicCatalog`, `worldMemoryPolicy`, and diagnostic issue summaries. Deleting an article removes its whole folder, including `assets/`, and deletes the matching `magazine_event_signature_embeddings.article_id` row from `data/magazine/event-signature-index.sqlite3` when present. The reader UI exposes `기사 삭제` in the top-left action row and requires a destructive confirmation dialog before calling the delete API.
+`GET` returns `articles`, `coverStories`, `topicCatalog`, `worldMemoryPolicy`, and diagnostic issue summaries. `POST` accepts `{"action":"generateWithCodex","count":1,"replace":false}` or the equivalent selected writing provider action to append exactly one article without running the scheduler count-decision cycle. Deleting an article removes its whole folder, including `assets/`, and deletes the matching `magazine_event_signature_embeddings.article_id` row from `data/magazine/event-signature-index.sqlite3` when present. The reader UI exposes `기사 삭제` in the top-left action row and requires a destructive confirmation dialog before calling the delete API.

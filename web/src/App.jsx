@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Check from "lucide-react/dist/esm/icons/check.js";
 import Copy from "lucide-react/dist/esm/icons/copy.js";
+import FilePlus2 from "lucide-react/dist/esm/icons/file-plus-2.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
 import SendHorizontal from "lucide-react/dist/esm/icons/send-horizontal.js";
@@ -131,6 +132,7 @@ const magazineFallbackTopics = [
 ];
 const magazineToneSequence = ["market", "finance", "economy", "industry", "tech", "policy", "ai", "climate", "crypto"];
 const MAGAZINE_ARTICLE_PAGE_SIZE = 5;
+const MAGAZINE_GENERATE_ONE_TOOL_STORAGE_KEY = "finance-agent-gui:magazine-generate-one-tool";
 const magazineDefaultFollowupOptions = [
   {
     id: "deeper-data",
@@ -441,31 +443,61 @@ function magazineArticleCountDecisionLabel(status) {
   ].join("");
 }
 
-function MagazineUpdateSchedule({ status, articles, isStartingNow = false, onStartNow }) {
+function MagazineUpdateSchedule({
+  status,
+  articles,
+  isStartingNow = false,
+  isGeneratingOne = false,
+  onStartNow,
+  onGenerateOne,
+}) {
   const lastUpdate =
     formatMagazineUpdateScheduleTime(magazineLatestUpdateTimestamp(status, articles)) || "기록 없음";
   const nextUpdate = magazineNextUpdateLabel(status);
   const decisionLabel = magazineArticleCountDecisionLabel(status);
+  const schedulerActive = magazineSchedulerIsActive(status);
   const showStartButton =
     Boolean(onStartNow) &&
     !isStartingNow &&
-    !magazineSchedulerIsActive(status) &&
+    !schedulerActive &&
     status?.scheduler?.enabled !== false;
+  const generateOneDisabled = isGeneratingOne || isStartingNow || schedulerActive;
   return (
     <div className="magazine-update-schedule">
       <div className="magazine-update-primary">
         <p>마지막 업데이트: {lastUpdate} / 다음 업데이트 예정: {nextUpdate}</p>
-        {showStartButton ? (
-          <button
-            className="magazine-update-refresh tooltip-button"
-            type="button"
-            aria-label="지금 매거진 작성 시작"
-            title="지금 매거진 작성 시작"
-            data-tooltip="지금 작성 시작"
-            onClick={onStartNow}
-          >
-            <RefreshCw size={14} strokeWidth={2.2} aria-hidden="true" />
-          </button>
+        {showStartButton || onGenerateOne ? (
+          <div className="magazine-update-actions">
+            {onGenerateOne ? (
+              <button
+                className="magazine-update-generate-one"
+                type="button"
+                onClick={onGenerateOne}
+                disabled={generateOneDisabled}
+                aria-label={isGeneratingOne ? "기사 1건 작성 중" : "기사 1건 작성"}
+                title={isGeneratingOne ? "기사 1건 작성 중" : "기사 1건 작성"}
+              >
+                {isGeneratingOne ? (
+                  <LoaderCircle size={14} strokeWidth={2.2} aria-hidden="true" />
+                ) : (
+                  <FilePlus2 size={14} strokeWidth={2.2} aria-hidden="true" />
+                )}
+                <span>{isGeneratingOne ? "작성 중" : "기사 1건 작성"}</span>
+              </button>
+            ) : null}
+            {showStartButton ? (
+              <button
+                className="magazine-update-refresh tooltip-button"
+                type="button"
+                aria-label="지금 매거진 작성 시작"
+                title="지금 매거진 작성 시작"
+                data-tooltip="지금 작성 시작"
+                onClick={onStartNow}
+              >
+                <RefreshCw size={14} strokeWidth={2.2} aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
       {decisionLabel ? <p>{decisionLabel}</p> : null}
@@ -1196,6 +1228,25 @@ const defaultMagazineSettings = {
   },
 };
 
+function readMagazineGenerateOneToolVisible() {
+  if (typeof window === "undefined") return false;
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const paramValue = params.get("magazineGenerateOne");
+    if (paramValue === "1" || paramValue === "true") {
+      window.localStorage.setItem(MAGAZINE_GENERATE_ONE_TOOL_STORAGE_KEY, "1");
+      return true;
+    }
+    if (paramValue === "0" || paramValue === "false") {
+      window.localStorage.removeItem(MAGAZINE_GENERATE_ONE_TOOL_STORAGE_KEY);
+      return false;
+    }
+    return window.localStorage.getItem(MAGAZINE_GENERATE_ONE_TOOL_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 async function loadPortfolioCanvasStoreFile() {
   const response = await fetch("/api/portfolio/canvases", { cache: "no-store" });
   const payload = await response.json().catch(() => ({}));
@@ -1678,6 +1729,8 @@ function App() {
   const [magazineCopyStatus, setMagazineCopyStatus] = useState("idle");
   const [magazineCopyError, setMagazineCopyError] = useState("");
   const [magazineStartNowBusy, setMagazineStartNowBusy] = useState(false);
+  const [magazineGenerateOneBusy, setMagazineGenerateOneBusy] = useState(false);
+  const [magazineGenerateOneToolVisible] = useState(() => readMagazineGenerateOneToolVisible());
   const [portfolioCanvasStore, setPortfolioCanvasStore] = useState(() => readStoredPortfolioCanvasStore());
   const [portfolioSidebarOpen, setPortfolioSidebarOpen] = useState(false);
   const [portfolioCanvasMenuId, setPortfolioCanvasMenuId] = useState("");
@@ -3520,6 +3573,40 @@ function App() {
       }
     } finally {
       setMagazineStartNowBusy(false);
+    }
+  }
+
+  async function generateOneMagazineArticle() {
+    if (magazineGenerateOneBusy || magazineStartNowBusy || magazineSchedulerIsActive(magazineStatus)) return;
+    setMagazineGenerateOneBusy(true);
+    try {
+      const response = await fetch("/api/magazine/articles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          action: "generateWithCodex",
+          count: 1,
+          replace: false,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || `HTTP ${response.status}`);
+      }
+      applyMagazineCatalogPayload(payload);
+      void refreshMagazineStatus().catch(() => {});
+    } catch (error) {
+      setMagazineStatus((current) => ({
+        ...(current || {}),
+        ok: false,
+        error: error.message,
+      }));
+      if (/cycle is active|already running|generation is already running/i.test(error.message || "")) {
+        void refreshMagazineStatus().catch(() => {});
+      }
+    } finally {
+      setMagazineGenerateOneBusy(false);
     }
   }
 
@@ -5466,7 +5553,9 @@ function App() {
               status={magazineStatus}
               articles={magazineArticles}
               isStartingNow={magazineStartNowBusy}
+              isGeneratingOne={magazineGenerateOneBusy}
               onStartNow={startMagazineNow}
+              onGenerateOne={magazineGenerateOneToolVisible ? generateOneMagazineArticle : null}
             />
             <h1 className="magazine-logo-heading">
               <img

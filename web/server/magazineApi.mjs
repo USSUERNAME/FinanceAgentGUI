@@ -59,8 +59,15 @@ const MAGAZINE_SCHEDULER_MAX_PER_CYCLE = clampInteger(
 );
 const MAGAZINE_ARTICLE_TOPIC_LIMIT = 3;
 const MAGAZINE_SCHEDULER_MAX_MANUAL_DELAY_MS = 24 * 60 * 60 * 1000;
+const MAGAZINE_SCHEDULER_RUNTIME_KEY = Symbol.for("finance-agent-gui.magazineSchedulerRuntime");
 
-const magazineSchedulerRuntime = {
+const previousMagazineSchedulerRuntime = globalThis[MAGAZINE_SCHEDULER_RUNTIME_KEY];
+if (previousMagazineSchedulerRuntime?.timer) {
+  clearTimeout(previousMagazineSchedulerRuntime.timer);
+  previousMagazineSchedulerRuntime.timer = null;
+}
+
+const magazineSchedulerRuntime = previousMagazineSchedulerRuntime || {
   started: false,
   startedAt: "",
   running: false,
@@ -73,6 +80,7 @@ const magazineSchedulerRuntime = {
   lastError: "",
   manualStartRequestedAt: "",
 };
+globalThis[MAGAZINE_SCHEDULER_RUNTIME_KEY] = magazineSchedulerRuntime;
 
 const mimeTypes = {
   ".avif": "image/avif",
@@ -2438,7 +2446,17 @@ async function handleMagazineSchedulerTimer() {
 }
 
 export function startMagazineScheduler() {
-  if (magazineSchedulerRuntime.started || magazineSchedulerDisabled()) return;
+  if (magazineSchedulerDisabled()) return;
+  if (magazineSchedulerRuntime.started) {
+    if (!magazineSchedulerRuntime.timer && !magazineSchedulerRuntime.running) {
+      if (magazineSchedulerRuntime.nextRunAt || magazineSchedulerRuntime.nextRetryAt) {
+        scheduleMagazineTimer();
+      } else {
+        scheduleNextMagazineCycle(magazineSchedulerInitialDelayMs(magazineSchedulerIntervalMs()));
+      }
+    }
+    return;
+  }
   magazineSchedulerRuntime.started = true;
   magazineSchedulerRuntime.startedAt = nowIso();
   const intervalMs = magazineSchedulerIntervalMs();
