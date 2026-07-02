@@ -7229,6 +7229,12 @@ button {
   border-bottom: 1px solid #dddddd;
 }
 
+.settings-feature-control-grid {
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 14px 16px;
+  max-width: 760px;
+}
+
 .settings-agent-provider-list {
   display: grid;
   gap: 14px;
@@ -12150,6 +12156,10 @@ textarea:disabled {
   }
 
   .settings-agent-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-feature-control-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 

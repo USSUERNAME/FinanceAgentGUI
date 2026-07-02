@@ -9,6 +9,7 @@ import {
 import {
   normalizeMagazineSchedulerIntervalHours,
   normalizeMagazineSchedulerMaxArticlesPerCycle,
+  normalizeMagazineWritingReasoning,
 } from "../server/magazineSettings.mjs";
 
 test("magazine scheduler preserves a model decision to skip with reason", () => {
@@ -101,4 +102,11 @@ test("magazine scheduler max articles defaults to 2 and stays in the settings ra
   assert.equal(normalizeMagazineSchedulerMaxArticlesPerCycle(0), 1);
   assert.equal(normalizeMagazineSchedulerMaxArticlesPerCycle(99), 3);
   assert.equal(normalizeMagazineSchedulerMaxArticlesPerCycle("3"), 3);
+});
+
+test("magazine writing reasoning accepts only known CLI reasoning levels", () => {
+  assert.equal(normalizeMagazineWritingReasoning("minimal"), "minimal");
+  assert.equal(normalizeMagazineWritingReasoning("LOW"), "low");
+  assert.equal(normalizeMagazineWritingReasoning("xhigh"), "xhigh");
+  assert.equal(normalizeMagazineWritingReasoning("turbo"), "");
 });

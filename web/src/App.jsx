@@ -1216,6 +1216,7 @@ const defaultMagazineSettings = {
   enabled: false,
   worldMemoryEnabled: false,
   writingProvider: "default",
+  writingReasoning: "",
   schedulerIntervalHours: 6,
   schedulerMaxArticlesPerCycle: 2,
   disabledReason: "",
@@ -1225,6 +1226,7 @@ const defaultMagazineSettings = {
     version: 1,
     enabled: false,
     writingProvider: "default",
+    writingReasoning: "",
     schedulerIntervalHours: 6,
     schedulerMaxArticlesPerCycle: 2,
   },
@@ -3038,9 +3040,10 @@ function App() {
     }
   }
 
-  async function updateMagazineWritingProvider(writingProvider) {
+  async function updateMagazineWritingProvider(writingProvider, writingReasoning = "") {
     if (magazineSettingsSaving) return;
     const safeProvider = normalizeAgentModelProvider(writingProvider);
+    const safeReasoning = String(writingReasoning || "").trim();
     setMagazineSettingsSaving(true);
     setMagazineSettingsError("");
     try {
@@ -3048,7 +3051,46 @@ function App() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ writingProvider: safeProvider }),
+        body: JSON.stringify({
+          writingProvider: safeProvider,
+          ...(safeReasoning ? { writingReasoning: safeReasoning } : {}),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      const nextSettings = { ...defaultMagazineSettings, ...payload };
+      setMagazineSettings(nextSettings);
+      setMagazineStatus((current) => ({
+        ...(current || {}),
+        settings: nextSettings,
+        scheduler: current?.scheduler
+          ? {
+              ...current.scheduler,
+              settings: nextSettings,
+            }
+          : current?.scheduler,
+      }));
+    } catch (error) {
+      setMagazineSettingsError(error.message);
+    } finally {
+      setMagazineSettingsSaving(false);
+    }
+  }
+
+  async function updateMagazineWritingReasoning(writingReasoning) {
+    if (magazineSettingsSaving) return;
+    const safeReasoning = String(writingReasoning || "").trim();
+    if (!safeReasoning) return;
+    setMagazineSettingsSaving(true);
+    setMagazineSettingsError("");
+    try {
+      const response = await fetch("/api/magazine/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ writingReasoning: safeReasoning }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) {
@@ -5430,6 +5472,7 @@ function App() {
               onWorldMemoryManagementProviderChange={updateWorldMemoryManagementProvider}
               onToggleMagazineEnabled={updateMagazineEnabled}
               onMagazineWritingProviderChange={updateMagazineWritingProvider}
+              onMagazineWritingReasoningChange={updateMagazineWritingReasoning}
               onMagazineSchedulerIntervalChange={updateMagazineSchedulerInterval}
               onMagazineMaxArticlesPerCycleChange={updateMagazineMaxArticlesPerCycle}
               onReloadWorldMemory={loadWorldMemoryStatus}

@@ -122,6 +122,13 @@ const fallbackModelGroups = [
   },
 ];
 
+const fallbackAntigravityReasoningOptions = [
+  { id: "minimal", label: "최소", cli: "", detail: "Gemini thinking level minimal" },
+  { id: "low", label: "낮음", cli: "", detail: "Gemini thinking level low" },
+  { id: "medium", label: "보통", cli: "", detail: "Gemini thinking level medium" },
+  { id: "high", label: "높음", cli: "", detail: "Gemini thinking level high" },
+];
+
 const fallbackPersonaModeOptions = [
   { id: "none", label: "사용하지 않음", detail: "일반 채팅도 기본 업무 응답으로 유지합니다." },
 ];
@@ -150,6 +157,43 @@ const MAGAZINE_MAX_ARTICLES_PER_CYCLE_OPTIONS = Array.from({ length: 3 }, (_, in
     label: String(count) + "건",
   };
 });
+
+function normalizeRuntimeProviderId(value, fallback = "codex-cli") {
+  return value === "antigravity-cli" || value === "codex-cli" ? value : fallback;
+}
+
+function normalizeMagazineProviderId(value) {
+  return value === "default" || value === "antigravity-cli" || value === "codex-cli" ? value : "default";
+}
+
+function profileForProvider(providerId, providerProfiles = []) {
+  return providerProfiles.find((profile) => profile.id === providerId) || null;
+}
+
+function magazineReasoningOptionsForProvider(providerId, providerProfiles = []) {
+  const profile = profileForProvider(providerId, providerProfiles);
+  const options = Array.isArray(profile?.reasoningOptions) ? profile.reasoningOptions : [];
+  if (options.length) return options;
+  return providerId === "antigravity-cli"
+    ? fallbackAntigravityReasoningOptions
+    : fallbackModelGroups[0].reasoningLevels;
+}
+
+function magazineReasoningDefaultForProvider(providerId, providerProfiles = [], options = []) {
+  const profile = profileForProvider(providerId, providerProfiles);
+  const optionIds = new Set(options.map((option) => option.id));
+  if (optionIds.has(profile?.reasoning)) return profile.reasoning;
+  const defaultReasoning = providerId === "antigravity-cli" ? "medium" : "high";
+  return optionIds.has(defaultReasoning) ? defaultReasoning : options[0]?.id || "";
+}
+
+function selectedMagazineReasoningValue(value, providerId, providerProfiles = [], options = []) {
+  const optionIds = new Set(options.map((option) => option.id));
+  const candidate = String(value || "").trim();
+  return optionIds.has(candidate)
+    ? candidate
+    : magazineReasoningDefaultForProvider(providerId, providerProfiles, options);
+}
 
 function NewsFeedPollIntervalBar({ valueSeconds, disabled, saving, onChange }) {
   const selectedMinutes = Math.max(1, Math.min(10, Math.round(Number(valueSeconds || 180) / 60)));
@@ -953,6 +997,7 @@ export default function SettingsView({
   onWorldMemoryManagementProviderChange,
   onToggleMagazineEnabled,
   onMagazineWritingProviderChange,
+  onMagazineWritingReasoningChange,
   onMagazineSchedulerIntervalChange,
   onMagazineMaxArticlesPerCycleChange,
   onReloadWorldMemory,
@@ -971,6 +1016,8 @@ export default function SettingsView({
     loading: agentSettingsLoading = false,
     ...agentSettingsSection
   } = agentSettings || {};
+  const agentProvider = agentSettingsSection.provider || "codex-cli";
+  const agentProviderProfiles = agentSettingsSection.providerProfiles || [];
 
   return (
     <div className="settings-shell">
@@ -1024,9 +1071,13 @@ export default function SettingsView({
           onManagementProviderChange={onWorldMemoryManagementProviderChange}
           onToggleMagazineEnabled={onToggleMagazineEnabled}
           onMagazineWritingProviderChange={onMagazineWritingProviderChange}
+          onMagazineWritingReasoningChange={onMagazineWritingReasoningChange}
           onMagazineSchedulerIntervalChange={onMagazineSchedulerIntervalChange}
           onMagazineMaxArticlesPerCycleChange={onMagazineMaxArticlesPerCycleChange}
           onReload={onReloadWorldMemory}
+          agentProvider={agentProvider}
+          agentProviderProfiles={agentProviderProfiles}
+          agentSettingsLoading={agentSettingsLoading}
         />
 
         <ArcaNotificationAuthSection {...arcaAuth} />
@@ -1125,9 +1176,13 @@ function WorldMemoryDiagnosticsSection({
   onManagementProviderChange = () => {},
   onToggleMagazineEnabled,
   onMagazineWritingProviderChange = () => {},
+  onMagazineWritingReasoningChange = () => {},
   onMagazineSchedulerIntervalChange = () => {},
   onMagazineMaxArticlesPerCycleChange = () => {},
   onReload,
+  agentProvider = "codex-cli",
+  agentProviderProfiles = [],
+  agentSettingsLoading = false,
 }) {
   const enabled = Boolean(settings?.enabled ?? status?.enabled);
   const toggleBusy = settingsBusy || settingsSaving;
@@ -1137,6 +1192,26 @@ function WorldMemoryDiagnosticsSection({
   const magazineToggleDisabled = !enabled || magazineToggleBusy;
   const magazineWritingProvider =
     magazineSettings?.settings?.writingProvider || magazineSettings?.writingProvider || "default";
+  const magazineSelectedProvider = normalizeMagazineProviderId(magazineWritingProvider);
+  const magazineEffectiveProvider = magazineSelectedProvider === "default"
+    ? normalizeRuntimeProviderId(agentProvider)
+    : magazineSelectedProvider;
+  const magazineProviderProfile = profileForProvider(magazineEffectiveProvider, agentProviderProfiles);
+  const magazineReasoningOptions = magazineReasoningOptionsForProvider(
+    magazineEffectiveProvider,
+    agentProviderProfiles
+  );
+  const magazineWritingReasoning = selectedMagazineReasoningValue(
+    magazineSettings?.settings?.writingReasoning || magazineSettings?.writingReasoning,
+    magazineEffectiveProvider,
+    agentProviderProfiles,
+    magazineReasoningOptions
+  );
+  const magazineReasoningOption =
+    magazineReasoningOptions.find((option) => option.id === magazineWritingReasoning) ||
+    magazineReasoningOptions[0];
+  const magazineReasoningProviderLabel =
+    magazineProviderProfile?.label || (magazineEffectiveProvider === "antigravity-cli" ? "Antigravity CLI" : "Codex CLI");
   const magazineSchedulerIntervalHours = Math.max(
     1,
     Math.min(
@@ -1365,15 +1440,44 @@ function WorldMemoryDiagnosticsSection({
       ) : null}
 
       {magazineEnabled ? (
-        <div className="settings-feature-control">
+        <div className="settings-feature-control settings-feature-control-grid">
           <SettingsSelectField
             id="magazine-writing-provider"
             label="매거진 작성 모델"
             value={magazineWritingProvider}
             options={agentModelProviderOptions}
             disabled={magazineToggleBusy}
-            onChange={onMagazineWritingProviderChange}
+            onChange={(nextProvider) => {
+              const nextSelectedProvider = normalizeMagazineProviderId(nextProvider);
+              const nextEffectiveProvider = nextSelectedProvider === "default"
+                ? normalizeRuntimeProviderId(agentProvider)
+                : nextSelectedProvider;
+              const nextReasoningOptions = magazineReasoningOptionsForProvider(
+                nextEffectiveProvider,
+                agentProviderProfiles
+              );
+              const nextReasoning = selectedMagazineReasoningValue(
+                magazineWritingReasoning,
+                nextEffectiveProvider,
+                agentProviderProfiles,
+                nextReasoningOptions
+              );
+              onMagazineWritingProviderChange(nextProvider, nextReasoning);
+            }}
             description="자동 매거진 기사 수 산정과 기사 작성에 적용합니다."
+          />
+          <SettingsSelectField
+            id="magazine-writing-reasoning"
+            label="매거진 추론 수준"
+            value={magazineWritingReasoning}
+            options={magazineReasoningOptions}
+            disabled={magazineToggleBusy || agentSettingsLoading}
+            onChange={onMagazineWritingReasoningChange}
+            description={
+              agentSettingsLoading
+                ? "에이전트 설정을 불러온 뒤 CLI별 목록을 표시합니다."
+                : `${magazineReasoningProviderLabel} 기준 · ${magazineReasoningOption?.detail || "기사 수 산정과 기사 작성에 적용합니다."}`
+            }
           />
         </div>
       ) : null}

@@ -250,6 +250,8 @@ POST /api/magazine/read-state
 
 `PATCH /api/magazine/settings` also accepts `{"schedulerMaxArticlesPerCycle":2}`. The value is stored in `config/magazine.user.json`, defaults to `2`, and is clamped to the Settings UI range of 1-3 articles. This setting is the maximum the model may choose for a cycle; the decision harness can still select fewer articles, including `targetCount=0`, when the evidence does not support more.
 
+`PATCH /api/magazine/settings` also accepts `{"writingProvider":"antigravity-cli","writingReasoning":"low"}`. `writingProvider` stays independent from the default chat agent, and `writingReasoning` is the Magazine-only reasoning level used for article-count judgment and article generation. The Settings page must show Codex CLI reasoning levels when the effective Magazine provider is Codex, and Antigravity CLI reasoning levels when the effective Magazine provider is Antigravity.
+
 `POST /api/magazine/status` accepts `{"action":"runNow"}` to request an immediate manual scheduler cycle. The cycle still runs the article-count decision harness first, so a valid result can be `targetCount=0` with a reader-visible reason instead of forcing an article. The API starts the cycle in the background, returns the refreshed status snapshot, and rejects the request while a scheduler or generation cycle is already active.
 
 `POST /api/magazine/status` or `PATCH /api/magazine/status` accepts `{"action":"reschedule","nextRunAt":"ISO timestamp"}` to move the next pending scheduler run within the next 24 hours. It does not interrupt an active generation cycle.

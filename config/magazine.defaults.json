@@ -2,6 +2,7 @@
   "version": 1,
   "enabled": false,
   "writingProvider": "default",
+  "writingReasoning": "",
   "schedulerIntervalHours": 6,
   "schedulerMaxArticlesPerCycle": 2
 }

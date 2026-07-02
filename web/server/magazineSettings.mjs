@@ -13,11 +13,13 @@ const fallbackSettings = {
   version: 1,
   enabled: false,
   writingProvider: "default",
+  writingReasoning: "",
   schedulerIntervalHours: 6,
   schedulerMaxArticlesPerCycle: 2,
 };
 
 const MODEL_PROVIDER_IDS = new Set(["default", "codex-cli", "antigravity-cli"]);
+const REASONING_LEVEL_IDS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
 const DEFAULT_SCHEDULER_INTERVAL_HOURS = 6;
 const MIN_SCHEDULER_INTERVAL_HOURS = 1;
 const MAX_SCHEDULER_INTERVAL_HOURS = 10;
@@ -67,6 +69,13 @@ export function normalizeMagazineSchedulerMaxArticlesPerCycle(
   );
 }
 
+export function normalizeMagazineWritingReasoning(value, fallback = fallbackSettings.writingReasoning) {
+  const candidate = String(value ?? "").trim().toLowerCase();
+  if (REASONING_LEVEL_IDS.has(candidate)) return candidate;
+  const safeFallback = String(fallback ?? "").trim().toLowerCase();
+  return REASONING_LEVEL_IDS.has(safeFallback) ? safeFallback : fallbackSettings.writingReasoning;
+}
+
 function normalizeMagazineSettings(raw = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
   const writingProvider = source.writingProvider || source.authorProvider || fallbackSettings.writingProvider;
@@ -76,6 +85,9 @@ function normalizeMagazineSettings(raw = {}) {
     writingProvider: MODEL_PROVIDER_IDS.has(writingProvider)
       ? writingProvider
       : fallbackSettings.writingProvider,
+    writingReasoning: normalizeMagazineWritingReasoning(
+      source.writingReasoning ?? source.writingReasoningLevel ?? fallbackSettings.writingReasoning
+    ),
     schedulerIntervalHours: normalizeMagazineSchedulerIntervalHours(
       source.schedulerIntervalHours ?? source.intervalHours ?? fallbackSettings.schedulerIntervalHours
     ),
@@ -108,6 +120,9 @@ export function writeMagazineSettingsPatch(patch = {}) {
   const source = patch && typeof patch === "object" ? patch : {};
   const hasEnabled = Object.prototype.hasOwnProperty.call(source, "enabled");
   const hasWritingProvider = Object.prototype.hasOwnProperty.call(source, "writingProvider");
+  const hasWritingReasoning =
+    Object.prototype.hasOwnProperty.call(source, "writingReasoning") ||
+    Object.prototype.hasOwnProperty.call(source, "writingReasoningLevel");
   const hasSchedulerIntervalHours = Object.prototype.hasOwnProperty.call(source, "schedulerIntervalHours");
   const hasSchedulerMaxArticlesPerCycle = Object.prototype.hasOwnProperty.call(
     source,
@@ -117,11 +132,12 @@ export function writeMagazineSettingsPatch(patch = {}) {
   if (
     !hasEnabled &&
     !hasWritingProvider &&
+    !hasWritingReasoning &&
     !hasSchedulerIntervalHours &&
     !hasSchedulerMaxArticlesPerCycle &&
     !hasDisabledReason
   ) {
-    throw new Error("enabled, writingProvider, schedulerIntervalHours, or schedulerMaxArticlesPerCycle is required");
+    throw new Error("enabled, writingProvider, writingReasoning, schedulerIntervalHours, or schedulerMaxArticlesPerCycle is required");
   }
   if (hasEnabled && source.enabled === true && !isWorldMemoryEnabled()) {
     const error = new Error("World Memory must be enabled before Magazine can be enabled");
@@ -135,6 +151,9 @@ export function writeMagazineSettingsPatch(patch = {}) {
     ...currentSettings,
     enabled: nextEnabled,
     ...(hasWritingProvider ? { writingProvider: source.writingProvider } : {}),
+    ...(hasWritingReasoning
+      ? { writingReasoning: source.writingReasoning ?? source.writingReasoningLevel }
+      : {}),
     ...(hasSchedulerIntervalHours ? { schedulerIntervalHours: source.schedulerIntervalHours } : {}),
     ...(hasSchedulerMaxArticlesPerCycle
       ? { schedulerMaxArticlesPerCycle: source.schedulerMaxArticlesPerCycle }
@@ -166,6 +185,7 @@ export function publicMagazineSettingsSnapshot() {
     enabled,
     worldMemoryEnabled,
     writingProvider: settings.writingProvider,
+    writingReasoning: settings.writingReasoning,
     schedulerIntervalHours: settings.schedulerIntervalHours,
     schedulerIntervalMs: settings.schedulerIntervalHours * 60 * 60 * 1000,
     schedulerMaxArticlesPerCycle: settings.schedulerMaxArticlesPerCycle,

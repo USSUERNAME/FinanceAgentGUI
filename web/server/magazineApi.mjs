@@ -46,6 +46,8 @@ const WORLD_MEMORY_VECTOR_POLICY = {
 };
 const MAGAZINE_CODEX_PROVIDER_ID = "codex-cli";
 const MAGAZINE_ANTIGRAVITY_PROVIDER_ID = "antigravity-cli";
+const MAGAZINE_CODEX_REASONING_IDS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
+const MAGAZINE_ANTIGRAVITY_REASONING_IDS = new Set(["minimal", "low", "medium", "high"]);
 
 const MAGAZINE_GENERATION_TIMEOUT_MS = 31 * 60 * 1000;
 const MAGAZINE_SCHEDULER_DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -1485,6 +1487,17 @@ function normalizeMagazineProviderSetting(value) {
     : "default";
 }
 
+function normalizeMagazineReasoningForProvider(provider, value, fallback = "") {
+  const candidate = safeGeneratorCliValue(value || "", "").toLowerCase();
+  const allowed =
+    provider === MAGAZINE_ANTIGRAVITY_PROVIDER_ID
+      ? MAGAZINE_ANTIGRAVITY_REASONING_IDS
+      : MAGAZINE_CODEX_REASONING_IDS;
+  if (allowed.has(candidate)) return candidate;
+  const safeFallback = safeGeneratorCliValue(fallback || "", "").toLowerCase();
+  return allowed.has(safeFallback) ? safeFallback : "";
+}
+
 function normalizeAgentProviderSettings(raw = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
   return {
@@ -1524,10 +1537,17 @@ async function readMagazineSchedulerAgent() {
   const topLevelSettings = mergeAgentProviderSettings(defaultSettings, userSettings);
   const settings = mergeAgentProviderSettings(providerSettings, topLevelSettings);
   const useAntigravity = provider === MAGAZINE_ANTIGRAVITY_PROVIDER_ID;
+  const defaultReasoning = useAntigravity ? "medium" : "high";
+  const providerReasoning = normalizeMagazineReasoningForProvider(provider, settings.reasoning, defaultReasoning);
+  const configuredReasoning = normalizeMagazineReasoningForProvider(
+    provider,
+    magazineSettings.writingReasoning,
+    providerReasoning || defaultReasoning
+  );
   return {
     provider,
     model: settings.model || (useAntigravity ? "Gemini 3.5 Flash (Medium)" : "gpt-5.5"),
-    reasoning: settings.reasoning || (useAntigravity ? "medium" : "high"),
+    reasoning: configuredReasoning || providerReasoning || defaultReasoning,
     approval: useAntigravity ? settings.approval || "turbo" : "never",
     speed: settings.speed || "standard",
   };
