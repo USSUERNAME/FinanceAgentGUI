@@ -1217,6 +1217,7 @@ const defaultMagazineSettings = {
   worldMemoryEnabled: false,
   writingProvider: "default",
   schedulerIntervalHours: 6,
+  schedulerMaxArticlesPerCycle: 2,
   disabledReason: "",
   configPath: "config/magazine.user.json",
   defaultConfigPath: "config/magazine.defaults.json",
@@ -1225,6 +1226,7 @@ const defaultMagazineSettings = {
     enabled: false,
     writingProvider: "default",
     schedulerIntervalHours: 6,
+    schedulerMaxArticlesPerCycle: 2,
   },
 };
 
@@ -3082,6 +3084,32 @@ function App() {
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify({ schedulerIntervalHours: safeIntervalHours }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      const nextSettings = { ...defaultMagazineSettings, ...payload };
+      setMagazineSettings(nextSettings);
+      await refreshMagazineStatus();
+    } catch (error) {
+      setMagazineSettingsError(error.message);
+    } finally {
+      setMagazineSettingsSaving(false);
+    }
+  }
+
+  async function updateMagazineMaxArticlesPerCycle(schedulerMaxArticlesPerCycle) {
+    if (magazineSettingsSaving) return;
+    const safeMaxArticles = Math.max(1, Math.min(3, Math.round(Number(schedulerMaxArticlesPerCycle || 2))));
+    setMagazineSettingsSaving(true);
+    setMagazineSettingsError("");
+    try {
+      const response = await fetch("/api/magazine/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ schedulerMaxArticlesPerCycle: safeMaxArticles }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) {
@@ -5403,6 +5431,7 @@ function App() {
               onToggleMagazineEnabled={updateMagazineEnabled}
               onMagazineWritingProviderChange={updateMagazineWritingProvider}
               onMagazineSchedulerIntervalChange={updateMagazineSchedulerInterval}
+              onMagazineMaxArticlesPerCycleChange={updateMagazineMaxArticlesPerCycle}
               onReloadWorldMemory={loadWorldMemoryStatus}
               arcaAuth={{
                 status: arcaAuthStatus,

@@ -143,6 +143,14 @@ const MAGAZINE_SCHEDULER_INTERVAL_OPTIONS = Array.from({ length: 10 }, (_, index
   };
 });
 
+const MAGAZINE_MAX_ARTICLES_PER_CYCLE_OPTIONS = Array.from({ length: 3 }, (_, index) => {
+  const count = index + 1;
+  return {
+    count,
+    label: String(count) + "건",
+  };
+});
+
 function NewsFeedPollIntervalBar({ valueSeconds, disabled, saving, onChange }) {
   const selectedMinutes = Math.max(1, Math.min(10, Math.round(Number(valueSeconds || 180) / 60)));
   return (
@@ -208,6 +216,48 @@ function MagazineSchedulerIntervalBar({ valueHours, disabled, saving, onChange }
       <p className="settings-interval-warning">
         이 기능은 토큰 소모가 대단히 많아 기사 생성 간격을 좁히면 ChatGPT Plus / Gemini Pro 요금에제서는 토큰 사용 한계에 빠르게 도달할 수 있습니다.
       </p>
+    </div>
+  );
+}
+
+function MagazineMaxArticlesPerCycleBar({ valueCount, disabled, saving, onChange }) {
+  const selectedCount = Math.max(1, Math.min(3, Math.round(Number(valueCount || 2))));
+  return (
+    <div className={disabled ? "settings-interval-control is-disabled" : "settings-interval-control"}>
+      <div
+        className="settings-interval-bar"
+        role="radiogroup"
+        aria-label="Magazine 생성 주기당 최대 기사 생성수"
+        style={{ "--settings-interval-steps": MAGAZINE_MAX_ARTICLES_PER_CYCLE_OPTIONS.length }}
+      >
+        {MAGAZINE_MAX_ARTICLES_PER_CYCLE_OPTIONS.map((option) => {
+          const selected = option.count === selectedCount;
+          return (
+            <button
+              className={selected ? "settings-interval-step is-selected" : "settings-interval-step"}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-label={`생성 주기당 최대 ${option.label}`}
+              disabled={disabled || saving}
+              onClick={() => {
+                if (!selected) onChange(option.count);
+              }}
+              key={option.count}
+            >
+              {option.count}
+            </button>
+          );
+        })}
+      </div>
+      <div className="settings-interval-copy">
+        <strong>{saving ? "저장 중" : `최대 ${selectedCount}건까지 생성`}</strong>
+        <span>
+          {disabled
+            ? "저장 중에는 최대 생성 수를 변경할 수 없습니다."
+            : `모델이 0~${selectedCount}건 사이에서 판단합니다. 이 숫자는 확정 생성 수가 아닙니다.`}
+        </span>
+      </div>
     </div>
   );
 }
@@ -904,6 +954,7 @@ export default function SettingsView({
   onToggleMagazineEnabled,
   onMagazineWritingProviderChange,
   onMagazineSchedulerIntervalChange,
+  onMagazineMaxArticlesPerCycleChange,
   onReloadWorldMemory,
   arcaAuth,
 }) {
@@ -974,6 +1025,7 @@ export default function SettingsView({
           onToggleMagazineEnabled={onToggleMagazineEnabled}
           onMagazineWritingProviderChange={onMagazineWritingProviderChange}
           onMagazineSchedulerIntervalChange={onMagazineSchedulerIntervalChange}
+          onMagazineMaxArticlesPerCycleChange={onMagazineMaxArticlesPerCycleChange}
           onReload={onReloadWorldMemory}
         />
 
@@ -1074,6 +1126,7 @@ function WorldMemoryDiagnosticsSection({
   onToggleMagazineEnabled,
   onMagazineWritingProviderChange = () => {},
   onMagazineSchedulerIntervalChange = () => {},
+  onMagazineMaxArticlesPerCycleChange = () => {},
   onReload,
 }) {
   const enabled = Boolean(settings?.enabled ?? status?.enabled);
@@ -1090,6 +1143,19 @@ function WorldMemoryDiagnosticsSection({
       10,
       Math.round(
         Number(magazineSettings?.settings?.schedulerIntervalHours ?? magazineSettings?.schedulerIntervalHours ?? 6)
+      )
+    )
+  );
+  const magazineMaxArticlesPerCycle = Math.max(
+    1,
+    Math.min(
+      3,
+      Math.round(
+        Number(
+          magazineSettings?.settings?.schedulerMaxArticlesPerCycle ??
+            magazineSettings?.schedulerMaxArticlesPerCycle ??
+            2
+        )
       )
     )
   );
@@ -1279,6 +1345,21 @@ function WorldMemoryDiagnosticsSection({
             disabled={magazineToggleBusy}
             saving={magazineSettingsSaving}
             onChange={onMagazineSchedulerIntervalChange}
+          />
+        </div>
+      ) : null}
+
+      {magazineEnabled ? (
+        <div className="settings-subsection" aria-labelledby="magazine-max-articles-settings-title">
+          <div className="settings-subsection-header">
+            <h3 id="magazine-max-articles-settings-title">생성 주기당 최대 기사 생성수</h3>
+            <span>{magazineMaxArticlesPerCycle}건</span>
+          </div>
+          <MagazineMaxArticlesPerCycleBar
+            valueCount={magazineMaxArticlesPerCycle}
+            disabled={magazineToggleBusy}
+            saving={magazineSettingsSaving}
+            onChange={onMagazineMaxArticlesPerCycleChange}
           />
         </div>
       ) : null}

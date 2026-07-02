@@ -6,7 +6,10 @@ import {
   normalizeMagazineSchedulerNextRunAt,
   normalizeMagazineArticleCountDecision,
 } from "../server/magazineApi.mjs";
-import { normalizeMagazineSchedulerIntervalHours } from "../server/magazineSettings.mjs";
+import {
+  normalizeMagazineSchedulerIntervalHours,
+  normalizeMagazineSchedulerMaxArticlesPerCycle,
+} from "../server/magazineSettings.mjs";
 
 test("magazine scheduler preserves a model decision to skip with reason", () => {
   const decision = normalizeMagazineArticleCountDecision(
@@ -91,4 +94,11 @@ test("magazine scheduler interval defaults to 6 hours and stays in the settings 
   assert.equal(normalizeMagazineSchedulerIntervalHours(0), 1);
   assert.equal(normalizeMagazineSchedulerIntervalHours(99), 10);
   assert.equal(normalizeMagazineSchedulerIntervalHours("4"), 4);
+});
+
+test("magazine scheduler max articles defaults to 2 and stays in the settings range", () => {
+  assert.equal(normalizeMagazineSchedulerMaxArticlesPerCycle(undefined), 2);
+  assert.equal(normalizeMagazineSchedulerMaxArticlesPerCycle(0), 1);
+  assert.equal(normalizeMagazineSchedulerMaxArticlesPerCycle(99), 3);
+  assert.equal(normalizeMagazineSchedulerMaxArticlesPerCycle("3"), 3);
 });

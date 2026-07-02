@@ -204,7 +204,7 @@ User changes are stored in:
 config/magazine.user.json
 ```
 
-Do not store this switch or the scheduler interval in browser memory or localStorage. The Settings page must read/write the file-backed `/api/magazine/settings` endpoint. Magazine can only be enabled when World Memory is enabled; turning World Memory off also writes Magazine off.
+Do not store this switch, the scheduler interval, or the per-cycle maximum article count in browser memory or localStorage. The Settings page must read/write the file-backed `/api/magazine/settings` endpoint. Magazine can only be enabled when World Memory is enabled; turning World Memory off also writes Magazine off.
 
 When the local web server starts, it starts the magazine scheduler only if both World Memory and Magazine are enabled, and unless `FINANCE_AGENT_MAGAZINE_SCHEDULER_DISABLED=1` or `FINANCE_AGENT_MAGAZINE_AUTORUN=0` is set.
 
@@ -212,14 +212,15 @@ Default behavior:
 
 - first scheduled run: about 6 hours after server start by default
 - recurring interval: 6 hours by default, adjustable from 1-10 hours in Settings
-- per cycle article count: model editorial judgment 0-3, never random
+- per cycle article count: model editorial judgment from 0 to the configured maximum, never random
+- per cycle maximum article count: 2 by default, adjustable from 1-3 in Settings; this is an upper bound, not a guaranteed generation count
 - generation order: sequential, one `--count 1` generator run at a time
 - replacement policy: `replace=false`, so scheduled runs append new article folders rather than replacing the issue
 - retry policy: failed scheduled cycles retry every 15 minutes until the next regular update slot
 - retry window: if a cycle still cannot complete before its next regular update slot, that cycle is closed and no longer carries work forward
 - deadline policy: if a cycle reaches the next regular update slot before its planned article count is filled, the article already being generated may finish, but any not-yet-started articles are canceled; the next new writing attempt waits 15 minutes after the slot or after the in-flight article is sent
 
-The scheduler asks the selected local agent provider for an `articleCountDecision` JSON object before a new regular cycle starts. The decision must include `targetCount`, `confidence`, `reason`, and optional `candidateAngles`. `targetCount=0` is valid only when the model judges that there is no clearly article-worthy new angle after checking the evidence bundle, recent magazine articles, and reader preference/bias signals. If the count-decision model call fails, the scheduler records a fallback decision and conservatively attempts one article rather than silently skipping the cycle.
+The scheduler asks the selected local agent provider for an `articleCountDecision` JSON object before a new regular cycle starts. The decision must include `targetCount`, `confidence`, `reason`, and optional `candidateAngles`. `targetCount=0` is valid only when the model judges that there is no clearly article-worthy new angle after checking the evidence bundle, recent magazine articles, and reader preference/bias signals. `targetCount` must not exceed the configured maximum article count, but that maximum never forces the scheduler to create that many articles. If the count-decision model call fails, the scheduler records a fallback decision and conservatively attempts one article rather than silently skipping the cycle.
 
 Runtime scheduler state is stored in:
 
@@ -246,6 +247,8 @@ POST /api/magazine/read-state
 ```
 
 `PATCH /api/magazine/settings` accepts `{"schedulerIntervalHours":6}`. The value is stored in `config/magazine.user.json`, defaults to `6`, and is clamped to the Settings UI range of 1-10 hours. When Magazine is enabled and no scheduler cycle is active, changing the value re-arms the next pending run with the new interval.
+
+`PATCH /api/magazine/settings` also accepts `{"schedulerMaxArticlesPerCycle":2}`. The value is stored in `config/magazine.user.json`, defaults to `2`, and is clamped to the Settings UI range of 1-3 articles. This setting is the maximum the model may choose for a cycle; the decision harness can still select fewer articles, including `targetCount=0`, when the evidence does not support more.
 
 `POST /api/magazine/status` accepts `{"action":"runNow"}` to request an immediate manual scheduler cycle. The cycle still runs the article-count decision harness first, so a valid result can be `targetCount=0` with a reader-visible reason instead of forcing an article. The API starts the cycle in the background, returns the refreshed status snapshot, and rejects the request while a scheduler or generation cycle is already active.
 

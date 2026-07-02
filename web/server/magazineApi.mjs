@@ -51,12 +51,10 @@ const MAGAZINE_GENERATION_TIMEOUT_MS = 31 * 60 * 1000;
 const MAGAZINE_SCHEDULER_DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const MAGAZINE_SCHEDULER_MIN_INTERVAL_MS = 60_000;
 const MAGAZINE_SCHEDULER_MAX_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const MAGAZINE_SCHEDULER_MAX_PER_CYCLE = clampInteger(
-  process.env.FINANCE_AGENT_MAGAZINE_MAX_PER_CYCLE,
-  0,
-  3,
-  3
-);
+const MAGAZINE_SCHEDULER_ENV_MAX_PER_CYCLE =
+  process.env.FINANCE_AGENT_MAGAZINE_MAX_PER_CYCLE === undefined
+    ? null
+    : clampInteger(process.env.FINANCE_AGENT_MAGAZINE_MAX_PER_CYCLE, 0, 3, 3);
 const MAGAZINE_ARTICLE_TOPIC_LIMIT = 3;
 const MAGAZINE_SCHEDULER_MAX_MANUAL_DELAY_MS = 24 * 60 * 60 * 1000;
 const MAGAZINE_SCHEDULER_RUNTIME_KEY = Symbol.for("finance-agent-gui.magazineSchedulerRuntime");
@@ -1693,10 +1691,12 @@ async function buildMagazineArticleCountDecisionContext() {
     : [];
   const preferenceSnapshot = publicPreferenceSnapshot(preferenceStore);
   const biasSnapshot = publicBiasSnapshot(biasStore);
+  const maxTargetCount = magazineSchedulerMaxPerCycle();
 
   return {
     policy: "magazine-article-count-decision-v1",
-    maxTargetCount: MAGAZINE_SCHEDULER_MAX_PER_CYCLE,
+    maxTargetCount,
+    maxTargetPolicy: "user-configured-upper-bound-not-guaranteed-count",
     now: nowIso(),
     worldMemory: compactWorldMemoryReportForDecision(worldState || {}),
     newsFeed: {
@@ -1734,14 +1734,16 @@ async function buildMagazineArticleCountDecisionContext() {
 }
 
 function buildMagazineArticleCountDecisionPrompt(context) {
+  const maxTargetCount = clampInteger(context?.maxTargetCount, 0, 3, magazineSchedulerMaxPerCycle());
   return [
     "너는 FinanceAgentGUI 주식채널 매거진+의 자동 편집회의 JSON 하네스다.",
-    "이번 자동 생성 주기에서 새 매거진 기사를 몇 개 쓸지 0~3 사이 정수로 결정한다.",
+    `이번 자동 생성 주기에서 새 매거진 기사를 몇 개 쓸지 0~${maxTargetCount} 사이 정수로 결정한다.`,
+    `사용자 설정 maxTargetCount=${maxTargetCount}는 확정 생성 수가 아니라 상한이다. 충분한 독립 신규 각도가 없으면 이보다 적게 선택한다.`,
     "무작위 선택, 텍스트 매칭 규칙, 키워드 카운팅은 금지한다. 아래 컨텍스트의 의미, 최신성, 중복도, 독자 편집 신호를 종합해 LLM 편집 판단으로 결정한다.",
     "0건은 허용되지만, '쓸 만한 신규 각도가 명확히 없다'고 판단될 때만 선택한다. 단순히 데이터가 조금 적다는 이유로 0건을 고르지 않는다.",
     "1건은 새 각도가 하나 있거나 기존 이슈의 의미 있는 후속 업데이트가 하나 있을 때 선택한다.",
-    "2건은 서로 다른 storyFamily/editorialAngle로 쓸 수 있는 신호가 두 개 이상 있을 때 선택한다.",
-    "3건은 강한 신규 신호가 세 개 이상이고 최근 기사와 충분히 다른 각도를 만들 수 있을 때 선택한다.",
+    "2건은 maxTargetCount가 2 이상이고 서로 다른 storyFamily/editorialAngle로 쓸 수 있는 신호가 두 개 이상 있을 때만 선택한다.",
+    "3건은 maxTargetCount가 3이고 강한 신규 신호가 세 개 이상이며 최근 기사와 충분히 다른 각도를 만들 수 있을 때만 선택한다.",
     "최근 기사와 제목 구도, storyFamily, editorialAngle이 겹치면 후보 수를 줄인다. 독자 선호와 bias 신호는 신선한 시장 신호보다 우선하지 말고 보조 가중치로만 쓴다.",
     "최근 기사와 같은 metadata.newsFeed.items[].id를 재사용하는 후보는 같은 뉴스로 본다. primary continuity eventId가 같다는 사실만으로는 중복 판정하지 않는다. 그 eventId는 연속성 맥락일 수 있고, 하드 veto가 아니다.",
     "같은 사건을 다른 제목으로 다시 쓰는 후보는 targetCount에 세지 않는다. 독립 델타는 기사 전체 임베딩 거리가 아니라 새 근거 앵커다: 새 보도 id, 새 공식/외부 출처 URL, 새 수치, 새 정책 집행, 새 가격 반응, 새 기업 행동 중 적어도 하나가 이전 기사 이후 발생했을 때만 follow-up 후보로 남긴다.",
@@ -1784,7 +1786,7 @@ function normalizeMagazineDecisionAngle(value) {
 }
 
 export function normalizeMagazineArticleCountDecision(parsed = {}, options = {}) {
-  const maxCount = clampInteger(options.maxCount, 0, 3, MAGAZINE_SCHEDULER_MAX_PER_CYCLE);
+  const maxCount = clampInteger(options.maxCount, 0, 3, 3);
   const source = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   const rawTarget = source.targetCount ?? source.articleCount ?? source.count;
   const hasTarget = rawTarget !== undefined && rawTarget !== null && rawTarget !== "";
@@ -1818,7 +1820,7 @@ export function normalizeMagazineArticleCountDecision(parsed = {}, options = {})
 }
 
 export function fallbackMagazineArticleCountDecision(options = {}) {
-  const maxCount = clampInteger(options.maxCount, 0, 3, MAGAZINE_SCHEDULER_MAX_PER_CYCLE);
+  const maxCount = clampInteger(options.maxCount, 0, 3, 3);
   const targetCount = maxCount > 0 ? Math.min(1, maxCount) : 0;
   return normalizeMagazineArticleCountDecision(
     {
@@ -1840,7 +1842,7 @@ export function fallbackMagazineArticleCountDecision(options = {}) {
 }
 
 async function decideScheduledMagazineArticleCount({ scheduledAt = "" } = {}) {
-  const maxCount = clampInteger(MAGAZINE_SCHEDULER_MAX_PER_CYCLE, 0, 3, 3);
+  const maxCount = magazineSchedulerMaxPerCycle();
   const agent = await readMagazineSchedulerAgent();
   if (maxCount <= 0) {
     return {
@@ -1994,6 +1996,14 @@ function magazineSchedulerDisabled() {
   );
 }
 
+function magazineSchedulerMaxPerCycle() {
+  const settingsMax = readMagazineSettings().schedulerMaxArticlesPerCycle;
+  if (MAGAZINE_SCHEDULER_ENV_MAX_PER_CYCLE !== null) {
+    return Math.min(settingsMax, MAGAZINE_SCHEDULER_ENV_MAX_PER_CYCLE);
+  }
+  return settingsMax;
+}
+
 function magazineSchedulerHasActiveWork() {
   return Boolean(
     magazineSchedulerRuntime.running ||
@@ -2024,7 +2034,8 @@ function publicMagazineSchedulerState() {
     retryIntervalMinutes: Math.round((retryIntervalMs / 60000) * 100) / 100,
     retryWindowMs: intervalMs,
     initialDelayMs,
-    maxPerCycle: MAGAZINE_SCHEDULER_MAX_PER_CYCLE,
+    maxPerCycle: magazineSchedulerMaxPerCycle(),
+    maxPerCycleSource: MAGAZINE_SCHEDULER_ENV_MAX_PER_CYCLE === null ? "settings" : "settings-env-cap",
     nextRunAt: magazineSchedulerRuntime.nextRunAt,
     nextRetryAt: magazineSchedulerRuntime.nextRetryAt,
     currentCycle: magazineSchedulerRuntime.currentCycle,
@@ -2213,7 +2224,7 @@ async function buildMagazineCycle({ trigger, scheduledAt, sourceCycle = null }) 
   const articleCountDecision =
     countPlan.decision ||
     fallbackMagazineArticleCountDecision({
-      maxCount: MAGAZINE_SCHEDULER_MAX_PER_CYCLE,
+      maxCount: magazineSchedulerMaxPerCycle(),
       provider: countPlan.agent?.provider || "",
       model: countPlan.agent?.model || "",
       reasoning: countPlan.agent?.reasoning || "",
@@ -2487,16 +2498,27 @@ function applyMagazineSchedulerSettingsChange(previousSettings, nextSettings) {
 
   const intervalChanged =
     Number(previousSettings?.schedulerIntervalHours || 0) !== Number(nextSettings.schedulerIntervalHours || 0);
-  if (!intervalChanged) return;
+  const maxArticlesChanged =
+    Number(previousSettings?.schedulerMaxArticlesPerCycle || 0) !==
+    Number(nextSettings.schedulerMaxArticlesPerCycle || 0);
+  if (!intervalChanged && !maxArticlesChanged) return;
 
   if (!magazineSchedulerHasActiveWork()) {
-    scheduleNextMagazineCycle(magazineSchedulerIntervalMs());
+    if (intervalChanged) {
+      scheduleNextMagazineCycle(magazineSchedulerIntervalMs());
+      return;
+    }
+    void writeMagazineSchedulerState({
+      settingsChangedAt: nowIso(),
+      pendingMaxArticlesPerCycle: nextSettings.schedulerMaxArticlesPerCycle,
+    });
     return;
   }
 
   void writeMagazineSchedulerState({
     settingsChangedAt: nowIso(),
-    pendingIntervalHours: nextSettings.schedulerIntervalHours,
+    ...(intervalChanged ? { pendingIntervalHours: nextSettings.schedulerIntervalHours } : {}),
+    ...(maxArticlesChanged ? { pendingMaxArticlesPerCycle: nextSettings.schedulerMaxArticlesPerCycle } : {}),
   });
 }
 

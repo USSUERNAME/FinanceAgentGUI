@@ -14,12 +14,16 @@ const fallbackSettings = {
   enabled: false,
   writingProvider: "default",
   schedulerIntervalHours: 6,
+  schedulerMaxArticlesPerCycle: 2,
 };
 
 const MODEL_PROVIDER_IDS = new Set(["default", "codex-cli", "antigravity-cli"]);
 const DEFAULT_SCHEDULER_INTERVAL_HOURS = 6;
 const MIN_SCHEDULER_INTERVAL_HOURS = 1;
 const MAX_SCHEDULER_INTERVAL_HOURS = 10;
+const DEFAULT_SCHEDULER_MAX_ARTICLES_PER_CYCLE = 2;
+const MIN_SCHEDULER_MAX_ARTICLES_PER_CYCLE = 1;
+const MAX_SCHEDULER_MAX_ARTICLES_PER_CYCLE = 3;
 
 function ensureConfigDir() {
   mkdirSync(CONFIG_DIR, { recursive: true });
@@ -44,6 +48,25 @@ export function normalizeMagazineSchedulerIntervalHours(value, fallback = DEFAUL
   return Math.max(MIN_SCHEDULER_INTERVAL_HOURS, Math.min(MAX_SCHEDULER_INTERVAL_HOURS, number));
 }
 
+export function normalizeMagazineSchedulerMaxArticlesPerCycle(
+  value,
+  fallback = DEFAULT_SCHEDULER_MAX_ARTICLES_PER_CYCLE
+) {
+  const number = Number.parseInt(value, 10);
+  const safeFallback = Math.max(
+    MIN_SCHEDULER_MAX_ARTICLES_PER_CYCLE,
+    Math.min(
+      MAX_SCHEDULER_MAX_ARTICLES_PER_CYCLE,
+      Number.parseInt(fallback, 10) || DEFAULT_SCHEDULER_MAX_ARTICLES_PER_CYCLE
+    )
+  );
+  if (!Number.isFinite(number)) return safeFallback;
+  return Math.max(
+    MIN_SCHEDULER_MAX_ARTICLES_PER_CYCLE,
+    Math.min(MAX_SCHEDULER_MAX_ARTICLES_PER_CYCLE, number)
+  );
+}
+
 function normalizeMagazineSettings(raw = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
   const writingProvider = source.writingProvider || source.authorProvider || fallbackSettings.writingProvider;
@@ -55,6 +78,12 @@ function normalizeMagazineSettings(raw = {}) {
       : fallbackSettings.writingProvider,
     schedulerIntervalHours: normalizeMagazineSchedulerIntervalHours(
       source.schedulerIntervalHours ?? source.intervalHours ?? fallbackSettings.schedulerIntervalHours
+    ),
+    schedulerMaxArticlesPerCycle: normalizeMagazineSchedulerMaxArticlesPerCycle(
+      source.schedulerMaxArticlesPerCycle ??
+        source.maxArticlesPerCycle ??
+        source.maxPerCycle ??
+        fallbackSettings.schedulerMaxArticlesPerCycle
     ),
     updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : "",
     disabledReason: typeof source.disabledReason === "string" ? source.disabledReason : "",
@@ -80,9 +109,19 @@ export function writeMagazineSettingsPatch(patch = {}) {
   const hasEnabled = Object.prototype.hasOwnProperty.call(source, "enabled");
   const hasWritingProvider = Object.prototype.hasOwnProperty.call(source, "writingProvider");
   const hasSchedulerIntervalHours = Object.prototype.hasOwnProperty.call(source, "schedulerIntervalHours");
+  const hasSchedulerMaxArticlesPerCycle = Object.prototype.hasOwnProperty.call(
+    source,
+    "schedulerMaxArticlesPerCycle"
+  );
   const hasDisabledReason = Object.prototype.hasOwnProperty.call(source, "disabledReason");
-  if (!hasEnabled && !hasWritingProvider && !hasSchedulerIntervalHours && !hasDisabledReason) {
-    throw new Error("enabled, writingProvider, or schedulerIntervalHours is required");
+  if (
+    !hasEnabled &&
+    !hasWritingProvider &&
+    !hasSchedulerIntervalHours &&
+    !hasSchedulerMaxArticlesPerCycle &&
+    !hasDisabledReason
+  ) {
+    throw new Error("enabled, writingProvider, schedulerIntervalHours, or schedulerMaxArticlesPerCycle is required");
   }
   if (hasEnabled && source.enabled === true && !isWorldMemoryEnabled()) {
     const error = new Error("World Memory must be enabled before Magazine can be enabled");
@@ -97,6 +136,9 @@ export function writeMagazineSettingsPatch(patch = {}) {
     enabled: nextEnabled,
     ...(hasWritingProvider ? { writingProvider: source.writingProvider } : {}),
     ...(hasSchedulerIntervalHours ? { schedulerIntervalHours: source.schedulerIntervalHours } : {}),
+    ...(hasSchedulerMaxArticlesPerCycle
+      ? { schedulerMaxArticlesPerCycle: source.schedulerMaxArticlesPerCycle }
+      : {}),
     disabledReason: nextEnabled ? "" : source.disabledReason || currentSettings.disabledReason || "",
     updatedAt: new Date().toISOString(),
   });
@@ -126,6 +168,7 @@ export function publicMagazineSettingsSnapshot() {
     writingProvider: settings.writingProvider,
     schedulerIntervalHours: settings.schedulerIntervalHours,
     schedulerIntervalMs: settings.schedulerIntervalHours * 60 * 60 * 1000,
+    schedulerMaxArticlesPerCycle: settings.schedulerMaxArticlesPerCycle,
     disabledReason: worldMemoryEnabled ? settings.disabledReason : "world-memory-disabled",
     settings: {
       ...settings,

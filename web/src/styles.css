@@ -7837,7 +7837,7 @@ button {
 
 .settings-interval-bar {
   display: grid;
-  grid-template-columns: repeat(10, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--settings-interval-steps, 10), minmax(0, 1fr));
   width: 100%;
   min-width: 0;
   height: 38px;
