@@ -43,6 +43,26 @@ function fakePng() {
   return buffer;
 }
 
+function readerToneDecision(patch = {}) {
+  return {
+    policy: "magazine-reader-tone-v1",
+    method: "LLM_CLASSIFICATION_ONLY",
+    noTextMatching: true,
+    classifier: "magazine-reader-tone-llm",
+    readerDirective: false,
+    readerAddressedAsInvestor: false,
+    checklistConclusion: false,
+    lateSectionReviews: [
+      {
+        heading: "전력망으로 내려온 성장주 이야기",
+        classification: "market_observation",
+        rationale: "후반부는 시장 비용 배분의 의미를 설명하며 독자에게 행동을 지시하지 않습니다.",
+      },
+    ],
+    ...patch,
+  };
+}
+
 function writeArticle(root, { articleId = "ai-power-bill-test", body, heroImage, topics = ["AI", "테크"], metadataPatch = {} } = {}) {
   const articleDir = join(root, "articles", articleId);
   mkdirSync(join(articleDir, "assets"), { recursive: true });
@@ -87,6 +107,7 @@ function writeArticle(root, { articleId = "ai-power-bill-test", body, heroImage,
         researchMode: "mixed-research",
         editorialAngle: "policy-mechanics",
         storyFamily: "AI 물리 인프라 비즈니스",
+        readerToneDecision: readerToneDecision(),
         ...metadataPatch,
       },
       null,
@@ -136,6 +157,139 @@ test("magazine style check rejects World Memory in reader-facing article copy", 
       return true;
     },
   );
+});
+
+test("magazine style check rejects reader action checklist sections", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-action-section-"));
+  const body = makeArticleBody().replace(
+    "</article>",
+    `<h2>다음 확인 지점</h2>
+  <p>앞으로 봐야 할 데이터는 명확합니다. 첫째, 지역별 전력 접속 대기열입니다. 둘째, 변압기 납기입니다. 셋째, 요금 배분 방식입니다.</p>
+  <p>투자자는 이 세 가지를 함께 확인해야 합니다. 그래야 AI 인프라 투자가 실제 비용으로 내려오는 속도를 더 잘 읽을 수 있습니다.</p>
+</article>`,
+  );
+  writeArticle(articleRoot, {
+    body,
+    metadataPatch: {
+      readerToneDecision: readerToneDecision({
+        checklistConclusion: true,
+        lateSectionReviews: [
+          {
+            heading: "다음 확인 지점",
+            classification: "checklist_conclusion",
+            rationale: "LLM 판정: 후반부가 독자 체크리스트로 묶였습니다.",
+          },
+        ],
+      }),
+    },
+  });
+
+  assert.throws(
+    () => runCheck(articleRoot),
+    (error) => {
+      const output = JSON.parse(error.stdout);
+      assert.equal(output.ok, false);
+      assert.ok(output.errors.some((issue) => issue.code === "reader-action-section"));
+      return true;
+    },
+  );
+});
+
+test("magazine style check rejects late reader directive prose without checklist heading", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-late-directive-"));
+  const body = makeArticleBody().replace(
+    "</article>",
+    `<h2>시장 반응의 남은 거리</h2>
+  <p>앞으로 봐야 할 데이터는 지역별 전력 접속 대기열과 변압기 납기입니다. 이 둘이 함께 움직이면 비용 부담이 유틸리티와 클라우드 사업자의 마진으로 내려오는 속도도 더 선명해집니다.</p>
+</article>`,
+  );
+  writeArticle(articleRoot, {
+    body,
+    metadataPatch: {
+      readerToneDecision: readerToneDecision({
+        readerDirective: true,
+        lateSectionReviews: [
+          {
+            heading: "시장 반응의 남은 거리",
+            classification: "reader_directive",
+            rationale: "LLM 판정: 후반부가 독자에게 확인할 과제를 부여합니다.",
+          },
+        ],
+      }),
+    },
+  });
+
+  assert.throws(
+    () => runCheck(articleRoot),
+    (error) => {
+      const output = JSON.parse(error.stdout);
+      assert.equal(output.ok, false);
+      assert.ok(output.errors.some((issue) => issue.code === "reader-directive"));
+      return true;
+    },
+  );
+});
+
+test("magazine style check rejects addressing readers as investors", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-reader-investor-"));
+  const body = makeArticleBody().replace(
+    "</article>",
+    `<h2>시장 반응의 남은 거리</h2>
+  <p>투자자는 이 변수를 함께 확인해야 합니다. 그래야 전력망 병목이 반도체 주문과 유틸리티 비용으로 내려오는 속도를 읽을 수 있습니다.</p>
+</article>`,
+  );
+  writeArticle(articleRoot, {
+    body,
+    metadataPatch: {
+      readerToneDecision: readerToneDecision({
+        readerAddressedAsInvestor: true,
+        lateSectionReviews: [
+          {
+            heading: "시장 반응의 남은 거리",
+            classification: "reader_directive",
+            rationale: "LLM 판정: 독자를 투자자로 호명했습니다.",
+          },
+        ],
+      }),
+    },
+  });
+
+  assert.throws(
+    () => runCheck(articleRoot),
+    (error) => {
+      const output = JSON.parse(error.stdout);
+      assert.equal(output.ok, false);
+      assert.ok(output.errors.some((issue) => issue.code === "reader-as-investor-address"));
+      return true;
+    },
+  );
+});
+
+test("magazine style check allows investors as third-party article subjects", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-third-party-investor-"));
+  const body = makeArticleBody().replace(
+    "시장에서는 반도체 주문서와 전력 구매계약이 같은 투자 논리 안으로 들어오고 있습니다.",
+    "해외 투자자는 전력 구매계약을 반도체 주문서와 함께 가격에 반영하고 있다고 한 전략가는 설명했습니다. Trump 대통령은 투표자의 신원을 확인해야 한다고 말했습니다. 시장에서는 반도체 주문서와 전력 구매계약이 같은 투자 논리 안으로 들어오고 있습니다.",
+  );
+  writeArticle(articleRoot, {
+    body,
+    metadataPatch: {
+      readerToneDecision: readerToneDecision({
+        lateSectionReviews: [
+          {
+            heading: "전력망으로 내려온 성장주 이야기",
+            classification: "third_party_market_participant",
+            rationale: "LLM 판정: 투자자와 대통령 발언은 기사 속 제3자 설명이며 독자 지시가 아닙니다.",
+          },
+        ],
+      }),
+    },
+  });
+
+  const output = JSON.parse(runCheck(articleRoot));
+
+  assert.equal(output.ok, true);
+  assert.equal(output.errors.length, 0);
 });
 
 test("magazine style check rejects SVG mock hero images", () => {

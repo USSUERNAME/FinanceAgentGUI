@@ -55,16 +55,14 @@ const INTERNAL_PHRASES = [
   /하네스/,
 ];
 
-const LECTURE_PATTERNS = [
-  /봐야 합니다/g,
-  /확인해야 합니다/g,
-  /점검해야 합니다/g,
-  /잊으면 안 됩니다/g,
-  /필요합니다/g,
-  /투자자는/g,
-  /핵심은/g,
-  /문제는/g,
-];
+const READER_TONE_POLICY = "magazine-reader-tone-v1";
+const READER_TONE_METHOD = "LLM_CLASSIFICATION_ONLY";
+const READER_TONE_ALLOWED_CLASSIFICATIONS = new Set([
+  "market_observation",
+  "unresolved_tension",
+  "evidence_based_implication",
+  "third_party_market_participant",
+]);
 
 const ATTRIBUTION_PATTERNS = [
   /에 따르면/g,
@@ -107,7 +105,74 @@ function paragraphCountsBySection(html) {
 }
 
 function countMatches(text, pattern) {
+  pattern.lastIndex = 0;
   return Array.from(String(text || "").matchAll(pattern)).length;
+}
+
+function checkReaderToneDecision(metadata = {}) {
+  const issues = [];
+  const decision = metadata.readerToneDecision && typeof metadata.readerToneDecision === "object" && !Array.isArray(metadata.readerToneDecision)
+    ? metadata.readerToneDecision
+    : null;
+  if (!decision) {
+    issues.push({
+      level: "error",
+      code: "reader-tone-decision-missing",
+      message: "metadata.readerToneDecision must include the LLM reader-tone classification result",
+    });
+    return issues;
+  }
+
+  if (decision.policy !== READER_TONE_POLICY) {
+    issues.push({ level: "error", code: "reader-tone-policy-invalid", message: `metadata.readerToneDecision.policy must be ${READER_TONE_POLICY}` });
+  }
+  if (decision.method !== READER_TONE_METHOD) {
+    issues.push({ level: "error", code: "reader-tone-method-invalid", message: `metadata.readerToneDecision.method must be ${READER_TONE_METHOD}` });
+  }
+  if (decision.noTextMatching !== true) {
+    issues.push({ level: "error", code: "reader-tone-text-matching", message: "metadata.readerToneDecision.noTextMatching must be true" });
+  }
+  if (!String(decision.classifier || "").trim()) {
+    issues.push({ level: "error", code: "reader-tone-classifier-missing", message: "metadata.readerToneDecision.classifier must name the LLM classifier pass" });
+  }
+
+  for (const [field, code] of [
+    ["readerDirective", "reader-directive"],
+    ["readerAddressedAsInvestor", "reader-as-investor-address"],
+    ["checklistConclusion", "reader-action-section"],
+  ]) {
+    if (decision[field] !== false) {
+      issues.push({ level: "error", code, message: `metadata.readerToneDecision.${field} must be false` });
+    }
+  }
+
+  const sectionReviews = Array.isArray(decision.lateSectionReviews) ? decision.lateSectionReviews : [];
+  if (!sectionReviews.length) {
+    issues.push({
+      level: "error",
+      code: "reader-tone-section-reviews-missing",
+      message: "metadata.readerToneDecision.lateSectionReviews must include at least one LLM-reviewed late-section classification",
+    });
+  }
+  for (const [index, review] of sectionReviews.entries()) {
+    const item = review && typeof review === "object" && !Array.isArray(review) ? review : {};
+    const classification = String(item.classification || "");
+    if (!READER_TONE_ALLOWED_CLASSIFICATIONS.has(classification)) {
+      issues.push({
+        level: "error",
+        code: "reader-tone-section-classification-invalid",
+        message: `metadata.readerToneDecision.lateSectionReviews[${index}].classification is invalid: ${classification || "(missing)"}`,
+      });
+    }
+    if (!String(item.rationale || "").trim()) {
+      issues.push({
+        level: "error",
+        code: "reader-tone-section-rationale-missing",
+        message: `metadata.readerToneDecision.lateSectionReviews[${index}].rationale is required`,
+      });
+    }
+  }
+  return issues;
 }
 
 function sourceBasisUsesWorldMemory(metadata) {
@@ -861,6 +926,7 @@ function checkArticle({ articleId, metadata, html }, topicCatalog) {
   issues.push(...checkHeroImage(articleId, metadata));
   issues.push(...checkCoverDecision(metadata));
   issues.push(...checkNewsFeedEvidence(metadata));
+  issues.push(...checkReaderToneDecision(metadata));
 
   if (!Array.isArray(metadata.sourceBasis) || metadata.sourceBasis.length < 3) {
     issues.push({ level: "error", code: "source-basis-too-thin", message: "sourceBasis should include at least three source or evidence entries" });
@@ -909,11 +975,6 @@ function checkArticle({ articleId, metadata, html }, topicCatalog) {
       code: "body-too-short",
       message: `${articleType} body has ${compactLength} non-space chars; target is ${minLength}+`,
     });
-  }
-
-  const lectureCount = LECTURE_PATTERNS.reduce((sum, pattern) => sum + countMatches(visibleText, pattern), 0);
-  if (lectureCount >= 10) {
-    issues.push({ level: "warn", code: "lecture-tone-risk", message: `teacherly or generic guidance patterns appear ${lectureCount} times` });
   }
 
   const twoParagraphSections = sectionParagraphCounts.filter((count) => count === 2).length;

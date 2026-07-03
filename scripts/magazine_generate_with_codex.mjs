@@ -15,6 +15,8 @@ const LOCK_PATH = join(GUIBUILD_ROOT, "data", "magazine", ".generation.lock");
 const CODEX_PROVIDER_ID = "codex-cli";
 const ANTIGRAVITY_PROVIDER_ID = "antigravity-cli";
 const MAX_ARTICLE_TOPICS = 3;
+const READER_TONE_POLICY = "magazine-reader-tone-v1";
+const READER_TONE_METHOD = "LLM_CLASSIFICATION_ONLY";
 
 function argValue(name, fallback = "") {
   const index = process.argv.indexOf(name);
@@ -426,6 +428,85 @@ function buildTitlePrompt({ bodyText }) {
   ].join("\n");
 }
 
+function extractJsonObject(output) {
+  const raw = String(output || "").trim();
+  const withoutFences = raw.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+  const start = withoutFences.indexOf("{");
+  const end = withoutFences.lastIndexOf("}");
+  if (start < 0 || end < start) return null;
+  try {
+    return JSON.parse(withoutFences.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+function buildReaderToneDecisionPrompt({ articleId, metadata, bodyText }) {
+  return [
+    "너는 FinanceAgentGUI Magazine의 독자 톤 LLM 분류 하네스다.",
+    "절대 키워드, 정규식, 부분 문자열, 금칙어 목록으로 판정하지 않는다. 문맥과 발화 주체를 의미적으로 분류한다.",
+    "예: 'Trump 대통령은 투표자의 신원을 확인해야 한다고 말했습니다'는 독자 지시가 아니라 제3자 발언 귀속이다.",
+    "예: '해외 투자자는 달러와 장기금리를 함께 봅니다'는 기사 속 제3자 시장 참여자 설명이다.",
+    "예: '투자자는 이 변수를 확인해야 합니다'처럼 독자를 투자자로 호명하고 과제를 주면 실패다.",
+    "",
+    "분류 목표:",
+    "- 기사 후반부가 독자에게 무엇을 해야 한다고 지시하거나 숙제를 내는지 판정한다.",
+    "- 독자를 '투자자' 또는 '투자자 여러분'으로 호명했는지 판정한다.",
+    "- 결론부를 독자 체크리스트로 묶었는지 판정한다.",
+    "- 기사 속 제3자인 투자자, 유권자, 기업, 정책당국, 대통령, 분석가가 무엇을 해야 한다고 말하거나 행동한 것은 독자 지시로 보지 않는다.",
+    "",
+    "반드시 아래 JSON 객체 하나만 출력한다. 설명 문장이나 마크다운을 붙이지 않는다.",
+    JSON.stringify({
+      policy: READER_TONE_POLICY,
+      method: READER_TONE_METHOD,
+      noTextMatching: true,
+      classifier: "magazine-reader-tone-llm",
+      readerDirective: false,
+      readerAddressedAsInvestor: false,
+      checklistConclusion: false,
+      lateSectionReviews: [
+        {
+          heading: "소제목 또는 후반부 문단 묶음 label",
+          classification: "market_observation | unresolved_tension | evidence_based_implication | third_party_market_participant | reader_directive | checklist_conclusion | mixed",
+          rationale: "발화 주체와 독자 지시 여부를 의미적으로 설명",
+        },
+      ],
+    }, null, 2),
+    "",
+    "허용 classification:",
+    "- market_observation: 시장이 어떻게 읽는지 관찰한다.",
+    "- unresolved_tension: 아직 풀리지 않은 긴장이나 변수의 의미를 설명한다.",
+    "- evidence_based_implication: 근거에서 파생되는 함의를 설명한다.",
+    "- third_party_market_participant: 기사 속 제3자 발언/행동/의무를 귀속한다.",
+    "",
+    "실패 classification:",
+    "- reader_directive: 독자에게 무엇을 봐야/확인해야/점검해야/주목해야 한다고 말한다.",
+    "- checklist_conclusion: 결론을 독자 체크리스트로 묶는다.",
+    "- mixed: 허용/실패가 섞여 있어 수리가 필요하다.",
+    "",
+    "판정값 규칙:",
+    "- readerDirective는 실패 classification이 하나라도 있으면 true, 아니면 false.",
+    "- readerAddressedAsInvestor는 독자를 투자자로 부른 경우만 true. 기사 속 제3자 투자자는 false.",
+    "- checklistConclusion은 실패 classification checklist_conclusion이 있으면 true.",
+    "- lateSectionReviews에는 기사 후반부 주요 소제목/문단 묶음을 최소 1개 이상 넣는다.",
+    "",
+    `[articleId]\n${articleId}`,
+    "",
+    "[metadata excerpt]",
+    JSON.stringify({
+      title: metadata.title || "",
+      deck: metadata.deck || "",
+      summary: metadata.summary || "",
+      articleType: metadata.articleType || "",
+      storyFamily: metadata.storyFamily || metadata.storyKey || "",
+      editorialAngle: metadata.editorialAngle || "",
+    }, null, 2),
+    "",
+    "[article body text]",
+    bodyText,
+  ].join("\n");
+}
+
 async function finalizeArticleTitles({ provider, codex, approval, sandbox, model, reasoning, timeoutMs, tempDir, articleDirectory, agentLabel }) {
   for (const [index, articleId] of articleIdsIn(articleDirectory).entries()) {
     const articleDir = join(articleDirectory, articleId);
@@ -455,6 +536,38 @@ async function finalizeArticleTitles({ provider, codex, approval, sandbox, model
       throw new Error(`${agentLabel} title finalization returned an empty title for ${articleId}`);
     }
     writeFileSync(metadataPath, `${JSON.stringify({ ...metadata, title }, null, 2)}\n`, "utf8");
+  }
+}
+
+async function finalizeReaderToneDecisions({ provider, codex, approval, sandbox, model, reasoning, timeoutMs, tempDir, articleDirectory, agentLabel }) {
+  for (const [index, articleId] of articleIdsIn(articleDirectory).entries()) {
+    const articleDir = join(articleDirectory, articleId);
+    const metadataPath = join(articleDir, "metadata.json");
+    const htmlPath = join(articleDir, "article.html");
+    if (!existsSync(metadataPath) || !existsSync(htmlPath)) continue;
+    const metadata = readJsonFile(metadataPath);
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) continue;
+    const bodyText = stripHtmlForTitle(readFileSync(htmlPath, "utf8"));
+    if (!bodyText) continue;
+    const outputPath = join(tempDir, `${provider}-reader-tone-${index + 1}.json`);
+    console.log(`\nClassifying article reader tone with LLM harness: ${articleId}`);
+    await runAgentPrompt({
+      provider,
+      codex,
+      approval,
+      sandbox,
+      model,
+      reasoning,
+      outputPath,
+      prompt: buildReaderToneDecisionPrompt({ articleId, metadata, bodyText }),
+      timeoutMs,
+      tempDir,
+    });
+    const decision = extractJsonObject(existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "");
+    if (!decision) {
+      throw new Error(`${agentLabel} reader-tone classifier returned invalid JSON for ${articleId}`);
+    }
+    writeFileSync(metadataPath, `${JSON.stringify({ ...metadata, readerToneDecision: decision }, null, 2)}\n`, "utf8");
   }
 }
 
@@ -527,6 +640,10 @@ function buildPrompt({ count, replace, articleDirectory, staged, agentLabel = "C
     "- 직접 인용은 검증된 출처일 때만 쓴다. 확실하지 않으면 따옴표를 쓰지 말고 간접 인용한다.",
     "- 매체명/소속기관/사람 이름은 첫 등장에 original name(Korean name) 형태를 쓴다.",
     "- 존대말로 쓰되 독자를 가르치거나 훈계하지 않는다.",
+    "- '투자자'는 해외 투자자, 채권 투자자, 기관투자자처럼 기사 속 제3자 시장 참여자를 말할 때만 쓴다. 독자를 '투자자', '투자자 여러분'이라고 부르거나 '투자자는 ...해야 합니다/봐야 합니다/확인해야 합니다'처럼 호명하지 않는다.",
+    "- 글의 후반부에서는 소제목 유무와 관계없이 독자에게 무엇을 봐야/확인해야/점검해야/주목해야 한다고 말하지 않는다. 앞으로의 변수는 시장의 미해결 긴장, 가격 반응, 증거가 아직 붙지 않은 대목으로 서술한다.",
+    "- 글의 끝을 '다음 확인 지점', '앞으로 볼 것', '남은 확인 변수' 같은 소제목 아래 여러 문단의 체크리스트로 묶지 않는다.",
+    "- 독자 지시 여부는 별도 LLM 분류 패스가 metadata.readerToneDecision에 저장한다. 기사 작성자는 키워드/정규식 회피가 아니라 의미상 독자에게 과제를 주지 않는 문장을 쓴다.",
     "- 사망, 전쟁, 테러리즘, 심각한 수준의 시장 붕괴처럼 가혹한 상황을 다루는 기사가 아니라면 본문에는 Bloomberg 뉴스레터 스타일의 절제된 유머와 위트를 어느 정도 담는다. 위트는 장식이 아니라 시장 메커니즘을 더 선명하게 보이게 해야 한다.",
     "- 인용은 본문과 유기적으로 연결될 때만 쓴다. 본문과 인용이 같은 말을 반복하면 padding으로 간주하고, 인용 대신 더 구체적인 수치·반론·현장 맥락을 넣는다.",
     count > 1
@@ -601,6 +718,10 @@ function buildRepairPrompt({ count, checkOutput, articleDirectory, staged, agent
     "- 독자-facing deck, summary, article.html과 metadata의 prose 필드에서는 내부 출처명을 한 단어로 기계 치환하지 말고 신문 기사 문장으로 풀어 쓴다. 예: 'Bloomberg가 전한 장중 보도', '같은 날 나온 ISNA 인용 발언', '새 가격 반응', '새 기업 공시', '최근 현지 매체 보도'.",
     "- 독자-facing deck, summary, article.html과 metadata의 prose 필드에는 'World Memory', '월드 메모리', '월드메모리', '월드 메모리 벡터 검색 결과', 'News Feed', 'post-cutoff', 'post-World-Memory-update', '컷오프', '수집 기사', '피드', 'semantic-search', '하네스' 같은 내부 표현을 쓰지 않는다.",
     "- 존대말을 유지하되 독자를 가르치거나 훈계하는 문장을 줄인다.",
+    "- '투자자'는 기사 속 제3자 시장 참여자를 말할 때만 쓰고, 독자를 '투자자'나 '투자자 여러분'으로 부르지 않는다. '투자자는 ...해야 합니다/봐야 합니다/확인해야 합니다' 같은 문장은 반드시 고친다.",
+    "- 글의 후반부에서 소제목 유무와 관계없이 독자에게 무엇을 봐야/확인해야/점검해야/주목해야 한다고 말하는 문장은 반드시 고친다. 시장의 미해결 긴장, 가격 반응, 증거가 아직 붙지 않은 대목으로 바꾼다.",
+    "- '다음 확인 지점', '앞으로 볼 것', '남은 확인 변수' 같은 소제목 아래 여러 문단의 독자 체크리스트가 있으면 소제목과 문단을 함께 고친다.",
+    "- reader-tone strict failure는 키워드 치환으로 고치지 않는다. 발화 주체와 독자 지시 여부를 의미상 분리하고, 제3자 발언 귀속은 살리되 독자에게 과제를 주는 문장만 관찰/함의 문장으로 고친다.",
     "- 사망, 전쟁, 테러리즘, 심각한 수준의 시장 붕괴처럼 가혹한 상황이 아닌데 본문이 건조한 요약문처럼 보이면 Bloomberg 뉴스레터 스타일의 절제된 유머와 위트를 보강한다. 위트는 시장 메커니즘을 선명하게 하는 문장으로만 넣는다.",
     "- 생성 뒤 node scripts/magazine_article_style_check.mjs --strict 를 실행하고 warning 0개가 될 때까지 수정한다.",
     "",
@@ -866,6 +987,18 @@ async function runStrictCheckWithRepair({ provider, codex, approval, sandbox, mo
     try {
       normalizeGeneratedArticleMetadata(articleDirectory, publishedAt, { existingArticleCount, previousArticleIds, generationAgent });
       await finalizeArticleTitles({
+        provider,
+        codex,
+        approval,
+        sandbox,
+        model,
+        reasoning,
+        timeoutMs,
+        tempDir,
+        articleDirectory,
+        agentLabel,
+      });
+      await finalizeReaderToneDecisions({
         provider,
         codex,
         approval,

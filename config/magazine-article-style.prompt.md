@@ -104,15 +104,18 @@ Write like a magazine editor walking through the issue with the reader, not a tu
 
 - Avoid scolding or command-heavy phrasing such as repeated `봐야 합니다`, `확인해야 합니다`, `점검해야 합니다`, `잊으면 안 됩니다`, and `투자자는 ...해야 합니다`.
 - Prefer observational phrasing: `눈길이 가는 대목은`, `시장이 헷갈리는 지점은`, `여기서 이야기가 조금 꼬입니다`, `숫자는 차분한데 의미는 꽤 시끄럽습니다`.
+- `투자자` can appear as a third-party article subject, such as foreign investors, bond investors, institutional investors, or market participants in a cited report. Never call the reader `투자자`, `투자자 여러분`, or write generic reader-address sentences like `투자자는 ...해야 합니다`.
 - Unless the article covers death, war, terrorism, or a severe market collapse, include some restrained Bloomberg-newsletter-style humor and wit in the body. The joke should reveal a market mechanism, not become the point.
 - Use polite endings, but vary sentence endings. `~입니다` and `~합니다` are allowed; do not let every paragraph end like a memo.
 - Do not lecture. Let facts, scenes, quotes, and numbers carry the point.
+- Reader-directive detection is an LLM classification contract, not text matching. Store the classifier output in `metadata.readerToneDecision` with `policy:"magazine-reader-tone-v1"`, `method:"LLM_CLASSIFICATION_ONLY"`, `noTextMatching:true`, `readerDirective:false`, `readerAddressedAsInvestor:false`, `checklistConclusion:false`, and at least one `lateSectionReviews[]` item classified as `market_observation`, `unresolved_tension`, `evidence_based_implication`, or `third_party_market_participant`.
 
 ## Structure
 
 - Do not use a fixed `H2 + two paragraphs` rhythm.
 - Give each section a job: scene, data, mechanism, stakeholder voice, counterpoint, company map, market implication, or unresolved question.
 - Vary section length. A short section can be one paragraph; a data section may need four or five.
+- Do not make a closing mini-checklist section with headings such as `다음 확인 지점`, `앞으로 볼 것`, or `남은 확인 변수`. Even without those headings, the later sections must not tell readers what they should watch, check, monitor, distinguish, or reflect. If forward-looking material is needed, frame it as market implication, unresolved tension, or an evidence-based open question, not a list of tasks for the reader.
 - Deep analysis should include at least one chart block when useful, but the body must still read on its own.
 - Use direct or indirect attribution when research contains named stakeholders. Direct quote text should be Korean, with original source/person names preserved in the label.
 - A generated magazine article should usually carry at least five source/evidence entries in `sourceBasis` and at least four direct or indirect attribution moments in the body. Treat this as a writing-balance target, not a license to insert mechanical quote blocks.
