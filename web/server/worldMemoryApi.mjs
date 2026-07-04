@@ -345,7 +345,7 @@ function normalizeAcceptedChangeSuggestion(value, { action = "", params = {} } =
   const text = optionalCommandTextArg(
     typeof value === "string"
       ? value
-      : raw.text || item.text || item.body || item.title || raw.body || raw.title,
+      : raw.text || raw.suggestion || item.text || item.suggestion || item.body || item.title || raw.body || raw.title,
     1400
   );
   if (!text) return null;

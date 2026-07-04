@@ -1436,7 +1436,7 @@ function parseWorldMemoryJsonAction(answer = "") {
   return null;
 }
 
-function normalizeWorldMemoryActionProposal(parsed, answer = "") {
+function normalizeWorldMemoryActionProposal(parsed, answer = "", focusContext = null) {
   const action = String(parsed?.action || parsed?.actionId || "").trim();
   if (!action || !worldMemoryActionCatalog[action]) return null;
   const catalog = worldMemoryActionCatalog[action];
@@ -1463,6 +1463,14 @@ function normalizeWorldMemoryActionProposal(parsed, answer = "") {
       ...(parsed?.days && !params.days ? { days: parsed.days } : {}),
       ...(parsed?.limit && !params.limit ? { limit: parsed.limit } : {}),
     },
+    acceptedChangeSuggestion:
+      focusContext?.section === "memory-change"
+        ? {
+            ...focusContext,
+            action,
+            label,
+          }
+        : null,
     raw: parsed,
     answer,
   };
@@ -3579,10 +3587,14 @@ function App() {
           : proposal.raw?.params && typeof proposal.raw.params === "object"
           ? proposal.raw.params
           : {};
+    const focusedChangeSuggestion =
+      proposal.acceptedChangeSuggestion?.section === "memory-change"
+        ? proposal.acceptedChangeSuggestion
+        : worldMemoryFocusedChangeSuggestion;
     const acceptedChangeSuggestion =
-      worldMemoryFocusedChangeSuggestion?.section === "memory-change"
+      focusedChangeSuggestion?.section === "memory-change"
         ? {
-            ...worldMemoryFocusedChangeSuggestion,
+            ...focusedChangeSuggestion,
             action: proposal.action,
             label: proposal.label || proposal.raw?.label || "",
           }
@@ -5242,7 +5254,11 @@ function App() {
         if (screenForMessage === "world-memory") {
           const parsedWorldMemoryAction = parseWorldMemoryJsonAction(completedAnswer);
           const proposal = parsedWorldMemoryAction
-            ? normalizeWorldMemoryActionProposal(parsedWorldMemoryAction, completedAnswer)
+            ? normalizeWorldMemoryActionProposal(
+                parsedWorldMemoryAction,
+                completedAnswer,
+                options.worldMemoryFocusContext || worldMemoryContext?.pendingChangeSuggestion || null
+              )
             : null;
           if (proposal) {
             setWorldMemoryAgentAction(proposal);
