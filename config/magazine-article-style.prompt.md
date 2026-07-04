@@ -36,6 +36,7 @@ Before writing articles, create a short issue slate. The slate should prevent th
   - what prior assumption weakened or strengthened,
   - which next data point now matters.
 - During article drafting, leave `metadata.title` as an empty string. The generator finalizes the title after `article.html` is complete by sending only the body text to a separate title pass.
+- `article.html` is the article body fragment only. Do not include `<h1>`, `p.article-kicker`, `p.article-deck`, or any duplicate title/deck/topic chrome; the reader renders those from `metadata.json`.
 - Track `editorialAngle` in metadata when possible: `follow-up`, `low-level-signal`, `company-map`, `data-anomaly`, `external-research`, `human-drama`, or `policy-mechanics`.
 - Track `storyFamily` or `storyKey` in metadata when possible. In a five-article issue, more than two articles from the same story family need an explicit editorial reason.
 - A low-ranked issue can be article-worthy when it has a clean mechanism, surprising implication, useful data point, or good scene. Importance rank is not the same as magazine value.
