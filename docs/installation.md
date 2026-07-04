@@ -205,7 +205,7 @@ Common environment variables:
 - `ARCA_BASE_URL`: default `https://arca.live`
 - `ARCA_CHANNEL`: default `stock`
 - `ARCA_LOGIN_URL`: override for the Arca.live login URL
-- `ARCA_BROWSER_PATH`: explicit ChatGPT Atlas/Chrome/Edge/Chromium/Brave executable path
+- `ARCA_BROWSER_PATH`: explicit Chrome/Edge/Chromium/Brave executable path; Google Chrome is used by default when available
 - `ARCA_USER_AGENT`: optional Arca.live request user agent override
 - `ANTIGRAVITY_CLI_PATH`: optional explicit path to `agy` when it is not on `PATH`.
 - `ANTIGRAVITY_CLI_MODEL`: optional default Antigravity CLI model override, default `Gemini 3.5 Flash (Medium)`.

@@ -131,7 +131,7 @@ function compactPromptText(value, limit = 180) {
   return text.length > limit ? `${text.slice(0, limit - 1)}...` : text;
 }
 
-function postWorldMemoryNewsFeedSummary(limit = 24) {
+function postWorldMemoryNewsFeedSummary() {
   const cutoff = worldMemoryLastSuccessfulAt();
   if (!cutoff.timestamp) {
     return [
@@ -153,9 +153,8 @@ function postWorldMemoryNewsFeedSummary(limit = 24) {
     .map((item) => ({ item, itemTime: newsFeedItemTimestamp(item) }))
     .filter(({ itemTime }) => itemTime.timestamp > cutoff.timestamp)
     .sort((a, b) => b.itemTime.timestamp - a.itemTime.timestamp || String(a.item.id || "").localeCompare(String(b.item.id || "")));
-  const windowItems = candidates.slice(0, limit);
 
-  if (!windowItems.length) {
+  if (!candidates.length) {
     return [
       `- worldMemoryLastSuccessfulAt=${cutoff.iso}`,
       `- 확인된 보도 ${items.length}개 중 기준 업데이트 이후 항목이 없다.`,
@@ -164,9 +163,9 @@ function postWorldMemoryNewsFeedSummary(limit = 24) {
   }
 
   return [
-    `- policy=post-world-memory-update-only / worldMemoryLastSuccessfulAt=${cutoff.iso} / availableAfterCutoff=${candidates.length} / showing=${windowItems.length}`,
-    "- 아래 목록 밖의 최근 확인된 보도는 기사 소재 후보로 쓰지 않는다.",
-    ...windowItems.map(({ item, itemTime }) => {
+    `- policy=post-world-memory-update-only / worldMemoryLastSuccessfulAt=${cutoff.iso} / availableAfterCutoff=${candidates.length} / included=${candidates.length}`,
+    "- 아래 목록은 기준 업데이트 이후 확인된 전체 보도 후보다.",
+    ...candidates.map(({ item, itemTime }) => {
       const title = compactPromptText(item.translatedTitle || item.translatedText || item.title || item.originalText, 220);
       const original = compactPromptText(item.originalText && item.originalText !== title ? item.originalText : "", 160);
       return [
@@ -574,7 +573,7 @@ async function finalizeReaderToneDecisions({ provider, codex, approval, sandbox,
 function buildPrompt({ count, replace, articleDirectory, staged, agentLabel = "Codex CLI" }) {
   const extraPrompt = String(process.env.MAGAZINE_EXTRA_PROMPT || process.env.MAGAZINE_CODEX_EXTRA_PROMPT || "").trim();
   const recentArticles = recentArticleWindowSummary(12);
-  const newsFeedCandidates = postWorldMemoryNewsFeedSummary(24);
+  const newsFeedCandidates = postWorldMemoryNewsFeedSummary();
   const worldMemorySignals = worldMemoryCurrentSignalSummary(8);
   const existingArticleCount = replace ? 0 : articleCountIn(ARTICLES_DIR);
   const firstGeneratedTotalCount = existingArticleCount + 1;
@@ -677,7 +676,7 @@ function truncateForPrompt(text, limit = 6000) {
 
 function buildRepairPrompt({ count, checkOutput, articleDirectory, staged, agentLabel = "Codex CLI" }) {
   const recentArticles = recentArticleWindowSummary(12);
-  const newsFeedCandidates = postWorldMemoryNewsFeedSummary(24);
+  const newsFeedCandidates = postWorldMemoryNewsFeedSummary();
   const worldMemorySignals = worldMemoryCurrentSignalSummary(8);
   return [
     `너는 FinanceAgentGUI 배포본 안에서 실행되는 ${agentLabel} 기사 보강 작업자다.`,

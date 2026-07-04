@@ -124,6 +124,15 @@ function processAlive(pid) {
   }
 }
 
+function stopProcess(pid) {
+  if (!pid || !processAlive(pid)) return;
+  try {
+    process.kill(pid);
+  } catch {
+    // best effort
+  }
+}
+
 function discoverRunningHandoff() {
   if (process.platform === "win32" || !existsSync(PROFILE_DIR)) return null;
   let output = "";
@@ -239,11 +248,10 @@ function browserCandidates() {
 
   if (process.platform === "darwin") {
     candidates.push(
-      { name: "ChatGPT Atlas", path: "/Applications/ChatGPT Atlas.app/Contents/MacOS/ChatGPT Atlas" },
       { name: "Google Chrome", path: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" },
-      { name: "Chromium", path: "/Applications/Chromium.app/Contents/MacOS/Chromium" },
       { name: "Microsoft Edge", path: "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" },
-      { name: "Brave Browser", path: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" }
+      { name: "Brave Browser", path: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" },
+      { name: "Chromium", path: "/Applications/Chromium.app/Contents/MacOS/Chromium" }
     );
   } else if (process.platform === "win32") {
     const roots = [
@@ -296,10 +304,10 @@ async function fetchJson(url, timeoutMs = CDP_TIMEOUT_MS) {
   }
 }
 
-async function waitForCdpVersion(port) {
+async function waitForCdpVersion(port, timeoutMs = HANDOFF_READY_TIMEOUT_MS) {
   const started = Date.now();
   let lastError = null;
-  while (Date.now() - started < HANDOFF_READY_TIMEOUT_MS) {
+  while (Date.now() - started < timeoutMs) {
     try {
       return await fetchJson(`http://127.0.0.1:${port}/json/version`, 1600);
     } catch (error) {
@@ -308,6 +316,64 @@ async function waitForCdpVersion(port) {
     }
   }
   throw new Error(lastError?.message || "브라우저 DevTools 포트가 준비되지 않았습니다.");
+}
+
+async function startBrowserHandoff(browser, targetLoginUrl) {
+  const port = await findFreePort();
+  const args = [
+    `--user-data-dir=${PROFILE_DIR}`,
+    `--remote-debugging-port=${port}`,
+    "--remote-debugging-address=127.0.0.1",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-features=Translate",
+    "--new-window",
+    targetLoginUrl,
+  ];
+  const child = spawn(browser.path, args, {
+    detached: true,
+    stdio: "ignore",
+  });
+  let spawnError = null;
+  child.once("error", (error) => {
+    spawnError = error;
+  });
+  child.unref();
+
+  const handoff = {
+    id: randomUUID(),
+    startedAt: new Date().toISOString(),
+    browserName: browser.name || basename(browser.path),
+    executable: browser.path,
+    loginUrl: targetLoginUrl,
+    port,
+    pid: child.pid,
+    browserVersion: "",
+  };
+
+  await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+  if (spawnError) {
+    stopProcess(child.pid);
+    throw new Error(spawnError.message);
+  }
+
+  try {
+    const version = await waitForCdpVersion(port, 6000);
+    handoff.browserVersion = version.Browser || "";
+    return {
+      handoff,
+      version,
+    };
+  } catch (error) {
+    if (processAlive(child.pid)) {
+      return {
+        handoff,
+        version: null,
+        warning: `${handoff.browserName} 창은 열렸지만 DevTools 포트가 아직 준비되지 않았습니다. 열린 창에서 로그인을 완료한 뒤 세션 저장을 누르면 다시 확인합니다.`,
+      };
+    }
+    throw new Error(error.message);
+  }
 }
 
 async function cdpCall(webSocketDebuggerUrl, method, params = {}, timeoutMs = CDP_TIMEOUT_MS) {
@@ -371,44 +437,27 @@ async function startHandoff() {
   }
 
   const candidates = browserCandidates();
-  const browser = candidates[0];
-  if (!browser) {
-    throw new Error("ChatGPT Atlas, Chrome, Edge, Chromium, Brave 실행 파일을 찾지 못했습니다. ARCA_BROWSER_PATH로 브라우저 경로를 지정할 수 있습니다.");
+  if (!candidates.length) {
+    throw new Error("Chrome, Edge, Brave, Chromium 실행 파일을 찾지 못했습니다. ARCA_BROWSER_PATH로 브라우저 경로를 지정할 수 있습니다.");
   }
 
-  const port = await findFreePort();
   const targetLoginUrl = loginUrl();
-  const args = [
-    `--user-data-dir=${PROFILE_DIR}`,
-    `--remote-debugging-port=${port}`,
-    "--remote-debugging-address=127.0.0.1",
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-features=Translate",
-    "--new-window",
-    targetLoginUrl,
-  ];
-  const child = spawn(browser.path, args, {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+  const failures = [];
+  for (const browser of candidates) {
+    try {
+      const { handoff, warning } = await startBrowserHandoff(browser, targetLoginUrl);
+      activeHandoff = handoff;
+      if (warning) failures.push(warning);
+      return publicSessionStatus({
+        lastAction: "handoff-started",
+        handoffWarnings: failures,
+      });
+    } catch (error) {
+      failures.push(`${browser.name || basename(browser.path)}: ${error.message}`);
+    }
+  }
 
-  const version = await waitForCdpVersion(port);
-  activeHandoff = {
-    id: randomUUID(),
-    startedAt: new Date().toISOString(),
-    browserName: browser.name || basename(browser.path),
-    executable: browser.path,
-    loginUrl: targetLoginUrl,
-    port,
-    pid: child.pid,
-    browserVersion: version.Browser || "",
-  };
-
-  return publicSessionStatus({
-    lastAction: "handoff-started",
-  });
+  throw new Error(`아카라이브 로그인 브라우저를 열지 못했습니다. ${failures.join(" / ")}. ARCA_BROWSER_PATH로 Chrome, Edge, Brave, Chromium 실행 파일을 직접 지정할 수 있습니다.`);
 }
 
 async function captureSession() {

@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildMagazineTopicDiscoverySlots,
+  chooseMagazineTopicDiscoveryLane,
+  compactPostCutoffNewsFeedItemsForDecision,
+  compactWorldMemoryScoutCandidatesForDecision,
   fallbackMagazineArticleCountDecision,
   normalizeMagazineSchedulerNextRunAt,
   normalizeMagazineArticleCountDecision,
@@ -70,6 +74,105 @@ test("magazine scheduler fallback is explicit and never random", () => {
   assert.equal(decision.basis, "fallback-after-model-decision-failure");
   assert.match(decision.reason, /1건/);
   assert.match(decision.error, /model unavailable/);
+});
+
+test("magazine scheduler includes every post-cutoff News Feed item in decision context", () => {
+  const cutoffMs = Date.parse("2026-07-03T12:00:00.000Z");
+  const items = Array.from({ length: 32 }, (_, index) => ({
+    id: `nf-${String(index + 1).padStart(2, "0")}`,
+    feedTitle: "First Squawk",
+    translatedTitle: `후보 ${index + 1}`,
+    publishedAt: new Date(cutoffMs + (index + 1) * 60_000).toISOString(),
+  }));
+  items.push({
+    id: "nf-before-cutoff",
+    feedTitle: "First Squawk",
+    translatedTitle: "이전 후보",
+    publishedAt: new Date(cutoffMs - 60_000).toISOString(),
+  });
+
+  const compacted = compactPostCutoffNewsFeedItemsForDecision(items, cutoffMs);
+
+  assert.equal(compacted.length, 32);
+  assert.equal(compacted[0].id, "nf-32");
+  assert.equal(compacted.at(-1).id, "nf-01");
+  assert.equal(compacted.some((item) => item.id === "nf-before-cutoff"), false);
+});
+
+test("magazine topic discovery lane uses a true 12 percent scout branch", () => {
+  assert.equal(chooseMagazineTopicDiscoveryLane({ roll: 0 }).id, "world-memory-scout");
+  assert.equal(chooseMagazineTopicDiscoveryLane({ roll: 11 }).id, "world-memory-scout");
+  assert.equal(chooseMagazineTopicDiscoveryLane({ roll: 12 }).id, "news-feed-primary");
+  assert.equal(chooseMagazineTopicDiscoveryLane({ roll: 99 }).id, "news-feed-primary");
+});
+
+test("magazine topic discovery rolls independently for each article slot", () => {
+  const slots = buildMagazineTopicDiscoverySlots(3, { rolls: [0, 12, 11] });
+
+  assert.deepEqual(
+    slots.map((slot) => slot.topicDiscoveryLane.id),
+    ["world-memory-scout", "news-feed-primary", "world-memory-scout"],
+  );
+  assert.deepEqual(
+    slots.map((slot) => slot.index),
+    [1, 2, 3],
+  );
+  assert.deepEqual(
+    slots.map((slot) => slot.topicDiscoveryLane.randomRoll),
+    [0, 12, 11],
+  );
+});
+
+test("magazine World Memory scout candidates dedupe recent article anchors", () => {
+  const rows = [
+    {
+      event_id: "already-covered",
+      title: "이미 다룬 후보",
+      summary: "최근 기사와 같은 이벤트",
+      importance: "medium",
+      entry_mode: "brief",
+      as_of: "2026-07-03T12:00:00.000Z",
+    },
+    {
+      event_id: "quiet-signal",
+      title: "조용하지만 흥미로운 후보",
+      summary: "메인 뉴스에 덜 잡히는 산업 신호",
+      why_it_matters: "후속 공시와 가격 반응으로 커질 수 있다.",
+      importance: "medium",
+      entry_mode: "brief",
+      as_of: "2026-07-03T13:00:00.000Z",
+      industries: ["power_grid"],
+      sources: [{ name: "Bloomberg" }],
+    },
+    {
+      event_id: "same-story",
+      title: "같은 스토리 후보 A",
+      summary: "중복 스토리",
+      importance: "medium",
+      entry_mode: "brief",
+      as_of: "2026-07-03T14:00:00.000Z",
+      story_key: "same-story-key",
+    },
+    {
+      event_id: "same-story-2",
+      title: "같은 스토리 후보 B",
+      summary: "중복 스토리",
+      importance: "medium",
+      entry_mode: "brief",
+      as_of: "2026-07-03T15:00:00.000Z",
+      story_key: "same-story-key",
+    },
+  ];
+
+  const compacted = compactWorldMemoryScoutCandidatesForDecision(
+    rows,
+    [{ worldMemoryEventIds: ["already-covered"] }],
+    { nowMs: Date.parse("2026-07-04T00:00:00.000Z"), limit: 10 },
+  );
+
+  assert.equal(compacted.some((item) => item.eventId === "already-covered"), false);
+  assert.equal(compacted.some((item) => item.eventId === "quiet-signal"), true);
+  assert.equal(compacted.filter((item) => item.title.startsWith("같은 스토리 후보")).length, 1);
 });
 
 test("magazine scheduler normalizes manual next-run timestamps", () => {
