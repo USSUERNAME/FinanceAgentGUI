@@ -33,8 +33,16 @@ const WORLD_MEMORY_MODEL_TIMEOUT_MS = 240000;
 const WORLD_MEMORY_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const WORLD_MEMORY_RETRY_INTERVAL_MS = 30 * 60 * 1000;
 const WORLD_MEMORY_HISTORY_LIMIT = 16;
+const WORLD_MEMORY_HANDLED_CHANGE_SUGGESTION_LIMIT = 40;
 const OUTPUT_LIMIT = 1024 * 1024;
 const runtimeKey = Symbol.for("financeAgentGui.worldMemoryCollector");
+const changeSuggestionMutationActions = new Set([
+  "stateAdd",
+  "briefStoryBackfill",
+  "storyLink",
+  "taxonomyRefresh",
+  "stateSync",
+]);
 
 const actionCatalog = [
   { id: "collectNow", label: "수동 수집", riskLevel: "network" },
@@ -125,6 +133,10 @@ function defaultCollectorState() {
     },
     modelPolicy: defaultModelPolicy(),
     report: emptyReportState(),
+    changeSuggestionLedger: {
+      version: 1,
+      handled: [],
+    },
     history: [],
   };
 }
@@ -172,7 +184,11 @@ function readCollectorState() {
   const base = defaultCollectorState();
   const report = { ...base.report, ...(raw.report || {}) };
   if (report.view && typeof report.view === "object" && !Array.isArray(report.view)) {
+    report.view = filterWorldMemoryReportView(report.view, {
+      handledChangeSuggestions: raw.changeSuggestionLedger?.handled,
+    });
     report.suggestions = reportChangeSuggestions(report.view);
+    report.text = reportPlainText(report.view);
   }
   return {
     ...base,
@@ -181,6 +197,7 @@ function readCollectorState() {
     schedule: { ...base.schedule, ...(raw.schedule || {}) },
     modelPolicy: { ...base.modelPolicy, ...(raw.modelPolicy || {}) },
     report,
+    changeSuggestionLedger: normalizeChangeSuggestionLedger(raw.changeSuggestionLedger),
     history: Array.isArray(raw.history) ? raw.history.slice(0, WORLD_MEMORY_HISTORY_LIMIT) : [],
   };
 }
@@ -291,6 +308,235 @@ function commandTextArg(value, fieldName, maxLength = 240) {
 function optionalCommandTextArg(value, maxLength = 400) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text ? text.slice(0, maxLength) : "";
+}
+
+export function normalizeWorldMemorySuggestionFingerprint(value = "") {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[`"'“”‘’]/g, "")
+    .replace(/[\s.,;:!?()[\]{}<>\\/|]+/g, "")
+    .trim();
+}
+
+function normalizeChangeSuggestionTarget(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const rawEventIds = Array.isArray(source.eventIds)
+    ? source.eventIds
+    : Array.isArray(source.event_ids)
+      ? source.event_ids
+      : source.eventId || source.event_id
+        ? [source.eventId || source.event_id]
+        : [];
+  return {
+    stateKey: optionalCommandTextArg(source.stateKey || source.state_key || "", 180),
+    stateLabel: optionalCommandTextArg(source.stateLabel || source.state_label || source.state || source.title || "", 180),
+    story: optionalCommandTextArg(source.story || source.storyLabel || "", 180),
+    storyFamily: optionalCommandTextArg(source.storyFamily || source.story_family || "", 180),
+    relatedStory: optionalCommandTextArg(source.relatedStory || source.related_story || source.relatedStoryLabel || "", 180),
+    relation: optionalCommandTextArg(source.relation || source.relationType || source.relation_type || "", 80),
+    eventIds: rawEventIds.map((item) => optionalCommandTextArg(item, 120)).filter(Boolean).slice(0, 20),
+  };
+}
+
+function normalizeAcceptedChangeSuggestion(value, { action = "", params = {} } = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  const item = raw.item && typeof raw.item === "object" ? raw.item : {};
+  const text = optionalCommandTextArg(
+    typeof value === "string"
+      ? value
+      : raw.text || item.text || item.body || item.title || raw.body || raw.title,
+    1400
+  );
+  if (!text) return null;
+  return {
+    text,
+    fingerprint: normalizeWorldMemorySuggestionFingerprint(text),
+    source: optionalCommandTextArg(raw.source || "world-memory-report-item", 80),
+    section: optionalCommandTextArg(raw.section || "memory-change", 80),
+    sectionLabel: optionalCommandTextArg(raw.sectionLabel || "월드 메모리 변경 제안", 120),
+    action: optionalCommandTextArg(raw.action || action, 80),
+    label: optionalCommandTextArg(raw.label || "", 180),
+    target: normalizeChangeSuggestionTarget(params),
+  };
+}
+
+function normalizeHandledChangeSuggestionRecord(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const text = optionalCommandTextArg(source.text, 1400);
+  const fingerprint = optionalCommandTextArg(source.fingerprint || normalizeWorldMemorySuggestionFingerprint(text), 1500);
+  if (!text || !fingerprint) return null;
+  return {
+    id: optionalCommandTextArg(source.id || `handled_${Date.now()}`, 80),
+    text,
+    fingerprint,
+    action: optionalCommandTextArg(source.action || "", 80),
+    label: optionalCommandTextArg(source.label || "", 180),
+    handledAt: optionalCommandTextArg(source.handledAt || source.at || nowIso(), 80),
+    source: optionalCommandTextArg(source.source || "world-memory-report-item", 80),
+    section: optionalCommandTextArg(source.section || "memory-change", 80),
+    sectionLabel: optionalCommandTextArg(source.sectionLabel || "월드 메모리 변경 제안", 120),
+    target: normalizeChangeSuggestionTarget(source.target || {}),
+  };
+}
+
+function normalizeChangeSuggestionLedger(value = {}) {
+  const raw = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const handled = asArray(raw.handled)
+    .map((item) => normalizeHandledChangeSuggestionRecord(item))
+    .filter(Boolean);
+  const seen = new Set();
+  return {
+    version: 1,
+    handled: handled.filter((item) => {
+      if (seen.has(item.fingerprint)) return false;
+      seen.add(item.fingerprint);
+      return true;
+    }).slice(0, WORLD_MEMORY_HANDLED_CHANGE_SUGGESTION_LIMIT),
+  };
+}
+
+function rememberHandledChangeSuggestion(state, suggestion) {
+  const normalized = normalizeHandledChangeSuggestionRecord(suggestion);
+  if (!normalized) return state;
+  const ledger = normalizeChangeSuggestionLedger(state.changeSuggestionLedger);
+  const nextHandled = [
+    normalized,
+    ...ledger.handled.filter((item) => item.fingerprint !== normalized.fingerprint),
+  ].slice(0, WORLD_MEMORY_HANDLED_CHANGE_SUGGESTION_LIMIT);
+  return {
+    ...state,
+    changeSuggestionLedger: {
+      version: 1,
+      handled: nextHandled,
+    },
+  };
+}
+
+function handledTargetMatchesSuggestion(suggestion, handled) {
+  const suggestionKey = normalizeWorldMemorySuggestionFingerprint(suggestion);
+  const target = handled?.target && typeof handled.target === "object" ? handled.target : {};
+  const targetLabels = [
+    target.stateLabel,
+    target.story,
+    target.storyFamily,
+    target.relatedStory,
+  ]
+    .map((item) => normalizeWorldMemorySuggestionFingerprint(item))
+    .filter((item) => item.length >= 4);
+  if (!targetLabels.length) return false;
+  if (!targetLabels.some((label) => suggestionKey.includes(label))) return false;
+
+  const handledTokens = new Set(
+    String(handled.text || "")
+      .normalize("NFKC")
+      .replace(/[`"'“”‘’.,;:!?()[\]{}<>\\/|]/g, " ")
+      .split(/\s+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter((item) => item.length >= 2)
+  );
+  if (!handledTokens.size) return false;
+  const suggestionTokens = new Set(
+    String(suggestion || "")
+      .normalize("NFKC")
+      .replace(/[`"'“”‘’.,;:!?()[\]{}<>\\/|]/g, " ")
+      .split(/\s+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter((item) => item.length >= 2)
+  );
+  const overlap = [...handledTokens].filter((token) => suggestionTokens.has(token)).length;
+  return overlap >= Math.min(6, Math.ceil(handledTokens.size * 0.45));
+}
+
+function shouldHideHandledChangeSuggestion(suggestion, handledChangeSuggestions = []) {
+  const fingerprint = normalizeWorldMemorySuggestionFingerprint(suggestion);
+  if (!fingerprint) return false;
+  return asArray(handledChangeSuggestions).some((item) => {
+    const handled = normalizeHandledChangeSuggestionRecord(item);
+    if (!handled) return false;
+    return handled.fingerprint === fingerprint || handledTargetMatchesSuggestion(suggestion, handled);
+  });
+}
+
+function handledRecordForSuggestion(suggestion, handledChangeSuggestions = []) {
+  const fingerprint = normalizeWorldMemorySuggestionFingerprint(suggestion);
+  if (!fingerprint) return null;
+  for (const item of asArray(handledChangeSuggestions)) {
+    const handled = normalizeHandledChangeSuggestionRecord(item);
+    if (!handled) continue;
+    if (handled.fingerprint === fingerprint || handledTargetMatchesSuggestion(suggestion, handled)) return handled;
+  }
+  return null;
+}
+
+function buildMemoryChangeSuggestionItems(suggestions = [], handledChangeSuggestions = []) {
+  const handledRecords = asArray(handledChangeSuggestions)
+    .map((item) => normalizeHandledChangeSuggestionRecord(item))
+    .filter(Boolean);
+  const matchedHandledFingerprints = new Set();
+  const items = normalizeTextList(suggestions, 8).map((text) => {
+    const handled = handledRecordForSuggestion(text, handledRecords);
+    if (handled) matchedHandledFingerprints.add(handled.fingerprint);
+    return {
+      text,
+      handled: Boolean(handled),
+      status: handled ? "handled" : "open",
+      handledAt: handled?.handledAt || "",
+      action: handled?.action || "",
+    };
+  });
+  const existingFingerprints = new Set(items.map((item) => normalizeWorldMemorySuggestionFingerprint(item.text)));
+  const missingHandledItems = handledRecords
+    .filter((item) => !matchedHandledFingerprints.has(item.fingerprint))
+    .filter((item) => !existingFingerprints.has(item.fingerprint))
+    .map((item) => ({
+      text: item.text,
+      handled: true,
+      status: "handled",
+      handledAt: item.handledAt,
+      action: item.action,
+    }));
+  return [...missingHandledItems, ...items];
+}
+
+export function filterWorldMemoryReportView(reportView, { handledChangeSuggestions = [] } = {}) {
+  const view = reportView && typeof reportView === "object" && !Array.isArray(reportView) ? reportView : fallbackReportView("");
+  const memoryChangeSuggestionItems = buildMemoryChangeSuggestionItems(view.memoryChangeSuggestions, handledChangeSuggestions);
+  return {
+    ...view,
+    memoryChangeSuggestions: memoryChangeSuggestionItems.map((item) => item.text),
+    memoryChangeSuggestionItems,
+  };
+}
+
+function formatHandledChangeSuggestionsForPrompt(handledChangeSuggestions = []) {
+  const rows = asArray(handledChangeSuggestions)
+    .map((item) => normalizeHandledChangeSuggestionRecord(item))
+    .filter(Boolean)
+    .slice(0, 12)
+    .map((item, index) => {
+      const target = item.target || {};
+      const targetBits = [
+        target.stateLabel ? `state=${target.stateLabel}` : "",
+        target.story ? `story=${target.story}` : "",
+        target.storyFamily ? `family=${target.storyFamily}` : "",
+        target.relatedStory ? `related=${target.relatedStory}` : "",
+        target.relation ? `relation=${target.relation}` : "",
+      ].filter(Boolean);
+      return `${index + 1}. ${item.text}${item.action ? ` / action=${item.action}` : ""}${targetBits.length ? ` / ${targetBits.join(", ")}` : ""}`;
+    });
+  return rows.length ? rows.join("\n") : "없음";
+}
+
+function filterStoredReport(report = {}, handledChangeSuggestions = []) {
+  if (!report?.view || typeof report.view !== "object" || Array.isArray(report.view)) return report;
+  const view = filterWorldMemoryReportView(report.view, { handledChangeSuggestions });
+  return {
+    ...report,
+    suggestions: reportChangeSuggestions(view),
+    text: reportPlainText(view),
+    view,
+  };
 }
 
 function commandFloat(value, fallback, min, max) {
@@ -950,11 +1196,20 @@ function buildBriefGenerationPrompt({ preflight, feedScan }) {
   ].join("\n");
 }
 
-function buildSituationReportPrompt({ listJson, statesJson, auditJson, feedScan, importSummary, harnessSummary }) {
+function buildSituationReportPrompt({
+  listJson,
+  statesJson,
+  auditJson,
+  feedScan,
+  importSummary,
+  harnessSummary,
+  handledChangeSuggestions = [],
+}) {
   return [
     "World Memory 자동 수집 직후 현재 시장 상황 인식 보고서를 한국어로 작성한다.",
     "보고서는 사용자가 메인 페이지에서 바로 읽는 HTML 기반 운영 보고서다. DB 경로, 명령어, 의존성 같은 기술 스탯은 쓰지 않는다.",
     "보고서 하단 제안 영역은 반드시 월드 메모리 변경 제안을 먼저 쓰고, 관찰 및 실행 제안을 그 다음에 쓴다.",
+    "이미 처리/수용된 월드 메모리 변경 제안은 새 미처리 제안처럼 다시 쓰지 않는다. 동일 취지의 재표현도 피한다.",
     "근거가 부족하면 부족하다고 말하고, 실제 행동 제안은 감시/확인/보류처럼 검증 가능한 수준으로 제안한다.",
     "마크다운이 아니라 JSON 객체 하나만 반환한다. 설명, 코드펜스, HTML 태그는 넣지 않는다.",
     "",
@@ -996,6 +1251,9 @@ function buildSituationReportPrompt({ listJson, statesJson, auditJson, feedScan,
     "",
     "harness 요약:",
     harnessSummary || "harness 요약 없음",
+    "",
+    "이미 처리된 월드 메모리 변경 제안:",
+    formatHandledChangeSuggestionsForPrompt(handledChangeSuggestions),
     "",
     "이번 FEED 스캔:",
     feedScan || "FEED 스캔 없음",
@@ -1086,6 +1344,19 @@ function reportChangeSuggestions(reportView) {
   return normalizeTextList(reportView?.memoryChangeSuggestions, 5);
 }
 
+function reportMemoryChangeSuggestionItems(view) {
+  if (Array.isArray(view?.memoryChangeSuggestionItems)) {
+    return view.memoryChangeSuggestionItems
+      .filter((item) => item && typeof item === "object" && item.text)
+      .map((item) => ({
+        text: String(item.text || "").trim(),
+        handled: Boolean(item.handled || item.status === "handled"),
+      }))
+      .filter((item) => item.text);
+  }
+  return normalizeTextList(view?.memoryChangeSuggestions, 8).map((text) => ({ text, handled: false }));
+}
+
 function reportPlainText(view) {
   return [
     `# ${view.title}`,
@@ -1098,7 +1369,7 @@ function reportPlainText(view) {
     ...view.highlights.map((item) => `- ${item.title}: ${item.body}`),
     "",
     "## 월드 메모리 변경 제안",
-    ...view.memoryChangeSuggestions.map((item) => `- ${item}`),
+    ...reportMemoryChangeSuggestionItems(view).map((item) => `- ${item.handled ? `<s>${item.text}</s>` : item.text}`),
     "",
     "## 포트폴리오/관찰 제안",
     ...view.portfolioSuggestions.map((item) => `- ${item}`),
@@ -1143,6 +1414,14 @@ function renderReportHtmlDocument(view) {
       <h2>${escapeHtml(title)}</h2>
       <ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("") || "<li>아직 제안 없음</li>"}</ul>
     </section>`;
+  const memoryChangeList = (title, items) => `
+    <section>
+      <h2>${escapeHtml(title)}</h2>
+      <ul>${
+        items.map((item) => `<li>${item.handled ? `<s>${escapeHtml(item.text)}</s>` : escapeHtml(item.text)}</li>`).join("") ||
+        "<li>아직 제안 없음</li>"
+      }</ul>
+    </section>`;
 
   return `<!doctype html>
 <html lang="ko">
@@ -1184,7 +1463,7 @@ function renderReportHtmlDocument(view) {
     <p>${escapeHtml(view.narrative)}</p>
     <div class="signals">${signals}</div>
     <div class="highlights">${highlights}</div>
-    ${list("월드 메모리 변경 제안", view.memoryChangeSuggestions)}
+	    ${memoryChangeList("월드 메모리 변경 제안", reportMemoryChangeSuggestionItems(view))}
     ${list("포트폴리오/관찰 제안", view.portfolioSuggestions)}
     ${list("다음 확인 지점", view.nextChecks)}
   </main>
@@ -1269,10 +1548,19 @@ async function runSituationReportGeneration({
   feedScan,
   importSummary,
   harnessSummary,
+  handledChangeSuggestions = [],
   modelPolicy,
 }) {
   const result = await runWorldMemoryModelText({
-    prompt: buildSituationReportPrompt({ listJson, statesJson, auditJson, feedScan, importSummary, harnessSummary }),
+    prompt: buildSituationReportPrompt({
+      listJson,
+      statesJson,
+      auditJson,
+      feedScan,
+      importSummary,
+      harnessSummary,
+      handledChangeSuggestions,
+    }),
     taskType: "world-memory-report",
     modelPolicy,
   });
@@ -1377,6 +1665,7 @@ async function refreshWorldMemoryReportSnapshot({ sourceAction = "", reason = ""
       ].filter(Boolean).join("\n"),
       importSummary: sourceAction ? `사용자 승인 변경 액션 이후 제안 목록 재계산: ${sourceAction}` : "보고서/변경 제안 수동 갱신",
       harnessSummary: stepText(harnessAfter),
+      handledChangeSuggestions: readCollectorState().changeSuggestionLedger?.handled || [],
       modelPolicy,
     });
 
@@ -1384,8 +1673,11 @@ async function refreshWorldMemoryReportSnapshot({ sourceAction = "", reason = ""
     const reportHtmlPath = join(WORLD_MEMORY_LOG_DIR, `${reportStem}.html`);
     const reportJsonPath = join(WORLD_MEMORY_LOG_DIR, `${reportStem}.json`);
     const reportTextPath = join(WORLD_MEMORY_LOG_DIR, `${reportStem}.txt`);
-    const reportView = generatedReport.view || fallbackReportView(generatedReport.text);
-    const reportText = generatedReport.text || reportPlainText(reportView);
+    const handledChangeSuggestions = readCollectorState().changeSuggestionLedger?.handled || [];
+    const reportView = filterWorldMemoryReportView(generatedReport.view || fallbackReportView(generatedReport.text), {
+      handledChangeSuggestions,
+    });
+    const reportText = reportPlainText(reportView);
     writeFileSync(reportHtmlPath, renderReportHtmlDocument(reportView));
     writeFileSync(reportJsonPath, `${JSON.stringify(reportView, null, 2)}\n`);
     writeFileSync(reportTextPath, `${reportText.trim()}\n`);
@@ -1623,14 +1915,18 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
         feedScan: feedScan.outputText,
         importSummary: stepText(briefImport),
         harnessSummary: stepText(harnessAfter),
+        handledChangeSuggestions: readCollectorState().changeSuggestionLedger?.handled || [],
         modelPolicy,
       });
       const reportStem = `world_memory_market_situation_${stampForFile()}`;
       const reportHtmlPath = join(WORLD_MEMORY_LOG_DIR, `${reportStem}.html`);
       const reportJsonPath = join(WORLD_MEMORY_LOG_DIR, `${reportStem}.json`);
       const reportTextPath = join(WORLD_MEMORY_LOG_DIR, `${reportStem}.txt`);
-      const reportView = generatedReport.view || fallbackReportView(generatedReport.text);
-      const reportText = generatedReport.text || reportPlainText(reportView);
+      const handledChangeSuggestions = readCollectorState().changeSuggestionLedger?.handled || [];
+      const reportView = filterWorldMemoryReportView(generatedReport.view || fallbackReportView(generatedReport.text), {
+        handledChangeSuggestions,
+      });
+      const reportText = reportPlainText(reportView);
       writeFileSync(reportHtmlPath, renderReportHtmlDocument(reportView));
       writeFileSync(reportJsonPath, `${JSON.stringify(reportView, null, 2)}\n`);
       writeFileSync(reportTextPath, `${reportText.trim()}\n`);
@@ -2008,6 +2304,11 @@ async function buildWorldMemoryStatus() {
     }
   }
 
+  const publicReport = filterStoredReport(
+    collectorState.report,
+    collectorState.changeSuggestionLedger?.handled || []
+  );
+
   return {
     ok: dependencies.ok && (!init || init.ok),
     enabled: true,
@@ -2042,7 +2343,8 @@ async function buildWorldMemoryStatus() {
     },
     schedule: collectorState.schedule,
     modelPolicy: collectorState.modelPolicy,
-    report: collectorState.report,
+    report: publicReport,
+    changeSuggestionLedger: collectorState.changeSuggestionLedger,
     history: collectorState.history,
     dependencies,
     actions: actionCatalog,
@@ -2068,6 +2370,10 @@ async function runWorldMemoryAction(body = {}) {
 
   ensureWorldMemoryDirs();
   const action = String(body.action || "").trim();
+  const acceptedChangeSuggestion = normalizeAcceptedChangeSuggestion(
+    body.acceptedChangeSuggestion || body.accepted_change_suggestion,
+    { action, params: body }
+  );
   if (action === "collectNow") {
     const runtime = runtimeState();
     if (runtime.inFlight) {
@@ -2099,12 +2405,19 @@ async function runWorldMemoryAction(body = {}) {
     };
   }
   if (action === "refreshReport" || action === "report") {
+    if (acceptedChangeSuggestion) {
+      updateCollectorState((state) => rememberHandledChangeSuggestion(state, acceptedChangeSuggestion));
+    }
     return refreshWorldMemoryReportSnapshot({
       sourceAction: String(body.sourceAction || body.source_action || "").trim(),
       reason: String(body.reason || "").trim() || (action === "report" ? "manual-report-action" : ""),
     });
   }
-  return runCommandFromBody(body);
+  const result = await runCommandFromBody(body);
+  if (result.ok && acceptedChangeSuggestion && changeSuggestionMutationActions.has(action)) {
+    updateCollectorState((state) => rememberHandledChangeSuggestion(state, acceptedChangeSuggestion));
+  }
+  return result;
 }
 
 export async function handleWorldMemoryEndpoint(kind, req, res) {

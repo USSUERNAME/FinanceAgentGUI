@@ -43,23 +43,37 @@ function WorldMemoryAskButton({ agentIcon, label, disabled = false, onClick }) {
   );
 }
 
+function normalizeMemoryChangeSuggestionItem(item) {
+  if (item && typeof item === "object") {
+    return {
+      text: String(item.text || item.body || item.title || "").trim(),
+      handled: Boolean(item.handled || item.status === "handled"),
+      handledAt: String(item.handledAt || "").trim(),
+    };
+  }
+  return { text: String(item || "").trim(), handled: false, handledAt: "" };
+}
+
 function WorldMemoryChangeSuggestionRow({ item, index, agentIcon, agentAskLabel, disabled = false, onAskItem }) {
-  const text = String(item || "").trim();
+  const suggestion = normalizeMemoryChangeSuggestionItem(item);
+  const { text, handled } = suggestion;
   return (
-    <p className="world-memory-change-suggestion-row">
+    <p className={`world-memory-change-suggestion-row${handled ? " is-handled" : ""}`}>
       <ChevronsRight size={14} strokeWidth={2.2} />
       <span className="world-memory-change-suggestion-content">
-        <span className="world-memory-change-suggestion-text">{text}</span>
-        <button
-          className="board-codex-context-button world-memory-change-agent-button"
-          type="button"
-          disabled={disabled}
-          aria-label={`${agentAskLabel}: ${text}`}
-          title={agentAskLabel}
-          onClick={() => onAskItem?.("memory-change", { text }, { index })}
-        >
-          <img className="agent-logo-image" src={agentIcon} alt="" />
-        </button>
+        <span className="world-memory-change-suggestion-text">{handled ? <s>{text}</s> : text}</span>
+        {!handled ? (
+          <button
+            className="board-codex-context-button world-memory-change-agent-button"
+            type="button"
+            disabled={disabled}
+            aria-label={`${agentAskLabel}: ${text}`}
+            title={agentAskLabel}
+            onClick={() => onAskItem?.("memory-change", { text }, { index })}
+          >
+            <img className="agent-logo-image" src={agentIcon} alt="" />
+          </button>
+        ) : null}
       </span>
     </p>
   );
@@ -71,7 +85,11 @@ function WorldMemoryRichReport({ report, agentIcon = "", agentAskLabel = "Codexì
   const signals = Array.isArray(view.signalRadar) ? view.signalRadar : [];
   const highlights = Array.isArray(view.highlights) ? view.highlights : [];
   const portfolioSuggestions = Array.isArray(view.portfolioSuggestions) ? view.portfolioSuggestions : [];
-  const memoryChangeSuggestions = Array.isArray(view.memoryChangeSuggestions) ? view.memoryChangeSuggestions : [];
+  const memoryChangeSuggestions = Array.isArray(view.memoryChangeSuggestionItems)
+    ? view.memoryChangeSuggestionItems
+    : Array.isArray(view.memoryChangeSuggestions)
+      ? view.memoryChangeSuggestions
+      : [];
   const nextChecks = Array.isArray(view.nextChecks) ? view.nextChecks : [];
 
   return (

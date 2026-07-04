@@ -3449,14 +3449,26 @@ function App() {
         : proposal.params && typeof proposal.params === "object"
           ? proposal.params
           : proposal.raw?.params && typeof proposal.raw.params === "object"
-            ? proposal.raw.params
-            : {};
-    const result = await runWorldMemoryAction(proposal.action, options);
+          ? proposal.raw.params
+          : {};
+    const acceptedChangeSuggestion =
+      worldMemoryFocusedChangeSuggestion?.section === "memory-change"
+        ? {
+            ...worldMemoryFocusedChangeSuggestion,
+            action: proposal.action,
+            label: proposal.label || proposal.raw?.label || "",
+          }
+        : null;
+    const result = await runWorldMemoryAction(
+      proposal.action,
+      acceptedChangeSuggestion ? { ...options, acceptedChangeSuggestion } : options
+    );
     if (!result?.ok) return;
     if (result?.ok && worldMemoryActionsNeedingReportRefresh.has(proposal.action)) {
       await runWorldMemoryAction("refreshReport", {
         sourceAction: proposal.action,
         reason: "agent-action-applied",
+        ...(acceptedChangeSuggestion ? { acceptedChangeSuggestion } : {}),
       });
     }
     setWorldMemoryAgentAction(null);
@@ -5749,7 +5761,10 @@ function App() {
               agentProvider={worldMemoryAgentRuntime.provider}
               agentOptionsReady={agentOptionsReady}
               isSending={worldMemoryChatIsSending}
-              onClearAgentAction={() => setWorldMemoryAgentAction(null)}
+              onClearAgentAction={() => {
+                setWorldMemoryAgentAction(null);
+                setWorldMemoryFocusedChangeSuggestion(null);
+              }}
               onExecuteAgentAction={executeWorldMemoryAgentAction}
               onAskReportItem={askWorldMemoryReportItem}
               onReload={loadWorldMemoryStatus}
