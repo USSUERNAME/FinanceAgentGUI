@@ -27,10 +27,12 @@ function worldMemoryAskItemForContext(section, item = {}, extra = {}) {
   }
 
   if (section === "memory-change") {
+    const text = String(item.text || item.body || item.title || "").trim();
     return {
       section: worldMemoryAskSectionLabel(section),
       index: extra.index ?? item.index ?? "",
-      suggestion: compactWorldMemoryText(item.text || item.body || item.title || "", 520),
+      text: compactWorldMemoryText(text, 1400),
+      suggestion: compactWorldMemoryText(text, 520),
       source: "report.view.memoryChangeSuggestions",
       decisionState: "pending-user-decision",
     };
