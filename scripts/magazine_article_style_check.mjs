@@ -66,6 +66,14 @@ const READER_TONE_ALLOWED_CLASSIFICATIONS = new Set([
   "evidence_based_implication",
   "third_party_market_participant",
 ]);
+const QUOTE_FLOW_POLICY = "magazine-quote-flow-v1";
+const QUOTE_FLOW_METHOD = "LLM_CLASSIFICATION_ONLY";
+const QUOTE_FLOW_ALLOWED_CLASSIFICATIONS = new Set([
+  "direct_quote_integrated",
+  "necessary_indirect_attribution",
+  "source_attribution_without_repetition",
+  "no_verified_statement_available",
+]);
 
 const ATTRIBUTION_PATTERNS = [
   /에 따르면/g,
@@ -198,6 +206,98 @@ function checkReaderToneDecision(metadata = {}) {
         level: "error",
         code: "reader-tone-section-rationale-missing",
         message: `metadata.readerToneDecision.lateSectionReviews[${index}].rationale is required`,
+      });
+    }
+  }
+  return issues;
+}
+
+function checkQuoteFlowDecision(metadata = {}) {
+  const issues = [];
+  const decision = metadata.quoteFlowDecision && typeof metadata.quoteFlowDecision === "object" && !Array.isArray(metadata.quoteFlowDecision)
+    ? metadata.quoteFlowDecision
+    : null;
+  if (!decision) {
+    issues.push({
+      level: "error",
+      code: "quote-flow-decision-missing",
+      message: "metadata.quoteFlowDecision must include the LLM quote-flow classification result",
+    });
+    return issues;
+  }
+
+  if (decision.policy !== QUOTE_FLOW_POLICY) {
+    issues.push({ level: "error", code: "quote-flow-policy-invalid", message: `metadata.quoteFlowDecision.policy must be ${QUOTE_FLOW_POLICY}` });
+  }
+  if (decision.method !== QUOTE_FLOW_METHOD) {
+    issues.push({ level: "error", code: "quote-flow-method-invalid", message: `metadata.quoteFlowDecision.method must be ${QUOTE_FLOW_METHOD}` });
+  }
+  if (decision.noTextMatching !== true) {
+    issues.push({ level: "error", code: "quote-flow-text-matching", message: "metadata.quoteFlowDecision.noTextMatching must be true" });
+  }
+  if (!String(decision.classifier || "").trim()) {
+    issues.push({ level: "error", code: "quote-flow-classifier-missing", message: "metadata.quoteFlowDecision.classifier must name the LLM classifier pass" });
+  }
+
+  if (decision.quoteFlowOk !== true) {
+    issues.push({ level: "error", code: "quote-flow-not-ok", message: "metadata.quoteFlowDecision.quoteFlowOk must be true" });
+  }
+  if (decision.directQuotePreferredWhenExactWordingVerified !== true) {
+    issues.push({
+      level: "error",
+      code: "direct-quote-preference-missing",
+      message: "metadata.quoteFlowDecision.directQuotePreferredWhenExactWordingVerified must be true",
+    });
+  }
+  if (decision.directQuoteCoverageOk !== true) {
+    issues.push({
+      level: "error",
+      code: "direct-quote-coverage-missing",
+      message: "metadata.quoteFlowDecision.directQuoteCoverageOk must be true",
+    });
+  }
+  if (decision.indirectAttributionLimitedToUnverifiedWording !== true) {
+    issues.push({
+      level: "error",
+      code: "indirect-attribution-limit-missing",
+      message: "metadata.quoteFlowDecision.indirectAttributionLimitedToUnverifiedWording must be true",
+    });
+  }
+
+  for (const [field, code] of [
+    ["directQuoteAvoidance", "direct-quote-avoidance"],
+    ["repeatedIndirectBeforeDirectQuote", "indirect-before-direct-repetition"],
+    ["indirectAttributionOverused", "indirect-attribution-overused"],
+    ["ornamentalQuoteBlocks", "ornamental-quote-block"],
+  ]) {
+    if (decision[field] !== false) {
+      issues.push({ level: "error", code, message: `metadata.quoteFlowDecision.${field} must be false` });
+    }
+  }
+
+  const reviews = Array.isArray(decision.reviews) ? decision.reviews : [];
+  if (!reviews.length) {
+    issues.push({
+      level: "error",
+      code: "quote-flow-reviews-missing",
+      message: "metadata.quoteFlowDecision.reviews must include at least one LLM-reviewed quote-flow classification",
+    });
+  }
+  for (const [index, review] of reviews.entries()) {
+    const item = review && typeof review === "object" && !Array.isArray(review) ? review : {};
+    const classification = String(item.classification || "");
+    if (!QUOTE_FLOW_ALLOWED_CLASSIFICATIONS.has(classification)) {
+      issues.push({
+        level: "error",
+        code: "quote-flow-classification-invalid",
+        message: `metadata.quoteFlowDecision.reviews[${index}].classification is invalid: ${classification || "(missing)"}`,
+      });
+    }
+    if (!String(item.rationale || "").trim()) {
+      issues.push({
+        level: "error",
+        code: "quote-flow-rationale-missing",
+        message: `metadata.quoteFlowDecision.reviews[${index}].rationale is required`,
       });
     }
   }
@@ -957,6 +1057,7 @@ function checkArticle({ articleId, metadata, html }, topicCatalog) {
   issues.push(...checkCoverDecision(metadata));
   issues.push(...checkNewsFeedEvidence(metadata));
   issues.push(...checkReaderToneDecision(metadata));
+  issues.push(...checkQuoteFlowDecision(metadata));
 
   if (!Array.isArray(metadata.sourceBasis) || metadata.sourceBasis.length < 3) {
     issues.push({ level: "error", code: "source-basis-too-thin", message: "sourceBasis should include at least three source or evidence entries" });
