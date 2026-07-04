@@ -144,6 +144,30 @@ test("magazine style check allows World Memory evidence in metadata only", () =>
   assert.equal(output.warnings.length, 0);
 });
 
+test("magazine style check rejects reader chrome inside article body", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-body-chrome-"));
+  const body = makeArticleBody().replace(
+    "<h2>전력망으로 내려온 성장주 이야기</h2>",
+    `<p class="article-kicker">AI 인프라</p>
+  <h1>본문 안에 다시 들어간 제목</h1>
+  <p class="article-deck">본문 안에 다시 들어간 덱입니다.</p>
+  <h2>전력망으로 내려온 성장주 이야기</h2>`,
+  );
+  writeArticle(articleRoot, { body });
+
+  assert.throws(
+    () => runCheck(articleRoot),
+    (error) => {
+      const output = JSON.parse(error.stdout);
+      assert.equal(output.ok, false);
+      assert.ok(output.errors.some((issue) => issue.code === "article-body-h1"));
+      assert.ok(output.errors.some((issue) => issue.code === "article-body-kicker"));
+      assert.ok(output.errors.some((issue) => issue.code === "article-body-deck"));
+      return true;
+    },
+  );
+});
+
 test("magazine style check rejects World Memory in reader-facing article copy", () => {
   const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-bad-"));
   writeArticle(articleRoot, { body: makeArticleBody({ internalPhrase: "World Memory에 쌓인" }) });

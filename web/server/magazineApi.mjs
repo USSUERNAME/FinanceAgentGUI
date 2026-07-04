@@ -123,6 +123,20 @@ function cleanText(value) {
     .trim();
 }
 
+const magazineBodyChromePatterns = [
+  /<h1\b[^>]*>[\s\S]*?<\/h1>/gi,
+  /<p\b(?=[^>]*\bclass\s*=\s*(?:"[^"]*\barticle-kicker\b[^"]*"|'[^']*\barticle-kicker\b[^']*'|[^\s>]*\barticle-kicker\b[^\s>]*))[^>]*>[\s\S]*?<\/p>/gi,
+  /<p\b(?=[^>]*\bclass\s*=\s*(?:"[^"]*\barticle-deck\b[^"]*"|'[^']*\barticle-deck\b[^']*'|[^\s>]*\barticle-deck\b[^\s>]*))[^>]*>[\s\S]*?<\/p>/gi,
+];
+
+function cleanMagazineArticleBodyHtml(value) {
+  let html = String(value || "");
+  for (const pattern of magazineBodyChromePatterns) {
+    html = html.replace(pattern, "");
+  }
+  return html.replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function normalizeArticleId(value) {
   const articleId = String(value || "").trim();
   if (!ARTICLE_ID_PATTERN.test(articleId)) {
@@ -1328,7 +1342,7 @@ async function readArticle(articleId) {
   if (bodyStat.size > MAX_ARTICLE_HTML_BYTES) {
     throw new Error(`article body is too large: ${id}`);
   }
-  const bodyHtml = await readFile(bodyPath, "utf8");
+  const bodyHtml = cleanMagazineArticleBodyHtml(await readFile(bodyPath, "utf8"));
   const heroImage = normalizeHeroImage(metadata.heroImage, id);
   const worldMemory = normalizeWorldMemoryEvidence(metadata.worldMemory);
   const generationAgent = normalizeGenerationAgent(metadata.generationAgent);

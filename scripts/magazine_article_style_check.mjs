@@ -55,6 +55,9 @@ const INTERNAL_PHRASES = [
   /하네스/,
 ];
 
+const BODY_KICKER_PATTERN = /<p\b(?=[^>]*\bclass\s*=\s*(?:"[^"]*\barticle-kicker\b[^"]*"|'[^']*\barticle-kicker\b[^']*'|[^\s>]*\barticle-kicker\b[^\s>]*))[^>]*>[\s\S]*?<\/p>/i;
+const BODY_DECK_PATTERN = /<p\b(?=[^>]*\bclass\s*=\s*(?:"[^"]*\barticle-deck\b[^"]*"|'[^']*\barticle-deck\b[^']*'|[^\s>]*\barticle-deck\b[^\s>]*))[^>]*>[\s\S]*?<\/p>/i;
+
 const READER_TONE_POLICY = "magazine-reader-tone-v1";
 const READER_TONE_METHOD = "LLM_CLASSIFICATION_ONLY";
 const READER_TONE_ALLOWED_CLASSIFICATIONS = new Set([
@@ -107,6 +110,32 @@ function paragraphCountsBySection(html) {
 function countMatches(text, pattern) {
   pattern.lastIndex = 0;
   return Array.from(String(text || "").matchAll(pattern)).length;
+}
+
+function checkArticleBodyChrome(html) {
+  const issues = [];
+  if (/<h1\b/i.test(String(html || ""))) {
+    issues.push({
+      level: "error",
+      code: "article-body-h1",
+      message: "article.html must not include an h1; the reader renders the metadata title outside the body",
+    });
+  }
+  if (BODY_KICKER_PATTERN.test(String(html || ""))) {
+    issues.push({
+      level: "error",
+      code: "article-body-kicker",
+      message: "article.html must not include p.article-kicker; topics are rendered by the reader header",
+    });
+  }
+  if (BODY_DECK_PATTERN.test(String(html || ""))) {
+    issues.push({
+      level: "error",
+      code: "article-body-deck",
+      message: "article.html must not include p.article-deck; deck/summary belong in metadata",
+    });
+  }
+  return issues;
 }
 
 function checkReaderToneDecision(metadata = {}) {
@@ -922,6 +951,7 @@ function checkArticle({ articleId, metadata, html }, topicCatalog) {
     issues.push({ level: "error", code: "metadata-missing-catalog-fields", message: "metadata must include title, summary, and heroImage" });
   }
 
+  issues.push(...checkArticleBodyChrome(html));
   issues.push(...checkArticleTopics(metadata, topicCatalog));
   issues.push(...checkHeroImage(articleId, metadata));
   issues.push(...checkCoverDecision(metadata));
