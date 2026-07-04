@@ -20,6 +20,7 @@ const DEFAULT_DAYS = 6;
 const DEFAULT_LIMIT = 100;
 const MAX_DAYS = 45;
 const MAX_LIMIT = 100;
+const ECONOMIC_FETCH_MAX_PAGES = 20;
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const ECONOMIC_FETCH_TIMEOUT_MS = 45000;
 const ECONOMIC_TRANSLATION_TIMEOUT_MS = 60000;
@@ -1116,6 +1117,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--start", required=True)
 parser.add_argument("--end", required=True)
 parser.add_argument("--limit", type=int, required=True)
+parser.add_argument("--max-pages", type=int, required=True)
 parser.add_argument("--force", action="store_true")
 args = parser.parse_args()
 
@@ -1301,13 +1303,31 @@ try:
             "installCommand": f"{sys.executable} -m pip install --upgrade yfinance",
         }, ensure_ascii=False))
         sys.exit(0)
-    df = calendars.get_economic_events_calendar(
-        start=args.start,
-        end=args.end,
-        limit=args.limit,
-        offset=0,
-        force=args.force,
-    )
+    frames = []
+    page_offsets = []
+    page_limit = max(1, int(args.limit or 100))
+    max_pages = max(1, min(50, int(args.max_pages or 1)))
+    reached_page_cap = False
+
+    for page in range(max_pages):
+        offset = page * page_limit
+        page_df = calendars.get_economic_events_calendar(
+            start=args.start,
+            end=args.end,
+            limit=page_limit,
+            offset=offset,
+            force=args.force,
+        )
+        if page_df is None or page_df.empty:
+            break
+        frames.append(page_df)
+        page_offsets.append(offset)
+        if len(page_df) < page_limit:
+            break
+    else:
+        reached_page_cap = bool(frames)
+
+    df = pd.concat(frames, ignore_index=False) if frames else None
 except Exception as exc:
     print(json.dumps({
         "ok": False,
@@ -1331,6 +1351,7 @@ if df is None or df.empty:
     sys.exit(0)
 
 records = []
+record_keys = set()
 data = df.reset_index()
 for index, row in data.iterrows():
     event_name = clean_text(row.get("Event"))
@@ -1350,9 +1371,13 @@ for index, row in data.iterrows():
     expected = format_value(row.get("Expected"))
     last = format_value(row.get("Last"))
     revised = format_value(row.get("Revised"))
+    record_key = "|".join([country_code or "XX", event_dt_utc.isoformat(), event_name, period])
+    if record_key in record_keys:
+        continue
+    record_keys.add(record_key)
 
     records.append({
-        "id": f"{country_code or 'XX'}-{event_dt_utc.isoformat()}-{event_name}-{period}-{index}",
+        "id": record_key,
         "dateKey": event_dt_kst.date().isoformat(),
         "time": event_dt_kst.strftime("%H:%M"),
         "country": country_label,
@@ -1385,8 +1410,10 @@ print(json.dumps({
     "endDate": args.end,
     "generatedAt": datetime.now(KST).isoformat(),
     "events": records,
-    "warnings": [],
+    "warnings": [f"Reached yfinance pagination cap at {len(page_offsets)} pages."] if reached_page_cap else [],
     "rowCount": len(records),
+    "fetchedPageCount": len(page_offsets),
+    "fetchedOffsets": page_offsets,
 }, ensure_ascii=False))
 `;
 
@@ -1414,6 +1441,8 @@ function runYfinanceEconomicCalendar({ startDate, endDate, limit, force }) {
         endDate,
         "--limit",
         String(limit),
+        "--max-pages",
+        String(ECONOMIC_FETCH_MAX_PAGES),
         ...(force ? ["--force"] : []),
       ],
       {

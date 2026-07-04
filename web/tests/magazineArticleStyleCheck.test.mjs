@@ -63,6 +63,31 @@ function readerToneDecision(patch = {}) {
   };
 }
 
+function quoteFlowDecision(patch = {}) {
+  return {
+    policy: "magazine-quote-flow-v1",
+    method: "LLM_CLASSIFICATION_ONLY",
+    noTextMatching: true,
+    classifier: "magazine-quote-flow-llm",
+    quoteFlowOk: true,
+    directQuotePreferredWhenExactWordingVerified: true,
+    directQuoteCoverageOk: true,
+    indirectAttributionLimitedToUnverifiedWording: true,
+    directQuoteAvoidance: false,
+    repeatedIndirectBeforeDirectQuote: false,
+    indirectAttributionOverused: false,
+    ornamentalQuoteBlocks: false,
+    reviews: [
+      {
+        location: "전력망으로 내려온 성장주 이야기",
+        classification: "direct_quote_integrated",
+        rationale: "직접 인용은 같은 주장을 앞에서 간접요약하지 않고 새 시장 맥락으로 연결됩니다.",
+      },
+    ],
+    ...patch,
+  };
+}
+
 function writeArticle(root, { articleId = "ai-power-bill-test", body, heroImage, topics = ["AI", "테크"], metadataPatch = {} } = {}) {
   const articleDir = join(root, "articles", articleId);
   mkdirSync(join(articleDir, "assets"), { recursive: true });
@@ -108,6 +133,7 @@ function writeArticle(root, { articleId = "ai-power-bill-test", body, heroImage,
         editorialAngle: "policy-mechanics",
         storyFamily: "AI 물리 인프라 비즈니스",
         readerToneDecision: readerToneDecision(),
+        quoteFlowDecision: quoteFlowDecision(),
         ...metadataPatch,
       },
       null,
@@ -314,6 +340,124 @@ test("magazine style check allows investors as third-party article subjects", ()
 
   assert.equal(output.ok, true);
   assert.equal(output.errors.length, 0);
+});
+
+test("magazine style check requires an LLM quote-flow decision", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-quote-flow-missing-"));
+  writeArticle(articleRoot, {
+    body: makeArticleBody(),
+    metadataPatch: {
+      quoteFlowDecision: undefined,
+    },
+  });
+
+  assert.throws(
+    () => runCheck(articleRoot),
+    (error) => {
+      const output = JSON.parse(error.stdout);
+      assert.equal(output.ok, false);
+      assert.ok(output.errors.some((issue) => issue.code === "quote-flow-decision-missing"));
+      return true;
+    },
+  );
+});
+
+test("magazine style check rejects indirect paraphrase before a repeated direct quote", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-quote-flow-repeat-"));
+  writeArticle(articleRoot, {
+    body: makeArticleBody(),
+    metadataPatch: {
+      quoteFlowDecision: quoteFlowDecision({
+        quoteFlowOk: false,
+        repeatedIndirectBeforeDirectQuote: true,
+        reviews: [
+          {
+            location: "전력망으로 내려온 성장주 이야기",
+            classification: "indirect_then_direct_repetition",
+            rationale: "LLM 판정: 같은 발언을 간접요약한 뒤 직접인용으로 다시 반복했습니다.",
+          },
+        ],
+      }),
+    },
+  });
+
+  assert.throws(
+    () => runCheck(articleRoot),
+    (error) => {
+      const output = JSON.parse(error.stdout);
+      assert.equal(output.ok, false);
+      assert.ok(output.errors.some((issue) => issue.code === "quote-flow-not-ok"));
+      assert.ok(output.errors.some((issue) => issue.code === "indirect-before-direct-repetition"));
+      assert.ok(output.errors.some((issue) => issue.code === "quote-flow-classification-invalid"));
+      return true;
+    },
+  );
+});
+
+test("magazine style check rejects direct quote avoidance", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-direct-quote-avoidance-"));
+  writeArticle(articleRoot, {
+    body: makeArticleBody(),
+    metadataPatch: {
+      quoteFlowDecision: quoteFlowDecision({
+        quoteFlowOk: false,
+        directQuoteCoverageOk: false,
+        directQuoteAvoidance: true,
+        reviews: [
+          {
+            location: "전력망으로 내려온 성장주 이야기",
+            classification: "direct_quote_avoidance",
+            rationale: "LLM 판정: 검증된 이해관계자 발언이 있는데 직접인용을 모두 없애고 간접귀속으로만 처리했습니다.",
+          },
+        ],
+      }),
+    },
+  });
+
+  assert.throws(
+    () => runCheck(articleRoot),
+    (error) => {
+      const output = JSON.parse(error.stdout);
+      assert.equal(output.ok, false);
+      assert.ok(output.errors.some((issue) => issue.code === "quote-flow-not-ok"));
+      assert.ok(output.errors.some((issue) => issue.code === "direct-quote-coverage-missing"));
+      assert.ok(output.errors.some((issue) => issue.code === "direct-quote-avoidance"));
+      assert.ok(output.errors.some((issue) => issue.code === "quote-flow-classification-invalid"));
+      return true;
+    },
+  );
+});
+
+test("magazine style check rejects overused indirect attribution", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-indirect-overused-"));
+  writeArticle(articleRoot, {
+    body: makeArticleBody(),
+    metadataPatch: {
+      quoteFlowDecision: quoteFlowDecision({
+        quoteFlowOk: false,
+        indirectAttributionOverused: true,
+        reviews: [
+          {
+            location: "전력망으로 내려온 성장주 이야기",
+            classification: "indirect_attribution_overused",
+            rationale: "LLM 판정: 직접 인용이 가능하거나 인용이 필요 없는 자리를 간접귀속으로 늘렸습니다.",
+          },
+        ],
+      }),
+    },
+  });
+
+  assert.throws(
+    () => runCheck(articleRoot),
+    (error) => {
+      const output = JSON.parse(error.stdout);
+      assert.equal(output.ok, false);
+      assert.ok(output.errors.some((issue) => issue.code === "quote-flow-not-ok"));
+      assert.ok(output.errors.some((issue) => issue.code === "indirect-attribution-overused"));
+      assert.ok(output.errors.some((issue) => issue.code === "quote-flow-classification-invalid"));
+      return true;
+    },
+  );
 });
 
 test("magazine style check rejects SVG mock hero images", () => {

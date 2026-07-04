@@ -17,6 +17,8 @@ const ANTIGRAVITY_PROVIDER_ID = "antigravity-cli";
 const MAX_ARTICLE_TOPICS = 3;
 const READER_TONE_POLICY = "magazine-reader-tone-v1";
 const READER_TONE_METHOD = "LLM_CLASSIFICATION_ONLY";
+const QUOTE_FLOW_POLICY = "magazine-quote-flow-v1";
+const QUOTE_FLOW_METHOD = "LLM_CLASSIFICATION_ONLY";
 
 function argValue(name, fallback = "") {
   const index = process.argv.indexOf(name);
@@ -506,6 +508,84 @@ function buildReaderToneDecisionPrompt({ articleId, metadata, bodyText }) {
   ].join("\n");
 }
 
+function buildQuoteFlowDecisionPrompt({ articleId, metadata, bodyText }) {
+  return [
+    "너는 FinanceAgentGUI Magazine의 인용 흐름 LLM 분류 하네스다.",
+    "절대 키워드, 정규식, 부분 문자열, 따옴표 개수로 판정하지 않는다. 문맥, 발화 주체, 같은 claim의 반복 여부를 의미적으로 분류한다.",
+    "목표는 직접인용을 없애는 것이 아니라, 검증된 직접인용은 살리고 그 앞뒤의 중복 간접요약만 줄이는 것이다.",
+    "직접인용 회피로 통과하려 하지 않는다. 검증된 이해관계자 발언이 있으면 적어도 하나 이상의 고신호 직접인용을 보통 남겨야 한다.",
+    "",
+    "분류 목표:",
+    "- 직접인용이 있다면 그 발언의 핵심 claim을 바로 직접인용으로 제시했는지 확인한다.",
+    "- 검증된 이해관계자 발언이 있는데도 직접인용을 모두 없애거나 간접귀속으로만 처리했는지 판정한다.",
+    "- 같은 문단이나 인접 문단에서 간접 귀속으로 이미 설명한 내용을 직접인용이 반복하는지 판정한다.",
+    "- 정확한 원문이 확인된 발언인데도 불필요한 간접귀속으로 우회했는지 판정한다.",
+    "- 정확한 표현이 불확실한 경우의 짧은 간접귀속은 허용한다.",
+    "- 출처명 연결, 데이터 출처 표시, 발언 배경 소개처럼 같은 claim을 반복하지 않는 attribution은 허용한다.",
+    "",
+    "반드시 아래 JSON 객체 하나만 출력한다. 설명 문장이나 마크다운을 붙이지 않는다.",
+    JSON.stringify({
+      policy: QUOTE_FLOW_POLICY,
+      method: QUOTE_FLOW_METHOD,
+      noTextMatching: true,
+      classifier: "magazine-quote-flow-llm",
+      quoteFlowOk: true,
+      directQuotePreferredWhenExactWordingVerified: true,
+      directQuoteCoverageOk: true,
+      indirectAttributionLimitedToUnverifiedWording: true,
+      directQuoteAvoidance: false,
+      repeatedIndirectBeforeDirectQuote: false,
+      indirectAttributionOverused: false,
+      ornamentalQuoteBlocks: false,
+      reviews: [
+        {
+          location: "문단 또는 소제목 label",
+          classification: "direct_quote_integrated | necessary_indirect_attribution | source_attribution_without_repetition | no_verified_statement_available | indirect_then_direct_repetition | direct_quote_avoidance | indirect_attribution_overused | ornamental_quote_block | mixed",
+          rationale: "직접/간접 인용 선택과 반복 여부를 의미적으로 설명",
+        },
+      ],
+    }, null, 2),
+    "",
+    "허용 classification:",
+    "- direct_quote_integrated: 검증된 발언을 먼저 직접인용으로 제시하고, 앞뒤 문장이 분석을 전진시킨다.",
+    "- necessary_indirect_attribution: 정확한 표현이 불확실하거나 짧은 출처 귀속이 더 적합해 간접귀속을 쓴다.",
+    "- source_attribution_without_repetition: 출처 표시나 배경 설명일 뿐 같은 claim을 반복하지 않는다.",
+    "- no_verified_statement_available: 검증 가능한 이해관계자 발언이 없어서 데이터, 가격 반응, 구조 설명만으로 충분하다.",
+    "",
+    "실패 classification:",
+    "- indirect_then_direct_repetition: 간접귀속으로 같은 내용을 설명한 뒤 직접인용으로 다시 반복한다.",
+    "- direct_quote_avoidance: 검증된 직접 발언이 있는데도 반복 위험을 피하려고 직접인용을 모두 없애거나 간접귀속으로만 처리한다.",
+    "- indirect_attribution_overused: 직접인용이 가능하거나 필요 없는 자리까지 간접귀속으로 문장을 늘린다.",
+    "- ornamental_quote_block: quote block이 장식이나 증명 도장처럼 붙어 있고 새 정보·반론·메커니즘을 만들지 않는다.",
+    "- mixed: 허용/실패가 섞여 있어 수리가 필요하다.",
+    "",
+    "판정값 규칙:",
+    "- quoteFlowOk는 실패 classification이 하나라도 있으면 false, 아니면 true.",
+    "- directQuoteCoverageOk는 검증된 이해관계자 발언이 없거나, 검증된 발언이 있을 때 최소 하나의 고신호 직접인용이 본문에 살아 있으면 true.",
+    "- directQuoteAvoidance는 direct_quote_avoidance가 하나라도 있으면 true.",
+    "- repeatedIndirectBeforeDirectQuote는 indirect_then_direct_repetition이 하나라도 있으면 true.",
+    "- indirectAttributionOverused는 indirect_attribution_overused가 하나라도 있으면 true.",
+    "- ornamentalQuoteBlocks는 ornamental_quote_block이 하나라도 있으면 true.",
+    "- reviews에는 기사에서 인용·귀속이 가장 많이 쓰인 대목 또는 인용이 없는 경우 그 선택의 이유를 최소 1개 이상 넣는다.",
+    "",
+    `[articleId]\n${articleId}`,
+    "",
+    "[metadata excerpt]",
+    JSON.stringify({
+      title: metadata.title || "",
+      deck: metadata.deck || "",
+      summary: metadata.summary || "",
+      articleType: metadata.articleType || "",
+      sourceBasis: Array.isArray(metadata.sourceBasis) ? metadata.sourceBasis.slice(0, 8) : [],
+      storyFamily: metadata.storyFamily || metadata.storyKey || "",
+      editorialAngle: metadata.editorialAngle || "",
+    }, null, 2),
+    "",
+    "[article body text]",
+    bodyText,
+  ].join("\n");
+}
+
 async function finalizeArticleTitles({ provider, codex, approval, sandbox, model, reasoning, timeoutMs, tempDir, articleDirectory, agentLabel }) {
   for (const [index, articleId] of articleIdsIn(articleDirectory).entries()) {
     const articleDir = join(articleDirectory, articleId);
@@ -570,6 +650,38 @@ async function finalizeReaderToneDecisions({ provider, codex, approval, sandbox,
   }
 }
 
+async function finalizeQuoteFlowDecisions({ provider, codex, approval, sandbox, model, reasoning, timeoutMs, tempDir, articleDirectory, agentLabel }) {
+  for (const [index, articleId] of articleIdsIn(articleDirectory).entries()) {
+    const articleDir = join(articleDirectory, articleId);
+    const metadataPath = join(articleDir, "metadata.json");
+    const htmlPath = join(articleDir, "article.html");
+    if (!existsSync(metadataPath) || !existsSync(htmlPath)) continue;
+    const metadata = readJsonFile(metadataPath);
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) continue;
+    const bodyText = stripHtmlForTitle(readFileSync(htmlPath, "utf8"));
+    if (!bodyText) continue;
+    const outputPath = join(tempDir, `${provider}-quote-flow-${index + 1}.json`);
+    console.log(`\nClassifying article quote flow with LLM harness: ${articleId}`);
+    await runAgentPrompt({
+      provider,
+      codex,
+      approval,
+      sandbox,
+      model,
+      reasoning,
+      outputPath,
+      prompt: buildQuoteFlowDecisionPrompt({ articleId, metadata, bodyText }),
+      timeoutMs,
+      tempDir,
+    });
+    const decision = extractJsonObject(existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "");
+    if (!decision) {
+      throw new Error(`${agentLabel} quote-flow classifier returned invalid JSON for ${articleId}`);
+    }
+    writeFileSync(metadataPath, `${JSON.stringify({ ...metadata, quoteFlowDecision: decision }, null, 2)}\n`, "utf8");
+  }
+}
+
 function buildPrompt({ count, replace, articleDirectory, staged, agentLabel = "Codex CLI" }) {
   const extraPrompt = String(process.env.MAGAZINE_EXTRA_PROMPT || process.env.MAGAZINE_CODEX_EXTRA_PROMPT || "").trim();
   const recentArticles = recentArticleWindowSummary(12);
@@ -617,8 +729,10 @@ function buildPrompt({ count, replace, articleDirectory, staged, agentLabel = "C
     "- 최근 기사와 같은 이슈처럼 보이면 내부적으로 LLM novelty judge를 수행한다: same_event이면 쓰지 않고, independent_followup이면 새 근거 앵커와 달라진 메커니즘을 metadata에 남기며, unrelated이면 별도 기사로 둔다. 사진, 제목, storyFamily 변경만으로 independent_followup이라고 판단하지 않는다.",
     "- 최근 업로드 기사와 storyFamily 및 editorialAngle이 모두 같으면 중복 위험이 높다. follow-up이라도 noveltyNote에 무엇이 새로 생겼는지 명시할 수 없으면 생성하지 않는다.",
     "- metadata.topics는 config/magazine-topics.json의 topics[].label 중 1~3개만 사용한다. 1개 주 토픽은 반드시 고르고, 보조 토픽은 정말 강할 때만 최대 2개까지 붙인다. 3개는 목표가 아니라 상한이다.",
-    "- 기사마다 sourceBasis를 5개 이상 채우고, 본문에는 직접 인용 또는 간접 귀속을 보통 4회 이상 넣는다. 이것은 글의 균형을 잡기 위한 목표이지, 기계적인 quote block 할당량이 아니다.",
-    "- 기사 핵심과 관련 있는 인물·기업·기관·정책당국·분석가·트레이더의 실제 발언을 발견했다면 익명 요약으로 뭉개지 말고 반드시 처리한다. 정확한 원문이 확인되면 직접 인용하고, 정확한 표현이 확인되지 않으면 명시적 간접 귀속으로 쓴다.",
+    "- 기사마다 sourceBasis를 5개 이상 채우고, 본문에는 직접 인용 또는 필요한 출처 귀속을 보통 4회 안팎으로 넣는다. 이것은 글의 균형을 잡기 위한 목표이지, 기계적인 quote block 또는 간접인용 할당량이 아니다.",
+    "- 기사 핵심과 관련 있는 인물·기업·기관·정책당국·분석가·트레이더의 실제 발언을 발견했다면 익명 요약으로 뭉개지 말고 반드시 처리한다. 정확한 원문이 확인되면 간접요약을 먼저 쓰지 말고 직접 인용을 우선한다. 반복 위험은 직접인용을 없애서 피하지 말고, 앞의 간접요약을 시장 맥락 문장으로 바꿔 해결한다.",
+    "- 직접인용이 0개인 기사는 예외다. 리서치상 검증 가능한 이해관계자 발언이 정말 없고 데이터·가격 반응·공시 사실만으로 기사 가치가 충분할 때만 quote-free로 둔다.",
+    "- 직접 인용을 쓸 때는 같은 claim을 직전 또는 같은 문단에서 간접귀속으로 먼저 설명하지 않는다. 직접인용이 그 발언의 첫 제시가 되어야 하며, 인용 뒤 문장은 반복 요약이 아니라 분석·반론·시장 메커니즘으로 넘어가야 한다.",
     "- 인용·귀속은 본문이 이미 설명한 내용을 반복하는 장식으로 넣지 않는다. 새 사실, 이해관계자 관점, 수치의 의미, 반론, 비용 부담자, 다음 문단의 전환 중 하나를 반드시 제공해야 한다.",
     "- 인용 앞 문장은 왜 그 목소리가 필요한지 만들어 주고, 인용 뒤 문장은 그 발언을 받아 다음 분석으로 넘어가야 한다. 흐름을 바꾸지 못하는 인용은 짧은 간접 귀속으로 줄이거나 빼고 더 좋은 근거를 찾는다.",
     `- 송고 시각은 기사 소재 시각이 아니라 매거진 생성기가 지정한 현재 송고 시각을 사용한다. metadata.publishedAt, createdAt, updatedAt, uploadedAt, generatedAt을 임의 과거 시각으로 쓰지 않는다.`,
@@ -636,7 +750,7 @@ function buildPrompt({ count, replace, articleDirectory, staged, agentLabel = "C
     "- 개인 열람용 보도사진을 쓰면 metadata.heroImage.usageNote에 'editorial-private-use; local personal reading only'와 원출처를 남긴다. 오픈/공식 이미지면 license/rights를 남긴다.",
     "- 다운로드 뒤에는 file, ls -lh, strict check로 실제 비트맵인지 확인한다. 다운로드가 실패하면 1px placeholder나 빈 파일을 만들지 말고 실패 원인과 실행한 명령을 보고한다.",
     "- 기사마다 본문 텍스트는 공백 제외 한국어 3,000자 이상을 목표로 한다. 수치, 이해관계자 발언, 반론, 다음 데이터 포인트로 분량을 늘리되 filler는 쓰지 않는다.",
-    "- 직접 인용은 검증된 출처일 때만 쓴다. 확실하지 않으면 따옴표를 쓰지 말고 간접 인용한다.",
+    "- 직접 인용은 검증된 출처일 때만 쓴다. 검증된 직접 발언이 있으면 간접인용을 덧붙여 같은 뜻을 반복하지 않는다. 확실하지 않으면 따옴표를 쓰지 말고 필요한 만큼만 짧게 간접 귀속한다.",
     "- 매체명/소속기관/사람 이름은 첫 등장에 original name(Korean name) 형태를 쓴다.",
     "- 존대말로 쓰되 독자를 가르치거나 훈계하지 않는다.",
     "- '투자자'는 해외 투자자, 채권 투자자, 기관투자자처럼 기사 속 제3자 시장 참여자를 말할 때만 쓴다. 독자를 '투자자', '투자자 여러분'이라고 부르거나 '투자자는 ...해야 합니다/봐야 합니다/확인해야 합니다'처럼 호명하지 않는다.",
@@ -644,7 +758,8 @@ function buildPrompt({ count, replace, articleDirectory, staged, agentLabel = "C
     "- 글의 끝을 '다음 확인 지점', '앞으로 볼 것', '남은 확인 변수' 같은 소제목 아래 여러 문단의 체크리스트로 묶지 않는다.",
     "- 독자 지시 여부는 별도 LLM 분류 패스가 metadata.readerToneDecision에 저장한다. 기사 작성자는 키워드/정규식 회피가 아니라 의미상 독자에게 과제를 주지 않는 문장을 쓴다.",
     "- 사망, 전쟁, 테러리즘, 심각한 수준의 시장 붕괴처럼 가혹한 상황을 다루는 기사가 아니라면 본문에는 Bloomberg 뉴스레터 스타일의 절제된 유머와 위트를 어느 정도 담는다. 위트는 장식이 아니라 시장 메커니즘을 더 선명하게 보이게 해야 한다.",
-    "- 인용은 본문과 유기적으로 연결될 때만 쓴다. 본문과 인용이 같은 말을 반복하면 padding으로 간주하고, 인용 대신 더 구체적인 수치·반론·현장 맥락을 넣는다.",
+    "- 인용은 본문과 유기적으로 연결될 때만 쓴다. 본문과 인용이 같은 말을 반복하면 padding으로 간주하고, 간접귀속을 줄인 뒤 직접인용 또는 더 구체적인 수치·반론·현장 맥락 중 하나를 선택한다.",
+    "- 인용 흐름 여부는 별도 LLM 분류 패스가 metadata.quoteFlowDecision에 저장한다. 기사 작성자는 키워드/따옴표 개수 회피가 아니라 의미상 같은 claim을 반복하지 않는 문장을 쓴다.",
     count > 1
       ? `- 이번 생성 묶음 ${count}개가 같은 storyFamily에 몰리지 않도록 issue slate를 내부적으로 잡는다.`
       : "- 이미 같은 issue 안에 생성된 기사와 storyFamily, editorialAngle, 제목 구도가 겹치지 않게 한다.",
@@ -697,8 +812,10 @@ function buildRepairPrompt({ count, checkOutput, articleDirectory, staged, agent
     "",
     "보강 원칙:",
     "- 본문 공백 제외 3,000자 미만인 기사는 실제 근거, 이해관계자 발언, 수치, 반론, 다음 데이터 포인트로 확장한다.",
-    "- 기사 핵심과 관련 있는 실제 발언이 metadata.sourceBasis, 기사 본문, 리서치 근거에 있는데 본문에서 익명 요약으로만 처리됐다면 직접 인용 또는 명시적 간접 귀속으로 복구한다.",
-    "- 본문에는 직접 인용 또는 간접 귀속을 보통 4회 이상 확보한다. 다만 고정 횟수를 채우기 위한 장식 인용은 넣지 말고, 출처 목소리가 기사 흐름을 실제로 앞으로 밀 때만 추가한다.",
+    "- 기사 핵심과 관련 있는 실제 발언이 metadata.sourceBasis, 기사 본문, 리서치 근거에 있는데 본문에서 익명 요약으로만 처리됐다면 정확한 원문이 확인되는 경우 직접 인용으로 복구한다. 정확한 표현이 확인되지 않을 때만 짧은 명시적 간접 귀속으로 둔다.",
+    "- quote-flow 수리를 직접인용 삭제로 해결하지 않는다. 반복이 문제라면 직접인용을 남기고 앞의 간접요약을 줄이거나 시장 맥락 문장으로 바꾼다.",
+    "- 본문에는 직접 인용 또는 필요한 출처 귀속을 보통 4회 안팎으로 확보한다. 다만 고정 횟수를 채우기 위한 장식 인용이나 간접인용은 넣지 말고, 출처 목소리가 기사 흐름을 실제로 앞으로 밀 때만 추가한다.",
+    "- 직접 인용을 보강할 때는 같은 claim을 앞 문장에서 간접요약하지 않는다. 이미 간접요약 뒤에 직접인용이 붙어 있다면 둘 중 하나를 고르되, 원문이 검증된 경우 직접인용을 남기고 앞의 간접요약을 삭제하거나 시장 맥락 문장으로 바꾼다.",
     "- 인용·귀속을 보강할 때는 앞 문장이 그 목소리의 필요성을 만들고, 뒤 문장이 그 발언을 받아 다음 분석으로 넘어가게 고친다. 인용마다 새 사실, 반론, 이해관계자 관점, 수치 해석, 비용 부담자 중 하나를 추가해야 한다.",
     "- 토픽 하네스가 실패했다면 metadata.topics를 config/magazine-topics.json의 topics[].label 중 1~3개로만 고친다. 1개 주 토픽은 반드시 남기고, 4개 이상 반환했다면 앞의 3개만 남긴다.",
     "- 최근 보도 근거를 보강하거나 새로 붙일 때는 기준 업데이트 이후 항목만 사용한다. 과거 보도 항목을 근거로 쓰지 않는다.",
@@ -721,6 +838,7 @@ function buildRepairPrompt({ count, checkOutput, articleDirectory, staged, agent
     "- 글의 후반부에서 소제목 유무와 관계없이 독자에게 무엇을 봐야/확인해야/점검해야/주목해야 한다고 말하는 문장은 반드시 고친다. 시장의 미해결 긴장, 가격 반응, 증거가 아직 붙지 않은 대목으로 바꾼다.",
     "- '다음 확인 지점', '앞으로 볼 것', '남은 확인 변수' 같은 소제목 아래 여러 문단의 독자 체크리스트가 있으면 소제목과 문단을 함께 고친다.",
     "- reader-tone strict failure는 키워드 치환으로 고치지 않는다. 발화 주체와 독자 지시 여부를 의미상 분리하고, 제3자 발언 귀속은 살리되 독자에게 과제를 주는 문장만 관찰/함의 문장으로 고친다.",
+    "- quote-flow strict failure도 키워드 치환으로 고치지 않는다. 같은 claim의 간접 후 직접 반복인지 의미상 판정하고, 직접인용을 남길 때는 앞의 간접요약을 줄이며, 간접귀속은 원문이 불확실한 경우나 짧은 출처 표시로 제한한다. direct_quote_avoidance 실패라면 검증된 발언을 찾아 직접인용으로 복구한다.",
     "- 사망, 전쟁, 테러리즘, 심각한 수준의 시장 붕괴처럼 가혹한 상황이 아닌데 본문이 건조한 요약문처럼 보이면 Bloomberg 뉴스레터 스타일의 절제된 유머와 위트를 보강한다. 위트는 시장 메커니즘을 선명하게 하는 문장으로만 넣는다.",
     "- 생성 뒤 node scripts/magazine_article_style_check.mjs --strict 를 실행하고 warning 0개가 될 때까지 수정한다.",
     "",
@@ -998,6 +1116,18 @@ async function runStrictCheckWithRepair({ provider, codex, approval, sandbox, mo
         agentLabel,
       });
       await finalizeReaderToneDecisions({
+        provider,
+        codex,
+        approval,
+        sandbox,
+        model,
+        reasoning,
+        timeoutMs,
+        tempDir,
+        articleDirectory,
+        agentLabel,
+      });
+      await finalizeQuoteFlowDecisions({
         provider,
         codex,
         approval,
