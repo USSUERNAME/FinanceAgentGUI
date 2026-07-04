@@ -17,7 +17,7 @@ FinanceAgentGUI is a local app plus repairable source code. It should work out o
 | Vite/React web app | Intended, tested locally | Intended | Intended |
 | Node local server | Intended, tested locally on Node 22 | Intended with Node 22+ recommended | Intended with Node 22+ recommended |
 | Python helper scripts | Intended with venv | Intended with venv | Intended with venv or PowerShell activation |
-| Arca.live browser handoff start | Tested with Google Chrome and ChatGPT Atlas | Intended through `which`-detected browser commands | Intended through common Chrome/Edge/Brave install paths |
+| Arca.live browser handoff start | Tested with Google Chrome; Chrome is the default | Intended through `which`-detected browser commands | Intended through common Chrome/Edge/Brave install paths |
 | Arca.live handoff recovery after server restart | Implemented through `ps` scan | Implemented through `ps` scan | Not fully implemented yet |
 
 Windows support for starting a fresh browser handoff is present, but recovering an already-open handoff browser after GUI server restart is still a known improvement area.
@@ -57,14 +57,16 @@ Do not print the session file or raw cookie header. Status UI should show only s
 
 ## Browser Detection
 
-The handoff code looks for browsers in this order:
+The handoff code defaults to Google Chrome where available. It looks for browsers in this order:
 
 - explicit `ARCA_BROWSER_PATH`
-- macOS app paths for ChatGPT Atlas, Chrome, Chromium, Edge, Brave
+- macOS app paths for Chrome, Edge, Brave, Chromium
 - Windows common install paths under `LOCALAPPDATA`, `Program Files`, and `Program Files (x86)`
 - Linux commands resolved by `which`: `google-chrome`, `google-chrome-stable`, `chromium`, `chromium-browser`, `microsoft-edge`, `brave-browser`
 
-If detection fails, the recovery path should tell the user to set `ARCA_BROWSER_PATH` to the browser executable.
+ChatGPT Atlas is not auto-selected for this flow because it may not expose a stable DevTools endpoint when launched as a detached login handoff. If a user intentionally wants another Chromium-family browser, set `ARCA_BROWSER_PATH` to that executable. If detection fails, the recovery path should tell the user to set `ARCA_BROWSER_PATH` to the browser executable.
+
+Starting the login handoff should return promptly after the dedicated browser process is open. If Chrome is still warming up its DevTools endpoint, the app can show the handoff as open and verify the endpoint again when the user presses "세션 저장".
 
 ## Known Compatibility Risks
 

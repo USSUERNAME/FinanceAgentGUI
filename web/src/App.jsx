@@ -845,8 +845,15 @@ function cleanMagazineClipboardNode(node) {
   node.querySelectorAll("[contenteditable]").forEach((element) => element.removeAttribute("contenteditable"));
 }
 
+function isMagazineClipboardNbspSpacer(element) {
+  return (
+    element?.classList?.contains("magazine-copy-heading-spacer") ||
+    element?.classList?.contains("magazine-copy-nbsp-spacer")
+  );
+}
+
 function trimMagazineClipboardTrailingWhitespace(element) {
-  if (element.classList?.contains("magazine-copy-heading-spacer")) return;
+  if (isMagazineClipboardNbspSpacer(element)) return;
   let current = element.lastChild;
   while (current && current.nodeType === Node.TEXT_NODE && !current.nodeValue.trim()) {
     const previous = current.previousSibling;
@@ -919,7 +926,7 @@ function normalizeMagazineClipboardTextWhitespace(node) {
     textNodes.push(walker.currentNode);
   }
   textNodes.forEach((textNode) => {
-    if (textNode.parentElement?.closest(".magazine-copy-heading-spacer")) return;
+    if (textNode.parentElement?.closest(".magazine-copy-heading-spacer, .magazine-copy-nbsp-spacer")) return;
     textNode.nodeValue = textNode.nodeValue.replace(/\u00a0/g, " ");
     if (shouldRemoveMagazineClipboardWhitespaceTextNode(textNode)) {
       textNode.remove();
@@ -931,8 +938,9 @@ function normalizeMagazineClipboardTextWhitespace(node) {
 }
 
 function stripMagazineClipboardInternalMarkers(node) {
-  node.querySelectorAll(".magazine-copy-heading-spacer").forEach((element) => {
+  node.querySelectorAll(".magazine-copy-heading-spacer, .magazine-copy-nbsp-spacer").forEach((element) => {
     element.classList.remove("magazine-copy-heading-spacer");
+    element.classList.remove("magazine-copy-nbsp-spacer");
     if (!element.getAttribute("class")) {
       element.removeAttribute("class");
     }
@@ -946,10 +954,15 @@ function createMagazineClipboardSpacer() {
   return spacer;
 }
 
-function createMagazineClipboardHeadingSpacer({ trailingNbsp = false, withLineBreak = false } = {}) {
+function createMagazineClipboardNbspSpacer(className = "magazine-copy-nbsp-spacer") {
   const spacer = document.createElement("p");
-  spacer.className = "magazine-copy-heading-spacer";
+  spacer.className = className;
   spacer.appendChild(document.createTextNode("\u00a0"));
+  return spacer;
+}
+
+function createMagazineClipboardHeadingSpacer({ trailingNbsp = false, withLineBreak = false } = {}) {
+  const spacer = createMagazineClipboardNbspSpacer("magazine-copy-heading-spacer");
   if (withLineBreak) {
     spacer.appendChild(document.createElement("br"));
     if (trailingNbsp) {
@@ -990,6 +1003,15 @@ function insertMagazineClipboardBlockquoteBreaks(node) {
     });
 }
 
+function insertMagazineClipboardFigureCreditBreak(node) {
+  const figure = node.querySelector(".magazine-reader-figure");
+  if (!figure?.querySelector("figcaption")) return;
+  const nextElement = nextMagazineClipboardElement(figure);
+  if (!nextElement?.classList?.contains("magazine-reader-body")) return;
+  if (!nextElement.querySelector("p")) return;
+  figure.insertAdjacentElement("afterend", createMagazineClipboardNbspSpacer());
+}
+
 function insertMagazineClipboardBreaks(node) {
   [
     ".magazine-reader-published-time",
@@ -1003,6 +1025,7 @@ function insertMagazineClipboardBreaks(node) {
     heading.insertAdjacentElement("beforebegin", createMagazineClipboardHeadingSpacer({ trailingNbsp: true, withLineBreak: true }));
     heading.insertAdjacentElement("afterend", createMagazineClipboardHeadingSpacer());
   });
+  insertMagazineClipboardFigureCreditBreak(node);
   insertMagazineClipboardBlockquoteBreaks(node);
   node
     .querySelectorAll(".magazine-reader-html p, .magazine-reader-section p, .magazine-reader-chart-section p")

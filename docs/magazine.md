@@ -89,6 +89,8 @@ Treat local context, recent items, continuity search, and external research as o
 
 The local `data/news-feed.json` items may be used for urgent or unusually article-worthy subjects, but only for items after the latest successful internal update. The internal eligibility boundary is `data/world-memory/collector-state.json` `collector.lastSuccessfulAt`; if that timestamp is missing, those items must not be used as a subject source for that generation run.
 
+Article-count decisions and article-generation prompts should include all eligible post-update News Feed items, not an arbitrary fixed sample such as the latest 18 or 24 rows. A busy six-hour window can contain hundreds of short squawk items; the model should make the editorial judgment from the full eligible set, then ignore weak, promotional, duplicative, or off-domain items semantically rather than because they fell outside a prompt cap.
+
 When an article uses this local evidence, store the specific eligible evidence:
 
 ```json
@@ -115,6 +117,8 @@ When an article uses this local evidence, store the specific eligible evidence:
 Use `researchMode: "news-feed-first"` when the local item is the main source and continuity search is unavailable or weak; prefer `"news-feed-with-world-memory-backup"` when continuity search adds useful context. Do not use keyword or regex matching to decide whether an item is article-worthy; the generator should make an editorial LLM judgment from the eligible item, timing, market mechanism, source, and context.
 
 Before generating a new magazine issue, create an editorial slate. A normal five-article issue should not be five versions of the highest-ranked story family. Mix major trend follow-ups, lower-level signals, company or sector mechanics, and at least occasional external-research stories. For recurring mega-trends, write from the latest delta rather than reintroducing the issue from scratch. Use `editorialAngle`, `storyFamily`, and `noveltyNote` in metadata to make that decision auditable.
+
+Scheduled topic discovery normally uses the eligible post-update News Feed set as the main candidate lane. After the model decides the cycle's `targetCount`, the server makes an independent true-random 12% lane roll for each actual article slot. A slot that rolls into the under-radar World Memory scout pass excludes News Feed items as subject candidates for that slot and instead evaluates recent World Memory rows using a "심심해요"-style method: look for quieter medium/low-importance, industry, company, subject, or mechanism signals that may become article-worthy, while still applying the same recent-article and event-anchor duplicate checks. This lane only changes topic discovery; once a subject is selected, article writing must continue to use the normal magazine writing harness, style rules, evidence requirements, continuity search, external research, image rules, title pass, and strict checks.
 
 Store `metadata.eventSignature` for new articles as a primary event-card claimlet, not a prose summary: `role:"primary"`, `actor`, `action`, `object[]`, `time`, `marketMechanism`, and `sourceIds[]`. For articles that intentionally connect several facts, `metadata.eventSignatures[]` may contain exactly one `role:"primary"` card plus zero or more `role:"supporting"` cards. The primary event signature is the text that should be embedded for duplicate discovery; do not embed the whole article body for novelty checks.
 
