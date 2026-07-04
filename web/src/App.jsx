@@ -90,7 +90,7 @@ import { AppNavigation } from "./shell/AppNavigation.jsx";
 import { compactVisibleScreenText, collectVisibleScreenSnapshot } from "./shell/screenSnapshot.js";
 import { worldMemoryActionCatalog } from "./worldMemory/actionCatalog.js";
 import { buildWorldMemoryAskRequest } from "./worldMemory/askRequest.js";
-import { worldMemoryActionText } from "./worldMemory/statusHelpers.js";
+import { worldMemoryActionText, worldMemoryHealthState } from "./worldMemory/statusHelpers.js";
 
 const SettingsView = React.lazy(() => import("./settings/SettingsView.jsx"));
 const ReportsView = React.lazy(() => import("./reports/ReportsView.jsx"));
@@ -1226,6 +1226,8 @@ const ARCA_WRITE_URL = "https://arca.live/b/stock/write";
 const ARCA_NOTIFICATION_URL = "https://arca.live/u/notification";
 const ARCA_NOTIFICATION_POLL_INTERVAL_MS = 30000;
 const MAGAZINE_STATUS_POLL_INTERVAL_MS = 30000;
+const NOTIFICATION_STATUS_POLL_INTERVAL_MS = 15000;
+const BROWSER_NOTIFICATION_LAST_SHOWN_KEY = "finance-agent-gui:last-browser-notification-id";
 const MEMORY_RECENT_LIMIT = 5;
 const MEMORY_DIALOG_PAGE_SIZE = 20;
 const PORTFOLIO_CANVAS_FILE_SAVE_DEBOUNCE_MS = 450;
@@ -1290,6 +1292,29 @@ function readMagazineGenerateOneToolVisible() {
     return window.localStorage.getItem(MAGAZINE_GENERATE_ONE_TOOL_STORAGE_KEY) === "1";
   } catch {
     return false;
+  }
+}
+
+function browserNotificationPermissionState() {
+  if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
+  return window.Notification.permission || "default";
+}
+
+function readLastBrowserNotificationId() {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(BROWSER_NOTIFICATION_LAST_SHOWN_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeLastBrowserNotificationId(id) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(BROWSER_NOTIFICATION_LAST_SHOWN_KEY, String(id || ""));
+  } catch {
+    // Ignore storage failures; duplicate prevention is best-effort.
   }
 }
 
@@ -1538,7 +1563,9 @@ function arcaNotificationHealthState(status) {
   if (hasError) {
     return {
       level: "error",
+      sidebarLevel: "error",
       count: 0,
+      showNotificationCount: false,
       showSidebarDot: true,
       title: status?.error ? `아카라이브 알림 조회 불가: ${status.error}` : "아카라이브 알림 조회 불가",
       ariaLabel: "아카라이브 알림 조회 불가",
@@ -1548,8 +1575,10 @@ function arcaNotificationHealthState(status) {
   if (!connected) {
     return {
       level: "idle",
+      sidebarLevel: "online",
       count: 0,
-      showSidebarDot: false,
+      showNotificationCount: false,
+      showSidebarDot: true,
       title: status?.error || "아카라이브 알림 로그인 필요",
       ariaLabel: "아카라이브 알림 로그인 필요",
     };
@@ -1558,7 +1587,9 @@ function arcaNotificationHealthState(status) {
   if (count > 0) {
     return {
       level: "online",
+      sidebarLevel: "online",
       count,
+      showNotificationCount: true,
       showSidebarDot: true,
       title: `아카라이브 알림 ${formatCount(count)}개`,
       ariaLabel: `아카라이브 알림 ${formatCount(count)}개`,
@@ -1567,7 +1598,9 @@ function arcaNotificationHealthState(status) {
 
   return {
     level: "idle",
+    sidebarLevel: "online",
     count: 0,
+    showNotificationCount: true,
     showSidebarDot: true,
     title: "아카라이브 알림 없음",
     ariaLabel: "아카라이브 알림 없음",
@@ -1786,6 +1819,8 @@ function App() {
   const [pendingDeletePortfolioCanvas, setPendingDeletePortfolioCanvas] = useState(null);
   const [assetApiDialogOpen, setAssetApiDialogOpen] = useState(false);
   const portfolioCanvasNameInputRef = useRef(null);
+  const notificationStatusRef = useRef(null);
+  const browserNotificationLastShownRef = useRef(readLastBrowserNotificationId());
   const magazineCanvasRef = useRef(null);
   const magazineTopicModalRef = useRef(null);
   const magazineReaderArticleRef = useRef(null);
@@ -1814,6 +1849,9 @@ function App() {
   const [arcaAuthBusy, setArcaAuthBusy] = useState(false);
   const [arcaAuthAction, setArcaAuthAction] = useState("");
   const [arcaAuthError, setArcaAuthError] = useState("");
+  const [browserNotificationPermission, setBrowserNotificationPermission] = useState(() =>
+    browserNotificationPermissionState()
+  );
   const [arcaNotificationStatus, setArcaNotificationStatus] = useState({
     ok: true,
     connected: false,
@@ -1833,6 +1871,7 @@ function App() {
   const [newsFeedSettingsBusy, setNewsFeedSettingsBusy] = useState(false);
   const [newsFeedSettingsSavingId, setNewsFeedSettingsSavingId] = useState("");
   const [newsFeedSettingsError, setNewsFeedSettingsError] = useState("");
+  const [notificationStatus, setNotificationStatus] = useState(null);
   const [memoryStatus, setMemoryStatus] = useState(emptyMemoryStatus);
   const [memoryBusy, setMemoryBusy] = useState(false);
   const [memoryError, setMemoryError] = useState("");
@@ -1856,6 +1895,8 @@ function App() {
   const [worldMemoryBusy, setWorldMemoryBusy] = useState(false);
   const [worldMemoryError, setWorldMemoryError] = useState("");
   const [worldMemoryActionBusy, setWorldMemoryActionBusy] = useState(false);
+  const [worldMemoryRunningAction, setWorldMemoryRunningAction] = useState("");
+  const [worldMemoryRunningAgentActionId, setWorldMemoryRunningAgentActionId] = useState("");
   const [worldMemoryActionResult, setWorldMemoryActionResult] = useState(null);
   const [worldMemoryAgentAction, setWorldMemoryAgentAction] = useState(null);
   const [worldMemoryTechOpen, setWorldMemoryTechOpen] = useState(false);
@@ -2172,6 +2213,11 @@ function App() {
     [speed, speedOptions]
   );
   const arcaNotificationHealth = arcaNotificationHealthState(arcaNotificationStatus);
+  const worldMemoryHealth = worldMemoryHealthState(worldMemoryStatus, {
+    busy: worldMemoryBusy || worldMemoryActionBusy,
+    enabled: worldMemoryEnabled,
+    error: worldMemoryError || worldMemorySettingsError,
+  });
   const modelSummaryLabel = `${selectedModelGroup?.label || "모델"} ${selectedReasoning?.label || ""}`.trim();
   const selectedApproval = useMemo(
     () => activeApprovalOptions.find((item) => item.id === approval) ?? activeApprovalOptions[0],
@@ -2866,6 +2912,9 @@ function App() {
     if (item.view === "stock") {
       refreshBoard();
     }
+    if (item.view === "reports") {
+      void markReportsNotificationsOpened();
+    }
     setActiveView(item.view);
   }
 
@@ -2946,6 +2995,80 @@ function App() {
     } finally {
       setMemoryBusy(false);
     }
+  }
+
+  async function refreshNotificationStatus() {
+    const response = await fetch("/api/notifications/status", { cache: "no-store" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    setNotificationStatus(payload);
+    return payload;
+  }
+
+  async function markReportsNotificationsOpened() {
+    try {
+      const response = await fetch("/api/notifications/read-state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "mark-reports-opened" }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.ok) {
+        setNotificationStatus(payload);
+      }
+    } catch {
+      // The notification badge will be reconciled by the next status poll.
+    }
+  }
+
+  function openReportsFromBrowserNotification(notification = null) {
+    if (notification && typeof notification.close === "function") {
+      notification.close();
+    }
+    try {
+      window.focus();
+    } catch {
+      // Focus can fail in restricted browser contexts; still navigate the app state.
+    }
+    setActiveView("reports");
+    setReportRefreshSignal((value) => value + 1);
+    void markReportsNotificationsOpened();
+  }
+
+  function showBrowserNotificationForStatus(status = notificationStatusRef.current) {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setBrowserNotificationPermission("unsupported");
+      return false;
+    }
+    setBrowserNotificationPermission(window.Notification.permission || "default");
+    const urgentUpdate = status?.reportsUrgentUpdate || {};
+    const notificationId = urgentUpdate.id || status?.latest?.id || "";
+    if (!urgentUpdate.showBadge || !notificationId) return false;
+    if (browserNotificationLastShownRef.current === notificationId) return false;
+    if (window.Notification.permission !== "granted") return false;
+
+    const body = urgentUpdate.summary || status?.latest?.summary || "긴급 업데이트가 있습니다.";
+    const icon = status?.delivery?.iconPath || "/favicon.svg";
+    const notification = new window.Notification(status?.appName || "주식채널+", {
+      body,
+      icon,
+      badge: icon,
+      tag: `finance-agent-gui-${notificationId}`,
+      renotify: true,
+      data: {
+        id: notificationId,
+        view: "reports",
+      },
+    });
+    notification.onclick = (event) => {
+      event.preventDefault();
+      openReportsFromBrowserNotification(notification);
+    };
+    browserNotificationLastShownRef.current = notificationId;
+    writeLastBrowserNotificationId(notificationId);
+    return true;
   }
 
   async function loadWorldMemorySettings({ quiet = false, refreshStatus = false } = {}) {
@@ -3417,14 +3540,17 @@ function App() {
 
   async function runWorldMemoryAction(action, options = {}) {
     if (worldMemoryActionBusy) return;
+    const { uiAgentActionId = "", ...requestOptions } = options;
     setWorldMemoryActionBusy(true);
+    setWorldMemoryRunningAction(action);
+    setWorldMemoryRunningAgentActionId(uiAgentActionId);
     setWorldMemoryError("");
     try {
       const response = await fetch("/api/world-memory/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ action, ...options }),
+        body: JSON.stringify({ action, ...requestOptions }),
       });
       const payload = await response.json().catch(() => ({}));
       setWorldMemoryActionResult(payload);
@@ -3438,6 +3564,8 @@ function App() {
       return { ok: false, error: error.message };
     } finally {
       setWorldMemoryActionBusy(false);
+      setWorldMemoryRunningAction("");
+      setWorldMemoryRunningAgentActionId("");
     }
   }
 
@@ -3461,7 +3589,9 @@ function App() {
         : null;
     const result = await runWorldMemoryAction(
       proposal.action,
-      acceptedChangeSuggestion ? { ...options, acceptedChangeSuggestion } : options
+      acceptedChangeSuggestion
+        ? { ...options, acceptedChangeSuggestion, uiAgentActionId: proposal.id || "" }
+        : { ...options, uiAgentActionId: proposal.id || "" }
     );
     if (!result?.ok) return;
     if (result?.ok && worldMemoryActionsNeedingReportRefresh.has(proposal.action)) {
@@ -4123,7 +4253,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    void loadWorldMemorySettings({ quiet: true });
+    void loadWorldMemorySettings({ quiet: true, refreshStatus: true });
     void loadMagazineSettings({ quiet: true });
   }, []);
 
@@ -4410,6 +4540,71 @@ function App() {
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function pollNotificationStatus() {
+      try {
+        const payload = await refreshNotificationStatus();
+        if (cancelled) return;
+        setNotificationStatus(payload);
+      } catch {
+        // Keep the last known badge state; notification polling should not disturb the workspace.
+      }
+    }
+
+    void pollNotificationStatus();
+    const timer = window.setInterval(pollNotificationStatus, NOTIFICATION_STATUS_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    notificationStatusRef.current = notificationStatus;
+    showBrowserNotificationForStatus(notificationStatus);
+  }, [notificationStatus?.latest?.id, notificationStatus?.reportsUrgentUpdate?.showBadge]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setBrowserNotificationPermission("unsupported");
+      return undefined;
+    }
+    setBrowserNotificationPermission(window.Notification.permission || "default");
+    if (window.Notification.permission !== "default") return undefined;
+
+    let cancelled = false;
+    let cleanupDone = false;
+    const cleanup = () => {
+      if (cleanupDone) return;
+      cleanupDone = true;
+      window.removeEventListener("click", requestPermission);
+      window.removeEventListener("keydown", requestPermission);
+    };
+    const requestPermission = () => {
+      cleanup();
+      window.Notification.requestPermission()
+        .then((permission) => {
+          if (cancelled) return;
+          setBrowserNotificationPermission(permission || browserNotificationPermissionState());
+          if (permission === "granted") {
+            showBrowserNotificationForStatus(notificationStatusRef.current);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setBrowserNotificationPermission(browserNotificationPermissionState());
+        });
+    };
+
+    window.addEventListener("click", requestPermission, { capture: true, once: true });
+    window.addEventListener("keydown", requestPermission, { capture: true, once: true });
+    return () => {
+      cancelled = true;
+      cleanup();
     };
   }, []);
 
@@ -5569,6 +5764,7 @@ function App() {
         magazineStatus={magazineStatus}
         nameInputRef={portfolioCanvasNameInputRef}
         newsFeedStatus={newsFeedStatus}
+        notificationStatus={notificationStatus}
         magazineEnabled={magazineEnabled}
         onDraftChange={setPortfolioCanvasNameDraft}
         onDraftKeyDown={handlePortfolioCanvasNameKeyDown}
@@ -5588,6 +5784,7 @@ function App() {
         portfolioCanvases={portfolioCanvases}
         portfolioSidebarOpen={portfolioSidebarOpen}
         worldMemoryEnabled={worldMemoryEnabled}
+        worldMemoryHealth={worldMemoryHealth}
       />
 
       {activeView === "settings" ? (
@@ -5689,6 +5886,7 @@ function App() {
       ) : activeView === "chat" ? (
         <ChatCanvas
           activeWorldMemoryActionId={worldMemoryAgentAction?.id || ""}
+          runningWorldMemoryAgentActionId={worldMemoryRunningAgentActionId}
           addChatAttachmentFiles={addChatAttachmentFiles}
           agentIcon={agentIcon}
           agentOptionsReady={agentOptionsReady}
@@ -5755,6 +5953,8 @@ function App() {
               busy={worldMemoryBusy}
               error={worldMemoryError}
               actionBusy={worldMemoryActionBusy}
+              activeAction={worldMemoryRunningAction}
+              agentActionBusy={Boolean(worldMemoryRunningAgentActionId && worldMemoryRunningAgentActionId === worldMemoryAgentAction?.id)}
               actionResult={worldMemoryActionResult}
               agentAction={worldMemoryAgentAction}
               agentIcon={worldMemoryAgentRuntime.icon}
@@ -6332,6 +6532,7 @@ function App() {
           isSending={isSending}
           messageStackRef={messageStackRef}
           activeWorldMemoryActionId={worldMemoryAgentAction?.id || ""}
+          runningWorldMemoryAgentActionId={worldMemoryRunningAgentActionId}
           onClearAttachedArticle={() => clearAttachedArticleForScope(activeChatScope)}
           onExecuteWorldMemoryAction={executeWorldMemoryAgentAction}
           onNewChat={startNewChat}

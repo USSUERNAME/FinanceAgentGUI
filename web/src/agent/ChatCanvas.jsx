@@ -50,6 +50,7 @@ export function ChatCanvas({
   toolbarReasoningValue,
   toolbarSpeedValue,
   visibleChatMessages,
+  runningWorldMemoryAgentActionId = "",
   worldMemoryActionBusy = false,
 }) {
   const hasMessages = visibleChatMessages.length > 0;
@@ -193,6 +194,7 @@ export function ChatCanvas({
                 message={message}
                 agentIcon={agentIcon}
                 activeWorldMemoryActionId={activeWorldMemoryActionId}
+                runningWorldMemoryAgentActionId={runningWorldMemoryAgentActionId}
                 worldMemoryActionBusy={worldMemoryActionBusy}
                 onExecuteWorldMemoryAction={onExecuteWorldMemoryAction}
                 key={message.id}

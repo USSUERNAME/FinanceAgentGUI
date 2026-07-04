@@ -327,23 +327,25 @@ export default function StockChannelView({
                 <PencilLine size={16} strokeWidth={2.2} />
                 <span>글쓰기</span>
               </a>
-              <a
-                className={[
-                  "board-notification-link",
-                  notificationHealth.level === "online" ? "is-online" : "",
-                  notificationHealth.level === "error" ? "is-error" : "",
-                  notificationBusy ? "is-loading" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                href={notificationUrl}
-                target="_blank"
-                rel="noreferrer"
-                title={notificationHealth.title}
-                aria-label={notificationHealth.ariaLabel}
-              >
-                <span>{formatCount(notificationHealth.count) || "0"}</span>
-              </a>
+              {notificationHealth.showNotificationCount ? (
+                <a
+                  className={[
+                    "board-notification-link",
+                    notificationHealth.level === "online" ? "is-online" : "",
+                    notificationHealth.level === "error" ? "is-error" : "",
+                    notificationBusy ? "is-loading" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  href={notificationUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={notificationHealth.title}
+                  aria-label={notificationHealth.ariaLabel}
+                >
+                  <span>{formatCount(notificationHealth.count) || "0"}</span>
+                </a>
+              ) : null}
             </div>
           </header>
 

@@ -8,6 +8,7 @@ import { handleEconomicCalendarEndpoint } from "./economicCalendarApi.mjs";
 import { handleEarningsEndpoint } from "./earningsApi.mjs";
 import { handleMemoryEndpoint } from "./memoryApi.mjs";
 import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mjs";
+import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
 import { handleWorldMemoryEndpoint, startWorldMemoryCollector } from "./worldMemoryApi.mjs";
@@ -225,6 +226,31 @@ const server = createServer(async (req, res) => {
 
   if (req.url?.startsWith("/api/memory")) {
     await handleMemoryEndpoint("memory", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/notifications/status")) {
+    await handleNotificationsEndpoint("status", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/notifications/push")) {
+    await handleNotificationsEndpoint("push", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/notifications/emergency-report")) {
+    await handleNotificationsEndpoint("emergency-report", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/notifications/emergency-scenario")) {
+    await handleNotificationsEndpoint("emergency-scenario", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/notifications/read-state")) {
+    await handleNotificationsEndpoint("read-state", req, res);
     return;
   }
 

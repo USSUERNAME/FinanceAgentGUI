@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildDailyUserMemoryRollup,
   buildExternalNewsBriefing,
+  normalizeExternalMarketSummaryCandidate,
   sanitizeWorldMemoryReportText,
 } from "../server/sharedMemoryStore.mjs";
 
@@ -31,7 +32,7 @@ test("world memory context strips memory change suggestions", () => {
   assert.doesNotMatch(text, /들어가면 안 되는/);
 });
 
-test("external briefing uses only news after the latest world memory report", () => {
+test("external briefing stores a market summary instead of raw post-report news list", () => {
   const briefing = buildExternalNewsBriefing({
     builtAt: "2026-06-27T01:00:00.000Z",
     worldReport: {
@@ -58,13 +59,41 @@ test("external briefing uses only news after the latest world memory report", ()
         },
       ],
     },
+    marketSummary: {
+      marketTone: "mixed",
+      summaryKo: "보고서 이후 새 신호는 기술주 비용 검증과 유가 완화가 엇갈리는 혼재 국면으로 정리된다.",
+      keySignals: ["기술주 비용 검증 부담이 남아 있다."],
+      watchPoints: ["유가와 금리 변동이 같은 방향으로 움직이는지 확인이 필요하다."],
+      confidence: 0.68,
+    },
+    marketSummaryStatus: "translation-model",
+    marketSummaryModel: "translation-test-model",
+    marketSummaryProvider: "Codex CLI",
+    marketSummaryReasoning: "low",
   });
 
   assert.equal(briefing.reportAt, "2026-06-27T00:30:00.000Z");
   assert.equal(briefing.consideredCount, 1);
-  assert.match(briefing.text, /보고서 이후 새 소식/);
+  assert.match(briefing.text, /월드 메모리 이후 시장 요약/);
+  assert.match(briefing.text, /혼재 국면/);
+  assert.match(briefing.text, /translation-test-model/);
+  assert.doesNotMatch(briefing.text, /시장에 영향을 줄 수 있는 새 뉴스/);
   assert.doesNotMatch(briefing.text, /보고서 이전 오래된 소식/);
   assert.doesNotMatch(briefing.text, /외부 레이어에 들어가면 안 된다/);
+});
+
+test("external market summary harness rejects empty or non-Korean summaries", () => {
+  const candidate = normalizeExternalMarketSummaryCandidate({
+    marketTone: "mixed",
+    summaryKo: "Market is mixed.",
+    keySignals: ["rates"],
+    watchPoints: [],
+    confidence: 2,
+  });
+
+  assert.equal(candidate.ok, false);
+  assert.match(candidate.error, /한국어/);
+  assert.equal(candidate.confidence, 1);
 });
 
 test("daily user memory rollup keeps notebook-like entries in one layer", () => {

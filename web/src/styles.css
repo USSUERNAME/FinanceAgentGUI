@@ -171,6 +171,19 @@ button {
   color: #1f1f1f;
 }
 
+.nav-item.is-critical-alert {
+  background: #f2d6d6;
+  color: #8f2020;
+  box-shadow: inset 0 0 0 1px #dc8d8d;
+}
+
+.nav-item.is-critical-alert:hover,
+.nav-item.is-critical-alert.is-active {
+  background: #ebc4c4;
+  color: #741717;
+  box-shadow: inset 0 0 0 1px #cf7373;
+}
+
 .nav-item svg {
   flex: 0 0 auto;
   color: currentColor;
@@ -217,6 +230,29 @@ button {
   font-weight: 760;
   line-height: 1;
   white-space: nowrap;
+}
+
+.nav-item.is-active .nav-unread-count {
+  border-color: #adadad;
+  background: #c9c9c9;
+}
+
+.nav-item .nav-critical-update-badge {
+  margin-left: auto;
+  border-color: #cf7373;
+  background: #ebc4c4;
+  color: #741717;
+  font-size: 10.5px;
+  font-weight: 780;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.nav-item.is-active .nav-critical-update-badge,
+.nav-item.is-critical-alert:hover .nav-critical-update-badge {
+  border-color: #bf6060;
+  background: #dfadad;
+  color: #650f0f;
 }
 
 .nav-status-dot {
@@ -9485,6 +9521,7 @@ button {
   display: grid;
   gap: 16px;
   width: min(100%, 980px);
+  margin-inline: auto;
   min-width: 0;
   padding: 22px clamp(16px, 2.4vw, 30px) 38px;
 }

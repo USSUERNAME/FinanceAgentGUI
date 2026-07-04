@@ -21,6 +21,10 @@ function worldMemorySignalToneClass(tone) {
   return "is-neutral";
 }
 
+function isWorldMemoryCollectionStatus(status) {
+  return status === "collecting" || status === "generating_briefs";
+}
+
 function worldMemoryAskAgentLabel(agentProvider = "") {
   return agentProvider === "antigravity-cli" ? "Antigravity에게 질문하기" : "Codex에게 질문하기";
 }
@@ -225,6 +229,7 @@ function WorldMemoryRichReport({ report, agentIcon = "", agentAskLabel = "Codex�
 function WorldMemoryAgentActionCard({
   action,
   busy,
+  disabled,
   onExecute,
   onClear,
 }) {
@@ -255,11 +260,11 @@ function WorldMemoryAgentActionCard({
       </div>
       {paramsText !== "{}" ? <pre>{paramsText}</pre> : null}
       <div className="world-memory-agent-action-buttons">
-        <button type="button" data-testid="world-memory-agent-execute" onClick={() => onExecute(action)} disabled={busy}>
-          {busy ? <LoaderCircle size={15} strokeWidth={2.2} /> : <Play size={15} strokeWidth={2.2} />}
+        <button type="button" data-testid="world-memory-agent-execute" onClick={() => onExecute(action)} disabled={disabled || busy}>
+          {busy ? <LoaderCircle className="is-spinning" size={15} strokeWidth={2.2} /> : <Play size={15} strokeWidth={2.2} />}
           <span>{busy ? "실행 중" : "확인 후 실행"}</span>
         </button>
-        <button type="button" onClick={onClear} disabled={busy}>
+        <button type="button" onClick={onClear} disabled={disabled || busy}>
           <X size={15} strokeWidth={2.2} />
           <span>취소</span>
         </button>
@@ -273,6 +278,8 @@ export default function WorldMemoryView({
   busy,
   error,
   actionBusy,
+  activeAction,
+  agentActionBusy,
   actionResult,
   agentAction,
   agentIcon,
@@ -295,7 +302,9 @@ export default function WorldMemoryView({
   const legacySuggestions = !hasRichReport && Array.isArray(report.suggestions) ? report.suggestions : [];
   const nextCollection = schedule.nextRetryAt || schedule.pausedUntil || schedule.nextRunAt;
   const paused = schedule.pausedUntil && new Date(schedule.pausedUntil).getTime() > Date.now();
-  const active = Boolean(collector.inFlight || collector.running || actionBusy);
+  const collectorStatus = String(collector.status || "");
+  const collectBusy = Boolean(activeAction === "collectNow" || (collector.inFlight && isWorldMemoryCollectionStatus(collectorStatus)));
+  const reportBusy = activeAction === "refreshReport" || collectorStatus === "writing_report";
   const askDisabled = !agentOptionsReady || isSending;
   const agentAskLabel = worldMemoryAskAgentLabel(agentProvider);
 
@@ -309,19 +318,19 @@ export default function WorldMemoryView({
           </div>
           <div className="world-memory-header-actions">
             <button type="button" onClick={() => onRunAction("collectNow")} disabled={!canRun}>
-              {active ? <LoaderCircle size={16} strokeWidth={2.2} /> : <Play size={16} strokeWidth={2.2} />}
-              <span>{active ? "수집 중" : "수동 수집"}</span>
+              {collectBusy ? <LoaderCircle className="is-spinning" size={16} strokeWidth={2.2} /> : <Play size={16} strokeWidth={2.2} />}
+              <span>{collectBusy ? "수집 중" : "수동 수집"}</span>
             </button>
             <button type="button" onClick={() => onRunAction("pause")} disabled={busy}>
               <Pause size={16} strokeWidth={2.2} />
               <span>{paused ? "6시간 더 연기" : "수집 일시정지"}</span>
             </button>
             <button type="button" onClick={() => onRunAction("refreshReport")} disabled={!canRun}>
-              {actionBusy ? <LoaderCircle size={16} strokeWidth={2.2} /> : <RefreshCw size={16} strokeWidth={2.2} />}
-              <span>{actionBusy ? "갱신 중" : "보고서 갱신"}</span>
+              {reportBusy ? <LoaderCircle className="is-spinning" size={16} strokeWidth={2.2} /> : <RefreshCw size={16} strokeWidth={2.2} />}
+              <span>{reportBusy ? "갱신 중" : "보고서 갱신"}</span>
             </button>
             <button type="button" onClick={onReload} disabled={busy} aria-label="월드 메모리 상태 새로고침" title="새로고침">
-              {busy ? <LoaderCircle size={16} strokeWidth={2.2} /> : <RefreshCw size={16} strokeWidth={2.2} />}
+              {busy ? <LoaderCircle className="is-spinning" size={16} strokeWidth={2.2} /> : <RefreshCw size={16} strokeWidth={2.2} />}
             </button>
           </div>
         </header>
@@ -350,7 +359,8 @@ export default function WorldMemoryView({
 
         <WorldMemoryAgentActionCard
           action={agentAction}
-          busy={actionBusy}
+          busy={agentActionBusy}
+          disabled={actionBusy}
           onExecute={onExecuteAgentAction}
           onClear={onClearAgentAction}
         />

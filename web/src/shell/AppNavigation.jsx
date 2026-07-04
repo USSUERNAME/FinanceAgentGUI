@@ -20,7 +20,6 @@ const leftSidebarSections = [
     title: "작업",
     items: [
       { label: "주식채널", icon: Home, view: "stock", statusKey: "arcaNotifications" },
-      { label: "World Memory", icon: Database, view: "world-memory" },
       { label: "News Feed", icon: Newspaper, view: "news-feed", statusKey: "newsFeed" },
       { label: "Magazine", icon: BookOpenText, view: "magazine" },
       { label: "Earning Calendar", icon: CalendarDays, view: "earning-calendar" },
@@ -33,18 +32,20 @@ const leftSidebarSections = [
 ];
 
 const sidebarUtilityItems = [
+  { label: "World Memory", icon: Database, view: "world-memory", statusKey: "worldMemory" },
   { label: "설정", icon: Settings, view: "settings" },
 ];
 
 function NavStatusDot({ health }) {
   if (!health || health.showSidebarDot === false) return null;
+  const level = health.sidebarLevel || health.level;
   return (
     <span
       className={[
         "nav-status-dot",
-        health.level === "online" ? "is-online" : "",
-        health.level === "warning" ? "is-warning" : "",
-        health.level === "error" ? "is-error" : "",
+        level === "online" ? "is-online" : "",
+        level === "warning" ? "is-warning" : "",
+        level === "error" ? "is-error" : "",
         health.isCollecting ? "is-collecting" : "",
       ]
         .filter(Boolean)
@@ -68,6 +69,7 @@ export function AppNavigation({
   magazineEnabled = false,
   nameInputRef,
   newsFeedStatus,
+  notificationStatus,
   onDraftChange,
   onDraftKeyDown,
   onDuplicateCanvas,
@@ -84,6 +86,7 @@ export function AppNavigation({
   portfolioCanvases,
   portfolioSidebarOpen,
   worldMemoryEnabled = false,
+  worldMemoryHealth,
 }) {
   const PortfolioChevron = portfolioSidebarOpen ? ChevronDown : ChevronRight;
 
@@ -115,13 +118,22 @@ export function AppNavigation({
                   const isPortfolioItem = item.view === "portfolio";
                   const isPortfolioSurface = activeView === "portfolio" || activeView === "portfolio-canvas";
                   const isActiveItem = isPortfolioItem ? isPortfolioSurface : item.view === activeView;
-                  const showNewsFeedUnreadBadge = item.statusKey === "newsFeed" && !isActiveItem;
+                  const showReportsUrgentUpdateBadge =
+                    item.view === "reports" && notificationStatus?.reportsUrgentUpdate?.showBadge;
+                  const reportsUrgentUpdateSummary = notificationStatus?.reportsUrgentUpdate?.summary || "";
+                  const arcaNotificationCount =
+                    item.statusKey === "arcaNotifications"
+                      ? Math.max(0, Math.trunc(Number(itemStatusHealth?.count || 0)))
+                      : 0;
+                  const showArcaNotificationBadge =
+                    item.statusKey === "arcaNotifications" && itemStatusHealth?.showNotificationCount === true;
+                  const showNewsFeedUnreadBadge = item.statusKey === "newsFeed";
                   const newsFeedUnreadCount =
                     showNewsFeedUnreadBadge
                       ? Math.max(0, Math.trunc(Number(newsFeedStatus?.readState?.unreadTranslatedCount || 0)))
                       : 0;
                   const newsFeedUnreadText = formatUnreadBadgeCount(newsFeedUnreadCount);
-                  const showMagazineArticleBadge = item.view === "magazine" && !isActiveItem;
+                  const showMagazineArticleBadge = item.view === "magazine";
                   const magazineUnreadCount = showMagazineArticleBadge
                     ? Math.max(0, Math.trunc(Number(magazineStatus?.readState?.unreadArticleCount || 0)))
                     : 0;
@@ -132,18 +144,33 @@ export function AppNavigation({
                         className={[
                           "nav-item",
                           isActiveItem ? "is-active" : "",
+                          showReportsUrgentUpdateBadge ? "is-critical-alert" : "",
                           isPortfolioItem ? "has-children" : "",
                         ]
                           .filter(Boolean)
                           .join(" ")}
                         type="button"
                         onClick={() => onSelectItem(item)}
-                        title={itemStatusHealth ? itemStatusHealth.title : item.label}
+                        title={
+                          showReportsUrgentUpdateBadge
+                            ? `긴급 업데이트${reportsUrgentUpdateSummary ? `: ${reportsUrgentUpdateSummary}` : ""}`
+                            : itemStatusHealth
+                              ? itemStatusHealth.title
+                              : item.label
+                        }
                         aria-expanded={isPortfolioItem ? portfolioSidebarOpen : undefined}
                       >
                         <Icon size={16} strokeWidth={2} />
                         <span className="nav-item-label">
                           <span className="nav-item-text">{item.label}</span>
+                          {showArcaNotificationBadge ? (
+                            <span
+                              className="nav-unread-count nav-arca-count"
+                              aria-label={`아카라이브 알림 ${formatUnreadBadgeCount(arcaNotificationCount)}개`}
+                            >
+                              {formatUnreadBadgeCount(arcaNotificationCount)}
+                            </span>
+                          ) : null}
                           {showNewsFeedUnreadBadge ? (
                             <span
                               className="nav-unread-count"
@@ -158,6 +185,14 @@ export function AppNavigation({
                               aria-label={`확인 안 한 Magazine 새 글 ${formatUnreadBadgeCount(magazineUnreadCount)}개`}
                             >
                               {magazineUnreadText}
+                            </span>
+                          ) : null}
+                          {showReportsUrgentUpdateBadge ? (
+                            <span
+                              className="nav-unread-count nav-critical-update-badge"
+                              aria-label="보고서 긴급 업데이트"
+                            >
+                              긴급 업데이트
                             </span>
                           ) : null}
                         </span>
@@ -194,21 +229,26 @@ export function AppNavigation({
         ))}
       </nav>
 
-      <nav className="app-sidebar-footer" aria-label="설정">
-        {sidebarUtilityItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              className={item.view === activeView ? "nav-item is-active" : "nav-item"}
-              type="button"
-              key={item.label}
-              onClick={() => onSelectUtility(item)}
-            >
-              <Icon size={16} strokeWidth={2} />
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
+      <nav className="app-sidebar-footer" aria-label="시스템">
+        {sidebarUtilityItems
+          .filter((item) => item.view !== "world-memory" || worldMemoryEnabled)
+          .map((item) => {
+            const Icon = item.icon;
+            const itemStatusHealth = item.statusKey === "worldMemory" ? worldMemoryHealth : null;
+            return (
+              <button
+                className={item.view === activeView ? "nav-item is-active" : "nav-item"}
+                type="button"
+                key={item.label}
+                onClick={() => onSelectUtility(item)}
+                title={itemStatusHealth ? itemStatusHealth.title : item.label}
+              >
+                <Icon size={16} strokeWidth={2} />
+                <span className="nav-item-text">{item.label}</span>
+                <NavStatusDot health={itemStatusHealth} />
+              </button>
+            );
+          })}
       </nav>
     </aside>
   );
