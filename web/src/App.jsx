@@ -113,9 +113,28 @@ const PortfolioWorkspace = React.lazy(() =>
 );
 
 const initialChatMessages = [];
+const systemMainChatScope = Object.freeze({ type: "system-main", canvasId: "" });
+const worldMemoryChatScope = Object.freeze({ type: "world-memory", canvasId: "" });
 const CODEX_PROVIDER_ID = "codex-cli";
 const ANTIGRAVITY_PROVIDER_ID = "antigravity-cli";
 const agentProviderIds = [CODEX_PROVIDER_ID, ANTIGRAVITY_PROVIDER_ID];
+
+function isWorldMemoryChatScope(scope) {
+  return scope?.type === "world-memory";
+}
+
+function chatScopeKey(scope = systemMainChatScope) {
+  if (scope?.type === "portfolio-canvas" && scope.canvasId) {
+    return `portfolio-canvas:${scope.canvasId}`;
+  }
+  if (isWorldMemoryChatScope(scope)) return "world-memory";
+  return "system-main";
+}
+
+function normalizeChatMessageList(value) {
+  return Array.isArray(value) ? value : initialChatMessages;
+}
+
 function normalizeAgentModelProvider(value) {
   return value === CODEX_PROVIDER_ID || value === ANTIGRAVITY_PROVIDER_ID ? value : "default";
 }
@@ -1738,6 +1757,7 @@ function App() {
   const [agentOptionsReady, setAgentOptionsReady] = useState(false);
   const [personaMode, setPersonaMode] = useState("none");
   const [chatMessages, setChatMessages] = useState(initialChatMessages);
+  const [worldMemoryChatMessages, setWorldMemoryChatMessages] = useState(initialChatMessages);
   const [magazineActiveArticle, setMagazineActiveArticle] = useState(null);
   const [magazineActiveTopic, setMagazineActiveTopic] = useState("");
   const [magazineCatalog, setMagazineCatalog] = useState(null);
@@ -1780,8 +1800,9 @@ function App() {
   const [reasoning, setReasoning] = useState(fallbackModelGroups[0].defaultReasoningLevel);
   const [speed, setSpeed] = useState("standard");
   const [prompt, setPrompt] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const activeChatAbortRef = useRef(null);
+  const [worldMemoryPrompt, setWorldMemoryPrompt] = useState("");
+  const [sendingChatScopes, setSendingChatScopes] = useState({});
+  const activeChatAbortRefs = useRef(new Map());
   const [promptHeight, setPromptHeight] = useState(MIN_PROMPT_HEIGHT);
   const [promptOverflow, setPromptOverflow] = useState(false);
   const [boardFilters, setBoardFilters] = useState(initialBoardFilters);
@@ -1847,7 +1868,9 @@ function App() {
   const [queuedPortfolioWidgetRequest, setQueuedPortfolioWidgetRequest] = useState(null);
   const [attachedArticle, setAttachedArticle] = useState(null);
   const [chatAttachments, setChatAttachments] = useState([]);
+  const [worldMemoryChatAttachments, setWorldMemoryChatAttachments] = useState([]);
   const [attachmentError, setAttachmentError] = useState("");
+  const [worldMemoryAttachmentError, setWorldMemoryAttachmentError] = useState("");
   const [isComposerDragging, setIsComposerDragging] = useState(false);
   const [attachingArticleHref, setAttachingArticleHref] = useState("");
   const messageStackRef = useRef(null);
@@ -2167,11 +2190,25 @@ function App() {
     [portfolioCanvases, portfolioCanvasStore.activeCanvasId]
   );
   const isPortfolioCanvasView = activeView === "portfolio-canvas" && Boolean(activePortfolioCanvas);
+  const isWorldMemoryChatView = activeView === "world-memory" && worldMemoryEnabled;
   const isChatCanvasView = activeView === "chat";
   const activeChatScope = isPortfolioCanvasView
     ? { type: "portfolio-canvas", canvasId: activePortfolioCanvas.id }
-    : { type: "system-main", canvasId: "" };
-  const visibleChatMessages = isPortfolioCanvasView ? activePortfolioCanvas.chatMessages : chatMessages;
+    : isWorldMemoryChatView
+      ? worldMemoryChatScope
+      : systemMainChatScope;
+  const visibleChatMessages = isPortfolioCanvasView
+    ? activePortfolioCanvas.chatMessages
+    : isWorldMemoryChatView
+      ? worldMemoryChatMessages
+      : chatMessages;
+  const activePrompt = promptForScope(activeChatScope);
+  const activeChatAttachments = attachmentsForScope(activeChatScope);
+  const activeAttachmentError = attachmentErrorForScope(activeChatScope);
+  const activeAttachedArticle = attachedArticleForScope(activeChatScope);
+  const isSending = isChatScopeSending(activeChatScope);
+  const activePortfolioChatIsSending = isPortfolioCanvasView ? isChatScopeSending(activeChatScope) : false;
+  const worldMemoryChatIsSending = isChatScopeSending(worldMemoryChatScope);
 
   useEffect(() => {
     if (!editingPortfolioCanvasId) return;
@@ -2568,6 +2605,75 @@ function App() {
     [activePortfolioCanvas?.id, updatePortfolioCanvasWorkspace]
   );
 
+  function isChatScopeSending(scope) {
+    return Boolean(sendingChatScopes[chatScopeKey(scope)]);
+  }
+
+  function setChatScopeSending(scope, sending) {
+    const key = chatScopeKey(scope);
+    setSendingChatScopes((current) => {
+      if (sending) {
+        return current[key] ? current : { ...current, [key]: true };
+      }
+      if (!current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function promptForScope(scope) {
+    return isWorldMemoryChatScope(scope) ? worldMemoryPrompt : prompt;
+  }
+
+  function setPromptForScope(scope, value) {
+    if (isWorldMemoryChatScope(scope)) {
+      setWorldMemoryPrompt(value);
+      return;
+    }
+    setPrompt(value);
+  }
+
+  function attachmentsForScope(scope) {
+    return isWorldMemoryChatScope(scope) ? worldMemoryChatAttachments : chatAttachments;
+  }
+
+  function setAttachmentsForScope(scope, updater) {
+    const setter = isWorldMemoryChatScope(scope) ? setWorldMemoryChatAttachments : setChatAttachments;
+    setter((current) => {
+      const nextAttachments = typeof updater === "function" ? updater(current) : updater;
+      return Array.isArray(nextAttachments) ? nextAttachments : [];
+    });
+  }
+
+  function attachmentErrorForScope(scope) {
+    return isWorldMemoryChatScope(scope) ? worldMemoryAttachmentError : attachmentError;
+  }
+
+  function setAttachmentErrorForScope(scope, value) {
+    if (isWorldMemoryChatScope(scope)) {
+      setWorldMemoryAttachmentError(value);
+      return;
+    }
+    setAttachmentError(value);
+  }
+
+  function attachedArticleForScope(scope) {
+    return isWorldMemoryChatScope(scope) ? null : attachedArticle;
+  }
+
+  function clearAttachedArticleForScope(scope) {
+    if (isWorldMemoryChatScope(scope)) return;
+    setAttachedArticle(null);
+  }
+
+  function clearComposerForScope(scope) {
+    setPromptForScope(scope, "");
+    setAttachmentsForScope(scope, []);
+    setAttachmentErrorForScope(scope, "");
+    clearAttachedArticleForScope(scope);
+  }
+
   function updateChatMessagesForScope(scope, updater) {
     if (scope?.type === "portfolio-canvas" && scope.canvasId) {
       updatePortfolioCanvasStore((current) => ({
@@ -2585,9 +2691,16 @@ function App() {
       }));
       return;
     }
+    if (isWorldMemoryChatScope(scope)) {
+      setWorldMemoryChatMessages((messages) => {
+        const nextMessages = typeof updater === "function" ? updater(messages) : updater;
+        return normalizeChatMessageList(nextMessages);
+      });
+      return;
+    }
     setChatMessages((messages) => {
       const nextMessages = typeof updater === "function" ? updater(messages) : updater;
-      return Array.isArray(nextMessages) ? nextMessages : initialChatMessages;
+      return normalizeChatMessageList(nextMessages);
     });
   }
 
@@ -2596,21 +2709,25 @@ function App() {
       const canvas = portfolioCanvases.find((item) => item.id === scope.canvasId);
       return normalizePortfolioChatMessages(canvas?.chatMessages);
     }
+    if (isWorldMemoryChatScope(scope)) {
+      return normalizeChatMessageList(worldMemoryChatMessages);
+    }
     return chatMessages;
   }
 
   function startNewChat() {
     updateChatMessagesForScope(activeChatScope, initialChatMessages);
-    setAttachedArticle(null);
-    setChatAttachments([]);
-    setAttachmentError("");
+    clearComposerForScope(activeChatScope);
   }
 
   function resolveChatScope(screen) {
     if ((screen === "portfolio-canvas" || screen === "portfolio") && isPortfolioCanvasView && activePortfolioCanvas) {
       return { type: "portfolio-canvas", canvasId: activePortfolioCanvas.id };
     }
-    return { type: "system-main", canvasId: "" };
+    if (screen === "world-memory") {
+      return worldMemoryChatScope;
+    }
+    return systemMainChatScope;
   }
 
   function createPortfolioCanvasFromGuide(mode = PORTFOLIO_CANVAS_MODES.asset.id) {
@@ -3439,6 +3556,8 @@ function App() {
     memoryScope = "system-main",
     canvas = null,
     magazineArticleContext = null,
+    provider = agentProvider,
+    providerLabel = agentProviderLabel,
   }) {
     const summary = memorySummaryFromExchange(promptText, answerText);
     if (!summary) return;
@@ -3449,19 +3568,23 @@ function App() {
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify({
-          provider: agentProvider,
-          providerLabel: agentProviderLabel,
+          provider,
+          providerLabel,
           screen,
           title: memoryTitleFromPrompt(promptText, taskType === "earning-analysis" ? "어닝 이벤트 분석" : "에이전트 채팅"),
           summary,
           tags: memoryTagsForExchange({
             screen,
-            provider: agentProvider,
+            provider,
             article,
             attachments,
             taskType,
           }).concat(
-            memoryScope === "portfolio-canvas" ? ["portfolio-canvas-memory"] : ["system-main-memory"],
+            memoryScope === "portfolio-canvas"
+              ? ["portfolio-canvas-memory"]
+              : memoryScope === "world-memory"
+                ? ["world-memory-chat-memory"]
+                : ["system-main-memory"],
             canvas?.id ? [`canvas:${canvas.id}`] : []
           ),
           artifacts: attachments.map((attachment) => attachment.name).filter(Boolean),
@@ -3480,8 +3603,8 @@ function App() {
           contextPacket: {
             screen,
             userIntent: trimForMemory(promptText, 260),
-            selectedProvider: agentProvider,
-            providerLabel: agentProviderLabel,
+            selectedProvider: provider,
+            providerLabel,
             memoryScope,
             canvas: canvas
               ? {
@@ -3511,11 +3634,16 @@ function App() {
             })),
           },
           source: {
-            surface: memoryScope === "portfolio-canvas" ? "portfolio-canvas-chat" : "sidebar-chat",
+            surface:
+              memoryScope === "portfolio-canvas"
+                ? "portfolio-canvas-chat"
+                : memoryScope === "world-memory"
+                  ? "world-memory-chat"
+                  : "sidebar-chat",
             screen,
-            provider: agentProvider,
-            providerLabel: agentProviderLabel,
-            writer: agentProvider,
+            provider,
+            providerLabel,
+            writer: provider,
           },
         }),
       });
@@ -3824,19 +3952,21 @@ function App() {
   }
 
   async function addChatAttachmentFiles(fileList) {
+    const scope = activeChatScope;
+    const scopeAttachments = attachmentsForScope(scope);
     const incoming = Array.from(fileList || []).filter((file) => file && typeof file.size === "number");
     if (!incoming.length) return;
 
-    setAttachmentError("");
-    const remainingSlots = MAX_CHAT_ATTACHMENTS - chatAttachments.length;
+    setAttachmentErrorForScope(scope, "");
+    const remainingSlots = MAX_CHAT_ATTACHMENTS - scopeAttachments.length;
     if (remainingSlots <= 0) {
-      setAttachmentError(`첨부는 최대 ${MAX_CHAT_ATTACHMENTS}개까지 가능합니다.`);
+      setAttachmentErrorForScope(scope, `첨부는 최대 ${MAX_CHAT_ATTACHMENTS}개까지 가능합니다.`);
       return;
     }
 
     const accepted = [];
     const rejected = [];
-    let totalBytes = chatAttachments.reduce((sum, item) => sum + Number(item.size || 0), 0);
+    let totalBytes = scopeAttachments.reduce((sum, item) => sum + Number(item.size || 0), 0);
 
     for (const file of incoming.slice(0, remainingSlots)) {
       if (file.size > MAX_CHAT_ATTACHMENT_BYTES) {
@@ -3856,22 +3986,23 @@ function App() {
     }
 
     if (rejected.length) {
-      setAttachmentError(rejected.join(" / "));
+      setAttachmentErrorForScope(scope, rejected.join(" / "));
     }
     if (!accepted.length) return;
 
     try {
       const nextAttachments = await Promise.all(accepted.map(fileToChatAttachment));
-      setChatAttachments((current) => [...current, ...nextAttachments].slice(0, MAX_CHAT_ATTACHMENTS));
+      setAttachmentsForScope(scope, (current) => [...current, ...nextAttachments].slice(0, MAX_CHAT_ATTACHMENTS));
       promptRef.current?.focus();
     } catch (error) {
-      setAttachmentError(error.message || "첨부 파일을 읽지 못했습니다.");
+      setAttachmentErrorForScope(scope, error.message || "첨부 파일을 읽지 못했습니다.");
     }
   }
 
   function removeChatAttachment(id) {
-    setChatAttachments((current) => current.filter((attachment) => attachment.id !== id));
-    setAttachmentError("");
+    const scope = activeChatScope;
+    setAttachmentsForScope(scope, (current) => current.filter((attachment) => attachment.id !== id));
+    setAttachmentErrorForScope(scope, "");
   }
 
   function hasFileTransfer(event) {
@@ -4441,7 +4572,7 @@ function App() {
     setPromptHeight(nextHeight);
     setPromptOverflow(textarea.scrollHeight > MAX_PROMPT_HEIGHT);
     textarea.style.height = `${nextHeight}px`;
-  }, [prompt]);
+  }, [activePrompt]);
 
   const commandPreview = useMemo(() => {
     if (!agentOptionsReady) {
@@ -4523,8 +4654,8 @@ function App() {
     return true;
   }
 
-  function stopActiveChatResponse() {
-    activeChatAbortRef.current?.abort();
+  function stopActiveChatResponse(scope = activeChatScope) {
+    activeChatAbortRefs.current.get(chatScopeKey(scope))?.abort();
   }
 
   async function saveReportArtifactAction(action, request = {}) {
@@ -4558,16 +4689,20 @@ function App() {
     const options = rawOptions && typeof rawOptions === "object" && !("nativeEvent" in rawOptions) ? rawOptions : {};
     const overridePromptText = typeof options.promptText === "string" ? options.promptText : "";
     const hasOverridePrompt = Boolean(overridePromptText);
-    const trimmed = (hasOverridePrompt ? overridePromptText : prompt).trim();
+    const screenForMessage = typeof options.screen === "string" ? options.screen : activeView;
+    const chatScope = options.chatScope || resolveChatScope(screenForMessage);
+    const scopePrompt = promptForScope(chatScope);
+    const scopeAttachments = attachmentsForScope(chatScope);
+    const trimmed = (hasOverridePrompt ? overridePromptText : scopePrompt).trim();
     const attachmentsForMessage = Array.isArray(options.attachments)
       ? options.attachments
       : hasOverridePrompt
         ? []
-        : chatAttachments;
-    if (!agentOptionsReady || (!trimmed && !attachmentsForMessage.length) || isSending) return false;
+        : scopeAttachments;
+    if (!agentOptionsReady || (!trimmed && !attachmentsForMessage.length) || isChatScopeSending(chatScope)) return false;
     const createdAt = Date.now();
-    const articleForMessage = options.article === undefined ? (hasOverridePrompt ? null : attachedArticle) : options.article;
-    const screenForMessage = typeof options.screen === "string" ? options.screen : activeView;
+    const articleForMessage =
+      options.article === undefined ? (hasOverridePrompt ? null : attachedArticleForScope(chatScope)) : options.article;
     const screenModelProviderId =
       worldMemoryEnabled && screenForMessage === "world-memory"
         ? worldMemoryManagementProviderId()
@@ -4585,7 +4720,6 @@ function App() {
     const displayText = requestedDisplayText || trimmed || "첨부 파일을 확인해 주세요.";
     const promptTextForAgent = trimmed || displayText;
     const isPortfolioScreenForMessage = screenForMessage === "portfolio" || screenForMessage === "portfolio-canvas";
-    const chatScope = options.chatScope || resolveChatScope(screenForMessage);
     const scopeCanvas = chatScope.type === "portfolio-canvas"
       ? portfolioCanvases.find((canvas) => canvas.id === chatScope.canvasId) || activePortfolioCanvas
       : null;
@@ -4648,19 +4782,18 @@ function App() {
 
     updateChatMessagesForScope(chatScope, (messages) => [...messages, userMessage, buildPendingAssistant(assistantId, messageRuntime)]);
     if (!hasOverridePrompt || options.clearComposerOnSend) {
-      setPrompt("");
-      setAttachedArticle(null);
-      setChatAttachments([]);
+      clearComposerForScope(chatScope);
     }
-    setAttachmentError("");
-    setIsSending(true);
+    setAttachmentErrorForScope(chatScope, "");
+    setChatScopeSending(chatScope, true);
 
     let completedAnswer = "";
     let streamedText = "";
     let visibleAssistantTextForCatch = (text) => text;
     let flushAssistantMessageStream = () => {};
     const abortController = new AbortController();
-    activeChatAbortRef.current = abortController;
+    const chatScopeAbortKey = chatScopeKey(chatScope);
+    activeChatAbortRefs.current.set(chatScopeAbortKey, abortController);
     const includeWorldMemoryPageContext =
       options.includeWorldMemoryContext !== undefined
         ? Boolean(options.includeWorldMemoryContext)
@@ -4931,6 +5064,8 @@ function App() {
           screen: screenForMessage,
           memoryScope: chatScope.type,
           magazineArticleContext: magazineArticleContextForMessage,
+          provider: messageRuntime.provider,
+          providerLabel: messageRuntime.providerLabel,
           canvas: scopeCanvas
             ? {
                 id: scopeCanvas.id,
@@ -5021,10 +5156,10 @@ function App() {
         )
       );
     } finally {
-      if (activeChatAbortRef.current === abortController) {
-        activeChatAbortRef.current = null;
+      if (activeChatAbortRefs.current.get(chatScopeAbortKey) === abortController) {
+        activeChatAbortRefs.current.delete(chatScopeAbortKey);
       }
-      setIsSending(false);
+      setChatScopeSending(chatScope, false);
     }
     return true;
   }
@@ -5115,8 +5250,8 @@ function App() {
             ? "위젯 수정 요청"
             : "위젯 생성 요청";
     const displayText = `${displayPrefix} · ${title}`;
-    if (!agentOptionsReady || isSending) {
-      setPrompt(agentPrompt);
+    if (!agentOptionsReady || activePortfolioChatIsSending) {
+      setPromptForScope({ type: "portfolio-canvas", canvasId: requestWithAttachments.canvasId || "" }, agentPrompt);
       setQueuedPortfolioWidgetRequest(requestWithAttachments);
       window.setTimeout(() => promptRef.current?.focus(), 0);
       return;
@@ -5144,11 +5279,11 @@ function App() {
   }
 
   useEffect(() => {
-    if (!queuedPortfolioWidgetRequest || !agentOptionsReady || isSending) return;
+    if (!queuedPortfolioWidgetRequest || !agentOptionsReady || activePortfolioChatIsSending) return;
     const request = queuedPortfolioWidgetRequest;
     setQueuedPortfolioWidgetRequest(null);
     handlePortfolioWidgetPromptRequest(request);
-  }, [queuedPortfolioWidgetRequest, agentOptionsReady, isSending]);
+  }, [queuedPortfolioWidgetRequest, agentOptionsReady, activePortfolioChatIsSending]);
 
   async function analyzeEarningEvent(event) {
     if (!agentOptionsReady || isSending || !event) return;
@@ -5169,8 +5304,8 @@ function App() {
     }));
 
     setChatMessages((messages) => [...messages, userMessage, buildPendingAssistant(assistantId)]);
-    setAttachmentError("");
-    setIsSending(true);
+    setAttachmentErrorForScope(systemMainChatScope, "");
+    setChatScopeSending(systemMainChatScope, true);
 
     let completedAnswer = "";
     let flushEarningMessageStream = () => {};
@@ -5346,7 +5481,7 @@ function App() {
         )
       );
     } finally {
-      setIsSending(false);
+      setChatScopeSending(systemMainChatScope, false);
     }
   }
 
@@ -5546,9 +5681,9 @@ function App() {
           agentIcon={agentIcon}
           agentOptionsReady={agentOptionsReady}
           agentProviderLabel={agentProviderLabel}
-          attachedArticle={attachedArticle}
-          attachmentError={attachmentError}
-          chatAttachments={chatAttachments}
+          attachedArticle={activeAttachedArticle}
+          attachmentError={activeAttachmentError}
+          chatAttachments={activeChatAttachments}
           fileInputRef={fileInputRef}
           handleComposerDragEnter={handleComposerDragEnter}
           handleComposerDragLeave={handleComposerDragLeave}
@@ -5558,17 +5693,17 @@ function App() {
           isComposerDragging={isComposerDragging}
           isSending={isSending}
           messageStackRef={messageStackRef}
-          onClearAttachedArticle={() => setAttachedArticle(null)}
+          onClearAttachedArticle={() => clearAttachedArticleForScope(activeChatScope)}
           onExecuteWorldMemoryAction={executeWorldMemoryAgentAction}
           onNewChat={startNewChat}
-          onPromptChange={setPrompt}
+          onPromptChange={(nextPrompt) => setPromptForScope(activeChatScope, nextPrompt)}
           onRemoveChatAttachment={removeChatAttachment}
           onSelectApproval={(nextApproval) => updateAgentSelection({ approval: nextApproval })}
           onSelectModel={(nextModel) => updateAgentSelection({ model: nextModel })}
           onSelectReasoning={(nextReasoning) => updateAgentSelection({ reasoning: nextReasoning })}
           onSelectSpeed={(nextSpeed) => updateAgentSelection({ speed: nextSpeed })}
           onStopSend={stopActiveChatResponse}
-          prompt={prompt}
+          prompt={activePrompt}
           promptHeight={promptHeight}
           promptOverflow={promptOverflow}
           promptRef={promptRef}
@@ -5613,7 +5748,7 @@ function App() {
               agentIcon={worldMemoryAgentRuntime.icon}
               agentProvider={worldMemoryAgentRuntime.provider}
               agentOptionsReady={agentOptionsReady}
-              isSending={isSending}
+              isSending={worldMemoryChatIsSending}
               onClearAgentAction={() => setWorldMemoryAgentAction(null)}
               onExecuteAgentAction={executeWorldMemoryAgentAction}
               onAskReportItem={askWorldMemoryReportItem}
@@ -6167,9 +6302,9 @@ function App() {
           agentProvider={sidebarAgentRuntime.provider}
           agentProviderAvailable={sidebarAgentRuntime.providerAvailable}
           agentProviderLabel={sidebarAgentRuntime.providerLabel}
-          attachedArticle={attachedArticle}
-          attachmentError={attachmentError}
-          chatAttachments={chatAttachments}
+          attachedArticle={activeAttachedArticle}
+          attachmentError={activeAttachmentError}
+          chatAttachments={activeChatAttachments}
           codexStatus={codexStatus}
           commandPreview={sidebarAgentRuntime.commandPreview}
           fileInputRef={fileInputRef}
@@ -6182,17 +6317,17 @@ function App() {
           isSending={isSending}
           messageStackRef={messageStackRef}
           activeWorldMemoryActionId={worldMemoryAgentAction?.id || ""}
-          onClearAttachedArticle={() => setAttachedArticle(null)}
+          onClearAttachedArticle={() => clearAttachedArticleForScope(activeChatScope)}
           onExecuteWorldMemoryAction={executeWorldMemoryAgentAction}
           onNewChat={startNewChat}
-          onPromptChange={setPrompt}
+          onPromptChange={(nextPrompt) => setPromptForScope(activeChatScope, nextPrompt)}
           onRemoveChatAttachment={removeChatAttachment}
           onSelectApproval={(nextApproval) => updateProviderSelection(sidebarAgentRuntime.provider, { approval: nextApproval })}
           onSelectModel={(nextModel) => updateProviderSelection(sidebarAgentRuntime.provider, { model: nextModel })}
           onSelectReasoning={(nextReasoning) => updateProviderSelection(sidebarAgentRuntime.provider, { reasoning: nextReasoning })}
           onSelectSpeed={(nextSpeed) => updateProviderSelection(sidebarAgentRuntime.provider, { speed: nextSpeed })}
           onStopSend={stopActiveChatResponse}
-          prompt={prompt}
+          prompt={activePrompt}
           promptHeight={promptHeight}
           promptOverflow={promptOverflow}
           promptRef={promptRef}
