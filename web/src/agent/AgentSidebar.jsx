@@ -56,6 +56,7 @@ export function AgentSidebar({
   toolbarReasoningValue,
   toolbarSpeedValue,
   visibleChatMessages,
+  runningWorldMemoryAgentActionId = "",
   worldMemoryActionBusy = false,
 }) {
   return (
@@ -111,6 +112,7 @@ export function AgentSidebar({
               message={message}
               agentIcon={agentIcon}
               activeWorldMemoryActionId={activeWorldMemoryActionId}
+              runningWorldMemoryAgentActionId={runningWorldMemoryAgentActionId}
               worldMemoryActionBusy={worldMemoryActionBusy}
               onExecuteWorldMemoryAction={onExecuteWorldMemoryAction}
               key={message.id}

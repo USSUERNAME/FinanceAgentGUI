@@ -2,6 +2,7 @@ import { handleEconomicCalendarEndpoint } from "./economicCalendarApi.mjs";
 import { handleEarningsEndpoint } from "./earningsApi.mjs";
 import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mjs";
 import { handleMemoryEndpoint } from "./memoryApi.mjs";
+import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
 import { handleWorldMemoryEndpoint, startWorldMemoryCollector } from "./worldMemoryApi.mjs";
@@ -167,6 +168,26 @@ export function codexApiPlugin() {
 
       server.middlewares.use("/api/memory", async (req, res) => {
         await handleMemoryEndpoint("memory", req, res);
+      });
+
+      server.middlewares.use("/api/notifications/status", async (req, res) => {
+        await handleNotificationsEndpoint("status", req, res);
+      });
+
+      server.middlewares.use("/api/notifications/push", async (req, res) => {
+        await handleNotificationsEndpoint("push", req, res);
+      });
+
+      server.middlewares.use("/api/notifications/emergency-report", async (req, res) => {
+        await handleNotificationsEndpoint("emergency-report", req, res);
+      });
+
+      server.middlewares.use("/api/notifications/emergency-scenario", async (req, res) => {
+        await handleNotificationsEndpoint("emergency-scenario", req, res);
+      });
+
+      server.middlewares.use("/api/notifications/read-state", async (req, res) => {
+        await handleNotificationsEndpoint("read-state", req, res);
       });
 
       server.middlewares.use("/api/codex/chat/stream", async (req, res) => {

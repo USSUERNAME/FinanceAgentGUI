@@ -106,6 +106,27 @@ Common repair checks:
   should be installed from native PowerShell or another native Windows shell,
   not WSL.
 
+### Local urgent notifications
+
+The local urgent notification path uses the browser Notification API:
+
+- title: `주식채널+`
+- body: one-line summary generated from the saved urgent market update report
+- icon: `/favicon.svg`
+- click target: the open FinanceAgentGUI tab focuses and switches to `보고서`
+
+Browser notifications require an open FinanceAgentGUI browser tab and browser
+notification permission for the local site. The app requests permission on the
+first user click or keypress when the browser still reports the permission state
+as `default`. If permission is denied or the page is closed, the in-app `보고서`
+sidebar badge remains the reliable visual signal for urgent updates.
+
+Urgent market updates are generated before notification delivery. The app first
+writes a short report from the existing shared-memory external market summary,
+then stores a notification event for the open browser tab to display. Opening
+Reports or clicking the browser notification marks the current urgent badge as
+read; a new urgent report turns it on again.
+
 ### Antigravity CLI OAuth
 
 Antigravity provider calls use the standalone `agy` CLI and its Google OAuth

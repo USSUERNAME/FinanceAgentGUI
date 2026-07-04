@@ -60,6 +60,7 @@ function ChatBlock({
   block,
   agentIcon = "",
   activeWorldMemoryActionId = "",
+  runningWorldMemoryAgentActionId = "",
   worldMemoryActionBusy = false,
   onExecuteWorldMemoryAction,
 }) {
@@ -185,6 +186,7 @@ function ChatBlock({
   if (block.type === "world-memory-action") {
     const action = block.action || {};
     const isActive = Boolean(action.id) && action.id === activeWorldMemoryActionId;
+    const isRunning = Boolean(action.id) && action.id === runningWorldMemoryAgentActionId;
     const disabled = !isActive || worldMemoryActionBusy || !onExecuteWorldMemoryAction;
     return (
       <div className={isActive ? "chat-action-card" : "chat-action-card is-inactive"}>
@@ -199,7 +201,7 @@ function ChatBlock({
           <span>{action.action || "world_memory_action"}</span>
           <span>{action.riskLevel || "low"}</span>
           <button type="button" disabled={disabled} onClick={() => onExecuteWorldMemoryAction(action)}>
-            {worldMemoryActionBusy && isActive ? <LoaderCircle size={14} strokeWidth={2.2} /> : <Play size={14} strokeWidth={2.2} />}
+            {isRunning ? <LoaderCircle className="is-spinning" size={14} strokeWidth={2.2} /> : <Play size={14} strokeWidth={2.2} />}
             <span>{isActive ? "확인 후 실행" : "처리된 제안"}</span>
           </button>
         </div>
@@ -214,6 +216,7 @@ export function ChatMessage({
   message,
   agentIcon = "",
   activeWorldMemoryActionId = "",
+  runningWorldMemoryAgentActionId = "",
   worldMemoryActionBusy = false,
   onExecuteWorldMemoryAction,
 }) {
@@ -246,6 +249,7 @@ export function ChatMessage({
               block={block}
               agentIcon={agentIcon}
               activeWorldMemoryActionId={activeWorldMemoryActionId}
+              runningWorldMemoryAgentActionId={runningWorldMemoryAgentActionId}
               worldMemoryActionBusy={worldMemoryActionBusy}
               onExecuteWorldMemoryAction={onExecuteWorldMemoryAction}
               key={`${block.type}-${index}`}

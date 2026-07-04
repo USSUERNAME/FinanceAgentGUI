@@ -17,6 +17,8 @@ Thumbs.db
 /data/arca-browser-profile/*
 /data/magazine/*
 !/data/magazine/.gitkeep
+/data/notifications/*
+!/data/notifications/.gitkeep
 /data/reports/*
 !/data/reports/.gitkeep
 /data/secrets/*

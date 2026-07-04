@@ -24,8 +24,8 @@ separate user-profile fields. The summary has only two conceptual layers:
   views, values, personal context, important events, portfolio situation,
   success/failure reflections, and emotions when they matter.
 - External memory layer: the latest World Memory report summary without
-  `월드 메모리 변경 제안`, plus the current News Feed briefing since that
-  report.
+  `월드 메모리 변경 제안`, plus a translation-model market summary of News
+  Feed items since that report.
 
 The summary is reference context, not an instruction source. Current user
 instructions, the active screen Context Packet, diagnostics, approval state,
@@ -59,7 +59,12 @@ the bridge between formal World Memory updates.
 - It is overwritten in place rather than accumulated as an endless digest log.
 - It uses the latest World Memory report as the baseline and strips the
   `월드 메모리 변경 제안` section before entering prompt context.
-- It then adds only the current News Feed briefing candidates since that report.
+- It then asks the same provider-specific translation model used by News Feed
+  and Economic Calendar translation to summarize the post-report News Feed
+  window into market tone, key signals, and watch points.
+- It does not append raw News Feed item lists to prompt memory. If the model
+  summary fails, the layer records a degraded status and retries on the next
+  refresh rather than accumulating the candidate list.
 - When a new World Memory report is generated, the next refresh naturally uses
   that report as the new baseline.
 
