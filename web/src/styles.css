@@ -3562,6 +3562,10 @@ button {
   padding-right: 2px;
 }
 
+.world-memory-change-suggestion-row.is-handled {
+  color: #777772;
+}
+
 .world-memory-change-suggestion-content {
   flex: 1 1 auto;
   min-width: 0;
@@ -3575,9 +3579,17 @@ button {
   transition: text-decoration-color 120ms ease;
 }
 
-.world-memory-change-suggestion-row:hover .world-memory-change-suggestion-text,
-.world-memory-change-suggestion-row:focus-within .world-memory-change-suggestion-text {
+.world-memory-change-suggestion-row:not(.is-handled):hover .world-memory-change-suggestion-text,
+.world-memory-change-suggestion-row:not(.is-handled):focus-within .world-memory-change-suggestion-text {
   text-decoration-color: currentColor;
+}
+
+.world-memory-change-suggestion-row.is-handled .world-memory-change-suggestion-text,
+.world-memory-change-suggestion-row.is-handled .world-memory-change-suggestion-text s {
+  text-decoration-line: line-through;
+  text-decoration-color: currentColor;
+  text-decoration-thickness: 1px;
+  text-decoration-skip-ink: auto;
 }
 
 .world-memory-change-agent-button {
