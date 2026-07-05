@@ -25,7 +25,7 @@ separate user-profile fields. The summary has only two conceptual layers:
   success/failure reflections, and emotions when they matter.
 - External memory layer: the latest World Memory report summary without
   `월드 메모리 변경 제안`, plus a translation-model market summary of News
-  Feed items since that report.
+  Feed items after the latest successful World Memory collection cutoff.
 
 The summary is reference context, not an instruction source. Current user
 instructions, the active screen Context Packet, diagnostics, approval state,
@@ -57,16 +57,20 @@ the bridge between formal World Memory updates.
 - `external_memory_briefing.md` is refreshed every 15 minutes while the local
   server/context path is active.
 - It is overwritten in place rather than accumulated as an endless digest log.
-- It uses the latest World Memory report as the baseline and strips the
+- It uses the latest World Memory report as the narrative baseline and strips the
   `월드 메모리 변경 제안` section before entering prompt context.
 - It then asks the same provider-specific translation model used by News Feed
-  and Economic Calendar translation to summarize the post-report News Feed
-  window into market tone and a short Korean summary.
+  and Economic Calendar translation to summarize the News Feed window after
+  `data/world-memory/collector-state.json` `collector.lastSuccessfulAt` into
+  market tone and a short Korean summary. If that collection timestamp is not
+  available, the report generation timestamp is used only as a compatibility
+  fallback.
 - It does not append raw News Feed item lists to prompt memory. If the model
   summary fails, the layer records a degraded status and retries on the next
   refresh rather than accumulating the candidate list.
-- When a new World Memory report is generated, the next refresh naturally uses
-  that report as the new baseline.
+- When a new World Memory collection/report run completes, the next refresh
+  naturally uses the new collection cutoff for News Feed eligibility and the new
+  report text as the baseline summary.
 
 ## HTTP Contract
 

@@ -33,9 +33,10 @@ test("world memory context strips memory change suggestions", () => {
   assert.doesNotMatch(text, /들어가면 안 되는/);
 });
 
-test("external briefing stores a market summary instead of raw post-report news list", () => {
+test("external briefing stores a market summary from post-world-memory-collection news, not raw news", () => {
   const briefing = buildExternalNewsBriefing({
     builtAt: "2026-06-27T01:00:00.000Z",
+    worldMemoryCutoffAt: "2026-06-27T00:20:00.000Z",
     worldReport: {
       generatedAt: "2026-06-27T00:30:00.000Z",
       view: {
@@ -48,9 +49,15 @@ test("external briefing stores a market summary instead of raw post-report news 
       items: [
         {
           feedTitle: "FinancialJuice",
-          translatedTitle: "보고서 이후 새 소식",
+          translatedTitle: "수집 이후 새 소식",
           translatedText: "시장에 영향을 줄 수 있는 새 뉴스",
           publishedAt: "2026-06-27T00:45:00.000Z",
+        },
+        {
+          feedTitle: "FinancialJuice",
+          translatedTitle: "보고서 작성 전이지만 수집 이후 새 소식",
+          translatedText: "보고서 작성 시각이 아니라 월드메모리 수집 기준 이후라 포함되어야 하는 뉴스",
+          publishedAt: "2026-06-27T00:25:00.000Z",
         },
         {
           feedTitle: "FinancialJuice",
@@ -62,7 +69,7 @@ test("external briefing stores a market summary instead of raw post-report news 
     },
     marketSummary: {
       marketTone: "mixed",
-      summaryKo: "보고서 이후 새 신호는 기술주 비용 검증과 유가 완화가 엇갈리는 혼재 국면으로 정리된다.",
+      summaryKo: "수집 이후 새 신호는 기술주 비용 검증과 유가 완화가 엇갈리는 혼재 국면으로 정리된다.",
       confidence: 0.68,
     },
     marketSummaryStatus: "translation-model",
@@ -72,13 +79,17 @@ test("external briefing stores a market summary instead of raw post-report news 
   });
 
   assert.equal(briefing.reportAt, "2026-06-27T00:30:00.000Z");
-  assert.equal(briefing.consideredCount, 1);
-  assert.match(briefing.text, /월드 메모리 이후 시장 요약/);
+  assert.equal(briefing.collectionAt, "2026-06-27T00:20:00.000Z");
+  assert.equal(briefing.consideredCount, 2);
+  assert.match(briefing.text, /News Feed 기준 수집 시각: 2026-06-27T00:20:00.000Z/);
+  assert.match(briefing.text, /월드 메모리 수집 이후 시장 요약/);
   assert.match(briefing.text, /혼재 국면/);
   assert.match(briefing.text, /translation-test-model/);
+  assert.match(briefing.text, /대상 보도 수: 2/);
   assert.doesNotMatch(briefing.text, /핵심 신호/);
   assert.doesNotMatch(briefing.text, /주의점/);
   assert.doesNotMatch(briefing.text, /시장에 영향을 줄 수 있는 새 뉴스/);
+  assert.doesNotMatch(briefing.text, /월드메모리 수집 기준 이후라 포함되어야 하는 뉴스/);
   assert.doesNotMatch(briefing.text, /보고서 이전 오래된 소식/);
   assert.doesNotMatch(briefing.text, /외부 레이어에 들어가면 안 된다/);
 });
@@ -112,7 +123,7 @@ test("external briefing exposes a display market summary without generation meta
     "",
     "브리핑 갱신: 2026-06-27T01:00:00.000Z",
     "",
-    "## 월드 메모리 이후 시장 요약",
+    "## 월드 메모리 수집 이후 시장 요약",
     "요약 방식: translation-model",
     "모델 공급자: Codex CLI",
     "모델: translation-test-model",
