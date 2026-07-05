@@ -83,12 +83,11 @@ test("world memory report view keeps unrelated suggestions that only mention the
     handledChangeSuggestions,
   });
 
-  assert.deepEqual(filtered.memoryChangeSuggestions, [acceptedText, unrelated]);
-  assert.equal(filtered.memoryChangeSuggestionItems[0].handled, true);
-  assert.equal(filtered.memoryChangeSuggestionItems[1].handled, false);
+  assert.deepEqual(filtered.memoryChangeSuggestions, [unrelated]);
+  assert.equal(filtered.memoryChangeSuggestionItems[0].handled, false);
 });
 
-test("world memory report view keeps handled ledger items visible when regenerated report omits them", () => {
+test("world memory report view drops handled ledger items when regenerated report omits them", () => {
   const handledChangeSuggestions = [
     {
       text: acceptedText,
@@ -104,7 +103,53 @@ test("world memory report view keeps handled ledger items visible when regenerat
     handledChangeSuggestions,
   });
 
+  assert.deepEqual(filtered.memoryChangeSuggestions, [other]);
+  assert.equal(filtered.memoryChangeSuggestionItems[0].handled, false);
+});
+
+test("world memory report view can show the just accepted suggestion as handled feedback", () => {
+  const handledChangeSuggestions = [
+    {
+      text: acceptedText,
+      fingerprint: normalizeWorldMemorySuggestionFingerprint(acceptedText),
+      action: "stateAdd",
+      target: {
+        stateLabel: "PJM 운영 비상·피크 전력가격 관찰축",
+      },
+    },
+  ];
+  const other = "`호르무즈 통항 규칙·보험료 검증 꼬리위험` state는 유지한다.";
+  const filtered = filterWorldMemoryReportView(reportViewWithSuggestions([other]), {
+    handledChangeSuggestions,
+    handledDisplayMode: "omit",
+    appendHandledChangeSuggestions: [handledChangeSuggestions[0]],
+  });
+
   assert.deepEqual(filtered.memoryChangeSuggestions, [acceptedText, other]);
   assert.equal(filtered.memoryChangeSuggestionItems[0].handled, true);
   assert.equal(filtered.memoryChangeSuggestionItems[1].handled, false);
+});
+
+test("world memory report view omits handled suggestions during collection-cycle output", () => {
+  const handledChangeSuggestions = [
+    {
+      text: acceptedText,
+      fingerprint: normalizeWorldMemorySuggestionFingerprint(acceptedText),
+      action: "stateAdd",
+      target: {
+        stateLabel: "PJM 운영 비상·피크 전력가격 관찰축",
+        story: "AI 물리 인프라 비즈니스",
+      },
+    },
+  ];
+  const restated =
+    "AI 물리 인프라 비즈니스 안에서 `PJM 운영 비상·피크 전력가격 관찰축`은 하위 관찰축으로 두고, `AI 전력망 병목과 데이터센터 접속 지연` watch state를 상위 축으로 유지한다.";
+  const other = "`호르무즈 통항 규칙·보험료 검증 꼬리위험` state는 유지한다.";
+  const filtered = filterWorldMemoryReportView(reportViewWithSuggestions([restated, other]), {
+    handledChangeSuggestions,
+    handledDisplayMode: "omit",
+  });
+
+  assert.deepEqual(filtered.memoryChangeSuggestions, [other]);
+  assert.equal(filtered.memoryChangeSuggestionItems[0].handled, false);
 });

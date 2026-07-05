@@ -61,7 +61,7 @@ the bridge between formal World Memory updates.
   `월드 메모리 변경 제안` section before entering prompt context.
 - It then asks the same provider-specific translation model used by News Feed
   and Economic Calendar translation to summarize the post-report News Feed
-  window into market tone, key signals, and watch points.
+  window into market tone and a short Korean summary.
 - It does not append raw News Feed item lists to prompt memory. If the model
   summary fails, the layer records a degraded status and retries on the next
   refresh rather than accumulating the candidate list.
@@ -77,6 +77,8 @@ GET /api/memory?limit=5&offset=0
 ```
 
 `limit` is capped at 100. Use `offset` to page through records for an infinite-scroll UI.
+The response also includes `contextMemory.marketSummary`, a display-safe view
+of the current translation-model market summary used by the News Feed screen.
 
 Append a record:
 

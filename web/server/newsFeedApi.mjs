@@ -33,6 +33,7 @@ const USER_CONFIG_PATH = join(CONFIG_DIR, "news-feeds.user.json");
 const LEGACY_CONFIG_PATH = join(CONFIG_DIR, "news-feeds.json");
 const STORE_PATH = join(DATA_DIR, "news-feed.json");
 const READ_STATE_PATH = join(DATA_DIR, "news-feed-read-state.json");
+const VIEW_STATE_PATH = join(DATA_DIR, "news-feed-view-state.json");
 const DEFAULT_POLL_INTERVAL_SECONDS = 180;
 const DEFAULT_RETENTION_HOURS = 24;
 const DEFAULT_TRANSLATION_BATCH_SIZE = 2;
@@ -526,6 +527,43 @@ function writeNewsFeedReadState(readState) {
   return nextReadState;
 }
 
+function emptyViewState() {
+  return {
+    version: 1,
+    updatedAt: nowIso(),
+    marketSummaryCollapsed: true,
+  };
+}
+
+function readNewsFeedViewState() {
+  ensureDirs();
+  if (!existsSync(VIEW_STATE_PATH)) {
+    return emptyViewState();
+  }
+  try {
+    const viewState = JSON.parse(readFileSync(VIEW_STATE_PATH, "utf8"));
+    return {
+      ...emptyViewState(),
+      ...viewState,
+      marketSummaryCollapsed: viewState.marketSummaryCollapsed !== false,
+    };
+  } catch {
+    return emptyViewState();
+  }
+}
+
+function writeNewsFeedViewState(viewState) {
+  ensureDirs();
+  const nextViewState = {
+    ...emptyViewState(),
+    ...viewState,
+    marketSummaryCollapsed: viewState.marketSummaryCollapsed !== false,
+    updatedAt: nowIso(),
+  };
+  writeFileSync(VIEW_STATE_PATH, `${JSON.stringify(nextViewState, null, 2)}\n`);
+  return nextViewState;
+}
+
 function newsFeedReadStateSnapshot(store, readState = readNewsFeedReadState()) {
   const lastOpenedMs = timestampMs(readState.lastOpenedAt);
   let unreadTranslatedCount = 0;
@@ -550,6 +588,14 @@ function newsFeedReadStateSnapshot(store, readState = readNewsFeedReadState()) {
     unreadTranslatedCount,
     latestTranslatedAt,
     path: "data/news-feed-read-state.json",
+  };
+}
+
+function newsFeedViewStateSnapshot(viewState = readNewsFeedViewState()) {
+  return {
+    marketSummaryCollapsed: viewState.marketSummaryCollapsed !== false,
+    updatedAt: viewState.updatedAt || "",
+    path: "data/news-feed-view-state.json",
   };
 }
 
@@ -633,8 +679,9 @@ function collectorStatusFromStore(store, config) {
   };
 }
 
-function publicSnapshot({ limit = 80, offset = 0, readState = null } = {}) {
+function publicSnapshot({ limit = 80, offset = 0, readState = null, viewState = null } = {}) {
   const snapshotReadState = readState || readNewsFeedReadState();
+  const snapshotViewState = viewState || readNewsFeedViewState();
   const config = readNewsFeedConfig();
   const store = readStore();
   const sortedItems = store.items
@@ -655,6 +702,7 @@ function publicSnapshot({ limit = 80, offset = 0, readState = null } = {}) {
     })),
     itemCount: sortedItems.length,
     readState: newsFeedReadStateSnapshot(store, snapshotReadState),
+    viewState: newsFeedViewStateSnapshot(snapshotViewState),
     offset,
     limit,
     hasMore: offset + items.length < sortedItems.length,
@@ -1359,6 +1407,33 @@ export async function handleNewsFeedEndpoint(kind, req, res) {
 
       if (req.method === "POST" || req.method === "PATCH") {
         sendJson(res, markNewsFeedOpened());
+        return;
+      }
+
+      sendJson(res, { ok: false, error: "method not allowed" }, 405);
+      return;
+    }
+
+    if (kind === "view-state") {
+      if (req.method === "GET") {
+        sendJson(res, {
+          ok: true,
+          viewState: newsFeedViewStateSnapshot(),
+        });
+        return;
+      }
+
+      if (req.method === "POST" || req.method === "PATCH") {
+        const body = await readJsonBody(req);
+        if (body.marketSummaryCollapsed === undefined) {
+          sendJson(res, { ok: false, error: "view-state patch is empty" }, 400);
+          return;
+        }
+        const viewState = writeNewsFeedViewState({
+          ...readNewsFeedViewState(),
+          marketSummaryCollapsed: Boolean(body.marketSummaryCollapsed),
+        });
+        sendJson(res, publicSnapshot({ limit: 0, viewState }));
         return;
       }
 

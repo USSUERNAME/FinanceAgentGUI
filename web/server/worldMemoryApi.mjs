@@ -469,25 +469,31 @@ function handledRecordForSuggestion(suggestion, handledChangeSuggestions = []) {
   return null;
 }
 
-function buildMemoryChangeSuggestionItems(suggestions = [], handledChangeSuggestions = []) {
+function buildMemoryChangeSuggestionItems(
+  suggestions = [],
+  handledChangeSuggestions = [],
+  { handledDisplayMode = "mark", appendHandledChangeSuggestions = [] } = {}
+) {
   const handledRecords = asArray(handledChangeSuggestions)
     .map((item) => normalizeHandledChangeSuggestionRecord(item))
     .filter(Boolean);
-  const matchedHandledFingerprints = new Set();
-  const items = normalizeTextList(suggestions, 8).map((text) => {
-    const handled = handledRecordForSuggestion(text, handledRecords);
-    if (handled) matchedHandledFingerprints.add(handled.fingerprint);
-    return {
-      text,
-      handled: Boolean(handled),
-      status: handled ? "handled" : "open",
-      handledAt: handled?.handledAt || "",
-      action: handled?.action || "",
-    };
-  });
+  const appendedHandledRecords = asArray(appendHandledChangeSuggestions)
+    .map((item) => normalizeHandledChangeSuggestionRecord(item))
+    .filter(Boolean);
+  const items = normalizeTextList(suggestions, 8)
+    .map((text) => {
+      const handled = handledRecordForSuggestion(text, handledRecords);
+      return {
+        text,
+        handled: Boolean(handled),
+        status: handled ? "handled" : "open",
+        handledAt: handled?.handledAt || "",
+        action: handled?.action || "",
+      };
+    })
+    .filter((item) => !(handledDisplayMode === "omit" && item.handled));
   const existingFingerprints = new Set(items.map((item) => normalizeWorldMemorySuggestionFingerprint(item.text)));
-  const missingHandledItems = handledRecords
-    .filter((item) => !matchedHandledFingerprints.has(item.fingerprint))
+  const missingHandledItems = appendedHandledRecords
     .filter((item) => !existingFingerprints.has(item.fingerprint))
     .map((item) => ({
       text: item.text,
@@ -499,9 +505,19 @@ function buildMemoryChangeSuggestionItems(suggestions = [], handledChangeSuggest
   return [...missingHandledItems, ...items];
 }
 
-export function filterWorldMemoryReportView(reportView, { handledChangeSuggestions = [] } = {}) {
+export function filterWorldMemoryReportView(
+  reportView,
+  {
+    handledChangeSuggestions = [],
+    handledDisplayMode = "mark",
+    appendHandledChangeSuggestions = [],
+  } = {}
+) {
   const view = reportView && typeof reportView === "object" && !Array.isArray(reportView) ? reportView : fallbackReportView("");
-  const memoryChangeSuggestionItems = buildMemoryChangeSuggestionItems(view.memoryChangeSuggestions, handledChangeSuggestions);
+  const memoryChangeSuggestionItems = buildMemoryChangeSuggestionItems(view.memoryChangeSuggestions, handledChangeSuggestions, {
+    handledDisplayMode,
+    appendHandledChangeSuggestions,
+  });
   return {
     ...view,
     memoryChangeSuggestions: memoryChangeSuggestionItems.map((item) => item.text),
@@ -1611,7 +1627,11 @@ async function runCommandFromBody(body) {
   };
 }
 
-async function refreshWorldMemoryReportSnapshot({ sourceAction = "", reason = "" } = {}) {
+async function refreshWorldMemoryReportSnapshot({
+  sourceAction = "",
+  reason = "",
+  acceptedChangeSuggestion = null,
+} = {}) {
   const startedAt = nowIso();
   const modelPolicy = resolveWorldMemoryModelPolicy();
   const steps = [];
@@ -1676,6 +1696,8 @@ async function refreshWorldMemoryReportSnapshot({ sourceAction = "", reason = ""
     const handledChangeSuggestions = readCollectorState().changeSuggestionLedger?.handled || [];
     const reportView = filterWorldMemoryReportView(generatedReport.view || fallbackReportView(generatedReport.text), {
       handledChangeSuggestions,
+      handledDisplayMode: "omit",
+      appendHandledChangeSuggestions: acceptedChangeSuggestion ? [acceptedChangeSuggestion] : [],
     });
     const reportText = reportPlainText(reportView);
     writeFileSync(reportHtmlPath, renderReportHtmlDocument(reportView));
@@ -1925,6 +1947,7 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
       const handledChangeSuggestions = readCollectorState().changeSuggestionLedger?.handled || [];
       const reportView = filterWorldMemoryReportView(generatedReport.view || fallbackReportView(generatedReport.text), {
         handledChangeSuggestions,
+        handledDisplayMode: "omit",
       });
       const reportText = reportPlainText(reportView);
       writeFileSync(reportHtmlPath, renderReportHtmlDocument(reportView));
@@ -2411,6 +2434,7 @@ async function runWorldMemoryAction(body = {}) {
     return refreshWorldMemoryReportSnapshot({
       sourceAction: String(body.sourceAction || body.source_action || "").trim(),
       reason: String(body.reason || "").trim() || (action === "report" ? "manual-report-action" : ""),
+      acceptedChangeSuggestion,
     });
   }
   const result = await runCommandFromBody(body);

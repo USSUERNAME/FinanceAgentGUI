@@ -45,6 +45,7 @@ const MEMORY_TIME_ZONE = process.env.FINANCE_AGENT_GUI_MEMORY_TZ || "Asia/Seoul"
 const MEMORY_SUMMARY_TEXT_LIMIT = 16000;
 const USER_MEMORY_LAYER_LIMIT = 7000;
 const EXTERNAL_MEMORY_LAYER_LIMIT = 8000;
+const EXTERNAL_MARKET_SUMMARY_DISPLAY_LIMIT = 3200;
 const ANTIGRAVITY_PROVIDER_ID = "antigravity-cli";
 const CODEX_PROVIDER_ID = "codex-cli";
 
@@ -782,11 +783,12 @@ function externalMarketSummaryPrompt({ worldReport = null, items = [], builtAt =
     "입력은 최신 World Memory 보고서 이후에 들어온 News Feed 항목이다.",
     "뉴스 항목을 그대로 나열하지 말고, 한국어 시장 요약으로 압축한다.",
     "없는 정보를 추가하지 말고, 약한 신호는 약하다고 쓴다. 투자 조언이나 매매 지시는 쓰지 않는다.",
-    "내부 용어인 News Feed, 월드 메모리, 컨텍스트, 브리핑 후보, post-cutoff 같은 표현은 summaryKo/keySignals/watchPoints에 쓰지 않는다.",
+    "내부 용어인 News Feed, 월드 메모리, 컨텍스트, 브리핑 후보, post-cutoff 같은 표현은 summaryKo에 쓰지 않는다.",
+    "핵심 신호, 후속 확인 목록, 주의점, keySignals, watchPoints는 만들지 않는다. 필요한 시장 신호와 경계 조건은 summaryKo 안에 자연스럽게만 녹인다.",
     "출력은 JSON 객체 하나만 반환한다.",
     "",
     "반환 형식:",
-    '{"marketTone":"risk_on|risk_off|mixed|quiet|unclear","summaryKo":"한국어 3-5문장 시장 요약","keySignals":["핵심 신호"],"watchPoints":["주의해서 볼 점"],"confidence":0.0}',
+    '{"marketTone":"risk_on|risk_off|mixed|quiet|unclear","summaryKo":"한국어 3-5문장 시장 요약","confidence":0.0}',
     "",
     "기준 정보:",
     JSON.stringify(
@@ -812,17 +814,9 @@ function externalMarketSummarySchema() {
         enum: ["risk_on", "risk_off", "mixed", "quiet", "unclear"],
       },
       summaryKo: { type: "string" },
-      keySignals: {
-        type: "array",
-        items: { type: "string" },
-      },
-      watchPoints: {
-        type: "array",
-        items: { type: "string" },
-      },
       confidence: { type: "number" },
     },
-    required: ["marketTone", "summaryKo", "keySignals", "watchPoints", "confidence"],
+    required: ["marketTone", "summaryKo", "confidence"],
   };
 }
 
@@ -832,8 +826,6 @@ export function normalizeExternalMarketSummaryCandidate(payload = {}) {
     ? marketTone
     : "unclear";
   const summaryKo = cleanText(payload.summaryKo || "", 1200);
-  const keySignals = cleanArray(payload.keySignals, { limit: 6, maxLength: 240 });
-  const watchPoints = cleanArray(payload.watchPoints, { limit: 5, maxLength: 240 });
   const confidenceNumber = Number(payload.confidence);
   const confidence = Number.isFinite(confidenceNumber)
     ? Math.max(0, Math.min(1, confidenceNumber))
@@ -841,13 +833,10 @@ export function normalizeExternalMarketSummaryCandidate(payload = {}) {
   const issues = [];
   if (!summaryKo) issues.push("summaryKo가 비어 있습니다");
   if (summaryKo && !hasKoreanText(summaryKo)) issues.push("summaryKo에 한국어가 없습니다");
-  if (!keySignals.length && !watchPoints.length) issues.push("keySignals 또는 watchPoints가 필요합니다");
   return {
     ok: issues.length === 0,
     marketTone: safeTone,
     summaryKo,
-    keySignals,
-    watchPoints,
     confidence,
     error: issues.length ? `시장 요약 검증 보류: ${issues.join(", ")}` : "",
   };
@@ -856,15 +845,11 @@ export function normalizeExternalMarketSummaryCandidate(payload = {}) {
 function formatExternalMarketSummary(summary = {}) {
   const candidate = normalizeExternalMarketSummaryCandidate(summary);
   if (!candidate.ok) throw new Error(candidate.error);
-  const keySignals = candidate.keySignals.map((item) => `- ${item}`);
-  const watchPoints = candidate.watchPoints.map((item) => `- ${item}`);
   return [
     `시장 톤: ${candidate.marketTone}`,
     `신뢰도: ${candidate.confidence.toFixed(2)}`,
     "",
     candidate.summaryKo,
-    keySignals.length ? ["", "핵심 신호:", ...keySignals].join("\n") : "",
-    watchPoints.length ? ["", "주의점:", ...watchPoints].join("\n") : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -879,6 +864,132 @@ function fallbackExternalMarketSummaryText({ itemCount = 0, error = "" } = {}) {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function parseExternalBriefingCount(value = "") {
+  const parsed = Number.parseInt(String(value || "").replace(/[^\d]/g, ""), 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function extractExternalMarketSummaryFromBriefingText(text = "") {
+  const lines = String(text || "").split(/\r?\n/);
+  const builtAt =
+    lines
+      .find((line) => line.trim().startsWith("브리핑 갱신:"))
+      ?.replace(/^브리핑 갱신:\s*/, "")
+      .trim() || "";
+  const headingIndex = lines.findIndex((line) => line.trim() === "## 월드 메모리 이후 시장 요약");
+  if (headingIndex < 0) {
+    return {
+      ok: false,
+      text: "",
+      builtAt: cleanText(builtAt, 80),
+      summaryMode: "",
+      provider: "",
+      model: "",
+      reasoning: "",
+      newsItemsConsidered: 0,
+      tone: "",
+      confidence: "",
+    };
+  }
+
+  const sectionLines = [];
+  for (const line of lines.slice(headingIndex + 1)) {
+    if (line.trim().startsWith("## ")) break;
+    sectionLines.push(line);
+  }
+
+  const displayLines = [];
+  const parsed = {
+    summaryMode: "",
+    provider: "",
+    model: "",
+    reasoning: "",
+    newsItemsConsidered: 0,
+    tone: "",
+    confidence: "",
+  };
+  let legacySignalBlock = false;
+
+  for (const line of sectionLines) {
+    const trimmed = line.trim();
+    if (/^(핵심\s*신호|주의점)\s*:?\s*$/.test(trimmed)) {
+      legacySignalBlock = true;
+      continue;
+    }
+    if (legacySignalBlock) {
+      if (!trimmed || trimmed.startsWith("- ")) continue;
+      legacySignalBlock = false;
+    }
+    if (trimmed.startsWith("요약 방식:")) {
+      parsed.summaryMode = cleanText(trimmed.replace(/^요약 방식:\s*/, ""), 80);
+      continue;
+    }
+    if (trimmed.startsWith("모델 공급자:")) {
+      parsed.provider = cleanText(trimmed.replace(/^모델 공급자:\s*/, ""), 120);
+      continue;
+    }
+    if (trimmed.startsWith("모델:")) {
+      parsed.model = cleanText(trimmed.replace(/^모델:\s*/, ""), 120);
+      continue;
+    }
+    if (trimmed.startsWith("reasoning:")) {
+      parsed.reasoning = cleanText(trimmed.replace(/^reasoning:\s*/, ""), 80);
+      continue;
+    }
+    if (trimmed.startsWith("대상 보도 수:")) {
+      parsed.newsItemsConsidered = parseExternalBriefingCount(trimmed);
+      continue;
+    }
+    if (trimmed.startsWith("시장 톤:")) {
+      parsed.tone = cleanText(trimmed.replace(/^시장 톤:\s*/, ""), 40);
+      continue;
+    }
+    if (trimmed.startsWith("신뢰도:")) {
+      parsed.confidence = cleanText(trimmed.replace(/^신뢰도:\s*/, ""), 40);
+      continue;
+    }
+    displayLines.push(line);
+  }
+
+  const displayText = cleanText(displayLines.join("\n"), EXTERNAL_MARKET_SUMMARY_DISPLAY_LIMIT);
+  return {
+    ok: Boolean(displayText),
+    text: displayText,
+    builtAt: cleanText(builtAt, 80),
+    ...parsed,
+  };
+}
+
+function publicExternalMarketSummary() {
+  const state = readExternalMemoryState();
+  const briefing = state.briefing || {};
+  const parsedFromFile = extractExternalMarketSummaryFromBriefingText(readTextFile(EXTERNAL_MEMORY_BRIEFING_PATH));
+  const parsedFromState = briefing.summaryText
+    ? extractExternalMarketSummaryFromBriefingText(
+        ["## 월드 메모리 이후 시장 요약", "", briefing.summaryText].join("\n")
+      )
+    : null;
+  const parsed = parsedFromFile.ok ? parsedFromFile : parsedFromState?.ok ? parsedFromState : parsedFromFile;
+
+  return {
+    status: cleanText(briefing.status || (parsed.text ? "ready" : "empty"), 40),
+    text: parsed.text || "",
+    updatedAt: cleanText(briefing.lastBuiltAt || parsed.builtAt || "", 80),
+    nextBuildAt: cleanText(briefing.nextBuildAt || "", 80),
+    basedOnWorldMemoryReportAt: cleanText(briefing.basedOnWorldMemoryReportAt || "", 80),
+    intervalMs: Number(briefing.intervalMs || EXTERNAL_BRIEFING_INTERVAL_MS),
+    newsItemsConsidered: Number(briefing.newsItemsConsidered ?? parsed.newsItemsConsidered ?? 0),
+    newsItemsSummarized: Number(briefing.newsItemsSummarized ?? briefing.newsItemsConsidered ?? parsed.newsItemsConsidered ?? 0),
+    summaryMode: cleanText(briefing.summaryMode || parsed.summaryMode || "", 80),
+    provider: cleanText(briefing.summaryProvider || parsed.provider || "", 120),
+    model: cleanText(briefing.summaryModel || parsed.model || "", 120),
+    reasoning: cleanText(briefing.summaryReasoning || parsed.reasoning || "", 80),
+    tone: cleanText(parsed.tone || "", 40),
+    confidence: cleanText(parsed.confidence || "", 40),
+    lastError: cleanText(briefing.lastError || "", 500),
+  };
 }
 
 export function buildMarketSummaryWithTranslationModel({ worldReport = null, items = [], builtAt = nowIso() } = {}) {
@@ -1029,6 +1140,7 @@ function refreshExternalMemoryBriefingIfDue(date = new Date()) {
         summaryProvider: marketSummaryResult.provider,
         summaryModel: marketSummaryResult.model,
         summaryReasoning: marketSummaryResult.reasoning,
+        summaryText: cleanText(marketSummaryResult.text, EXTERNAL_MARKET_SUMMARY_DISPLAY_LIMIT),
         lastError: marketSummaryResult.error,
       },
     });
@@ -1285,6 +1397,7 @@ export function sharedMemoryStatus({ limit = PUBLIC_RECORD_LIMIT, offset = 0 } =
       externalBriefingIntervalMs: EXTERNAL_BRIEFING_INTERVAL_MS,
       user: readUserMemoryState(),
       external: readExternalMemoryState(),
+      marketSummary: publicExternalMarketSummary(),
       summaryPath: "data/shared-memory/memory_summary.md",
       gitPolicy: "local-only; ignored by .gitignore",
     },

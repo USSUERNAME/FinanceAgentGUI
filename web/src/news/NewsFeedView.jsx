@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import AlertTriangle from "lucide-react/dist/esm/icons/alert-triangle.js";
+import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
+import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.js";
 import Copy from "lucide-react/dist/esm/icons/copy.js";
 import Languages from "lucide-react/dist/esm/icons/languages.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
@@ -19,6 +21,19 @@ function formatNewsFeedCount(value) {
 function translationStatusLabel(status) {
   if (status === "translated") return "번역 완료";
   return "번역 대기";
+}
+
+function formatNewsFeedMarketSummaryMeta(summary) {
+  if (!summary || typeof summary !== "object") return "";
+  const parts = [];
+  if (summary.updatedAt) parts.push(`갱신 ${formatDateTime(summary.updatedAt)}`);
+  if (Number.isFinite(Number(summary.newsItemsConsidered))) {
+    parts.push(`대상 ${formatNewsFeedCount(summary.newsItemsConsidered)}건`);
+  }
+  const modelLabel = [summary.provider, summary.model].filter(Boolean).join(" · ");
+  if (modelLabel) parts.push(modelLabel);
+  if (summary.nextBuildAt) parts.push(`다음 ${formatDateTime(summary.nextBuildAt)}`);
+  return parts.join(" · ");
 }
 
 function newsFeedBlobToDataUrl(blob) {
@@ -242,6 +257,9 @@ export default function NewsFeedView({
   error,
   hasMore,
   translationModelLabel,
+  marketSummary,
+  marketSummaryCollapsed = true,
+  onMarketSummaryCollapsedChange,
   onRefresh,
 }) {
   const [copyState, setCopyState] = useState({ itemId: "", status: "idle", error: "" });
@@ -249,6 +267,11 @@ export default function NewsFeedView({
   const collector = status?.collector || {};
   const feeds = newsFeedFeeds(status);
   const healthState = newsFeedHealthState(status);
+  const marketSummaryText = String(marketSummary?.text || "").trim();
+  const marketSummaryMeta = formatNewsFeedMarketSummaryMeta(marketSummary);
+  const marketSummaryFallback = marketSummary?.lastError
+    ? `시장 요약 갱신이 보류되었습니다. ${marketSummary.lastError}`
+    : "아직 표시할 시장 요약이 없습니다.";
   const healthClassName = [
     "news-feed-health",
     healthState.level === "online" ? "is-online" : "",
@@ -345,6 +368,40 @@ export default function NewsFeedView({
             );
           })}
         </div>
+
+        {marketSummary ? (
+          <section
+            className={[
+              "news-feed-market-summary",
+              marketSummaryCollapsed ? "is-collapsed" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            aria-label="시장 요약"
+          >
+            <div className="news-feed-market-summary-header">
+              <button
+                className="news-feed-market-summary-toggle"
+                type="button"
+                aria-expanded={!marketSummaryCollapsed}
+                aria-controls="news-feed-market-summary-body"
+                aria-label={marketSummaryCollapsed ? "시장 요약 펼치기" : "시장 요약 접기"}
+                onClick={() => onMarketSummaryCollapsedChange?.(!marketSummaryCollapsed)}
+              >
+                {marketSummaryCollapsed ? (
+                  <ChevronRight size={16} strokeWidth={2.2} aria-hidden="true" />
+                ) : (
+                  <ChevronDown size={16} strokeWidth={2.2} aria-hidden="true" />
+                )}
+                <span>시장 요약</span>
+              </button>
+              {marketSummaryMeta ? <span>{marketSummaryMeta}</span> : <span>15분마다 갱신</span>}
+            </div>
+            {!marketSummaryCollapsed ? (
+              <p id="news-feed-market-summary-body">{marketSummaryText || marketSummaryFallback}</p>
+            ) : null}
+          </section>
+        ) : null}
 
         <div className="news-feed-list" aria-label="수집된 News Feed 항목">
           {items.map((item) => {

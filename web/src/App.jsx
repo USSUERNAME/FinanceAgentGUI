@@ -1227,6 +1227,7 @@ const ARCA_NOTIFICATION_URL = "https://arca.live/u/notification";
 const ARCA_NOTIFICATION_POLL_INTERVAL_MS = 30000;
 const MAGAZINE_STATUS_POLL_INTERVAL_MS = 30000;
 const NOTIFICATION_STATUS_POLL_INTERVAL_MS = 15000;
+const MEMORY_MARKET_SUMMARY_POLL_INTERVAL_MS = 15 * 60 * 1000;
 const BROWSER_NOTIFICATION_LAST_SHOWN_KEY = "finance-agent-gui:last-browser-notification-id";
 const MEMORY_RECENT_LIMIT = 5;
 const MEMORY_DIALOG_PAGE_SIZE = 20;
@@ -2294,6 +2295,8 @@ function App() {
       "low";
     return translationGroup?.slug ? `${translationGroup.slug} · ${translationReasoning}` : "";
   }, [agentOptionsReady, agentProvider, antigravityCatalogGroups, selectedModelGroup, model, modelGroups]);
+  const newsFeedMarketSummary = memoryStatus?.contextMemory?.marketSummary || null;
+  const newsFeedMarketSummaryCollapsed = newsFeedStatus?.viewState?.marketSummaryCollapsed !== false;
   const activeCategoryLabel = useMemo(() => {
     const selected = arcaBoard?.categories?.find((category) => category.name === boardFilters.category);
     return selected?.label || "전체";
@@ -4056,6 +4059,32 @@ function App() {
     }
   }
 
+  async function updateNewsFeedMarketSummaryCollapsed(collapsed) {
+    const nextCollapsed = Boolean(collapsed);
+    setNewsFeedStatus((current) => ({
+      ...(current || {}),
+      viewState: {
+        ...(current?.viewState || {}),
+        marketSummaryCollapsed: nextCollapsed,
+      },
+    }));
+    try {
+      const response = await fetch("/api/news-feed/view-state", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ marketSummaryCollapsed: nextCollapsed }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setNewsFeedStatus(payload);
+    } catch (error) {
+      setNewsFeedError(error.message);
+    }
+  }
+
   function handleNewsFeedScroll(event) {
     if (activeView !== "news-feed" || newsFeedBusy || newsFeedLoadingMore || !newsFeedHasMore) return;
     const element = event.currentTarget;
@@ -4676,6 +4705,15 @@ function App() {
     return () => {
       cancelled = true;
     };
+  }, [activeView]);
+
+  useEffect(() => {
+    if (activeView !== "news-feed") return;
+    void loadSharedMemoryStatus();
+    const timer = window.setInterval(() => {
+      void loadSharedMemoryStatus();
+    }, MEMORY_MARKET_SUMMARY_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
   }, [activeView]);
 
   useEffect(() => {
@@ -5999,6 +6037,9 @@ function App() {
               error={newsFeedError}
               hasMore={newsFeedHasMore}
               translationModelLabel={newsFeedTranslationModelLabel}
+              marketSummary={newsFeedMarketSummary}
+              marketSummaryCollapsed={newsFeedMarketSummaryCollapsed}
+              onMarketSummaryCollapsedChange={updateNewsFeedMarketSummaryCollapsed}
               onRefresh={refreshNewsFeed}
             />
           </React.Suspense>

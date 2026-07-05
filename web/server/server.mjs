@@ -74,6 +74,11 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.url?.startsWith("/api/news-feed/view-state")) {
+    await handleNewsFeedEndpoint("view-state", req, res);
+    return;
+  }
+
   if (req.url?.startsWith("/api/news-feed/items")) {
     await handleNewsFeedEndpoint("items", req, res);
     return;

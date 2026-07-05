@@ -37,6 +37,7 @@ Thumbs.db
 # Generated local feed/calendar caches
 /data/news-feed.json
 /data/news-feed-read-state.json
+/data/news-feed-view-state.json
 /data/search_results.json
 /data/*-cache.json
 /data/*-settings.json
