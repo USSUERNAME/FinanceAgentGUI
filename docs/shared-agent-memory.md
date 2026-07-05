@@ -63,8 +63,8 @@ the bridge between formal World Memory updates.
   and Economic Calendar translation to summarize the News Feed window after
   `data/world-memory/collector-state.json` `collector.lastSuccessfulAt` into
   market tone and a short Korean summary. If that collection timestamp is not
-  available, the report generation timestamp is used only as a compatibility
-  fallback.
+  available, no News Feed items are eligible for this layer; the report
+  generation timestamp must not be used as a substitute cutoff.
 - It does not append raw News Feed item lists to prompt memory. If the model
   summary fails, the layer records a degraded status and retries on the next
   refresh rather than accumulating the candidate list.

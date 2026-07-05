@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  completeWorldMemoryCollectionCollectorState,
+  completeWorldMemoryReportRefreshCollectorState,
   filterWorldMemoryReportView,
   normalizeWorldMemorySuggestionFingerprint,
 } from "../server/worldMemoryApi.mjs";
@@ -128,6 +130,45 @@ test("world memory report view can show the just accepted suggestion as handled 
   assert.deepEqual(filtered.memoryChangeSuggestions, [acceptedText, other]);
   assert.equal(filtered.memoryChangeSuggestionItems[0].handled, true);
   assert.equal(filtered.memoryChangeSuggestionItems[1].handled, false);
+});
+
+test("world memory report refresh does not advance the collection cutoff", () => {
+  const collector = completeWorldMemoryReportRefreshCollectorState(
+    {
+      running: true,
+      status: "writing_report",
+      lastSuccessfulAt: "2026-07-05T12:00:00.000Z",
+    },
+    "2026-07-05T12:45:00.000Z",
+  );
+
+  assert.equal(collector.status, "ok");
+  assert.equal(collector.lastFinishedAt, "2026-07-05T12:45:00.000Z");
+  assert.equal(collector.lastReportSuccessfulAt, "2026-07-05T12:45:00.000Z");
+  assert.equal(collector.lastSuccessfulAt, "2026-07-05T12:00:00.000Z");
+});
+
+test("world memory collection cutoff is captured before report completion", () => {
+  const collector = completeWorldMemoryCollectionCollectorState(
+    {
+      running: true,
+      status: "writing_report",
+      lastSuccessfulAt: "2026-07-05T06:00:00.000Z",
+    },
+    {
+      collectionSuccessfulAt: "2026-07-05T12:20:00.000Z",
+      reportFinishedAt: "2026-07-05T12:45:00.000Z",
+      importedCandidates: 6,
+      attempt: 2,
+    },
+  );
+
+  assert.equal(collector.status, "ok");
+  assert.equal(collector.lastSuccessfulAt, "2026-07-05T12:20:00.000Z");
+  assert.equal(collector.lastFinishedAt, "2026-07-05T12:45:00.000Z");
+  assert.equal(collector.lastReportSuccessfulAt, "2026-07-05T12:45:00.000Z");
+  assert.match(collector.lastAction, /신규 후보 6건/);
+  assert.equal(collector.attempt, 2);
 });
 
 test("world memory report view omits handled suggestions during collection-cycle output", () => {

@@ -743,7 +743,7 @@ function readWorldMemoryReportState(worldState = readWorldMemoryRuntimeState()) 
 }
 
 function worldMemoryCollectionCutoffAt(worldState = {}) {
-  return cleanText(worldState?.collector?.lastSuccessfulAt || worldState?.report?.generatedAt || "", 80);
+  return cleanText(worldState?.collector?.lastSuccessfulAt || "", 80);
 }
 
 function readNewsFeedStore() {
@@ -765,13 +765,13 @@ function externalNewsItemsAfterWorldMemoryCollection({
   worldMemoryCutoffAt = "",
   limit = EXTERNAL_BRIEFING_NEWS_ITEM_LIMIT,
 } = {}) {
-  const report = worldReport || {};
-  const cutoffMs = timestampMs(worldMemoryCutoffAt || report.generatedAt || "");
+  const cutoffMs = timestampMs(worldMemoryCutoffAt || "");
+  if (!cutoffMs) return [];
   const items = Array.isArray(newsStore?.items) ? newsStore.items : [];
   return items
     .filter((item) => {
       const time = itemTimeMs(item);
-      return time && (!cutoffMs || time > cutoffMs);
+      return time && time > cutoffMs;
     })
     .sort((a, b) => itemTimeMs(b) - itemTimeMs(a))
     .slice(0, limit);
@@ -790,7 +790,7 @@ function newsItemForMarketSummary(item = {}) {
 function externalMarketSummaryPrompt({ worldReport = null, items = [], builtAt = nowIso(), worldMemoryCutoffAt = "" } = {}) {
   const report = worldReport || {};
   const reportAt = report.generatedAt || "";
-  const cutoffAt = cleanText(worldMemoryCutoffAt || reportAt || "", 80);
+  const cutoffAt = cleanText(worldMemoryCutoffAt || "", 80);
   const worldText = sanitizeWorldMemoryReportText(report);
   const inputItems = items.map(newsItemForMarketSummary);
   return [
@@ -1062,7 +1062,7 @@ export function buildExternalNewsBriefing({
 } = {}) {
   const report = worldReport || {};
   const reportAt = report.generatedAt || "";
-  const collectionAt = cleanText(worldMemoryCutoffAt || reportAt || "", 80);
+  const collectionAt = cleanText(worldMemoryCutoffAt || "", 80);
   const filtered = externalNewsItemsAfterWorldMemoryCollection({
     worldReport: report,
     newsStore,

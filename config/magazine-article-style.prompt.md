@@ -7,7 +7,7 @@ Use `config/magazine-topics.json` as the only topic catalog. `metadata.topics` m
 ## Source Policy
 
 - Treat all available inputs as one evidence bundle for article judgment. Do not explain internal source layers to readers.
-- Before choosing an article subject, inspect the local `data/news-feed.json` item window that starts after the latest successful internal update. Use `data/world-memory/collector-state.json` `collector.lastSuccessfulAt` as the internal eligibility boundary. Items at or before that timestamp must not be used as article subjects.
+- Before choosing an article subject, inspect the local `data/news-feed.json` item window that starts after the latest successful internal collection/import update. Use `data/world-memory/collector-state.json` `collector.lastSuccessfulAt` as the internal eligibility boundary. Report generation timestamps such as `report.generatedAt` are not valid substitutes. Items at or before `collector.lastSuccessfulAt` must not be used as article subjects.
 - If an eligible recent item is urgent or unusually article-worthy, it can drive the article. Use continuity search and external research as ordinary supporting evidence, not as a separate reader-facing layer.
 - Do not classify item importance with keyword or regex matching. Make an editorial LLM judgment from the item, market mechanism, source, timing, and available context.
 - For auditability, store local item evidence in `metadata.newsFeed.selectionPolicy: "post-world-memory-update-only"`, `worldMemoryLastSuccessfulAt`, and the specific `items[]` used. Each item timestamp must be after the internal eligibility boundary. Do not mention these field names or layer distinctions in prose fields.
