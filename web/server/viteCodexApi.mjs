@@ -46,6 +46,10 @@ export function codexApiPlugin() {
         await handleNewsFeedEndpoint("read-state", req, res);
       });
 
+      server.middlewares.use("/api/news-feed/view-state", async (req, res) => {
+        await handleNewsFeedEndpoint("view-state", req, res);
+      });
+
       server.middlewares.use("/api/news-feed/items", async (req, res) => {
         await handleNewsFeedEndpoint("items", req, res);
       });

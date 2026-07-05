@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildDailyUserMemoryRollup,
   buildExternalNewsBriefing,
+  extractExternalMarketSummaryFromBriefingText,
   normalizeExternalMarketSummaryCandidate,
   sanitizeWorldMemoryReportText,
 } from "../server/sharedMemoryStore.mjs";
@@ -62,8 +63,6 @@ test("external briefing stores a market summary instead of raw post-report news 
     marketSummary: {
       marketTone: "mixed",
       summaryKo: "보고서 이후 새 신호는 기술주 비용 검증과 유가 완화가 엇갈리는 혼재 국면으로 정리된다.",
-      keySignals: ["기술주 비용 검증 부담이 남아 있다."],
-      watchPoints: ["유가와 금리 변동이 같은 방향으로 움직이는지 확인이 필요하다."],
       confidence: 0.68,
     },
     marketSummaryStatus: "translation-model",
@@ -77,6 +76,8 @@ test("external briefing stores a market summary instead of raw post-report news 
   assert.match(briefing.text, /월드 메모리 이후 시장 요약/);
   assert.match(briefing.text, /혼재 국면/);
   assert.match(briefing.text, /translation-test-model/);
+  assert.doesNotMatch(briefing.text, /핵심 신호/);
+  assert.doesNotMatch(briefing.text, /주의점/);
   assert.doesNotMatch(briefing.text, /시장에 영향을 줄 수 있는 새 뉴스/);
   assert.doesNotMatch(briefing.text, /보고서 이전 오래된 소식/);
   assert.doesNotMatch(briefing.text, /외부 레이어에 들어가면 안 된다/);
@@ -86,14 +87,62 @@ test("external market summary harness rejects empty or non-Korean summaries", ()
   const candidate = normalizeExternalMarketSummaryCandidate({
     marketTone: "mixed",
     summaryKo: "Market is mixed.",
-    keySignals: ["rates"],
-    watchPoints: [],
     confidence: 2,
   });
 
   assert.equal(candidate.ok, false);
   assert.match(candidate.error, /한국어/);
   assert.equal(candidate.confidence, 1);
+});
+
+test("external market summary harness accepts a summary without signal lists", () => {
+  const candidate = normalizeExternalMarketSummaryCandidate({
+    marketTone: "mixed",
+    summaryKo: "시장 방향성은 아직 뚜렷하지 않다.",
+    confidence: 0.4,
+  });
+
+  assert.equal(candidate.ok, true);
+  assert.equal(candidate.summaryKo, "시장 방향성은 아직 뚜렷하지 않다.");
+});
+
+test("external briefing exposes a display market summary without generation metadata or legacy signal lists", () => {
+  const summary = extractExternalMarketSummaryFromBriefingText([
+    "# External Memory Layer",
+    "",
+    "브리핑 갱신: 2026-06-27T01:00:00.000Z",
+    "",
+    "## 월드 메모리 이후 시장 요약",
+    "요약 방식: translation-model",
+    "모델 공급자: Codex CLI",
+    "모델: translation-test-model",
+    "reasoning: low",
+    "대상 보도 수: 3",
+    "",
+    "시장 톤: mixed",
+    "신뢰도: 0.72",
+    "",
+    "기술주 비용 검증과 유가 완화가 엇갈리는 혼재 국면이다.",
+    "",
+    "핵심 신호:",
+    "- 금리 부담은 완화됐지만 비용 검증은 남아 있다.",
+    "- 이 줄도 화면에는 중복으로 보이면 안 된다.",
+  ].join("\n"));
+
+  assert.equal(summary.ok, true);
+  assert.equal(summary.builtAt, "2026-06-27T01:00:00.000Z");
+  assert.equal(summary.summaryMode, "translation-model");
+  assert.equal(summary.provider, "Codex CLI");
+  assert.equal(summary.model, "translation-test-model");
+  assert.equal(summary.newsItemsConsidered, 3);
+  assert.equal(summary.tone, "mixed");
+  assert.equal(summary.confidence, "0.72");
+  assert.match(summary.text, /혼재 국면/);
+  assert.doesNotMatch(summary.text, /요약 방식/);
+  assert.doesNotMatch(summary.text, /시장 톤/);
+  assert.doesNotMatch(summary.text, /신뢰도/);
+  assert.doesNotMatch(summary.text, /핵심 신호/);
+  assert.doesNotMatch(summary.text, /금리 부담/);
 });
 
 test("daily user memory rollup keeps notebook-like entries in one layer", () => {
