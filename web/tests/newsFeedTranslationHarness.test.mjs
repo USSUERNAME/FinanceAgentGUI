@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizeNewsFeedTranslationCandidate, parseFeedXml } from "../server/newsFeedApi.mjs";
+import {
+  mergeNewsFeedItemsPreservingLatest,
+  normalizeNewsFeedTranslationCandidate,
+  parseFeedXml,
+} from "../server/newsFeedApi.mjs";
 
 test("news feed translation harness accepts Korean body without translating RSS title", () => {
   const candidate = normalizeNewsFeedTranslationCandidate(
@@ -120,4 +124,45 @@ test("news feed parser preserves Atom alternate links as sourceUrl", () => {
 
   assert.equal(parsed.items.length, 1);
   assert.equal(parsed.items[0].sourceUrl, "https://example.com/news/policy-update");
+});
+
+test("news feed refresh merge preserves translations written during collection", () => {
+  const stalePendingItem = {
+    id: "nf_same",
+    sourceFingerprint: "same-fingerprint",
+    feedId: "test-feed",
+    title: "Stocks moved higher.",
+    originalText: "Stocks moved higher.",
+    translatedText: "",
+    translatedAt: "",
+    translationStatus: "pending",
+    publishedAt: "2026-07-05T10:00:00.000Z",
+  };
+  const latestTranslatedItem = {
+    ...stalePendingItem,
+    translatedText: "주가가 상승했다.",
+    translatedAt: "2026-07-05T10:01:00.000Z",
+    translationStatus: "translated",
+  };
+  const newlyCollectedItem = {
+    id: "nf_new",
+    sourceFingerprint: "new-fingerprint",
+    feedId: "test-feed",
+    title: "Bond yields fell.",
+    originalText: "Bond yields fell.",
+    translatedText: "",
+    translatedAt: "",
+    translationStatus: "pending",
+    publishedAt: "2026-07-05T10:02:00.000Z",
+  };
+
+  const merged = mergeNewsFeedItemsPreservingLatest(
+    [latestTranslatedItem],
+    [newlyCollectedItem, stalePendingItem],
+  );
+
+  assert.equal(merged.length, 2);
+  assert.equal(merged.find((item) => item.id === "nf_same").translationStatus, "translated");
+  assert.equal(merged.find((item) => item.id === "nf_same").translatedText, "주가가 상승했다.");
+  assert.equal(merged.find((item) => item.id === "nf_new").translationStatus, "pending");
 });

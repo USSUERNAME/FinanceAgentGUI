@@ -225,6 +225,30 @@ function newsFeedItemSourceUrl(item) {
   return /^https?:\/\//i.test(guid) ? guid : "";
 }
 
+function newsFeedItemIdentityKeys(item = {}) {
+  return [
+    item.sourceFingerprint ? `fingerprint:${item.sourceFingerprint}` : "",
+    item.id ? `id:${item.id}` : "",
+  ].filter(Boolean);
+}
+
+export function mergeNewsFeedItemsPreservingLatest(latestItems = [], refreshItems = []) {
+  const merged = [];
+  const seen = new Set();
+
+  const append = (item) => {
+    if (!item || typeof item !== "object") return;
+    const keys = newsFeedItemIdentityKeys(item);
+    if (keys.some((key) => seen.has(key))) return;
+    merged.push(item);
+    for (const key of keys) seen.add(key);
+  };
+
+  for (const item of toArray(latestItems)) append(item);
+  for (const item of toArray(refreshItems)) append(item);
+  return merged;
+}
+
 function normalizeRssItem(feed, item, channelTitle) {
   const title = cleanText(item.title);
   const body = cleanText(item.description || item["content:encoded"] || item.summary || item.content);
@@ -1281,9 +1305,21 @@ async function refreshNewsFeeds(reason = "manual") {
       }
     }
 
+    const refreshItems = store.items;
+    const refreshFeeds = store.feeds;
+    const previousCollector = store.collector;
+    const latestStore = readStore();
+    const latestCollector = latestStore.collector || {};
+
+    store = {
+      ...latestStore,
+      feeds: refreshFeeds,
+      items: mergeNewsFeedItemsPreservingLatest(latestStore.items, refreshItems),
+    };
+
     trimStoreItems(store, config);
     store.collector = {
-      ...store.collector,
+      ...latestCollector,
       status: issues.length ? "error" : "ok",
       healthy: !issues.length,
       lastAction: newItems.length
@@ -1295,7 +1331,11 @@ async function refreshNewsFeeds(reason = "manual") {
       lastPollFinishedAt: nowIso(),
       feedStaggerWindowSeconds: staggerWindowSeconds,
       lastNewCount: newItems.length,
-      lastTranslatedCount: 0,
+      lastTranslatedCount: latestCollector.lastTranslatedCount || 0,
+      translationModel: latestCollector.translationModel || previousCollector.translationModel || "",
+      translationReasoning:
+        latestCollector.translationReasoning || previousCollector.translationReasoning || "",
+      translationLastError: latestCollector.translationLastError || "",
     };
     store = writeStore(store);
 
