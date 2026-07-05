@@ -9,6 +9,8 @@ export const emptyMemoryStatus = {
       text: "",
       updatedAt: "",
       nextBuildAt: "",
+      basedOnWorldMemoryReportAt: "",
+      basedOnWorldMemoryCollectionAt: "",
       intervalMs: 15 * 60 * 1000,
       newsItemsConsidered: 0,
       newsItemsSummarized: 0,
