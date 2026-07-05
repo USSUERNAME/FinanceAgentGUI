@@ -94,6 +94,37 @@ test("external briefing stores a market summary from post-world-memory-collectio
   assert.doesNotMatch(briefing.text, /외부 레이어에 들어가면 안 된다/);
 });
 
+test("external briefing does not use report generation time as a News Feed cutoff", () => {
+  const briefing = buildExternalNewsBriefing({
+    builtAt: "2026-06-27T01:00:00.000Z",
+    worldReport: {
+      generatedAt: "2026-06-27T00:30:00.000Z",
+      view: {
+        title: "World Memory 시장 상황 인식",
+        summary: "보고서는 있지만 수집 성공 시각은 없다.",
+      },
+    },
+    newsStore: {
+      items: [
+        {
+          feedTitle: "FinancialJuice",
+          translatedTitle: "보고서 작성 이후 새 소식",
+          translatedText: "수집 컷오프가 없으면 요약 대상이 아니다.",
+          publishedAt: "2026-06-27T00:45:00.000Z",
+        },
+      ],
+    },
+  });
+
+  assert.equal(briefing.reportAt, "2026-06-27T00:30:00.000Z");
+  assert.equal(briefing.collectionAt, "");
+  assert.equal(briefing.consideredCount, 0);
+  assert.match(briefing.text, /News Feed 기준 수집 시각: 아직 없음/);
+  assert.match(briefing.text, /월드메모리 수집 기준 이후 새 보도 요약 후보가 없습니다/);
+  assert.doesNotMatch(briefing.text, /보고서 작성 이후 새 소식/);
+  assert.doesNotMatch(briefing.text, /수집 컷오프가 없으면/);
+});
+
 test("external market summary harness rejects empty or non-Korean summaries", () => {
   const candidate = normalizeExternalMarketSummaryCandidate({
     marketTone: "mixed",

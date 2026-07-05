@@ -118,6 +118,7 @@ function defaultCollectorState() {
       lastStartedAt: "",
       lastFinishedAt: "",
       lastSuccessfulAt: "",
+      lastReportSuccessfulAt: "",
       lastFailedAt: "",
       lastTrigger: "",
       attempt: 0,
@@ -210,6 +211,35 @@ function writeCollectorState(state) {
   };
   writeJsonFile(WORLD_MEMORY_STATE_PATH, next);
   return next;
+}
+
+export function completeWorldMemoryReportRefreshCollectorState(collector = {}, finishedAt = nowIso()) {
+  return {
+    ...collector,
+    running: false,
+    status: "ok",
+    lastAction: "월드 메모리 보고서와 변경 제안 갱신 완료",
+    lastError: "",
+    lastFinishedAt: finishedAt,
+    lastReportSuccessfulAt: finishedAt,
+  };
+}
+
+export function completeWorldMemoryCollectionCollectorState(
+  collector = {},
+  { collectionSuccessfulAt = "", reportFinishedAt = nowIso(), importedCandidates = 0, attempt = 0 } = {}
+) {
+  return {
+    ...collector,
+    running: false,
+    status: "ok",
+    lastAction: `월드 메모리 수집 완료 · 신규 후보 ${Number(importedCandidates || 0)}건`,
+    lastError: "",
+    lastFinishedAt: reportFinishedAt,
+    lastSuccessfulAt: collectionSuccessfulAt || collector.lastSuccessfulAt || "",
+    lastReportSuccessfulAt: reportFinishedAt,
+    attempt,
+  };
 }
 
 function buildWorldMemoryDisabledStatus(settings = readWorldMemorySettings()) {
@@ -1726,15 +1756,7 @@ async function refreshWorldMemoryReportSnapshot({
         {
           ...state,
           report,
-          collector: {
-            ...state.collector,
-            running: false,
-            status: "ok",
-            lastAction: "월드 메모리 보고서와 변경 제안 갱신 완료",
-            lastError: "",
-            lastFinishedAt: finishedAt,
-            lastSuccessfulAt: finishedAt,
-          },
+          collector: completeWorldMemoryReportRefreshCollectorState(state.collector, finishedAt),
         },
         {
           id: `report_refresh_${finishedAt}`,
@@ -1921,12 +1943,14 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
       if (!auditAfter.ok) throw new Error(auditAfter.error || "audit 실패");
       if (!harnessAfter.ok) throw new Error(harnessAfter.error || "harness 실패");
 
+      const collectionSuccessfulAt = nowIso();
       updateCollectorState((state) => ({
         ...state,
         collector: {
           ...state.collector,
           status: "writing_report",
           lastAction: "현재 시장 상황 인식 보고서 작성 중",
+          lastSuccessfulAt: collectionSuccessfulAt,
         },
       }));
 
@@ -1980,16 +2004,12 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
           {
             ...state,
             report,
-            collector: {
-              ...state.collector,
-              running: false,
-              status: "ok",
-              lastAction: `월드 메모리 수집 완료 · 신규 후보 ${generated.rows.length}건`,
-              lastError: "",
-              lastFinishedAt: finishedAt,
-              lastSuccessfulAt: finishedAt,
+            collector: completeWorldMemoryCollectionCollectorState(state.collector, {
+              collectionSuccessfulAt,
+              reportFinishedAt: finishedAt,
+              importedCandidates: generated.rows.length,
               attempt,
-            },
+            }),
             schedule: {
               ...state.schedule,
               nextRunAt,

@@ -45,6 +45,20 @@ The tracked design artifacts are:
 The schema file is documentation and repair guidance. The CLI remains the runtime
 owner because it also seeds system taxonomy and applies compatibility migrations.
 
+## Collector State Timestamps
+
+`data/world-memory/collector-state.json` separates collection eligibility from
+report generation:
+
+- `collector.lastSuccessfulAt` is the latest successful collection/import
+  cutoff. News Feed windows for Magazine and shared memory start after this
+  timestamp.
+- `collector.lastReportSuccessfulAt` and `report.generatedAt` describe report
+  generation or report refresh completion. They must not move News Feed
+  eligibility forward by themselves.
+- A report-only refresh can update `report.generatedAt` without changing
+  `collector.lastSuccessfulAt`.
+
 ## Initialization
 
 From the repository root, initialize a local store only when the user does not already
