@@ -71,6 +71,10 @@ test("external briefing stores a market summary from post-world-memory-collectio
       marketTone: "mixed",
       summaryKo: "수집 이후 새 신호는 기술주 비용 검증과 유가 완화가 엇갈리는 혼재 국면으로 정리된다.",
       confidence: 0.68,
+      alertLevel: "watch",
+      severityKo: "엇갈린 신호가 있어 관찰은 필요하지만 긴급 절차를 실행할 정도의 충격은 아니다.",
+      shouldCreateReport: false,
+      pushSummary: "",
     },
     marketSummaryStatus: "translation-model",
     marketSummaryModel: "translation-test-model",
@@ -84,6 +88,9 @@ test("external briefing stores a market summary from post-world-memory-collectio
   assert.match(briefing.text, /News Feed 기준 수집 시각: 2026-06-27T00:20:00.000Z/);
   assert.match(briefing.text, /월드 메모리 수집 이후 시장 요약/);
   assert.match(briefing.text, /혼재 국면/);
+  assert.match(briefing.text, /심각성 평가/);
+  assert.match(briefing.text, /등급: watch/);
+  assert.match(briefing.text, /긴급 절차: 대기/);
   assert.match(briefing.text, /translation-test-model/);
   assert.match(briefing.text, /대상 보도 수: 2/);
   assert.doesNotMatch(briefing.text, /핵심 신호/);
@@ -130,6 +137,10 @@ test("external market summary harness rejects empty or non-Korean summaries", ()
     marketTone: "mixed",
     summaryKo: "Market is mixed.",
     confidence: 2,
+    alertLevel: "watch",
+    severityKo: "긴급 절차 대상은 아니다.",
+    shouldCreateReport: false,
+    pushSummary: "",
   });
 
   assert.equal(candidate.ok, false);
@@ -142,10 +153,31 @@ test("external market summary harness accepts a summary without signal lists", (
     marketTone: "mixed",
     summaryKo: "시장 방향성은 아직 뚜렷하지 않다.",
     confidence: 0.4,
+    alertLevel: "watch",
+    severityKo: "관찰할 만한 신호는 있지만 긴급 절차 대상은 아니다.",
+    shouldCreateReport: false,
+    pushSummary: "",
   });
 
   assert.equal(candidate.ok, true);
   assert.equal(candidate.summaryKo, "시장 방향성은 아직 뚜렷하지 않다.");
+  assert.equal(candidate.alertLevel, "watch");
+  assert.equal(candidate.shouldCreateReport, false);
+});
+
+test("external market summary harness requires push summary for urgent reports", () => {
+  const candidate = normalizeExternalMarketSummaryCandidate({
+    marketTone: "risk_off",
+    summaryKo: "시장 전반의 위험회피가 빠르게 확산되고 있다.",
+    confidence: 0.82,
+    alertLevel: "urgent",
+    severityKo: "주요 자산 가격이 동시에 부정적으로 재평가되고 있어 긴급 확인이 필요하다.",
+    shouldCreateReport: true,
+    pushSummary: "",
+  });
+
+  assert.equal(candidate.ok, false);
+  assert.match(candidate.error, /pushSummary/);
 });
 
 test("external briefing exposes a display market summary without generation metadata or legacy signal lists", () => {
@@ -166,6 +198,11 @@ test("external briefing exposes a display market summary without generation meta
     "",
     "기술주 비용 검증과 유가 완화가 엇갈리는 혼재 국면이다.",
     "",
+    "심각성 평가:",
+    "등급: watch",
+    "긴급 절차: 대기",
+    "판단: 관찰할 만하지만 긴급 절차 대상은 아니다.",
+    "",
     "핵심 신호:",
     "- 금리 부담은 완화됐지만 비용 검증은 남아 있다.",
     "- 이 줄도 화면에는 중복으로 보이면 안 된다.",
@@ -179,7 +216,12 @@ test("external briefing exposes a display market summary without generation meta
   assert.equal(summary.newsItemsConsidered, 3);
   assert.equal(summary.tone, "mixed");
   assert.equal(summary.confidence, "0.72");
+  assert.equal(summary.alertLevel, "watch");
+  assert.equal(summary.shouldCreateReport, false);
+  assert.equal(summary.severityKo, "관찰할 만하지만 긴급 절차 대상은 아니다.");
   assert.match(summary.text, /혼재 국면/);
+  assert.match(summary.text, /심각성 평가/);
+  assert.match(summary.text, /등급: watch/);
   assert.doesNotMatch(summary.text, /요약 방식/);
   assert.doesNotMatch(summary.text, /시장 톤/);
   assert.doesNotMatch(summary.text, /신뢰도/);

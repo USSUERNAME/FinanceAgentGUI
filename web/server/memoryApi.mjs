@@ -5,6 +5,42 @@ import {
   deleteSharedMemoryRecord,
   sharedMemoryStatus,
 } from "./sharedMemoryStore.mjs";
+import { runEmergencyProcedureForMarketSummary } from "./notificationsApi.mjs";
+
+async function sharedMemoryStatusWithEmergencyProcedure(options = {}) {
+  const status = sharedMemoryStatus(options);
+  const marketSummary = status.contextMemory?.marketSummary || null;
+  if (!marketSummary || typeof marketSummary !== "object") return status;
+  try {
+    const emergencyProcedure = await runEmergencyProcedureForMarketSummary(marketSummary);
+    return {
+      ...status,
+      contextMemory: {
+        ...status.contextMemory,
+        marketSummary: {
+          ...marketSummary,
+          emergencyProcedure,
+        },
+      },
+    };
+  } catch (error) {
+    return {
+      ...status,
+      contextMemory: {
+        ...status.contextMemory,
+        marketSummary: {
+          ...marketSummary,
+          emergencyProcedure: {
+            ok: false,
+            skipped: true,
+            reason: "emergency-procedure-error",
+            error: error.message,
+          },
+        },
+      },
+    };
+  }
+}
 
 function methodNotAllowed(res) {
   sendJson(res, { ok: false, error: "method not allowed" }, 405);
@@ -22,15 +58,18 @@ export async function handleMemoryEndpoint(kind, req, res) {
         return;
       }
       const payload = await readJsonBody(req);
+      const packet = buildSharedMemoryContextPacket(payload);
+      const status = await sharedMemoryStatusWithEmergencyProcedure();
       sendJson(res, {
         ok: true,
-        ...buildSharedMemoryContextPacket(payload),
+        ...packet,
+        emergencyProcedure: status.contextMemory?.marketSummary?.emergencyProcedure || null,
       });
       return;
     }
 
     if (req.method === "GET") {
-      sendJson(res, sharedMemoryStatus({ limit, offset }));
+      sendJson(res, await sharedMemoryStatusWithEmergencyProcedure({ limit, offset }));
       return;
     }
 
@@ -40,7 +79,7 @@ export async function handleMemoryEndpoint(kind, req, res) {
       sendJson(res, {
         ok: true,
         record,
-        status: sharedMemoryStatus(),
+        status: await sharedMemoryStatusWithEmergencyProcedure(),
       });
       return;
     }
@@ -56,7 +95,7 @@ export async function handleMemoryEndpoint(kind, req, res) {
         ok: true,
         deleted: true,
         id: result.id,
-        status: sharedMemoryStatus({ limit, offset }),
+        status: await sharedMemoryStatusWithEmergencyProcedure({ limit, offset }),
       });
       return;
     }

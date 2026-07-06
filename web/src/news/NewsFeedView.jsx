@@ -36,6 +36,20 @@ function formatNewsFeedMarketSummaryMeta(summary) {
   return parts.join(" · ");
 }
 
+function marketSummarySeverityDot(summary) {
+  const level = String(summary?.alertLevel || "none").trim().toLowerCase();
+  if (level === "critical") return { level, label: "critical", className: "is-critical" };
+  if (level === "urgent") return { level, label: "urgent", className: "is-urgent" };
+  if (level === "watch") return { level, label: "watch", className: "is-watch" };
+  return { level: "none", label: "none", className: "is-none" };
+}
+
+function displayMarketSummaryText(value) {
+  return String(value || "")
+    .replace(/\n*\s*심각성\s*평가\s*:\s*[\s\S]*$/u, "")
+    .trim();
+}
+
 function newsFeedBlobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -267,8 +281,9 @@ export default function NewsFeedView({
   const collector = status?.collector || {};
   const feeds = newsFeedFeeds(status);
   const healthState = newsFeedHealthState(status);
-  const marketSummaryText = String(marketSummary?.text || "").trim();
+  const marketSummaryText = displayMarketSummaryText(marketSummary?.text);
   const marketSummaryMeta = formatNewsFeedMarketSummaryMeta(marketSummary);
+  const marketSummarySeverity = marketSummarySeverityDot(marketSummary);
   const marketSummaryFallback = marketSummary?.lastError
     ? `시장 요약 갱신이 보류되었습니다. ${marketSummary.lastError}`
     : "아직 표시할 시장 요약이 없습니다.";
@@ -393,6 +408,16 @@ export default function NewsFeedView({
                 ) : (
                   <ChevronDown size={16} strokeWidth={2.2} aria-hidden="true" />
                 )}
+                <span
+                  className={[
+                    "news-feed-market-summary-severity-dot",
+                    marketSummarySeverity.className,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  title={`심각성 ${marketSummarySeverity.label}`}
+                  aria-hidden="true"
+                />
                 <span>시장 요약</span>
               </button>
               {marketSummaryMeta ? <span>{marketSummaryMeta}</span> : <span>15분마다 갱신</span>}
