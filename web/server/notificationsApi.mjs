@@ -22,9 +22,14 @@ const MAX_SUMMARY_LENGTH = 160;
 const MAX_REPORT_INPUT_LENGTH = 5200;
 const MAX_SCENARIO_ITEM_COUNT = 24;
 const EMERGENCY_REPORT_MODEL_TIMEOUT_MS = 60 * 1000;
-const EMERGENCY_DETECTION_MODEL_TIMEOUT_MS = 60 * 1000;
 const REPORT_ALERT_LEVELS = new Set(["urgent", "critical"]);
 const DETECTION_ALERT_LEVELS = new Set(["none", "watch", "urgent", "critical"]);
+const REPORT_ALERT_LEVEL_RANK = {
+  urgent: 1,
+  critical: 2,
+};
+const MARKET_SUMMARY_EMERGENCY_SOURCE = "market-summary-emergency-procedure";
+const marketSummaryEmergencyInFlightKeys = new Set();
 const URGENT_REPORT_UNCERTAINTY_NOTICE =
   "이 알림은 부정확할 수 있으며 현재 벌어지고 있는 사안에 대한 자세하고 정확한 정보 습득은 주식채널+의 정식 채팅 기능이나 다른 수단을 이용해야 할 수 있다.";
 
@@ -34,6 +39,18 @@ function defaultStore() {
     records: [],
     readState: {
       reportsOpenedAt: "",
+    },
+    emergencyProcedures: {
+      marketSummary: {
+        lastRunKey: "",
+        lastRunAt: "",
+        lastReportId: "",
+        lastNotificationId: "",
+        activeAlertLevel: "",
+        activeStartedAt: "",
+        lastResolvedAt: "",
+        lastError: "",
+      },
     },
   };
 }
@@ -54,6 +71,16 @@ function readStore() {
       readState: {
         ...defaultStore().readState,
         ...(parsed?.readState && typeof parsed.readState === "object" ? parsed.readState : {}),
+      },
+      emergencyProcedures: {
+        ...defaultStore().emergencyProcedures,
+        ...(parsed?.emergencyProcedures && typeof parsed.emergencyProcedures === "object" ? parsed.emergencyProcedures : {}),
+        marketSummary: {
+          ...defaultStore().emergencyProcedures.marketSummary,
+          ...(parsed?.emergencyProcedures?.marketSummary && typeof parsed.emergencyProcedures.marketSummary === "object"
+            ? parsed.emergencyProcedures.marketSummary
+            : {}),
+        },
       },
     };
   } catch {
@@ -101,7 +128,11 @@ function formatKstDateMinute(value = new Date()) {
 
 function notificationIdFor(record) {
   const basis = [record.createdAt, record.level, record.summary, record.source].join("\n");
-  return `stock_alert_${createHash("sha256").update(basis).digest("hex").slice(0, 16)}`;
+  return `stock_alert_${hashText(basis).slice(0, 16)}`;
+}
+
+function hashText(value) {
+  return createHash("sha256").update(String(value || "")).digest("hex");
 }
 
 function normalizeLevel(value) {
@@ -110,6 +141,15 @@ function normalizeLevel(value) {
   if (level === "urgent") return "urgent";
   if (level === "watch") return "watch";
   return "info";
+}
+
+function normalizeDetectionLevel(value) {
+  const level = String(value || "").trim().toLowerCase();
+  return DETECTION_ALERT_LEVELS.has(level) ? level : "none";
+}
+
+function reportAlertRank(value) {
+  return REPORT_ALERT_LEVEL_RANK[normalizeDetectionLevel(value)] || 0;
 }
 
 function browserNotificationDelivery() {
@@ -175,61 +215,6 @@ function fastReportSchema() {
     },
     required: ["severity", "reportTitle", "marketImpactSummary", "knownFacts", "pushSummary"],
   };
-}
-
-function emergencyDetectionSchema() {
-  return {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      alertLevel: { type: "string", enum: ["none", "watch", "urgent", "critical"] },
-      shouldCreateReport: { type: "boolean" },
-      rationaleKo: { type: "string" },
-      signals: {
-        type: "array",
-        items: { type: "string" },
-      },
-    },
-    required: ["alertLevel", "shouldCreateReport", "rationaleKo", "signals"],
-  };
-}
-
-function emergencyDetectionPrompt({ contextSummary, generatedAt = new Date().toISOString() } = {}) {
-  return [
-    "너는 FinanceAgentGUI의 비상 시장 업데이트 감지기다.",
-    "입력은 번역/요약 모델이 만든 '월드메모리 이후 시장 요약'이다.",
-    "웹검색을 하지 않는다. 원 뉴스피드 목록을 다시 열람하지 않는다. 입력 요약에 없는 사실을 추가하지 않는다.",
-    "텍스트 매칭이 아니라 의미 기반으로 판정한다.",
-    "일반적인 악재, 단순 변동성 확대, 평범한 지정학 긴장은 watch 이하로 둔다.",
-    "시장 참여자가 즉시 알아야 하는 체제 변화, 전쟁 확전, 금융 시스템 장애, 주요 시장 폐쇄/거래 중단, 핵무기 사용, 대형 국가 부도/은행 유동성 위기, 전 세계 공급망 급변은 urgent 또는 critical로 판정한다.",
-    "체제 붕괴급 사건이 아니더라도, 현재 이슈를 시장이 이미 상당히 부정적으로 해석하고 가격에 반영하고 있으면 urgent로 판정한다.",
-    "예를 들어 주요 지수 급락, 금리·환율·신용스프레드·변동성의 급격한 재가격화, 안전자산 선호 급증, 특정 국가·섹터·자산군의 광범위한 매도, 정책·규제·중앙은행 결정에 대한 예상 밖의 위험회피가 함께 나타나면 urgent 후보로 본다.",
-    "이 기준은 미국 연준뿐 아니라 ECB, BOJ, PBOC, 한국은행 등 모든 주요 중앙은행과 각국 정부·규제기관·정치·지정학 이벤트에 동일하게 적용한다.",
-    "가격 반응이 약하거나 국지적이고, 시장이 아직 의미를 탐색하는 단계라면 watch로 둔다.",
-    "입력 요약이 여러 출처의 보도처럼 서술하고 있으면, 불확실하더라도 그 입력 세계 안에서는 실제 상황으로 가정해 판정한다.",
-    "critical은 '와 어떻게 이런 일이 생길 수가 있지? 이거 큰일났는데?' 수준의 급격한 시장 레짐 전환 신호에만 쓴다.",
-    "urgent 또는 critical이면 shouldCreateReport는 true다. none/watch면 false다.",
-    "출력은 JSON 객체 하나만 반환한다.",
-    "",
-    "반환 형식:",
-    JSON.stringify({
-      alertLevel: "critical",
-      shouldCreateReport: true,
-      rationaleKo: "비상 판정 이유",
-      signals: ["핵심 신호"],
-    }),
-    "",
-    "입력:",
-    JSON.stringify(
-      {
-        generatedAt,
-        sourcePolicy: "context-summary-only; no web search; no raw feed scan",
-        contextSummary,
-      },
-      null,
-      2
-    ),
-  ].join("\n");
 }
 
 function fastReportPrompt({ contextSummary, requestedLevel = "urgent", generatedAt = new Date().toISOString() } = {}) {
@@ -299,23 +284,31 @@ function normalizeFastReportCandidate(payload = {}) {
   };
 }
 
-function normalizeEmergencyDetectionCandidate(payload = {}) {
-  const rawLevel = cleanText(payload.alertLevel || payload.level || "none", 32).toLowerCase();
-  const alertLevel = DETECTION_ALERT_LEVELS.has(rawLevel) ? rawLevel : "none";
-  const shouldCreateReport =
-    payload.shouldCreateReport === true || (REPORT_ALERT_LEVELS.has(alertLevel) && payload.shouldCreateReport !== false);
-  const rationaleKo = cleanText(payload.rationaleKo || payload.rationale || "", 600);
+function parseAlertLevelFromText(value = "") {
+  const match = String(value || "").match(/(?:등급|심각도)\s*:\s*(none|watch|urgent|critical)\b/i);
+  return normalizeDetectionLevel(match?.[1] || "");
+}
+
+function parseSeverityFromText(value = "") {
+  const match = String(value || "").match(/^판단:\s*(.+)$/m);
+  return cleanText(match?.[1] || "", 600);
+}
+
+function normalizeMarketSummaryDetection(payload = {}) {
+  const text = payload.text || payload.contextSummary || payload.marketSummary || "";
+  const alertLevel = normalizeDetectionLevel(payload.alertLevel || payload.level || parseAlertLevelFromText(text));
+  const shouldCreateReport = REPORT_ALERT_LEVELS.has(alertLevel);
+  const rationaleKo =
+    cleanText(payload.rationaleKo || payload.severityKo || payload.rationale || parseSeverityFromText(text), 600) ||
+    (shouldCreateReport ? "시장 요약에서 긴급 절차 실행 대상 심각도가 확인되었습니다." : "긴급 절차 실행 대상은 아닙니다.");
   const signals = cleanTextList(payload.signals, { limit: 6, maxLength: 240 });
-  const issues = [];
-  if (!rationaleKo) issues.push("rationaleKo is required");
-  if (!signals.length) issues.push("signals must include at least one item");
   return {
-    ok: issues.length === 0,
+    ok: true,
     alertLevel,
-    shouldCreateReport: shouldCreateReport && REPORT_ALERT_LEVELS.has(alertLevel),
+    shouldCreateReport,
     rationaleKo,
-    signals,
-    error: issues.join(", "),
+    signals: signals.length ? signals : [rationaleKo],
+    error: "",
   };
 }
 
@@ -348,7 +341,7 @@ async function buildFastEmergencyReport(payload = {}) {
     throw new Error("context market summary is empty");
   }
   const modelInfo = chooseSharedMemoryTranslationModel();
-  const requestedLevel = normalizeLevel(payload.level || payload.severity || "urgent");
+  const requestedLevel = normalizeLevel(payload.level || payload.severity || parseAlertLevelFromText(contextSummary) || "urgent");
   const generatedAt = new Date().toISOString();
   const prompt = fastReportPrompt({ contextSummary, requestedLevel, generatedAt });
   const raw =
@@ -365,7 +358,7 @@ async function buildFastEmergencyReport(payload = {}) {
   });
   const pushed = await pushNotification({
     level: report.severity,
-    source: "fast-emergency-report",
+    source: cleanText(payload.source || "fast-emergency-report", 80),
     summary: report.pushSummary,
     reportId: saved.report?.id || "",
   });
@@ -407,25 +400,137 @@ function normalizeScenarioNewsItems(value = []) {
     .slice(0, MAX_SCENARIO_ITEM_COUNT);
 }
 
-function runEmergencyDetection(contextSummary, { generatedAt = new Date().toISOString() } = {}) {
-  const modelInfo = chooseSharedMemoryTranslationModel();
-  const prompt = emergencyDetectionPrompt({ contextSummary, generatedAt });
-  const raw =
-    modelInfo.provider === "antigravity-cli"
-      ? runAntigravityJsonModel(prompt, modelInfo, EMERGENCY_DETECTION_MODEL_TIMEOUT_MS)
-      : runCodexJsonModel(prompt, emergencyDetectionSchema(), modelInfo, EMERGENCY_DETECTION_MODEL_TIMEOUT_MS);
-  const detection = normalizeEmergencyDetectionCandidate(raw);
-  if (!detection.ok) throw new Error(`emergency detection validation failed: ${detection.error}`);
-  return {
-    ...detection,
-    model: {
-      provider: modelInfo.provider,
-      providerLabel: modelInfo.providerLabel,
-      model: modelInfo.model,
-      modelLabel: modelInfo.modelLabel || modelInfo.model,
-      reasoning: modelInfo.reasoning,
+function marketSummaryEmergencyKey(marketSummary = {}, detection = {}) {
+  const basis = [
+    detection.alertLevel || "",
+    marketSummary.basedOnWorldMemoryCollectionAt || "",
+    marketSummary.newsItemsSummarized ?? marketSummary.newsItemsConsidered ?? "",
+    marketSummary.text || marketSummary.contextSummary || marketSummary.marketSummary || "",
+  ].join("\n");
+  return `market_summary_${hashText(basis).slice(0, 24)}`;
+}
+
+function updateMarketSummaryProcedureState(nextState = {}) {
+  const store = readStore();
+  const emergencyProcedures = {
+    ...defaultStore().emergencyProcedures,
+    ...(store.emergencyProcedures || {}),
+    marketSummary: {
+      ...defaultStore().emergencyProcedures.marketSummary,
+      ...(store.emergencyProcedures?.marketSummary || {}),
+      ...nextState,
     },
   };
+  const nextStore = {
+    ...store,
+    emergencyProcedures,
+  };
+  writeStore(nextStore);
+  return nextStore.emergencyProcedures.marketSummary;
+}
+
+export async function runEmergencyProcedureForMarketSummary(marketSummary = {}) {
+  const contextSummary = cleanText(marketSummary.text || marketSummary.contextSummary || marketSummary.marketSummary || "", MAX_REPORT_INPUT_LENGTH);
+  const detection = normalizeMarketSummaryDetection({
+    ...marketSummary,
+    text: contextSummary,
+  });
+  const key = marketSummaryEmergencyKey(marketSummary, detection);
+  if (!contextSummary) {
+    return { ok: true, skipped: true, reason: "empty-market-summary", key, detection };
+  }
+  const store = readStore();
+  const procedure = store.emergencyProcedures?.marketSummary || defaultStore().emergencyProcedures.marketSummary;
+  if (!detection.shouldCreateReport) {
+    if (procedure.activeAlertLevel || procedure.activeStartedAt) {
+      updateMarketSummaryProcedureState({
+        activeAlertLevel: "",
+        activeStartedAt: "",
+        lastResolvedAt: new Date().toISOString(),
+      });
+    }
+    return { ok: true, skipped: true, reason: "severity-not-reportable", key, detection };
+  }
+
+  const currentRank = reportAlertRank(detection.alertLevel);
+  const coveredRank = reportAlertRank(procedure.activeAlertLevel);
+  const isFirstReportableInEpisode = coveredRank === 0;
+  const isSeverityEscalation = currentRank > coveredRank;
+  if (!isFirstReportableInEpisode && !isSeverityEscalation) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "severity-already-covered",
+      key,
+      detection,
+      activeAlertLevel: procedure.activeAlertLevel || "",
+      reportId: procedure.lastReportId || "",
+      notificationId: procedure.lastNotificationId || "",
+    };
+  }
+  if (procedure.lastRunKey === key) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "already-ran-for-summary",
+      key,
+      detection,
+      reportId: procedure.lastReportId || "",
+      notificationId: procedure.lastNotificationId || "",
+    };
+  }
+  if (marketSummaryEmergencyInFlightKeys.has(key)) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "already-running-for-summary",
+      key,
+      detection,
+    };
+  }
+
+  marketSummaryEmergencyInFlightKeys.add(key);
+  try {
+    const result = await buildFastEmergencyReport({
+      contextSummary,
+      level: detection.alertLevel,
+      source: MARKET_SUMMARY_EMERGENCY_SOURCE,
+    });
+    const savedState = updateMarketSummaryProcedureState({
+      lastRunKey: key,
+      lastRunAt: result.generatedAt || new Date().toISOString(),
+      lastReportId: result.saved?.report?.id || "",
+      lastNotificationId: result.notification?.id || "",
+      activeAlertLevel: detection.alertLevel,
+      activeStartedAt: procedure.activeStartedAt || result.generatedAt || new Date().toISOString(),
+      lastResolvedAt: "",
+      lastError: "",
+    });
+    return {
+      ok: true,
+      skipped: false,
+      reason: "emergency-procedure-ran",
+      key,
+      detection,
+      reportId: savedState.lastReportId,
+      notificationId: savedState.lastNotificationId,
+      reportResult: result,
+    };
+  } catch (error) {
+    updateMarketSummaryProcedureState({
+      lastError: cleanText(error.message, 500),
+    });
+    return {
+      ok: false,
+      skipped: true,
+      reason: "emergency-procedure-failed",
+      key,
+      detection,
+      error: cleanText(error.message, 500),
+    };
+  } finally {
+    marketSummaryEmergencyInFlightKeys.delete(key);
+  }
 }
 
 async function buildEmergencyScenarioEvaluation(payload = {}) {
@@ -445,12 +550,16 @@ async function buildEmergencyScenarioEvaluation(payload = {}) {
     items,
     builtAt,
   });
-  const detection = runEmergencyDetection(marketSummaryResult.text, { generatedAt });
+  const detection = normalizeMarketSummaryDetection({
+    ...marketSummaryResult,
+    text: marketSummaryResult.text,
+  });
   const shouldCreateReport = detection.shouldCreateReport && REPORT_ALERT_LEVELS.has(detection.alertLevel);
   const reportResult = shouldCreateReport
     ? await buildFastEmergencyReport({
         contextSummary: marketSummaryResult.text,
         level: detection.alertLevel,
+        source: MARKET_SUMMARY_EMERGENCY_SOURCE,
       })
     : null;
   return {
@@ -491,6 +600,7 @@ function publicSnapshot(store = readStore()) {
     latest: store.records[store.records.length - 1] || null,
     reportsUrgentUpdate: activeReportsAlert(store),
     readState: store.readState || defaultStore().readState,
+    emergencyProcedures: store.emergencyProcedures || defaultStore().emergencyProcedures,
   };
 }
 

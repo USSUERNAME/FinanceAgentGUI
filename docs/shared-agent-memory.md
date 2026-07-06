@@ -62,9 +62,21 @@ the bridge between formal World Memory updates.
 - It then asks the same provider-specific translation model used by News Feed
   and Economic Calendar translation to summarize the News Feed window after
   `data/world-memory/collector-state.json` `collector.lastSuccessfulAt` into
-  market tone and a short Korean summary. If that collection timestamp is not
-  available, no News Feed items are eligible for this layer; the report
-  generation timestamp must not be used as a substitute cutoff.
+  market tone, a short Korean summary, and an integrated severity assessment.
+  If that collection timestamp is not available, no News Feed items are eligible
+  for this layer; the report generation timestamp must not be used as a
+  substitute cutoff.
+- The same model response carries `alertLevel`, `severityKo`,
+  `shouldCreateReport`, and `pushSummary`; do not run a second text-matching or
+  model-only severity pass over the finished summary.
+- When the refreshed summary is `urgent` or `critical`, `/api/memory` triggers
+  the existing emergency-market-update procedure once for that summary: generate
+  the fast report, save it under `data/reports/`, queue the browser notification,
+  and dedupe later polls. A reportable episode gets one `urgent` report at most;
+  if the same episode escalates from `urgent` to `critical`, it may create one
+  additional report. Continued `urgent` or continued `critical` summaries should
+  not create repeated emergency reports until the summary severity falls back to
+  `watch` or `none` and a later reportable episode begins.
 - It does not append raw News Feed item lists to prompt memory. If the model
   summary fails, the layer records a degraded status and retries on the next
   refresh rather than accumulating the candidate list.
@@ -83,6 +95,10 @@ GET /api/memory?limit=5&offset=0
 `limit` is capped at 100. Use `offset` to page through records for an infinite-scroll UI.
 The response also includes `contextMemory.marketSummary`, a display-safe view
 of the current translation-model market summary used by the News Feed screen.
+The visible summary text includes a trailing `심각성 평가` block, and the object
+also exposes the parsed `alertLevel`, `severityKo`, `shouldCreateReport`, and
+`pushSummary`, plus the latest `emergencyProcedure` result when `/api/memory`
+ran the automatic urgent/critical hook.
 
 Append a record:
 

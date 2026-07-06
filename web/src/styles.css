@@ -8238,6 +8238,32 @@ button {
   flex: 0 0 auto;
 }
 
+.news-feed-market-summary-severity-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #2f9e44;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.news-feed-market-summary-severity-dot.is-none {
+  background: #2f9e44;
+}
+
+.news-feed-market-summary-severity-dot.is-watch {
+  background: #f2c94c;
+}
+
+.news-feed-market-summary-severity-dot.is-urgent {
+  background: #f2994a;
+}
+
+.news-feed-market-summary-severity-dot.is-critical {
+  background: #d64545;
+}
+
 .news-feed-market-summary-toggle:hover,
 .news-feed-market-summary-toggle:focus-visible {
   color: #000000;

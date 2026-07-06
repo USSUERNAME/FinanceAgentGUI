@@ -48,11 +48,37 @@ const EXTERNAL_MEMORY_LAYER_LIMIT = 8000;
 const EXTERNAL_MARKET_SUMMARY_DISPLAY_LIMIT = 3200;
 const ANTIGRAVITY_PROVIDER_ID = "antigravity-cli";
 const CODEX_PROVIDER_ID = "codex-cli";
+const MARKET_ALERT_LEVELS = new Set(["none", "watch", "urgent", "critical"]);
+const MARKET_REPORT_ALERT_LEVELS = new Set(["urgent", "critical"]);
 
 const PROVIDER_LABELS = {
   "codex-cli": "Codex CLI",
   "antigravity-cli": "Antigravity CLI",
 };
+
+function normalizeMarketAlertLevel(value) {
+  const level = String(value || "").trim().toLowerCase();
+  return MARKET_ALERT_LEVELS.has(level) ? level : "none";
+}
+
+function defaultSeverityText(level) {
+  if (level === "critical") return "급격한 시장 레짐 전환 가능성이 있어 즉시 확인이 필요합니다.";
+  if (level === "urgent") return "시장이 이미 상당히 부정적으로 해석하거나 가격에 반영하는 신호가 있어 긴급 확인이 필요합니다.";
+  if (level === "watch") return "관찰할 만한 신호는 있지만 아직 긴급 절차를 실행할 정도의 충격은 아닙니다.";
+  return "별도 긴급 신호는 확인되지 않았습니다.";
+}
+
+function marketSummaryDetection(candidate = {}) {
+  const alertLevel = normalizeMarketAlertLevel(candidate.alertLevel);
+  const shouldCreateReport = MARKET_REPORT_ALERT_LEVELS.has(alertLevel);
+  const rationaleKo = cleanText(candidate.severityKo || defaultSeverityText(alertLevel), 600);
+  return {
+    alertLevel,
+    shouldCreateReport,
+    rationaleKo,
+    signals: [rationaleKo].filter(Boolean),
+  };
+}
 
 function ensureMemoryDir() {
   mkdirSync(MEMORY_DIR, { recursive: true });
@@ -474,6 +500,10 @@ function defaultExternalMemoryState() {
       basedOnWorldMemoryReportAt: "",
       basedOnWorldMemoryCollectionAt: "",
       newsItemsConsidered: 0,
+      alertLevel: "none",
+      severityKo: "",
+      shouldCreateReport: false,
+      pushSummary: "",
       note: "This volatile bridge refreshes every 15 minutes when the local server/context path is active.",
     },
   };
@@ -799,12 +829,29 @@ function externalMarketSummaryPrompt({ worldReport = null, items = [], builtAt =
     "World Memory 보고서 요약은 기준 서술로만 쓰고, News Feed 후보 컷오프는 수집 성공 시각을 따른다.",
     "뉴스 항목을 그대로 나열하지 말고, 한국어 시장 요약으로 압축한다.",
     "없는 정보를 추가하지 말고, 약한 신호는 약하다고 쓴다. 투자 조언이나 매매 지시는 쓰지 않는다.",
+    "시장 요약을 쓸 때 같은 판단 맥락에서 심각성도 함께 평가한다. 별도 판정 모델을 기다린다고 가정하지 않는다.",
+    "alertLevel은 none, watch, urgent, critical 중 하나다.",
+    "일반 악재, 단순 변동성 확대, 평범한 지정학 긴장은 watch 이하로 둔다.",
+    "체제 붕괴급 사건이 아니더라도 시장이 현재 이슈를 이미 상당히 부정적으로 해석하고 가격에 반영하고 있으면 urgent로 둔다.",
+    "주요 지수 급락, 금리·환율·신용스프레드·변동성의 급격한 재가격화, 안전자산 선호 급증, 광범위한 매도, 예상 밖 정책·규제·중앙은행 위험회피가 함께 나타나면 urgent 후보로 본다.",
+    "critical은 급격한 시장 레짐 전환이나 금융 시스템 장애처럼 즉시 비상 절차가 필요한 신호에만 쓴다.",
+    "urgent 또는 critical이면 shouldCreateReport는 true다. none 또는 watch면 false다.",
     "내부 용어인 News Feed, 월드 메모리, 컨텍스트, 브리핑 후보, post-cutoff 같은 표현은 summaryKo에 쓰지 않는다.",
-    "핵심 신호, 후속 확인 목록, 주의점, keySignals, watchPoints는 만들지 않는다. 필요한 시장 신호와 경계 조건은 summaryKo 안에 자연스럽게만 녹인다.",
+    "핵심 신호, 후속 확인 목록, 주의점, keySignals, watchPoints는 만들지 않는다. 필요한 시장 신호와 경계 조건은 summaryKo 또는 severityKo 안에 자연스럽게만 녹인다.",
+    "severityKo는 심각성 평가만 1-2문장으로 쓰고, 내부 처리 과정이나 모델명은 쓰지 않는다.",
+    "pushSummary는 urgent 또는 critical일 때 브라우저 알림에 쓸 수 있는 90자 이내 한국어 한 줄 요약이다. none 또는 watch면 빈 문자열을 쓴다.",
     "출력은 JSON 객체 하나만 반환한다.",
     "",
     "반환 형식:",
-    '{"marketTone":"risk_on|risk_off|mixed|quiet|unclear","summaryKo":"한국어 3-5문장 시장 요약","confidence":0.0}',
+    JSON.stringify({
+      marketTone: "risk_on|risk_off|mixed|quiet|unclear",
+      summaryKo: "한국어 3-5문장 시장 요약",
+      confidence: 0.0,
+      alertLevel: "none|watch|urgent|critical",
+      severityKo: "한국어 1-2문장 심각성 평가",
+      shouldCreateReport: false,
+      pushSummary: "긴급 알림용 한 줄 요약 또는 빈 문자열",
+    }),
     "",
     "기준 정보:",
     JSON.stringify(
@@ -832,8 +879,12 @@ function externalMarketSummarySchema() {
       },
       summaryKo: { type: "string" },
       confidence: { type: "number" },
+      alertLevel: { type: "string", enum: ["none", "watch", "urgent", "critical"] },
+      severityKo: { type: "string" },
+      shouldCreateReport: { type: "boolean" },
+      pushSummary: { type: "string" },
     },
-    required: ["marketTone", "summaryKo", "confidence"],
+    required: ["marketTone", "summaryKo", "confidence", "alertLevel", "severityKo", "shouldCreateReport", "pushSummary"],
   };
 }
 
@@ -847,14 +898,27 @@ export function normalizeExternalMarketSummaryCandidate(payload = {}) {
   const confidence = Number.isFinite(confidenceNumber)
     ? Math.max(0, Math.min(1, confidenceNumber))
     : 0;
+  const alertLevel = normalizeMarketAlertLevel(payload.alertLevel || payload.severityLevel || payload.severity);
+  const severityKo = cleanText(payload.severityKo || payload.rationaleKo || payload.severitySummaryKo || "", 700);
+  const shouldCreateReport = MARKET_REPORT_ALERT_LEVELS.has(alertLevel);
+  const pushSummary = cleanText(payload.pushSummary || "", 110);
   const issues = [];
   if (!summaryKo) issues.push("summaryKo가 비어 있습니다");
   if (summaryKo && !hasKoreanText(summaryKo)) issues.push("summaryKo에 한국어가 없습니다");
+  if (!severityKo) issues.push("severityKo가 비어 있습니다");
+  if (severityKo && !hasKoreanText(severityKo)) issues.push("severityKo에 한국어가 없습니다");
+  if (MARKET_REPORT_ALERT_LEVELS.has(alertLevel) && !pushSummary) {
+    issues.push("urgent/critical에는 pushSummary가 필요합니다");
+  }
   return {
     ok: issues.length === 0,
     marketTone: safeTone,
     summaryKo,
     confidence,
+    alertLevel,
+    severityKo: severityKo || defaultSeverityText(alertLevel),
+    shouldCreateReport,
+    pushSummary,
     error: issues.length ? `시장 요약 검증 보류: ${issues.join(", ")}` : "",
   };
 }
@@ -867,6 +931,12 @@ function formatExternalMarketSummary(summary = {}) {
     `신뢰도: ${candidate.confidence.toFixed(2)}`,
     "",
     candidate.summaryKo,
+    "",
+    "심각성 평가:",
+    `등급: ${candidate.alertLevel}`,
+    `긴급 절차: ${candidate.shouldCreateReport ? "실행 대상" : "대기"}`,
+    `판단: ${candidate.severityKo}`,
+    candidate.shouldCreateReport && candidate.pushSummary ? `알림 요약: ${candidate.pushSummary}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -910,6 +980,9 @@ export function extractExternalMarketSummaryFromBriefingText(text = "") {
       newsItemsConsidered: 0,
       tone: "",
       confidence: "",
+      alertLevel: "",
+      severityKo: "",
+      shouldCreateReport: false,
     };
   }
 
@@ -928,6 +1001,9 @@ export function extractExternalMarketSummaryFromBriefingText(text = "") {
     newsItemsConsidered: 0,
     tone: "",
     confidence: "",
+    alertLevel: "",
+    severityKo: "",
+    shouldCreateReport: false,
   };
   let legacySignalBlock = false;
 
@@ -969,6 +1045,21 @@ export function extractExternalMarketSummaryFromBriefingText(text = "") {
       parsed.confidence = cleanText(trimmed.replace(/^신뢰도:\s*/, ""), 40);
       continue;
     }
+    if (trimmed.startsWith("등급:") || trimmed.startsWith("심각도:")) {
+      parsed.alertLevel = normalizeMarketAlertLevel(trimmed.replace(/^(등급|심각도):\s*/, ""));
+      displayLines.push(line);
+      continue;
+    }
+    if (trimmed.startsWith("긴급 절차:")) {
+      parsed.shouldCreateReport = /실행|필요|true|yes/i.test(trimmed);
+      displayLines.push(line);
+      continue;
+    }
+    if (trimmed.startsWith("판단:")) {
+      parsed.severityKo = cleanText(trimmed.replace(/^판단:\s*/, ""), 700);
+      displayLines.push(line);
+      continue;
+    }
     displayLines.push(line);
   }
 
@@ -1008,6 +1099,10 @@ function publicExternalMarketSummary() {
     reasoning: cleanText(briefing.summaryReasoning || parsed.reasoning || "", 80),
     tone: cleanText(parsed.tone || "", 40),
     confidence: cleanText(parsed.confidence || "", 40),
+    alertLevel: normalizeMarketAlertLevel(briefing.alertLevel || parsed.alertLevel || ""),
+    severityKo: cleanText(briefing.severityKo || parsed.severityKo || "", 700),
+    shouldCreateReport: Boolean(briefing.shouldCreateReport ?? parsed.shouldCreateReport ?? false),
+    pushSummary: cleanText(briefing.pushSummary || "", 110),
     lastError: cleanText(briefing.lastError || "", 500),
   };
 }
@@ -1019,13 +1114,31 @@ export function buildMarketSummaryWithTranslationModel({
   worldMemoryCutoffAt = "",
 } = {}) {
   if (!items.length) {
+    const candidate = {
+      alertLevel: "none",
+      severityKo: "새 보도 요약 후보가 없어 별도 긴급 신호는 확인되지 않았습니다.",
+      shouldCreateReport: false,
+      pushSummary: "",
+    };
     return {
       ok: true,
       status: "no-new-items",
-      text: "월드메모리 수집 기준 이후 새 보도 요약 후보가 없습니다.",
+      text: [
+        "월드메모리 수집 기준 이후 새 보도 요약 후보가 없습니다.",
+        "",
+        "심각성 평가:",
+        "등급: none",
+        "긴급 절차: 대기",
+        `판단: ${candidate.severityKo}`,
+      ].join("\n"),
       model: "",
       provider: "",
       reasoning: "",
+      alertLevel: candidate.alertLevel,
+      severityKo: candidate.severityKo,
+      shouldCreateReport: false,
+      pushSummary: "",
+      detection: marketSummaryDetection(candidate),
       error: "",
     };
   }
@@ -1044,6 +1157,11 @@ export function buildMarketSummaryWithTranslationModel({
     model: modelInfo.modelLabel || modelInfo.model,
     provider: modelInfo.providerLabel || modelInfo.provider,
     reasoning: modelInfo.reasoning,
+    alertLevel: candidate.alertLevel,
+    severityKo: candidate.severityKo,
+    shouldCreateReport: candidate.shouldCreateReport,
+    pushSummary: candidate.pushSummary,
+    detection: marketSummaryDetection(candidate),
     error: "",
   };
 }
@@ -1150,6 +1268,16 @@ function refreshExternalMemoryBriefingIfDue(date = new Date()) {
         model: "",
         provider: "",
         reasoning: "",
+        alertLevel: "none",
+        severityKo: "시장 요약 생성 실패로 심각성을 신뢰 있게 평가하지 못했습니다.",
+        shouldCreateReport: false,
+        pushSummary: "",
+        detection: {
+          alertLevel: "none",
+          shouldCreateReport: false,
+          rationaleKo: "시장 요약 생성 실패로 심각성을 신뢰 있게 평가하지 못했습니다.",
+          signals: ["시장 요약 생성 실패"],
+        },
         error: cleanText(error.message, 500),
       };
     }
@@ -1183,6 +1311,10 @@ function refreshExternalMemoryBriefingIfDue(date = new Date()) {
         summaryModel: marketSummaryResult.model,
         summaryReasoning: marketSummaryResult.reasoning,
         summaryText: cleanText(marketSummaryResult.text, EXTERNAL_MARKET_SUMMARY_DISPLAY_LIMIT),
+        alertLevel: marketSummaryResult.alertLevel || "none",
+        severityKo: cleanText(marketSummaryResult.severityKo || "", 700),
+        shouldCreateReport: Boolean(marketSummaryResult.shouldCreateReport),
+        pushSummary: cleanText(marketSummaryResult.pushSummary || "", 110),
         lastError: marketSummaryResult.error,
       },
     });
