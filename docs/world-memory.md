@@ -51,13 +51,31 @@ owner because it also seeds system taxonomy and applies compatibility migrations
 report generation:
 
 - `collector.lastSuccessfulAt` is the latest successful collection/import
-  cutoff. News Feed windows for Magazine and shared memory start after this
-  timestamp.
+  cutoff. News Feed windows for Magazine start after this timestamp. Shared
+  memory market summaries use it as the primary freshness boundary, then backfill
+  from the latest timestamped News Feed rows to keep a 30-row analysis sample
+  when the feed store has enough rows.
 - `collector.lastReportSuccessfulAt` and `report.generatedAt` describe report
   generation or report refresh completion. They must not move News Feed
   eligibility forward by themselves.
 - A report-only refresh can update `report.generatedAt` without changing
   `collector.lastSuccessfulAt`.
+
+## Collector Recovery And Connectivity
+
+The collector treats `collector-state.json` as rebuildable runtime state. If the
+state file is missing, invalid, or reset to an empty first-run shape while the
+SQLite store or `logs/world-memory/world_memory_market_situation_*.json` still
+exist, the server should recover the visible collector/report state from those
+artifacts instead of showing a false first-run screen.
+
+Before starting a collection cycle, the server performs a lightweight internet
+connectivity probe. If the probe fails, the collector enters `offline_wait`
+rather than running FEED scans or model calls. In this state it schedules a
+lightweight retry check for 10 minutes later and keeps the collection attempt
+number stable. When a later probe succeeds, the scheduled collection continues
+automatically. For local diagnostics only, `WORLD_MEMORY_ASSUME_ONLINE=1` forces
+the probe to pass and `WORLD_MEMORY_ASSUME_ONLINE=0` forces the offline path.
 
 ## Initialization
 

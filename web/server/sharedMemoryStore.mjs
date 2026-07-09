@@ -39,7 +39,8 @@ const CONTEXT_RECORD_LIMIT = 6;
 const INDEX_RECORD_LIMIT = 200;
 const USER_MEMORY_RETRY_INTERVAL_MS = 60 * 60 * 1000;
 const EXTERNAL_BRIEFING_INTERVAL_MS = 15 * 60 * 1000;
-const EXTERNAL_BRIEFING_NEWS_ITEM_LIMIT = 24;
+const EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT = 30;
+const EXTERNAL_BRIEFING_NEWS_ITEM_LIMIT = 30;
 const EXTERNAL_BRIEFING_MODEL_TIMEOUT_MS = 60 * 1000;
 const MEMORY_TIME_ZONE = process.env.FINANCE_AGENT_GUI_MEMORY_TZ || "Asia/Seoul";
 const MEMORY_SUMMARY_TEXT_LIMIT = 16000;
@@ -789,28 +790,64 @@ function itemTimeMs(item) {
   return timestampMs(item.publishedAt || item.fetchedAt || item.translatedAt);
 }
 
-function externalNewsItemsAfterWorldMemoryCollection({
-  worldReport = null,
+function newsItemSelectionKey(item = {}) {
+  return [
+    item.id,
+    item.guid,
+    item.link,
+    item.sourceUrl,
+    item.translatedTitle,
+    item.title,
+    item.publishedAt || item.fetchedAt || item.translatedAt,
+  ]
+    .map((value) => cleanText(value || "", 220))
+    .join("|");
+}
+
+function timestampedNewsItems(newsStore = null) {
+  const items = Array.isArray(newsStore?.items) ? newsStore.items : [];
+  return items
+    .map((item, index) => ({ item, index, time: itemTimeMs(item) }))
+    .filter(({ time }) => Boolean(time))
+    .sort((a, b) => b.time - a.time || a.index - b.index);
+}
+
+function externalNewsItemsForMarketSummary({
   newsStore = null,
   worldMemoryCutoffAt = "",
   limit = EXTERNAL_BRIEFING_NEWS_ITEM_LIMIT,
+  minimumCount = EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT,
 } = {}) {
   const cutoffMs = timestampMs(worldMemoryCutoffAt || "");
   if (!cutoffMs) return [];
-  const items = Array.isArray(newsStore?.items) ? newsStore.items : [];
-  return items
-    .filter((item) => {
-      const time = itemTimeMs(item);
-      return time && time > cutoffMs;
-    })
-    .sort((a, b) => itemTimeMs(b) - itemTimeMs(a))
-    .slice(0, limit);
+  const requestedLimit = Math.max(0, Math.floor(Number(limit) || 0));
+  if (!requestedLimit) return [];
+  const minimum = Math.max(0, Math.floor(Number(minimumCount) || 0));
+  const itemLimit = Math.max(requestedLimit, minimum);
+  const targetMinimum = Math.min(itemLimit, minimum);
+  const timestamped = timestampedNewsItems(newsStore);
+  const selected = timestamped.filter(({ time }) => time > cutoffMs).slice(0, itemLimit);
+
+  if (selected.length < targetMinimum) {
+    const selectedKeys = new Set(selected.map(({ item }) => newsItemSelectionKey(item)));
+    for (const candidate of timestamped) {
+      if (selected.length >= targetMinimum) break;
+      const key = newsItemSelectionKey(candidate.item);
+      if (selectedKeys.has(key)) continue;
+      selected.push(candidate);
+      selectedKeys.add(key);
+    }
+  }
+
+  return selected.slice(0, itemLimit).map(({ item }) => item);
 }
 
-function newsItemForMarketSummary(item = {}) {
+function newsItemForMarketSummary(item = {}, { cutoffMs = 0 } = {}) {
+  const timeMs = itemTimeMs(item);
   return {
     id: cleanText(item.id || item.guid || item.link || item.sourceUrl || "", 160),
     time: cleanText(item.publishedAt || item.fetchedAt || item.translatedAt || "", 60),
+    afterWorldMemoryCollection: Boolean(cutoffMs && timeMs && timeMs > cutoffMs),
     source: cleanText(item.feedTitle || item.feedId || "최근 보도", 80),
     title: cleanText(item.translatedTitle || item.title || "", 220),
     body: cleanText(item.translatedText || item.originalText || "", 480),
@@ -821,12 +858,15 @@ function externalMarketSummaryPrompt({ worldReport = null, items = [], builtAt =
   const report = worldReport || {};
   const reportAt = report.generatedAt || "";
   const cutoffAt = cleanText(worldMemoryCutoffAt || "", 80);
+  const cutoffMs = timestampMs(cutoffAt);
   const worldText = sanitizeWorldMemoryReportText(report);
-  const inputItems = items.map(newsItemForMarketSummary);
+  const inputItems = items.map((item) => newsItemForMarketSummary(item, { cutoffMs }));
   return [
     "너는 FinanceAgentGUI의 컨텍스트 메모리에 들어갈 짧은 시장 브리핑을 작성하는 번역/요약 모델이다.",
-    "입력은 최신 World Memory 수집 성공 시각 이후에 들어온 News Feed 항목이다.",
-    "World Memory 보고서 요약은 기준 서술로만 쓰고, News Feed 후보 컷오프는 수집 성공 시각을 따른다.",
+    "입력 보도는 최신 World Memory 수집 성공 시각 이후 항목을 우선한다.",
+    `그 이후 항목이 ${EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT}건 미만이고 로컬 News Feed 저장소에 시각 정보가 있는 항목이 충분하면, 최신 항목으로 ${EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT}건까지 보강된 표본이 들어올 수 있다.`,
+    "afterWorldMemoryCollection=false인 보강 항목은 이미 기준 World Memory 서술에 일부 반영됐을 수 있으므로 새로 발생한 사건처럼 단정하지 말고 현재 시장 톤과 리스크를 보정하는 근거로만 다룬다.",
+    "World Memory 보고서 요약은 기준 서술로만 쓰고, News Feed 후보의 1차 컷오프는 수집 성공 시각을 따른다.",
     "뉴스 항목을 그대로 나열하지 말고, 한국어 시장 요약으로 압축한다.",
     "없는 정보를 추가하지 말고, 약한 신호는 약하다고 쓴다. 투자 조언이나 매매 지시는 쓰지 않는다.",
     "시장 요약을 쓸 때 같은 판단 맥락에서 심각성도 함께 평가한다. 별도 판정 모델을 기다린다고 가정하지 않는다.",
@@ -859,6 +899,8 @@ function externalMarketSummaryPrompt({ worldReport = null, items = [], builtAt =
         builtAt,
         worldMemoryReportAt: reportAt,
         worldMemoryCollectionAt: cutoffAt,
+        selectionPolicy: "post-world-memory-update-first-minimum-30-recent-backfill",
+        minimumNewsItemsWhenAvailable: EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT,
         worldMemoryBaseline: clampText(worldText, 1800),
         items: inputItems,
       },
@@ -945,7 +987,7 @@ function formatExternalMarketSummary(summary = {}) {
 function fallbackExternalMarketSummaryText({ itemCount = 0, error = "" } = {}) {
   return [
     "번역모델 시장 요약을 아직 생성하지 못했습니다.",
-    `월드메모리 수집 기준 이후 새 보도 후보는 ${itemCount}건입니다.`,
+    `시장 요약 후보는 ${itemCount}건입니다.`,
     "원문 목록은 컨텍스트 메모리에 누적하지 않고, 다음 컨텍스트 갱신 때 요약을 다시 시도합니다.",
     error ? `최근 오류: ${cleanText(error, 300)}` : "",
   ]
@@ -966,7 +1008,7 @@ export function extractExternalMarketSummaryFromBriefingText(text = "") {
       ?.replace(/^브리핑 갱신:\s*/, "")
       .trim() || "";
   const headingIndex = lines.findIndex((line) =>
-    ["## 월드 메모리 수집 이후 시장 요약", "## 월드 메모리 이후 시장 요약"].includes(line.trim())
+    ["## 월드 메모리 기준 시장 요약", "## 월드 메모리 수집 이후 시장 요약", "## 월드 메모리 이후 시장 요약"].includes(line.trim())
   );
   if (headingIndex < 0) {
     return {
@@ -1078,7 +1120,7 @@ function publicExternalMarketSummary() {
   const parsedFromFile = extractExternalMarketSummaryFromBriefingText(readTextFile(EXTERNAL_MEMORY_BRIEFING_PATH));
   const parsedFromState = briefing.summaryText
     ? extractExternalMarketSummaryFromBriefingText(
-        ["## 월드 메모리 수집 이후 시장 요약", "", briefing.summaryText].join("\n")
+        ["## 월드 메모리 기준 시장 요약", "", briefing.summaryText].join("\n")
       )
     : null;
   const parsed = parsedFromFile.ok ? parsedFromFile : parsedFromState?.ok ? parsedFromState : parsedFromFile;
@@ -1124,7 +1166,7 @@ export function buildMarketSummaryWithTranslationModel({
       ok: true,
       status: "no-new-items",
       text: [
-        "월드메모리 수집 기준 이후 새 보도 요약 후보가 없습니다.",
+        "분석할 수 있는 시장 요약 후보가 없습니다.",
         "",
         "심각성 평가:",
         "등급: none",
@@ -1181,8 +1223,7 @@ export function buildExternalNewsBriefing({
   const report = worldReport || {};
   const reportAt = report.generatedAt || "";
   const collectionAt = cleanText(worldMemoryCutoffAt || "", 80);
-  const filtered = externalNewsItemsAfterWorldMemoryCollection({
-    worldReport: report,
+  const filtered = externalNewsItemsForMarketSummary({
     newsStore,
     worldMemoryCutoffAt: collectionAt,
   });
@@ -1194,7 +1235,7 @@ export function buildExternalNewsBriefing({
         ? formatExternalMarketSummary(marketSummary)
         : filtered.length
           ? fallbackExternalMarketSummaryText({ itemCount: filtered.length, error: marketSummaryError })
-          : "월드메모리 수집 기준 이후 새 보도 요약 후보가 없습니다.";
+          : "분석할 수 있는 시장 요약 후보가 없습니다.";
   const summaryMeta = [
     `요약 방식: ${marketSummaryStatus || (marketSummary ? "translation-model" : filtered.length ? "pending" : "no-new-items")}`,
     marketSummaryProvider ? `모델 공급자: ${marketSummaryProvider}` : "",
@@ -1220,7 +1261,7 @@ export function buildExternalNewsBriefing({
         "## 참고 근거 요약",
         worldText || "아직 사용할 수 있는 기준 요약이 없습니다.",
         "",
-        "## 월드 메모리 수집 이후 시장 요약",
+        "## 월드 메모리 기준 시장 요약",
         summaryMeta,
         "",
         summaryText,
@@ -1244,8 +1285,7 @@ function refreshExternalMemoryBriefingIfDue(date = new Date()) {
     const worldReport = readWorldMemoryReportState(worldState);
     const worldMemoryCutoffAt = worldMemoryCollectionCutoffAt(worldState);
     const newsStore = readNewsFeedStore();
-    const summaryItems = externalNewsItemsAfterWorldMemoryCollection({
-      worldReport,
+    const summaryItems = externalNewsItemsForMarketSummary({
       newsStore,
       worldMemoryCutoffAt,
     });

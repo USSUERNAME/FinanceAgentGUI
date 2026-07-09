@@ -114,6 +114,7 @@ export function buildPortfolioContextPacket({
   workspaceStatus = "draft",
   strategyPortfolios = [],
   scenario = null,
+  assetHistoryRange = null,
   widgets = [],
   canvasRefreshTargets = [],
   holdings = [],
@@ -167,6 +168,21 @@ export function buildPortfolioContextPacket({
           assumptions: scenarioSpec.assumptions,
           invariant: "strategy-research canvases have exactly one pinned scenario root; process widgets must preserve this scenarioId and emit one outputRole.",
         },
+    assetHistoryQuery: isAssetCanvas && assetHistoryRange
+      ? {
+          title: "기간 및 타임프레임",
+          dataProvider: "토스 증권 Open API",
+          startDate: assetHistoryRange.startDate,
+          startMode: assetHistoryRange.startMode || (assetHistoryRange.startDate ? "custom" : "first_trade"),
+          effectiveStartDate: assetHistoryRange.effectiveStartDate || assetHistoryRange.startDate,
+          endDate: assetHistoryRange.endDate,
+          endMode: assetHistoryRange.endMode || (assetHistoryRange.endDate ? "custom" : "latest"),
+          effectiveEndDate: assetHistoryRange.effectiveEndDate || assetHistoryRange.endDate,
+          effectiveEndLabel: assetHistoryRange.effectiveEndLabel || (assetHistoryRange.endDate ? "" : "latest"),
+          timeframe: assetHistoryRange.timeframe,
+          invariant: "asset-management history queries are hidden until Toss Invest API is connected and the completed position snapshot is available; a blank startDate means the first synced trade, a blank endDate means the latest available point, and startDate cannot precede the first synced trade.",
+        }
+      : null,
     strategyPortfolios: strategyPortfolios.map((strategy) => ({
       id: strategy.id,
       name: strategy.name,
@@ -179,7 +195,7 @@ export function buildPortfolioContextPacket({
     canvasRefresh: {
       actionId: "refresh_canvas_latest_data",
       label: "캔버스를 최신 정보로 새로고침",
-      source: "yfinance",
+      source: isAssetCanvas ? "토스 증권 Open API" : "yfinance",
       refreshableWidgetCount: canvasRefreshTargets.length,
       dependencyOrder: canvasRefreshTargets.map(portfolioContextRefreshTarget),
     },
@@ -200,13 +216,15 @@ export function buildPortfolioContextPacket({
     workspaceConcept: isAssetCanvas
       ? "실제 자산 데이터, 투자금, 원금, 평가금액, 수량, 손익, 업데이트 이력을 추적하는 자산 관리 캔버스"
       : "전략별 포트폴리오 비율, 가정, yfinance/CSV 데이터, 백테스트 조건을 비교하는 전략 연구 캔버스",
-    backtestRequest: {
-      source: "yfinance",
-      period: backtestPeriod,
-      benchmark,
-      status: liveBacktestBusy ? "running" : hasLiveBacktest ? "ready" : liveBacktestError ? "error" : "waiting",
-      error: liveBacktestError,
-    },
+    backtestRequest: isAssetCanvas
+      ? null
+      : {
+          source: "yfinance",
+          period: backtestPeriod,
+          benchmark,
+          status: liveBacktestBusy ? "running" : hasLiveBacktest ? "ready" : liveBacktestError ? "error" : "waiting",
+          error: liveBacktestError,
+        },
     liveBacktest: portfolioLiveBacktestContext(liveBacktest, hasLiveBacktest),
     schemaDraft: portfolioSchemaTables,
     principles: portfolioTheoryPrinciples.map((item) => item.title),

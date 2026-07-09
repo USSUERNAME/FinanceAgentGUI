@@ -6,10 +6,10 @@ The Portfolio page is a procedural workspace. Do not collapse a multi-step inves
 
 ## Canvas Modes
 
-Portfolio has two product modes, but only strategy research is an active widget graph today.
+Portfolio has two product modes. Strategy research is the executable backtest graph; asset management is a broker-sync snapshot canvas.
 
 - `strategy-research`: active calculation canvas. It has exactly one pinned scenario root, displayed as the non-draggable `기간 및 타임프레임` bar below the flow map. User-created process widgets must keep `scenarioId:"portfolio_scenario_root"` and flow one way from scenario to result.
-- `asset-management`: gated until broker API support exists. New asset-management creation should show a confirmation dialog saying `토스증권 API 연동 기능은 준비 중입니다`; do not ask users to hand-enter a manual brokerage ledger as the primary product path.
+- `asset-management`: visible only when the Toss Securities connection and position snapshot generation are ready. Empty-cell creation uses local snapshot-backed widgets instead of manual ledger prompts.
 
 The empty grid-cell control is not a direct widget creator. It opens a prompt modal and sends that prompt to the sidebar agent. The user may move and resize existing widgets directly on the grid; direct create/delete/edit content changes should still route through the sidebar agent.
 
@@ -315,6 +315,9 @@ Use these types as the default primitives:
 - `table`: portfolio holdings, target weights, imported rows, source datasets, or beta benchmark reference portfolios.
 - `function`: strategy rules, rebalance schedules, buy/sell signals, data-file contracts.
 - `line`: backtest, benchmark, NAV, drawdown, or performance chart output.
+- `price-history`: asset-management investment cost-basis history output rendered with Lightweight Charts from Toss Securities Open API sync snapshots.
+- `position-status`: asset-management position-composition snapshot output from Toss Securities Open API sync snapshots. It renders the query-end-date holdings composition as either a pie view or a long stacked-rectangle view and uses `knownCostBasis*`, not mark-to-market valuation.
+- `seasonal-comparison`: asset-management annual YTD return overlay from Toss Securities Open API sync snapshots. It renders one line per calendar year with Lightweight Charts, keeps the latest year visually heavier, and uses a clickable year legend to show or hide individual seasons.
 - `metrics-table`: computed backtest metrics such as CAGR, MDD, Sharpe, Sortino, Calmar, Ulcer, UPI, and beta.
 - `allocation`: allocation or pie/donut visualization.
 - `checklist`: validation, missing inputs, blocked execution, or repair steps.
@@ -322,7 +325,7 @@ Use these types as the default primitives:
 
 `memo` is a legacy/local display fallback only. Agents must not create new `memo` or `프롬프트 위젯` nodes. If an action lacks a canonical `visualType`, the harness rejects the action and asks the agent to regenerate a complete `portfolio_widget_action` JSON.
 
-Do not convert existing `table`, `function`, `line`, `metrics-table`, `allocation`, or `checklist` widgets into `markdown`. A targeted `update_widget` must preserve the target widget's calculation role and canonical `visualType`; if an agent needs to show a document-style explanation about an existing widget or external research result, it must emit a separate `action:"create_widget"` markdown action instead.
+Do not convert existing `table`, `function`, `line`, `price-history`, `position-status`, `seasonal-comparison`, `metrics-table`, `allocation`, or `checklist` widgets into `markdown`. A targeted `update_widget` must preserve the target widget's calculation role and canonical `visualType`; if an agent needs to show a document-style explanation about an existing widget or external research result, it must emit a separate `action:"create_widget"` markdown action instead.
 
 Runtime helpers now live under `web/src/portfolio/` for new portfolio-specific engine work. Keep reusable action parsing, widget type normalization, deterministic widget compilers, and portfolio route components there instead of adding more portfolio domain code to `web/src/App.jsx`. `App.jsx` lazy-loads the portfolio guide and active workspace route components.
 
@@ -346,6 +349,9 @@ Current local engine modules:
 - `liveBacktestRun.js`: builds and executes legacy holdings-panel yfinance backtest payloads without injecting a benchmark unless the user provided one.
 - `canvasModes.jsx`: owns asset-management and strategy-research canvas metadata, labels, and icons.
 - `chartBuilders.js`: builds chart specs and ECharts options for allocation/pie and line/backtest widgets.
+- `PortfolioAssetPriceHistoryChart.jsx`: renders asset-management `price-history` widgets with a Lightweight Charts area series from local Toss Securities sync snapshots.
+- `PortfolioInvestmentPositionStatusChart.jsx`: renders asset-management `position-status` widgets with pie and stacked-rectangle composition views from local Toss Securities sync snapshots.
+- `PortfolioSeasonalComparisonChart.jsx`: renders asset-management `seasonal-comparison` widgets with a Lightweight Charts multi-line YTD return overlay and a clickable per-year legend.
 - `contextPacketBuilder.js`: builds the portfolio canvas context packet handed to the sidebar agent.
 - `datasetParser.js`: parses ticker lists, markdown holdings tables, weights, and known asset labels into normalized widget datasets.
 - `functionSpecParser.js`: normalizes function widgets, strategy rules, attached CSV metadata, and inline external data.
@@ -386,9 +392,21 @@ Current local engine modules:
 
 The yfinance runner uses `parse_portfolio_strategy_config` as the strategy router. Strategy-specific parser names such as `parse_supertrend_strategy_config` should stay narrow and should not become general backtest routers again.
 
-## Deferred Asset Management Allocation Charts
+## Asset Management Snapshot Widgets
 
-New asset-management canvas creation is gated behind the Toss Securities API preparation dialog. The allocation-chart contract below remains for existing/restored canvases and for the future broker-API path, where holdings data should arrive from account integration rather than a manual ledger prompt.
+Asset-management canvas creation is available only after the Toss Securities connection and position snapshot generation are ready. Empty cells use local widget creation for snapshot-backed widgets rather than asking the agent to invent manual holdings.
+
+Toss Securities asset-management data is stored in the runtime-local SQLite ledger `data/tossinvest/tossinvest-ledger.sqlite3`; the schema contract is `config/tossinvest-ledger.schema.sql`. The snapshot-backed widgets read the API projections from `position_snapshots`, not CSV files. Snapshot rebuild progress is tracked in `rebuild_runs.total_snapshots` and `rebuild_runs.completed_snapshots`, so Settings and the asset-management header can display `completed / total` and percent while the rebuild is running.
+
+The asset-management reconstruction path must use Toss data only. Daily candles are cached per symbol/date in `market_candles`, coverage is tracked in `market_candle_cache_state`, and USD/KRW rates are cached per date in `fx_rates`. These tables are generated runtime data and should not be committed or shipped with releases.
+
+The latest snapshot date is not treated as final. When snapshot generation reaches the current KST date, the rebuild flow refreshes that latest candle/rate slice even if the symbol already has cached historical coverage, because the market may still be moving during the sync window. Historical covered dates can remain cached, but the latest-date row must stay refreshable at sync time.
+
+Asset-management empty cells use a local widget picker instead of an agent prompt. The picker includes `보유 자산 과거 내역 차트`, which creates a `visualType:"price-history"` widget. That widget reads `/api/tossinvest/order-sync/investment-history`, uses the visible asset-history period and timeframe, and renders an investment cost-basis area chart with Lightweight Charts. Its value series is `knownCostBasis*`, so it is not a market-price valuation series and should not be labeled as current asset value. It is not a yfinance backtest widget and should not receive `run_backtest_chart_widget`.
+
+The picker also includes `투자 종목 현황`, which creates a `visualType:"position-status"` widget. That widget reads `/api/tossinvest/order-sync/position-status`, follows the visible asset-history query end date, and defaults to a stacked-rectangle view with a `원 | 사각형` view toggle in the widget header. The `원` view is the pie view; `사각형` is the long composition-bar view. Position list labels should include the ratio in parentheses, such as `AMD (24.31%)`.
+
+The picker also includes `시즌별 비교`, which creates a `visualType:"seasonal-comparison"` widget. That widget reads `/api/tossinvest/order-sync/investment-history?timeframe=1d`, groups the snapshot series by calendar year, and overlays year-to-date return lines on a shared January-to-December axis. The last available year is drawn with a heavier line because it may be incomplete up to the latest synced date; earlier years use thinner lines. The widget renders a custom clickable legend so each year can be toggled on or off without mutating stored snapshot data.
 
 - A `table` widget with holdings rows can be converted directly to an `allocation` widget through the local action `create_allocation_chart_from_widget`.
 - This action should not call Codex or any LLM. It reads the source widget rows, creates a separate `visualType:"allocation"` widget, and links it back with `dependsOn` and `derivedFrom`.

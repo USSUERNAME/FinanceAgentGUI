@@ -8,9 +8,12 @@ import { handleEconomicCalendarEndpoint } from "./economicCalendarApi.mjs";
 import { handleEarningsEndpoint } from "./earningsApi.mjs";
 import { handleMemoryEndpoint } from "./memoryApi.mjs";
 import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mjs";
+import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
 import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
+import { handleTossInvestEndpoint } from "./tossInvestApi.mjs";
+import { handleTransactionSettingsEndpoint } from "./transactionSettings.mjs";
 import { handleWorldMemoryEndpoint, startWorldMemoryCollector } from "./worldMemoryApi.mjs";
 import {
   getCodexOptionsAsync,
@@ -59,6 +62,11 @@ function serveStatic(req, res) {
 }
 
 const server = createServer(async (req, res) => {
+  if (req.url?.startsWith("/api/market-symbols/search")) {
+    await handleMarketSymbolCatalogEndpoint("search", req, res);
+    return;
+  }
+
   if (req.url?.startsWith("/api/news-feed/settings")) {
     await handleNewsFeedEndpoint("settings", req, res);
     return;
@@ -134,6 +142,131 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.url?.startsWith("/api/tossinvest/auth/status")) {
+    await handleTossInvestEndpoint("status", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/auth/credentials")) {
+    await handleTossInvestEndpoint("credentials", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/auth/unlock")) {
+    await handleTossInvestEndpoint("unlock", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/auth/lock")) {
+    await handleTossInvestEndpoint("lock", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/auth/probe")) {
+    await handleTossInvestEndpoint("probe", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/network/public-ip")) {
+    await handleTossInvestEndpoint("public-ip", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/order-sync/status")) {
+    await handleTossInvestEndpoint("order-sync-status", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/order-sync/settings")) {
+    await handleTossInvestEndpoint("order-sync-settings", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/order-sync/run")) {
+    await handleTossInvestEndpoint("order-sync-run", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/order-sync/rebuild")) {
+    await handleTossInvestEndpoint("order-sync-rebuild", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/order-sync/investment-history")) {
+    await handleTossInvestEndpoint("order-sync-investment-history", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/order-sync/position-status")) {
+    await handleTossInvestEndpoint("order-sync-position-status", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/investment-status")) {
+    await handleTossInvestEndpoint("investment-status", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/prices")) {
+    await handleTossInvestEndpoint("prices", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/stocks")) {
+    await handleTossInvestEndpoint("stocks", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/candles")) {
+    await handleTossInvestEndpoint("candles", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/exchange-rate")) {
+    await handleTossInvestEndpoint("exchange-rate", req, res);
+    return;
+  }
+
+  if (req.url?.toLowerCase().startsWith("/api/tossinvest/market-calendar/kr")) {
+    await handleTossInvestEndpoint("market-calendar-kr", req, res);
+    return;
+  }
+
+  if (req.url?.toLowerCase().startsWith("/api/tossinvest/market-calendar/us")) {
+    await handleTossInvestEndpoint("market-calendar-us", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/orders/detail")) {
+    await handleTossInvestEndpoint("order", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/orders")) {
+    await handleTossInvestEndpoint("orders", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/conditional-orders/detail")) {
+    await handleTossInvestEndpoint("conditional-order", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/conditional-orders")) {
+    await handleTossInvestEndpoint("conditional-orders", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/holdings")) {
+    await handleTossInvestEndpoint("holdings", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/tossinvest/accounts")) {
+    await handleTossInvestEndpoint("accounts", req, res);
+    return;
+  }
+
   if (req.url?.startsWith("/api/earnings/upcoming")) {
     await handleEarningsEndpoint("upcoming", req, res);
     return;
@@ -161,6 +294,11 @@ const server = createServer(async (req, res) => {
 
   if (req.url?.startsWith("/api/portfolio/backtest")) {
     await handlePortfolioEndpoint("backtest", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/transactions/settings")) {
+    await handleTransactionSettingsEndpoint(req, res);
     return;
   }
 

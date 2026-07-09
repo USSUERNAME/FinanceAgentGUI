@@ -10,9 +10,10 @@ import Landmark from "lucide-react/dist/esm/icons/landmark.js";
 import MessageSquare from "lucide-react/dist/esm/icons/message-square.js";
 import Newspaper from "lucide-react/dist/esm/icons/newspaper.js";
 import PieChart from "lucide-react/dist/esm/icons/chart-pie.js";
+import ReceiptText from "lucide-react/dist/esm/icons/receipt-text.js";
 import Settings from "lucide-react/dist/esm/icons/settings.js";
 import TrendingUp from "lucide-react/dist/esm/icons/trending-up.js";
-import { newsFeedHealthState } from "../news/newsFeedStatus.js";
+import { newsFeedSidebarHealthState } from "../news/newsFeedStatus.js";
 import { PortfolioCanvasNavList } from "../portfolio/PortfolioCanvasNavList.jsx";
 
 const leftSidebarSections = [
@@ -26,6 +27,7 @@ const leftSidebarSections = [
       { label: "Economic Calendar", icon: Landmark, view: "economic-calendar" },
       { label: "채팅", icon: MessageSquare, view: "chat" },
       { label: "보고서", icon: FileText, view: "reports" },
+      { label: "거래현황", icon: ReceiptText, view: "transaction-status" },
       { label: "포트폴리오", icon: PieChart, view: "portfolio" },
     ],
   },
@@ -43,9 +45,7 @@ function NavStatusDot({ health }) {
     <span
       className={[
         "nav-status-dot",
-        level === "online" ? "is-online" : "",
-        level === "warning" ? "is-warning" : "",
-        level === "error" ? "is-error" : "",
+        level ? `is-${level}` : "",
         health.isCollecting ? "is-collecting" : "",
       ]
         .filter(Boolean)
@@ -68,6 +68,7 @@ export function AppNavigation({
   magazineStatus,
   magazineEnabled = false,
   nameInputRef,
+  newsFeedMarketSummary,
   newsFeedStatus,
   notificationStatus,
   onDraftChange,
@@ -111,7 +112,7 @@ export function AppNavigation({
                   const Icon = item.icon;
                   const itemStatusHealth =
                     item.statusKey === "newsFeed"
-                      ? newsFeedHealthState(newsFeedStatus)
+                      ? newsFeedSidebarHealthState(newsFeedStatus, newsFeedMarketSummary)
                       : item.statusKey === "arcaNotifications"
                         ? arcaNotificationHealth
                         : null;

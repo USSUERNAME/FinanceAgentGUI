@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "enabled": false,
+  "lookbackDays": 3,
+  "maxPagesPerRun": 50,
+  "pageDelayMs": 2000
+}

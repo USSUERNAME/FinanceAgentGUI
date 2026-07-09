@@ -6,6 +6,7 @@ import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
 import SendHorizontal from "lucide-react/dist/esm/icons/send-horizontal.js";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
+import X from "lucide-react/dist/esm/icons/x.js";
 import codexLogo from "./assets/codex-logo-transparent.png";
 import antigravityLogo from "./assets/antigravity-logo.png";
 import stockChannelMagazineLogo from "./assets/stock-channel-magazine-logo.png";
@@ -55,7 +56,6 @@ import {
 import {
   PortfolioCanvasDeleteDialog,
 } from "./portfolio/PortfolioCanvasDeleteDialog.jsx";
-import { PortfolioAssetApiDialog } from "./portfolio/PortfolioAssetApiDialog.jsx";
 import {
   normalizePortfolioCanvasStore,
   normalizePortfolioChatMessages,
@@ -93,8 +93,12 @@ import { buildWorldMemoryAskRequest } from "./worldMemory/askRequest.js";
 import { worldMemoryActionText, worldMemoryHealthState } from "./worldMemory/statusHelpers.js";
 
 const SettingsView = React.lazy(() => import("./settings/SettingsView.jsx"));
+const TossInvestConnectionSection = React.lazy(() =>
+  import("./settings/SettingsView.jsx").then((module) => ({ default: module.TossInvestConnectionSection }))
+);
 const ReportsView = React.lazy(() => import("./reports/ReportsView.jsx"));
 const NewsFeedView = React.lazy(() => import("./news/NewsFeedView.jsx"));
+const TransactionStatusView = React.lazy(() => import("./transactions/TransactionStatusView.jsx"));
 const WorldMemoryView = React.lazy(() => import("./worldMemory/WorldMemoryView.jsx"));
 const MagazinePortfolioEChart = React.lazy(() =>
   import("./portfolio/PortfolioEChart.jsx").then((module) => ({ default: module.PortfolioEChart }))
@@ -1217,6 +1221,7 @@ const personaEligibleScreens = new Set([
   "magazine",
   "world-memory",
   "reports",
+  "transaction-status",
   "earning-calendar",
   "economic-calendar",
   "portfolio",
@@ -1228,9 +1233,58 @@ const ARCA_NOTIFICATION_POLL_INTERVAL_MS = 30000;
 const MAGAZINE_STATUS_POLL_INTERVAL_MS = 30000;
 const NOTIFICATION_STATUS_POLL_INTERVAL_MS = 15000;
 const MEMORY_MARKET_SUMMARY_POLL_INTERVAL_MS = 15 * 60 * 1000;
+const TOSS_INVEST_ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
+const TOSS_INVEST_ORDER_SYNC_PROGRESS_POLL_MS = 3000;
+const TOSS_INVEST_ORDER_SYNC_BATCH_DELAY_MS = 2000;
+const TOSS_INVEST_ORDER_SYNC_MAX_BATCHES = 100;
 const BROWSER_NOTIFICATION_LAST_SHOWN_KEY = "finance-agent-gui:last-browser-notification-id";
 const MEMORY_RECENT_LIMIT = 5;
 const MEMORY_DIALOG_PAGE_SIZE = 20;
+
+function mergeTossInvestOrderSyncStatus(current, next) {
+  const currentReconstruction = current?.reconstruction;
+  if (!currentReconstruction || currentReconstruction.status !== "running") return next;
+  const nextReconstruction = next?.reconstruction;
+  if (!nextReconstruction) {
+    return {
+      ...next,
+      reconstruction: currentReconstruction,
+    };
+  }
+  if (nextReconstruction.clientRunId === currentReconstruction.clientRunId) return next;
+  const sameServerRun = currentReconstruction.runId && nextReconstruction.runId === currentReconstruction.runId;
+  const serverRunStarted =
+    nextReconstruction.status === "running" && (nextReconstruction.runId || nextReconstruction.progress);
+  if (sameServerRun || serverRunStarted) {
+    return {
+      ...next,
+      reconstruction: {
+        ...currentReconstruction,
+        ...nextReconstruction,
+        clientRunId: currentReconstruction.clientRunId,
+        startedAt: currentReconstruction.startedAt || nextReconstruction.startedAt || "",
+      },
+    };
+  }
+  return {
+    ...next,
+    reconstruction: currentReconstruction,
+  };
+}
+
+function failRunningTossInvestOrderSyncReconstruction(current, error) {
+  if (!current?.reconstruction || current.reconstruction.status !== "running") return current;
+  return {
+    ...current,
+    reconstruction: {
+      ...current.reconstruction,
+      ok: false,
+      status: "failed",
+      error: error.message,
+      finishedAt: new Date().toISOString(),
+    },
+  };
+}
 const PORTFOLIO_CANVAS_FILE_SAVE_DEBOUNCE_MS = 450;
 const initialBoardFilters = {
   channel: "stock",
@@ -1826,7 +1880,6 @@ function App() {
   const [editingPortfolioCanvasId, setEditingPortfolioCanvasId] = useState("");
   const [portfolioCanvasNameDraft, setPortfolioCanvasNameDraft] = useState("");
   const [pendingDeletePortfolioCanvas, setPendingDeletePortfolioCanvas] = useState(null);
-  const [assetApiDialogOpen, setAssetApiDialogOpen] = useState(false);
   const portfolioCanvasNameInputRef = useRef(null);
   const notificationStatusRef = useRef(null);
   const browserNotificationLastShownRef = useRef(readLastBrowserNotificationId());
@@ -1858,6 +1911,28 @@ function App() {
   const [arcaAuthBusy, setArcaAuthBusy] = useState(false);
   const [arcaAuthAction, setArcaAuthAction] = useState("");
   const [arcaAuthError, setArcaAuthError] = useState("");
+  const [tossInvestStatus, setTossInvestStatus] = useState(null);
+  const [tossInvestBusy, setTossInvestBusy] = useState(false);
+  const [tossInvestAction, setTossInvestAction] = useState("");
+  const [tossInvestError, setTossInvestError] = useState("");
+  const [tossInvestErrorCode, setTossInvestErrorCode] = useState("");
+  const [tossInvestPublicIp, setTossInvestPublicIp] = useState(null);
+  const [tossInvestPublicIpBusy, setTossInvestPublicIpBusy] = useState(false);
+  const [tossInvestPublicIpError, setTossInvestPublicIpError] = useState("");
+  const [tossInvestDialogOpen, setTossInvestDialogOpen] = useState(false);
+  const [tossInvestOrderSyncStatus, setTossInvestOrderSyncStatus] = useState(null);
+  const [tossInvestOrderSyncBusy, setTossInvestOrderSyncBusy] = useState(false);
+  const [tossInvestOrderSyncAction, setTossInvestOrderSyncAction] = useState("");
+  const [tossInvestOrderSyncError, setTossInvestOrderSyncError] = useState("");
+  const [tossInvestOrderSyncErrorCode, setTossInvestOrderSyncErrorCode] = useState("");
+  const tossInvestCredentials = tossInvestStatus?.credentials || {};
+  const tossInvestConnectionUsable = Boolean(tossInvestCredentials.usable || tossInvestCredentials.unlocked);
+  const tossInvestConnected = Boolean(
+    (tossInvestStatus?.connected || tossInvestStatus?.token?.cached) && tossInvestConnectionUsable
+  );
+  const tossInvestOrderSyncEnabled = Boolean(
+    tossInvestOrderSyncStatus?.enabled || tossInvestOrderSyncStatus?.settings?.enabled
+  );
   const [browserNotificationPermission, setBrowserNotificationPermission] = useState(() =>
     browserNotificationPermissionState()
   );
@@ -2247,6 +2322,7 @@ function App() {
   const isPortfolioCanvasView = activeView === "portfolio-canvas" && Boolean(activePortfolioCanvas);
   const isWorldMemoryChatView = activeView === "world-memory" && worldMemoryEnabled;
   const isChatCanvasView = activeView === "chat";
+  const isFullWidthCanvasView = isChatCanvasView;
   const activeChatScope = isPortfolioCanvasView
     ? { type: "portfolio-canvas", canvasId: activePortfolioCanvas.id }
     : isWorldMemoryChatView
@@ -2788,10 +2864,6 @@ function App() {
   }
 
   function createPortfolioCanvasFromGuide(mode = PORTFOLIO_CANVAS_MODES.asset.id) {
-    if (mode === PORTFOLIO_CANVAS_MODES.asset.id) {
-      setAssetApiDialogOpen(true);
-      return "";
-    }
     let createdCanvasId = "";
     updatePortfolioCanvasStore((current) => {
       const result = buildPortfolioCanvasCreateState(current, mode);
@@ -3549,6 +3621,321 @@ function App() {
     });
   }
 
+  async function loadTossInvestStatus({ actionLabel = "reload", quiet = false } = {}) {
+    if (!quiet) {
+      setTossInvestBusy(true);
+      setTossInvestAction(actionLabel);
+      setTossInvestError("");
+      setTossInvestErrorCode("");
+    }
+    try {
+      const response = await fetch("/api/tossinvest/auth/status", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        if (!quiet) setTossInvestErrorCode(payload.errorCode || "");
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setTossInvestStatus(payload);
+      if (!quiet) {
+        setTossInvestError("");
+        setTossInvestErrorCode("");
+      }
+      return payload;
+    } catch (error) {
+      if (!quiet) setTossInvestError(error.message);
+      return null;
+    } finally {
+      if (!quiet) {
+        setTossInvestBusy(false);
+        setTossInvestAction("");
+      }
+    }
+  }
+
+  async function runTossInvestAction(actionName, endpoint, { method = "POST", body = null, confirmMessage = "" } = {}) {
+    if (tossInvestBusy) return null;
+    if (confirmMessage && typeof window !== "undefined" && !window.confirm(confirmMessage)) return null;
+
+    setTossInvestBusy(true);
+    setTossInvestAction(actionName);
+    setTossInvestError("");
+    setTossInvestErrorCode("");
+    try {
+      const response = await fetch(endpoint, {
+        method,
+        headers: method === "DELETE" ? undefined : { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: method === "DELETE" ? undefined : body ? JSON.stringify(body) : "{}",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        setTossInvestErrorCode(payload.errorCode || "");
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setTossInvestStatus(payload);
+      setTossInvestErrorCode("");
+      return payload;
+    } catch (error) {
+      setTossInvestError(error.message);
+      return null;
+    } finally {
+      setTossInvestBusy(false);
+      setTossInvestAction("");
+    }
+  }
+
+  function saveTossInvestCredentials(credentials) {
+    return runTossInvestAction("save", "/api/tossinvest/auth/credentials", {
+      method: "PUT",
+      body: credentials,
+    });
+  }
+
+  async function saveAndProbeTossInvestCredentials(credentials, { closeDialog = false } = {}) {
+    const saved = await saveTossInvestCredentials(credentials);
+    if (!saved) return null;
+    await probeTossInvestConnection();
+    if (closeDialog) setTossInvestDialogOpen(false);
+    return saved;
+  }
+
+  function unlockTossInvestVault(payload) {
+    return runTossInvestAction("unlock", "/api/tossinvest/auth/unlock", {
+      body: payload,
+    });
+  }
+
+  async function unlockAndProbeTossInvestVault(payload, { closeDialog = false } = {}) {
+    const unlocked = await unlockTossInvestVault(payload);
+    if (!unlocked) return null;
+    await probeTossInvestConnection();
+    if (closeDialog) setTossInvestDialogOpen(false);
+    return unlocked;
+  }
+
+  function lockTossInvestVault() {
+    return runTossInvestAction("lock", "/api/tossinvest/auth/lock");
+  }
+
+  function probeTossInvestConnection() {
+    return runTossInvestAction("probe", "/api/tossinvest/auth/probe");
+  }
+
+  async function checkTossInvestPublicIp() {
+    if (tossInvestPublicIpBusy) return null;
+    setTossInvestPublicIpBusy(true);
+    setTossInvestPublicIpError("");
+    try {
+      const response = await fetch("/api/tossinvest/network/public-ip", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setTossInvestPublicIp(payload);
+      return payload;
+    } catch (error) {
+      setTossInvestPublicIpError(error.message);
+      return null;
+    } finally {
+      setTossInvestPublicIpBusy(false);
+    }
+  }
+
+  async function deleteTossInvestCredentials() {
+    const deleted = await runTossInvestAction("delete", "/api/tossinvest/auth/credentials", {
+      method: "DELETE",
+      confirmMessage: "저장된 토스증권 API 키와 동기화된 거래내역 SQLite를 함께 삭제할까요?",
+    });
+    if (deleted) {
+      await loadTossInvestOrderSyncStatus({ quiet: true });
+    }
+    return deleted;
+  }
+
+  async function loadTossInvestOrderSyncStatus({ actionLabel = "reload", quiet = false } = {}) {
+    if (!quiet) {
+      setTossInvestOrderSyncBusy(true);
+      setTossInvestOrderSyncAction(actionLabel);
+      setTossInvestOrderSyncError("");
+      setTossInvestOrderSyncErrorCode("");
+    }
+    try {
+      const response = await fetch("/api/tossinvest/order-sync/status", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        const error = new Error(payload.error || `HTTP ${response.status}`);
+        error.errorCode = payload.errorCode || "";
+        throw error;
+      }
+      setTossInvestOrderSyncStatus((current) => mergeTossInvestOrderSyncStatus(current, payload));
+      if (!quiet) {
+        setTossInvestOrderSyncError("");
+        setTossInvestOrderSyncErrorCode("");
+      }
+      return payload;
+    } catch (error) {
+      if (!quiet) {
+        setTossInvestOrderSyncError(error.message);
+        setTossInvestOrderSyncErrorCode(error.errorCode || "");
+      }
+      return null;
+    } finally {
+      if (!quiet) {
+        setTossInvestOrderSyncBusy(false);
+        setTossInvestOrderSyncAction("");
+      }
+    }
+  }
+
+  function tossInvestOrderSyncHasMore(payload) {
+    if (payload?.sync?.hasNext) return true;
+    const states = Array.isArray(payload?.store?.states) ? payload.store.states : [];
+    return states.some((state) => Boolean(state?.has_next));
+  }
+
+  async function waitForTossInvestOrderSyncBatch() {
+    await new Promise((resolveTimer) => window.setTimeout(resolveTimer, TOSS_INVEST_ORDER_SYNC_BATCH_DELAY_MS));
+  }
+
+  async function requestTossInvestOrderSyncBatch() {
+    const response = await fetch("/api/tossinvest/order-sync/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: "{}",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      const error = new Error(payload.error || `HTTP ${response.status}`);
+      error.errorCode = payload.errorCode || "";
+      throw error;
+    }
+    setTossInvestOrderSyncStatus((current) => mergeTossInvestOrderSyncStatus(current, payload));
+    return payload;
+  }
+
+  async function requestTossInvestOrderSyncSnapshotRebuild({ forceFull = false } = {}) {
+    const clientRunId = `snapshot-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const startedAt = new Date().toISOString();
+    setTossInvestOrderSyncStatus((current) => ({
+      ...(current || {}),
+      reconstruction: {
+        ok: null,
+        status: "running",
+        clientRunId,
+        startedAt,
+      },
+    }));
+    const response = await fetch("/api/tossinvest/order-sync/rebuild", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ forceFull }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      const error = new Error(payload.error || `HTTP ${response.status}`);
+      error.errorCode = payload.errorCode || "";
+      throw error;
+    }
+    const reconstruction = payload.reconstruction
+      ? {
+          ...payload.reconstruction,
+          clientRunId,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          status: payload.reconstruction.status || (payload.reconstruction.ok === true ? "completed" : "failed"),
+        }
+      : {
+          ok: false,
+          clientRunId,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          status: "failed",
+          error: "포지션 스냅샷 생성 결과를 확인하지 못했습니다.",
+        };
+    const normalizedPayload = { ...payload, reconstruction };
+    setTossInvestOrderSyncStatus((current) => mergeTossInvestOrderSyncStatus(current, normalizedPayload));
+    return normalizedPayload;
+  }
+
+  async function runTossInvestOrderSyncBatches() {
+    let payload = null;
+    for (let batchIndex = 0; batchIndex < TOSS_INVEST_ORDER_SYNC_MAX_BATCHES; batchIndex += 1) {
+      if (batchIndex > 0) {
+        await waitForTossInvestOrderSyncBatch();
+        await loadTossInvestOrderSyncStatus({ quiet: true });
+      }
+      payload = await requestTossInvestOrderSyncBatch();
+      if (!tossInvestOrderSyncHasMore(payload)) {
+        const changedOrders =
+          Number(payload?.sync?.insertedCount || 0) + Number(payload?.sync?.updatedCount || 0);
+        setTossInvestOrderSyncAction("snapshot");
+        return await requestTossInvestOrderSyncSnapshotRebuild({ forceFull: changedOrders > 0 });
+      }
+    }
+    throw new Error("거래내역 동기화가 너무 오래 이어지고 있습니다. 잠시 후 다시 이어서 동기화해 주세요.");
+  }
+
+  async function runTossInvestOrderSync() {
+    if (tossInvestOrderSyncBusy) return null;
+    setTossInvestOrderSyncBusy(true);
+    setTossInvestOrderSyncAction("sync");
+    setTossInvestOrderSyncError("");
+    setTossInvestOrderSyncErrorCode("");
+    try {
+      return await runTossInvestOrderSyncBatches();
+    } catch (error) {
+      setTossInvestOrderSyncStatus((current) => failRunningTossInvestOrderSyncReconstruction(current, error));
+      setTossInvestOrderSyncError(error.message);
+      setTossInvestOrderSyncErrorCode(error.errorCode || "");
+      return null;
+    } finally {
+      setTossInvestOrderSyncBusy(false);
+      setTossInvestOrderSyncAction("");
+    }
+  }
+
+  async function updateTossInvestOrderSyncEnabled(enabled) {
+    if (tossInvestOrderSyncBusy) return null;
+    setTossInvestOrderSyncBusy(true);
+    setTossInvestOrderSyncAction("toggle");
+    setTossInvestOrderSyncError("");
+    setTossInvestOrderSyncErrorCode("");
+    try {
+      const response = await fetch("/api/tossinvest/order-sync/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ enabled }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        const error = new Error(payload.error || `HTTP ${response.status}`);
+        error.errorCode = payload.errorCode || "";
+        throw error;
+      }
+      setTossInvestOrderSyncStatus((current) => mergeTossInvestOrderSyncStatus(current, payload));
+      if (!enabled) return payload;
+
+      setTossInvestOrderSyncAction("sync");
+      return await runTossInvestOrderSyncBatches();
+    } catch (error) {
+      setTossInvestOrderSyncStatus((current) => failRunningTossInvestOrderSyncReconstruction(current, error));
+      setTossInvestOrderSyncError(error.message);
+      setTossInvestOrderSyncErrorCode(error.errorCode || "");
+      return null;
+    } finally {
+      setTossInvestOrderSyncBusy(false);
+      setTossInvestOrderSyncAction("");
+    }
+  }
+
+  function openTossInvestDialog() {
+    setTossInvestDialogOpen(true);
+    void loadTossInvestStatus({ quiet: true });
+  }
+
   async function runWorldMemoryAction(action, options = {}) {
     if (worldMemoryActionBusy) return;
     const { uiAgentActionId = "", ...requestOptions } = options;
@@ -4299,6 +4686,33 @@ function App() {
   }, []);
 
   useEffect(() => {
+    void loadTossInvestStatus({ quiet: true });
+    void loadTossInvestOrderSyncStatus({ quiet: true });
+  }, []);
+
+  useEffect(() => {
+    if (!tossInvestConnected || !tossInvestOrderSyncEnabled) return undefined;
+
+    const timer = window.setInterval(() => {
+      if (tossInvestOrderSyncBusy) return;
+      void runTossInvestOrderSync();
+    }, TOSS_INVEST_ORDER_SYNC_INTERVAL_MS);
+
+    return () => window.clearInterval(timer);
+  }, [tossInvestConnected, tossInvestOrderSyncEnabled, tossInvestOrderSyncBusy]);
+
+  useEffect(() => {
+    if (!tossInvestOrderSyncBusy || !["sync", "snapshot"].includes(tossInvestOrderSyncAction)) return undefined;
+
+    void loadTossInvestOrderSyncStatus({ quiet: true });
+    const timer = window.setInterval(() => {
+      void loadTossInvestOrderSyncStatus({ quiet: true });
+    }, TOSS_INVEST_ORDER_SYNC_PROGRESS_POLL_MS);
+
+    return () => window.clearInterval(timer);
+  }, [tossInvestOrderSyncBusy, tossInvestOrderSyncAction]);
+
+  useEffect(() => {
     const controller = new AbortController();
     void refreshMagazineCatalog({ signal: controller.signal }).catch((error) => {
       if (error.name !== "AbortError") {
@@ -4748,7 +5162,34 @@ function App() {
     void loadWorldMemorySettings({ refreshStatus: true });
     void loadMagazineSettings({ quiet: true });
     void loadArcaAuthStatus({ quiet: true });
+    void loadTossInvestStatus({ quiet: true });
+    void loadTossInvestOrderSyncStatus({ quiet: true });
   }, [activeView]);
+
+  useEffect(() => {
+    if (activeView !== "transaction-status") return;
+    void loadTossInvestStatus({ quiet: true });
+  }, [activeView]);
+
+  useEffect(() => {
+    if (activeView !== "portfolio-canvas" || !activePortfolioCanvas) return;
+    if (portfolioCanvasModeMeta(activePortfolioCanvas.mode).id !== PORTFOLIO_CANVAS_MODES.asset.id) return;
+    void loadTossInvestStatus({ quiet: true });
+    void loadTossInvestOrderSyncStatus({ quiet: true });
+  }, [activeView, activePortfolioCanvas?.id, activePortfolioCanvas?.mode]);
+
+  useEffect(() => {
+    if (!tossInvestDialogOpen) return undefined;
+
+    function handleTossInvestDialogKeyDown(event) {
+      if (event.key === "Escape") {
+        setTossInvestDialogOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleTossInvestDialogKeyDown);
+    return () => window.removeEventListener("keydown", handleTossInvestDialogKeyDown);
+  }, [tossInvestDialogOpen]);
 
   useEffect(() => {
     if (activeView !== "world-memory") return;
@@ -5804,10 +6245,44 @@ function App() {
       speed: providerSelection.speed,
     };
   });
+  const promotedTossInvestError = tossInvestError || tossInvestOrderSyncError;
+  const promotedTossInvestErrorCode = tossInvestError
+    ? tossInvestErrorCode
+    : tossInvestOrderSyncError
+      ? tossInvestOrderSyncErrorCode
+      : tossInvestErrorCode;
+  const tossInvestConnectionProps = {
+    status: tossInvestStatus,
+    busy: tossInvestBusy,
+    action: tossInvestAction,
+    error: promotedTossInvestError,
+    errorCode: promotedTossInvestErrorCode,
+    publicIp: tossInvestPublicIp,
+    publicIpBusy: tossInvestPublicIpBusy,
+    publicIpError: tossInvestPublicIpError,
+    autoProbeAfterSave: true,
+    autoProbeAfterUnlock: true,
+    onReload: () => void loadTossInvestStatus(),
+    onSaveCredentials: saveAndProbeTossInvestCredentials,
+    onUnlockVault: unlockAndProbeTossInvestVault,
+    onLockVault: lockTossInvestVault,
+    onProbe: probeTossInvestConnection,
+    onCheckPublicIp: checkTossInvestPublicIp,
+    onDeleteCredentials: deleteTossInvestCredentials,
+  };
+  const tossInvestOrderSyncProps = {
+    status: tossInvestOrderSyncStatus,
+    busy: tossInvestOrderSyncBusy,
+    action: tossInvestOrderSyncAction,
+    error: tossInvestOrderSyncError,
+    errorCode: tossInvestOrderSyncErrorCode,
+    onToggleEnabled: updateTossInvestOrderSyncEnabled,
+    onRunSync: () => void runTossInvestOrderSync(),
+  };
 
   return (
     <main
-      className={isChatCanvasView ? "mockup-stage no-agent-sidebar" : "mockup-stage"}
+      className={isFullWidthCanvasView ? "mockup-stage no-agent-sidebar" : "mockup-stage"}
       aria-label="에이전트 sidebar mockup"
     >
       <AppNavigation
@@ -5817,6 +6292,7 @@ function App() {
         editingPortfolioCanvasId={editingPortfolioCanvasId}
         magazineStatus={magazineStatus}
         nameInputRef={portfolioCanvasNameInputRef}
+        newsFeedMarketSummary={newsFeedMarketSummary}
         newsFeedStatus={newsFeedStatus}
         notificationStatus={notificationStatus}
         magazineEnabled={magazineEnabled}
@@ -5841,18 +6317,63 @@ function App() {
         worldMemoryHealth={worldMemoryHealth}
       />
 
+      {tossInvestDialogOpen ? (
+        <div
+          className="portfolio-asset-api-modal-backdrop"
+          role="presentation"
+          onMouseDown={() => setTossInvestDialogOpen(false)}
+        >
+          <div
+            className="portfolio-asset-api-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="toss-auth-settings-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              className="portfolio-asset-api-modal-close"
+              type="button"
+              aria-label="토스증권 API 설정 닫기"
+              title="닫기"
+              onClick={() => setTossInvestDialogOpen(false)}
+            >
+              <X size={18} strokeWidth={2.4} />
+            </button>
+            <div className="portfolio-asset-api-modal-body">
+              <React.Suspense fallback={<RouteLoading label="토스증권 API 설정 불러오는 중" />}>
+                <TossInvestConnectionSection
+                  {...tossInvestConnectionProps}
+                  onSaveCredentials={(credentials) =>
+                    saveAndProbeTossInvestCredentials(credentials, { closeDialog: true })
+                  }
+                  onUnlockVault={(payload) => unlockAndProbeTossInvestVault(payload, { closeDialog: true })}
+                />
+              </React.Suspense>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {activeView === "settings" ? (
         <section className="workspace-canvas settings-canvas" aria-label="설정">
           <React.Suspense fallback={<RouteLoading label="설정 불러오는 중" />}>
             <SettingsView
               settings={newsFeedSettings}
-              busy={newsFeedSettingsBusy || worldMemorySettingsBusy || magazineSettingsBusy}
+              busy={
+                newsFeedSettingsBusy ||
+                worldMemorySettingsBusy ||
+                magazineSettingsBusy ||
+                tossInvestBusy ||
+                tossInvestOrderSyncBusy
+              }
               savingFeedId={newsFeedSettingsSavingId}
               error={newsFeedSettingsError}
               onReload={() => {
                 void loadNewsFeedSettings();
                 void loadWorldMemorySettings({ refreshStatus: true });
                 void loadMagazineSettings({ quiet: true });
+                void loadTossInvestStatus();
+                void loadTossInvestOrderSyncStatus();
               }}
               onToggleFeed={toggleNewsFeedSource}
               onPollIntervalChange={updateNewsFeedPollInterval}
@@ -5897,6 +6418,8 @@ function App() {
               onMagazineSchedulerIntervalChange={updateMagazineSchedulerInterval}
               onMagazineMaxArticlesPerCycleChange={updateMagazineMaxArticlesPerCycle}
               onReloadWorldMemory={loadWorldMemoryStatus}
+              tossInvest={tossInvestConnectionProps}
+              tossOrderSync={tossInvestOrderSyncProps}
               arcaAuth={{
                 status: arcaAuthStatus,
                 busy: arcaAuthBusy,
@@ -5999,6 +6522,25 @@ function App() {
             />
           </React.Suspense>
         </section>
+      ) : activeView === "transaction-status" ? (
+        <React.Suspense fallback={<RouteLoading label="거래현황 불러오는 중" />}>
+          <TransactionStatusView
+            tossStatus={tossInvestStatus}
+            tossBusy={tossInvestBusy}
+            tossError={promotedTossInvestError}
+            tossErrorCode={promotedTossInvestErrorCode}
+            tossPublicIp={tossInvestPublicIp}
+            tossPublicIpBusy={tossInvestPublicIpBusy}
+            tossPublicIpError={tossInvestPublicIpError}
+            onOpenSettings={openTossInvestDialog}
+            onDeleteCredentials={deleteTossInvestCredentials}
+            onProbeConnection={probeTossInvestConnection}
+            onCheckPublicIp={checkTossInvestPublicIp}
+            onReload={() => {
+              void loadTossInvestStatus({ quiet: true });
+            }}
+          />
+        </React.Suspense>
       ) : activeView === "world-memory" && worldMemoryEnabled ? (
         <section className="workspace-canvas world-memory-canvas" aria-label="World Memory">
           <React.Suspense fallback={<RouteLoading label="World Memory 불러오는 중" />}>
@@ -6505,6 +7047,23 @@ function App() {
                 onWidgetPromptRequest={handlePortfolioWidgetPromptRequest}
                 agentWidgetAction={portfolioWidgetAgentAction}
                 agentProvider={agentProvider}
+                tossInvestStatus={tossInvestStatus}
+                tossInvestBusy={tossInvestBusy}
+                tossInvestError={promotedTossInvestError}
+                tossInvestErrorCode={promotedTossInvestErrorCode}
+                tossInvestPublicIp={tossInvestPublicIp}
+                tossInvestPublicIpBusy={tossInvestPublicIpBusy}
+                tossInvestPublicIpError={tossInvestPublicIpError}
+                tossInvestOrderSyncStatus={tossInvestOrderSyncStatus}
+                tossInvestOrderSyncBusy={tossInvestOrderSyncBusy}
+                tossInvestOrderSyncAction={tossInvestOrderSyncAction}
+                tossInvestOrderSyncError={tossInvestOrderSyncError}
+                tossInvestOrderSyncErrorCode={tossInvestOrderSyncErrorCode}
+                onOpenSettings={openTossInvestDialog}
+                onDeleteTossInvestCredentials={deleteTossInvestCredentials}
+                onProbeTossInvestConnection={probeTossInvestConnection}
+                onRunTossInvestOrderSync={() => void runTossInvestOrderSync()}
+                onCheckTossInvestPublicIp={checkTossInvestPublicIp}
                 onAgentWidgetActionConsumed={(actionId) =>
                   setPortfolioWidgetAgentAction((current) => (current?.id === actionId ? null : current))
                 }
@@ -6566,7 +7125,7 @@ function App() {
         />
       )}
 
-      {isChatCanvasView ? null : (
+      {isFullWidthCanvasView ? null : (
         <AgentSidebar
           addChatAttachmentFiles={addChatAttachmentFiles}
           agentIcon={sidebarAgentRuntime.icon}
@@ -6621,10 +7180,6 @@ function App() {
         canvas={pendingDeletePortfolioCanvas}
         onCancel={() => setPendingDeletePortfolioCanvas(null)}
         onConfirm={confirmDeletePortfolioCanvas}
-      />
-      <PortfolioAssetApiDialog
-        open={assetApiDialogOpen}
-        onConfirm={() => setAssetApiDialogOpen(false)}
       />
     </main>
   );

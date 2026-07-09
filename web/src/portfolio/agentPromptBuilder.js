@@ -28,6 +28,65 @@ function portfolioPromptCurrentDate() {
   return localDate.toISOString().slice(0, 10);
 }
 
+function portfolioPromptAssetHistoryActionExample({ canvasId = "", canvasMode = "asset-management" } = {}) {
+  return {
+    action: "create_widget",
+    actionId: "render_portfolio_artifact",
+    canvasId,
+    canvasMode,
+    classification: {
+      taskFamily: "asset_management",
+      operation: "create_widget",
+      analysisKind: "asset_cost_basis_history",
+      isMultiplePeriodComparison: false,
+      isMultipleAssetComparison: false,
+      comparisonAxis: "",
+      primaryOutput: "asset_history_chart",
+      requiresMarketData: false,
+      requiresBacktestExecution: false,
+      confidence: "high",
+    },
+    periodComparison: {
+      isMultiplePeriodComparison: false,
+      periods: [],
+      confidence: "",
+      note: "",
+    },
+    widget: {
+      title: "보유 자산 과거 내역",
+      kind: "보유 자산 과거 내역 차트",
+      visualType: "price-history",
+      summary: "토스 증권 Open API 동기화 스냅샷의 투자 원금 흐름을 표시합니다.",
+      dataset: [],
+      chartSpec: {
+        type: "price-history",
+        engine: "lightweight-charts",
+        chartType: "area",
+        role: "asset_cost_basis_history",
+        dataProvider: "토스 증권 Open API",
+        source: "tossinvest-position-reconstruction",
+        query: {
+          startDate: "",
+          startMode: "first_trade",
+          endDate: "",
+          endMode: "latest",
+          timeframe: "1d",
+          currency: "KRW",
+        },
+      },
+      scenarioId: "portfolio_scenario_root",
+      graphRole: "process_node",
+      outputRole: "asset_history",
+      badges: ["Lightweight Charts"],
+      dependsOn: [],
+      derivedFrom: [],
+      updatePolicy: "auto",
+      w: 3,
+      h: 3,
+    },
+  };
+}
+
 const DEFAULT_USER_WIDGET_PROMPT_LIMIT = 1200;
 const BACKTEST_MATRIX_CONTEXT_PROMPT_LIMIT = 750000;
 
@@ -101,8 +160,8 @@ export function buildPortfolioWidgetAgentPrompt(
     "이 요청을 현재 포트폴리오 작업실의 Context Packet과 함께 해석하세요.",
     "Portfolio widget developer contract는 docs/portfolio-widgets.md 입니다. 그 문서를 런타임 기준처럼 따르세요.",
     "중요: 로컬 GUI는 자연어 키워드로 widget.visualType, dataset, functionSpec, 의존성 그래프를 추정하지 않습니다. 의미 분류와 실행 계획은 반드시 아래 classification/periodComparison/scenario/widget 필드에 명시하세요.",
-    "classification에는 taskFamily, operation, analysisKind, isMultiplePeriodComparison, isMultipleAssetComparison, comparisonAxis, primaryOutput, requiresMarketData, requiresBacktestExecution, confidence를 넣으세요. 예: primaryOutput='backtest_line_chart' | 'metrics_table' | 'source_table' | 'function_widget' | 'markdown' | 'allocation_chart'.",
-    "명시되지 않은 widget.visualType/dataset/functionSpec은 실행 가능한 값으로 추론되지 않습니다. 모든 새 widget은 canonical visualType(table/function/line/metrics-table/markdown/allocation/checklist)을 반드시 가져야 하며, memo/프롬프트 위젯 fallback은 계약 오류로 거절됩니다.",
+    "classification에는 taskFamily, operation, analysisKind, isMultiplePeriodComparison, isMultipleAssetComparison, comparisonAxis, primaryOutput, requiresMarketData, requiresBacktestExecution, confidence를 넣으세요. 예: primaryOutput='backtest_line_chart' | 'metrics_table' | 'source_table' | 'function_widget' | 'markdown' | 'allocation_chart' | 'asset_history_chart' | 'position_status_chart' | 'seasonal_comparison_chart'.",
+    "명시되지 않은 widget.visualType/dataset/functionSpec은 실행 가능한 값으로 추론되지 않습니다. 모든 새 widget은 canonical visualType(table/function/line/price-history/position-status/seasonal-comparison/metrics-table/markdown/allocation/checklist)을 반드시 가져야 하며, memo/프롬프트 위젯 fallback은 계약 오류로 거절됩니다.",
     "확신이 없으면 visualType='checklist' 또는 visualType='markdown' 위젯으로 보류하고 필요한 확인 질문을 남기세요.",
     "절차형 요청은 하나의 거대한 위젯으로 압축하지 말고 action='create_widget_flow'와 widgets 배열로 table/function/chart 노드를 나누세요.",
     "응답 JSON의 canvasId는 위 [Canvas]의 canvasId와 같아야 하며, 다른 캔버스의 위젯을 추정해서 수정하지 마세요.",
@@ -150,6 +209,15 @@ export function buildPortfolioWidgetAgentPrompt(
       : "사용자가 포트폴리오 종목/비율/전략안을 입력하면 기본적으로 새 전략 포트폴리오 테이블 위젯을 생성합니다. 사용자가 바꾸자, 수정하자, 업데이트하자처럼 기존 위젯 변경을 명시하지 않았다면 기존 전략 테이블을 덮어쓰지 말고 새 포트폴리오 추가로 처리하세요.",
     isAssetMode
       ? "자산 관리 모드에서 명시적 비중 또는 평가금액이 있는 보유 table은 파이/도넛 allocation 위젯의 원본입니다. GUI는 로컬 생성 가능한 table에 대해 파이차트를 자동으로 붙일 수 있으므로, 에이전트는 표와 차트를 같은 위젯으로 합치지 말고 필요하면 별도 allocation 위젯을 dependsOn으로 연결하세요."
+      : "",
+    isAssetMode
+      ? "사용자가 '보유자산 차트', '보유 자산 과거 내역 차트', '보유자산 과거 내역', '투자 원금 히스토리'처럼 동기화된 보유자산 흐름 차트를 요청하면 table/allocation/line/backtest가 아니라 widget.visualType='price-history'를 사용하세요. dataset은 비우고 chartSpec.type='price-history', engine='lightweight-charts', role='asset_cost_basis_history', dataProvider='토스 증권 Open API', source='tossinvest-position-reconstruction', outputRole='asset_history', updatePolicy='auto'를 지정하세요. 날짜가 명시되지 않으면 query.startDate=''와 query.endDate=''로 두어 첫 거래일~최신 시점을 사용합니다."
+      : "",
+    isAssetMode
+      ? "사용자가 '투자 종목 현황', '보유 종목 현황', '보유 종목 비중', '종목 구성', '종목 비율'처럼 조회 종료 기준 보유 종목 구성 위젯을 요청하면 일반 allocation이나 table이 아니라 widget.visualType='position-status'를 사용하세요. dataset은 비우고 chartSpec.type='position-status', engine='react-css', role='investment_position_status', dataProvider='토스 증권 Open API', source='tossinvest-position-reconstruction', outputRole='position_status', updatePolicy='auto'를 지정하세요. 날짜가 명시되지 않으면 query.endDate=''로 두어 최신 시점을 사용하고 query.view는 기본 'bar'입니다."
+      : "",
+    isAssetMode
+      ? "사용자가 '시즌별 비교', '연도별 수익률 비교', 'YTD 수익률 비교', '각 해 수익률을 겹쳐 보기'처럼 동기화된 보유자산 스냅샷의 연간 수익률 오버레이를 요청하면 widget.visualType='seasonal-comparison'을 사용하세요. dataset은 비우고 chartSpec.type='seasonal-comparison', engine='lightweight-charts', chartType='line', role='annual_return_overlay', dataProvider='토스 증권 Open API', source='tossinvest-position-reconstruction', outputRole='seasonal_comparison', updatePolicy='auto'를 지정하세요. 기본 query는 startDate='', startMode='first_trade', endDate='', endMode='latest', timeframe='1d', currency='KRW', returnMode='year_to_date'입니다."
       : "",
     "사용자의 목적, 투자 기간, 손실 감내도, 데이터 공백을 먼저 확인하고, 현대 포트폴리오 이론, 분산, 리스크 예산, 벤치마크 비교, 비용, 세금, 유동성 관점을 반영해 주세요.",
     "메인 캔버스에 들어갈 위젯은 단일 기능이어야 합니다. 차트 위젯은 차트 데이터와 차트 스펙만, 설명 위젯은 짧은 설명만, 체크리스트 위젯은 확인 항목만 담아 주세요.",
@@ -278,8 +346,8 @@ export function buildPortfolioChatActionInstructions(
     `현재 날짜: ${currentDate}`,
     "개발자 문서 기준: docs/portfolio-widgets.md. 포트폴리오 위젯 생성/수정은 이 계약과 예제를 우선 따르세요.",
     "중요: 로컬 GUI는 자연어 키워드로 widget.visualType, dataset, functionSpec, 의존성 그래프를 추정하지 않습니다. 의미 분류와 실행 계획은 반드시 portfolio_widget_action JSON의 classification/periodComparison/scenario/widget 필드에 명시하세요.",
-    "classification에는 taskFamily, operation, analysisKind, isMultiplePeriodComparison, isMultipleAssetComparison, comparisonAxis, primaryOutput, requiresMarketData, requiresBacktestExecution, confidence를 넣으세요. 예: primaryOutput='backtest_line_chart' | 'metrics_table' | 'source_table' | 'function_widget' | 'markdown' | 'allocation_chart'.",
-    "명시되지 않은 widget.visualType/dataset/functionSpec은 실행 가능한 값으로 추론되지 않습니다. 모든 새 widget은 canonical visualType(table/function/line/metrics-table/markdown/allocation/checklist)을 반드시 가져야 하며, memo/프롬프트 위젯 fallback은 계약 오류로 거절됩니다.",
+    "classification에는 taskFamily, operation, analysisKind, isMultiplePeriodComparison, isMultipleAssetComparison, comparisonAxis, primaryOutput, requiresMarketData, requiresBacktestExecution, confidence를 넣으세요. 예: primaryOutput='backtest_line_chart' | 'metrics_table' | 'source_table' | 'function_widget' | 'markdown' | 'allocation_chart' | 'asset_history_chart' | 'position_status_chart' | 'seasonal_comparison_chart'.",
+    "명시되지 않은 widget.visualType/dataset/functionSpec은 실행 가능한 값으로 추론되지 않습니다. 모든 새 widget은 canonical visualType(table/function/line/price-history/position-status/seasonal-comparison/metrics-table/markdown/allocation/checklist)을 반드시 가져야 하며, memo/프롬프트 위젯 fallback은 계약 오류로 거절됩니다.",
     "확신이 없으면 visualType='checklist' 또는 visualType='markdown' 위젯으로 보류하고 필요한 확인 질문을 남기세요.",
     scenario ? `현재 시나리오 루트: ${scenario.title || "기간 및 타임프레임"} / runs=${Array.isArray(scenario.runs) ? scenario.runs.length : 0} / dimensions=${Array.isArray(scenario.dimensions) ? scenario.dimensions.join(", ") : ""}` : "",
     isAssetMode
@@ -317,6 +385,15 @@ export function buildPortfolioChatActionInstructions(
       : "전략 연구 모드에서 포트폴리오 데이터가 입력되면 기본 산출물은 새 테이블 위젯입니다. 사용자가 바꾸자/수정/업데이트를 명시하지 않으면 기존 위젯 변경이 아니라 새 전략 포트폴리오 추가로 간주하고 create_widget을 사용하세요.",
     isAssetMode
       ? "자산 관리 모드의 기본 시각화는 파이/도넛 allocation 위젯입니다. 명시적 weight/비중/percent/ratio 또는 평가금액/marketValue/amount/value가 있는 table은 별도 allocation 위젯으로 파생될 수 있지만, 티커 이름만 있는 목록에서 비중을 꾸며내지는 마세요."
+      : "",
+    isAssetMode
+      ? "사용자가 '보유자산 차트', '보유 자산 과거 내역 차트', '보유자산 과거 내역', '투자 원금 히스토리'처럼 동기화된 보유자산 흐름 차트를 요청하면 table/allocation/line/backtest가 아니라 widget.visualType='price-history'를 사용하세요. dataset은 비우고 chartSpec.type='price-history', engine='lightweight-charts', role='asset_cost_basis_history', dataProvider='토스 증권 Open API', source='tossinvest-position-reconstruction', outputRole='asset_history', updatePolicy='auto'를 지정하세요. 날짜가 명시되지 않으면 query.startDate=''와 query.endDate=''로 두어 첫 거래일~최신 시점을 사용합니다."
+      : "",
+    isAssetMode
+      ? "사용자가 '투자 종목 현황', '보유 종목 현황', '보유 종목 비중', '종목 구성', '종목 비율'처럼 조회 종료 기준 보유 종목 구성 위젯을 요청하면 일반 allocation이나 table이 아니라 widget.visualType='position-status'를 사용하세요. dataset은 비우고 chartSpec.type='position-status', engine='react-css', role='investment_position_status', dataProvider='토스 증권 Open API', source='tossinvest-position-reconstruction', outputRole='position_status', updatePolicy='auto'를 지정하세요. 날짜가 명시되지 않으면 query.endDate=''로 두어 최신 시점을 사용하고 query.view는 기본 'bar'입니다."
+      : "",
+    isAssetMode
+      ? "사용자가 '시즌별 비교', '연도별 수익률 비교', 'YTD 수익률 비교', '각 해 수익률을 겹쳐 보기'처럼 동기화된 보유자산 스냅샷의 연간 수익률 오버레이를 요청하면 widget.visualType='seasonal-comparison'을 사용하세요. dataset은 비우고 chartSpec.type='seasonal-comparison', engine='lightweight-charts', chartType='line', role='annual_return_overlay', dataProvider='토스 증권 Open API', source='tossinvest-position-reconstruction', outputRole='seasonal_comparison', updatePolicy='auto'를 지정하세요. 기본 query는 startDate='', startMode='first_trade', endDate='', endMode='latest', timeframe='1d', currency='KRW', returnMode='year_to_date'입니다."
       : "",
     "사용자가 포트폴리오 위젯, 차트, 표, 색상, 데이터셋, 크기, 제목, 본문, 시각화 방식을 만들거나 수정해 달라고 하면 설명만 하지 말고 응답 끝에 반드시 portfolio_widget_action JSON block을 포함하세요.",
     "현재 캔버스에 위젯이 없어도 생성 요청이면 새 위젯을 만들 수 있는 action을 반드시 포함하세요.",
@@ -377,7 +454,9 @@ export function buildPortfolioChatActionInstructions(
     "생성 action 예시:",
     "```portfolio_widget_action",
     JSON.stringify(
-      {
+      isAssetMode
+      ? portfolioPromptAssetHistoryActionExample({ canvasId, canvasMode: modeMeta.id })
+      : {
         action: "create_widget",
         actionId: "render_portfolio_artifact",
         canvasId,

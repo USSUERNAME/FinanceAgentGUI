@@ -1,9 +1,8 @@
 import React, { useMemo, useRef, useState } from "react";
 import Move from "lucide-react/dist/esm/icons/move.js";
+import Plus from "lucide-react/dist/esm/icons/plus.js";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
-import codexLogo from "../assets/codex-logo-transparent.png";
-import antigravityLogo from "../assets/antigravity-logo.png";
 import {
   portfolioWidgetActionMeta,
   portfolioWidgetPrimaryAction,
@@ -29,28 +28,70 @@ import {
   PortfolioWidgetProducedContent,
   PortfolioWidgetRelationMeta,
 } from "./PortfolioWidgetContent.jsx";
+import { PortfolioAssetHistoryPanel } from "./PortfolioAssetHistoryPanel.jsx";
 import { PortfolioWidgetFlowMap } from "./PortfolioWidgetFlowMap.jsx";
 import { PortfolioScenarioPanel } from "./PortfolioScenarioPanel.jsx";
 
 export function PortfolioWidgetCanvas({
   widgets,
   scenario = null,
-  agentProvider = "codex-cli",
   setWidgets,
   activityLog,
   canvasMode = "",
+  assetHistoryPanel = null,
   onCreateCell,
+  onCreateAssetWidget,
   onDeleteWidget,
   onWidgetAction,
+  onAssetHistoryCurrencyChange,
+  onPositionStatusViewChange,
   onScenarioPromptRequest,
   appendLog,
 }) {
   const gridRef = useRef(null);
   const isStrategyCanvas = canvasMode === "strategy-research";
-  const agentIcon = agentProvider === "antigravity-cli" ? antigravityLogo : codexLogo;
-  const agentIconAlt = agentProvider === "antigravity-cli" ? "Antigravity" : "Codex";
   const gridModel = useMemo(() => portfolioGridModel(widgets), [widgets]);
   const [activeWidgetInteraction, setActiveWidgetInteraction] = useState(null);
+  const [activeAssetPickerCell, setActiveAssetPickerCell] = useState(null);
+  const showAssetHistoryPanel = Boolean(assetHistoryPanel && canvasMode === "asset-management");
+  const isAssetCanvas = canvasMode === "asset-management";
+
+  function assetPickerIsActive(cell) {
+    return activeAssetPickerCell?.x === cell.x && activeAssetPickerCell?.y === cell.y;
+  }
+
+  function openAddCell(cell) {
+    if (isAssetCanvas) {
+      setActiveAssetPickerCell(cell);
+      return;
+    }
+    onCreateCell?.(cell);
+  }
+
+  function createAssetWidget(cell, widgetType) {
+    if (!widgetType) return;
+    onCreateAssetWidget?.({ cell, widgetType });
+    setActiveAssetPickerCell(null);
+  }
+
+  function assetHistoryCurrency(widget) {
+    const value = String(
+      widget?.chartSpec?.query?.currency ||
+        widget?.chartSpec?.currency ||
+        widget?.chartSpec?.valueCurrency ||
+        widget?.currency ||
+        "KRW"
+    ).toUpperCase();
+    return value === "USD" ? "USD" : "KRW";
+  }
+
+  function positionStatusView(widget) {
+    return String(widget?.chartSpec?.query?.view || widget?.chartSpec?.view || "").toLowerCase() === "pie" ? "pie" : "bar";
+  }
+
+  function widgetUsesAssetHistoryCurrency(widgetVisualType) {
+    return widgetVisualType === "price-history" || widgetVisualType === "seasonal-comparison";
+  }
 
   function gridPointerMetrics(gridNode) {
     const style = window.getComputedStyle(gridNode);
@@ -321,17 +362,8 @@ export function PortfolioWidgetCanvas({
 
   return (
     <div className="portfolio-widget-canvas">
-      {isStrategyCanvas ? null : (
-        <section className="portfolio-widget-intro" aria-labelledby="portfolio-widget-canvas-title">
-          <div>
-            <span>3열 위젯 캔버스</span>
-            <h2 id="portfolio-widget-canvas-title">빈 칸의 에이전트 아이콘으로 요청합니다.</h2>
-            <p>포트폴리오 위젯은 원본 데이터로 두고, 백테스트는 입력 위젯들을 엮은 별도 차트 위젯으로 생성합니다.</p>
-          </div>
-        </section>
-      )}
-
       <PortfolioWidgetFlowMap widgets={widgets} />
+      {showAssetHistoryPanel ? <PortfolioAssetHistoryPanel {...assetHistoryPanel} /> : null}
       {isStrategyCanvas ? <PortfolioScenarioPanel scenario={scenario} onPromptRequest={onScenarioPromptRequest} /> : null}
 
       <div
@@ -342,19 +374,48 @@ export function PortfolioWidgetCanvas({
         }}
       >
         {gridModel.emptyCells.map((cell) => (
-          <button
-            className="portfolio-widget-add-cell"
-            type="button"
-            key={`empty-${cell.x}-${cell.y}`}
-            style={{
-              gridColumn: `${cell.x + 1} / span 1`,
-              gridRow: `${cell.y + 1} / span 1`,
-            }}
-            onClick={() => onCreateCell(cell)}
-            aria-label={`${cell.x + 1}열 ${cell.y + 1}행에 에이전트 위젯 요청`}
-          >
-            <img className="portfolio-widget-agent-icon" src={agentIcon} alt={`${agentIconAlt} 에이전트`} />
-          </button>
+          assetPickerIsActive(cell) ? (
+            <div
+              className="portfolio-widget-picker-cell"
+              key={`picker-${cell.x}-${cell.y}`}
+              style={{
+                gridColumn: `${cell.x + 1} / span 1`,
+                gridRow: `${cell.y + 1} / span 1`,
+              }}
+            >
+              <span>위젯 선택하기</span>
+              <select
+                aria-label="자산관리 위젯 선택하기"
+                defaultValue=""
+                onChange={(event) => createAssetWidget(cell, event.currentTarget.value)}
+              >
+                <option value="" disabled>
+                  선택
+                </option>
+                <option value="asset-investment-history">보유 자산 과거 내역 차트</option>
+                <option value="asset-position-status">투자 종목 현황</option>
+                <option value="asset-seasonal-comparison">시즌별 비교</option>
+              </select>
+            </div>
+          ) : (
+            <button
+              className="portfolio-widget-add-cell"
+              type="button"
+              key={`empty-${cell.x}-${cell.y}`}
+              style={{
+                gridColumn: `${cell.x + 1} / span 1`,
+                gridRow: `${cell.y + 1} / span 1`,
+              }}
+              onClick={() => openAddCell(cell)}
+              aria-label={
+                isAssetCanvas
+                  ? `${cell.x + 1}열 ${cell.y + 1}행에 위젯 선택하기`
+                  : `${cell.x + 1}열 ${cell.y + 1}행에 에이전트 위젯 요청`
+              }
+            >
+              <Plus className="portfolio-widget-add-icon" size={22} strokeWidth={2.35} aria-hidden="true" />
+            </button>
+          )
         ))}
 
         {activeMoveInteraction?.candidate ? (
@@ -375,6 +436,11 @@ export function PortfolioWidgetCanvas({
 
         {widgets.map((widget) => {
           const widgetVisualType = normalizePortfolioWidgetVisualType(widget.visualType);
+          const isAssetPriceHistoryWidget = widgetVisualType === "price-history";
+          const isSeasonalComparisonWidget = widgetVisualType === "seasonal-comparison";
+          const isPositionStatusWidget = widgetVisualType === "position-status";
+          const selectedAssetHistoryCurrency = widgetUsesAssetHistoryCurrency(widgetVisualType) ? assetHistoryCurrency(widget) : "";
+          const selectedPositionStatusView = isPositionStatusWidget ? positionStatusView(widget) : "";
           const isMovingWidget = activeMoveInteraction?.widgetId === widget.id;
           const isResizingWidget = activeResizeInteraction?.widgetId === widget.id;
           const resizeLayout =
@@ -386,7 +452,7 @@ export function PortfolioWidgetCanvas({
             h: widget.h,
           };
           const isCompactVisualWidget =
-            ["allocation", "line"].includes(widgetVisualType) && Number(renderedLayout.h || 1) <= 2;
+            ["allocation", "line", "price-history", "position-status", "seasonal-comparison"].includes(widgetVisualType) && Number(renderedLayout.h || 1) <= 2;
           const primaryAction = portfolioWidgetPrimaryAction(widget, canvasMode);
           const primaryActionMeta = primaryAction ? portfolioWidgetActionMeta(primaryAction, widget.status) : null;
           const originalWidgetGridStyle = {
@@ -424,7 +490,7 @@ export function PortfolioWidgetCanvas({
                 className={[
                   "portfolio-widget-card",
                   `is-${normalizePortfolioWidgetStatus(widget.status)}`,
-                  ["allocation", "line"].includes(widgetVisualType) ? "is-visual-widget" : "",
+                  ["allocation", "line", "price-history", "position-status", "seasonal-comparison"].includes(widgetVisualType) ? "is-visual-widget" : "",
                   isCompactVisualWidget ? "is-compact-visual" : "",
                   isMovingWidget ? "is-moving" : "",
                   isResizingWidget ? "is-resizing" : "",
@@ -451,6 +517,66 @@ export function PortfolioWidgetCanvas({
                         <RefreshCw size={14} strokeWidth={2.3} />
                       </button>
                     ) : null}
+                    {isAssetPriceHistoryWidget || isSeasonalComparisonWidget ? (
+                      <div
+                        className="portfolio-widget-currency-toggle"
+                        role="group"
+                        aria-label={`${widget.title} 표시 통화`}
+                      >
+                        {[
+                          ["USD", "달러"],
+                          ["KRW", "원"],
+                        ].map(([currency, label]) => (
+                          <button
+                            className={selectedAssetHistoryCurrency === currency ? "is-selected" : ""}
+                            type="button"
+                            key={`${widget.id}-${currency}`}
+                            aria-pressed={selectedAssetHistoryCurrency === currency}
+                            aria-label={`${widget.title} ${label}로 보기`}
+                            title={`${label}로 보기`}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              if (selectedAssetHistoryCurrency !== currency) {
+                                onAssetHistoryCurrencyChange?.(widget, currency);
+                              }
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    {isPositionStatusWidget ? (
+                      <div
+                        className="portfolio-widget-currency-toggle"
+                        role="group"
+                        aria-label={`${widget.title} 투자 종목 현황 보기`}
+                      >
+                        {[
+                          ["pie", "원"],
+                          ["bar", "사각형"],
+                        ].map(([view, label]) => (
+                          <button
+                            className={selectedPositionStatusView === view ? "is-selected" : ""}
+                            type="button"
+                            key={`${widget.id}-${view}`}
+                            aria-pressed={selectedPositionStatusView === view}
+                            aria-label={`${widget.title} ${label} 보기`}
+                            title={`${label} 보기`}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              if (selectedPositionStatusView !== view) {
+                                onPositionStatusViewChange?.(widget, view);
+                              }
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                     <button
                       className="portfolio-widget-drag-handle"
                       type="button"
@@ -470,7 +596,7 @@ export function PortfolioWidgetCanvas({
                 )}
                 <div className="portfolio-widget-card-footer">
                   <span>
-                    {widget.displayId || widget.id} · {renderedLayout.w}x{renderedLayout.h} · {renderedLayout.x + 1}열 {renderedLayout.y + 1}행 · 이동/크기 조절 가능
+                  {widget.displayId || widget.id} · {renderedLayout.w}x{renderedLayout.h} · {renderedLayout.x + 1}열 {renderedLayout.y + 1}행 · 이동/크기 조절 가능
                   </span>
                   <div className="portfolio-widget-card-footer-actions">
                     <button

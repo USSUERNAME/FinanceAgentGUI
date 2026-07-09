@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCodexOptions, readJsonBody, runAntigravityGenerate, runCodexChat, sendJson } from "./codexProbe.mjs";
@@ -32,6 +34,12 @@ const FEED_SCAN_TIMEOUT_MS = 180000;
 const WORLD_MEMORY_MODEL_TIMEOUT_MS = 240000;
 const WORLD_MEMORY_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const WORLD_MEMORY_RETRY_INTERVAL_MS = 30 * 60 * 1000;
+const WORLD_MEMORY_CONNECTIVITY_RETRY_INTERVAL_MS = 10 * 60 * 1000;
+const WORLD_MEMORY_CONNECTIVITY_TIMEOUT_MS = 5000;
+const WORLD_MEMORY_CONNECTIVITY_PROBE_URLS = [
+  "https://www.gstatic.com/generate_204",
+  "https://www.cloudflare.com/cdn-cgi/trace",
+];
 const WORLD_MEMORY_HISTORY_LIMIT = 16;
 const WORLD_MEMORY_HANDLED_CHANGE_SUGGESTION_LIMIT = 40;
 const OUTPUT_LIMIT = 1024 * 1024;
@@ -89,8 +97,154 @@ function timestampMs(dateLike) {
   return Number.isFinite(value) ? value : 0;
 }
 
+function isCollectorScheduleDue(state = {}, now = Date.now()) {
+  const schedule = state.schedule || {};
+  const pausedUntilMs = timestampMs(schedule.pausedUntil);
+  if (pausedUntilMs > now) return false;
+
+  const retryAtMs = timestampMs(schedule.nextRetryAt);
+  if (schedule.activeCycle && retryAtMs) return now >= retryAtMs;
+
+  const nextRunMs = timestampMs(schedule.nextRunAt);
+  return Boolean(nextRunMs && now >= nextRunMs);
+}
+
+function requestConnectivityProbe(url, timeoutMs = WORLD_MEMORY_CONNECTIVITY_TIMEOUT_MS) {
+  return new Promise((resolveProbe) => {
+    let parsed = null;
+    try {
+      parsed = new URL(url);
+    } catch (error) {
+      resolveProbe({ ok: false, url, error: error.message });
+      return;
+    }
+
+    const client = parsed.protocol === "http:" ? http : https;
+    const req = client.request(
+      parsed,
+      {
+        method: "HEAD",
+        timeout: timeoutMs,
+        headers: {
+          "user-agent": "FinanceAgentGUI/WorldMemoryConnectivityProbe",
+        },
+      },
+      (res) => {
+        res.resume();
+        res.on("end", () => {
+          const statusCode = Number(res.statusCode || 0);
+          resolveProbe({
+            ok: statusCode >= 200 && statusCode < 400,
+            url,
+            statusCode,
+          });
+        });
+      }
+    );
+    req.on("timeout", () => {
+      req.destroy();
+      resolveProbe({ ok: false, url, error: "timeout" });
+    });
+    req.on("error", (error) => {
+      resolveProbe({ ok: false, url, error: error.message });
+    });
+    req.end();
+  });
+}
+
+async function probeInternetConnectivity() {
+  if (process.env.WORLD_MEMORY_ASSUME_ONLINE === "1") {
+    return { ok: true, checkedAt: nowIso(), forced: true, probes: [] };
+  }
+  if (process.env.WORLD_MEMORY_ASSUME_ONLINE === "0") {
+    return {
+      ok: false,
+      checkedAt: nowIso(),
+      forced: true,
+      error: "WORLD_MEMORY_ASSUME_ONLINE=0",
+      probes: [],
+    };
+  }
+
+  const probes = [];
+  for (const url of WORLD_MEMORY_CONNECTIVITY_PROBE_URLS) {
+    const probe = await requestConnectivityProbe(url);
+    probes.push(probe);
+    if (probe.ok) {
+      return { ok: true, checkedAt: nowIso(), probes };
+    }
+  }
+  return {
+    ok: false,
+    checkedAt: nowIso(),
+    error: probes.map((probe) => `${probe.url}: ${probe.statusCode || probe.error || "failed"}`).join("; "),
+    probes,
+  };
+}
+
+export function applyWorldMemoryOfflineWaitState(
+  state = {},
+  {
+    cycleId = "",
+    trigger = "scheduled",
+    scheduledAt = nowIso(),
+    deadlineAt = "",
+    attempt = 1,
+    checkedAt = nowIso(),
+    connectivity = {},
+  } = {}
+) {
+  const nextRetryAt = addMs(checkedAt, WORLD_MEMORY_CONNECTIVITY_RETRY_INTERVAL_MS);
+  const reason = connectivity.error || "인터넷 연결 확인 실패";
+  return appendHistory(
+    {
+      ...state,
+      collector: {
+        ...(state.collector || {}),
+        running: false,
+        status: "offline_wait",
+        lastAction: "인터넷 연결 대기 · 연결 확인 후 자동 재시도",
+        lastError: reason,
+        lastFinishedAt: checkedAt,
+        lastTrigger: trigger,
+        attempt,
+      },
+      schedule: {
+        ...(state.schedule || {}),
+        nextRetryAt,
+        activeCycle: {
+          id: cycleId || `wm_offline_${Date.now()}`,
+          trigger,
+          scheduledAt,
+          deadlineAt,
+          attempt,
+          awaitingConnectivity: true,
+          checkedAt,
+          nextRetryAt,
+        },
+      },
+    },
+    {
+      type: "collection",
+      status: "offline_wait",
+      trigger,
+      scheduledAt,
+      finishedAt: checkedAt,
+      attempts: attempt,
+      nextRetryAt,
+      error: reason,
+    }
+  );
+}
+
 function safeRelative(path) {
   return path ? relative(GUIBUILD_ROOT, path) : "";
+}
+
+function safeArtifactPath(path) {
+  if (!path) return "";
+  const text = String(path);
+  return text.startsWith(GUIBUILD_ROOT) ? safeRelative(text) : text;
 }
 
 function runtimeState() {
@@ -173,16 +327,199 @@ function writeJsonFile(path, payload) {
   writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`);
 }
 
+function latestWorldMemoryReportArtifact() {
+  ensureWorldMemoryDirs();
+  let entries = [];
+  try {
+    entries = readdirSync(WORLD_MEMORY_LOG_DIR, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  const candidates = entries
+    .filter((entry) => entry.isFile() && /^world_memory_market_situation_\d{8}_\d{6}\.json$/.test(entry.name))
+    .map((entry) => {
+      const jsonPath = join(WORLD_MEMORY_LOG_DIR, entry.name);
+      const view = readJsonFile(jsonPath);
+      if (!view || typeof view !== "object" || Array.isArray(view)) return null;
+      let stats = null;
+      try {
+        stats = statSync(jsonPath);
+      } catch {
+        return null;
+      }
+      const stem = entry.name.replace(/\.json$/, "");
+      const htmlPath = join(WORLD_MEMORY_LOG_DIR, `${stem}.html`);
+      const textPath = join(WORLD_MEMORY_LOG_DIR, `${stem}.txt`);
+      return {
+        view,
+        jsonPath,
+        htmlPath: existsSync(htmlPath) ? htmlPath : "",
+        textPath: existsSync(textPath) ? textPath : "",
+        generatedAt: stats.mtime instanceof Date ? stats.mtime.toISOString() : nowIso(),
+        mtimeMs: stats.mtimeMs || 0,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs || b.jsonPath.localeCompare(a.jsonPath));
+
+  return candidates[0] || null;
+}
+
+function readWorldMemoryDbSnapshot() {
+  if (!existsSync(WORLD_MEMORY_DB_PATH)) return null;
+  const python = findPythonCommand();
+  if (!python) return null;
+
+  const script = [
+    "import json, sqlite3, sys",
+    "db_path = sys.argv[1]",
+    "payload = {'entryCount': 0, 'maxAsOf': '', 'maxLoggedAt': ''}",
+    "try:",
+    "    conn = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True)",
+    "    try:",
+    "        row = conn.execute('select count(*), max(as_of), max(logged_at) from world_issue_entries').fetchone()",
+    "        if row:",
+    "            payload = {'entryCount': int(row[0] or 0), 'maxAsOf': row[1] or '', 'maxLoggedAt': row[2] or ''}",
+    "    finally:",
+    "        conn.close()",
+    "except Exception as exc:",
+    "    payload = {'entryCount': 0, 'maxAsOf': '', 'maxLoggedAt': '', 'error': str(exc)}",
+    "print(json.dumps(payload, ensure_ascii=False))",
+  ].join("\n");
+
+  const result = spawnSync(python.command, [...python.argsPrefix, "-c", script, WORLD_MEMORY_DB_PATH], {
+    cwd: GUIBUILD_ROOT,
+    encoding: "utf8",
+    timeout: 3000,
+  });
+  if (result.error || result.status !== 0) return null;
+  const parsed = tryParseJson(result.stdout);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+}
+
+function latestDbSnapshotTimestamp(dbSnapshot = {}) {
+  for (const value of [dbSnapshot.maxLoggedAt, dbSnapshot.maxAsOf]) {
+    if (timestampMs(value)) return value;
+  }
+  return "";
+}
+
+function stateNeedsArtifactRecovery(state = {}) {
+  const collector = state.collector || {};
+  const report = state.report || {};
+  return (
+    !collector.lastSuccessfulAt ||
+    !collector.lastReportSuccessfulAt ||
+    report.status !== "ready" ||
+    !report.generatedAt ||
+    !report.view
+  );
+}
+
+export function recoverWorldMemoryCollectorStateFromArtifacts(state = {}, options = {}) {
+  if (!stateNeedsArtifactRecovery(state) && !options.force) {
+    return { state, recovered: false };
+  }
+
+  const hasDbSnapshot = Object.prototype.hasOwnProperty.call(options, "dbSnapshot");
+  const hasReportArtifact = Object.prototype.hasOwnProperty.call(options, "reportArtifact");
+  const dbSnapshot = hasDbSnapshot ? options.dbSnapshot : readWorldMemoryDbSnapshot();
+  const reportArtifact = hasReportArtifact ? options.reportArtifact : latestWorldMemoryReportArtifact();
+  const recoveredCollectionAt = latestDbSnapshotTimestamp(dbSnapshot || {});
+  const recoveredReportAt = reportArtifact?.generatedAt || "";
+  const reportArtifactMs = timestampMs(recoveredReportAt);
+  const currentReportMs = timestampMs(state.report?.generatedAt);
+  let next = {
+    ...state,
+    collector: { ...(state.collector || {}) },
+    schedule: { ...(state.schedule || {}) },
+    report: { ...(state.report || {}) },
+  };
+  let recovered = false;
+
+  if (
+    reportArtifact?.view &&
+    (!next.report.view || next.report.status !== "ready" || !currentReportMs || reportArtifactMs > currentReportMs)
+  ) {
+    const reportView = filterWorldMemoryReportView(reportArtifact.view, {
+      handledChangeSuggestions: next.changeSuggestionLedger?.handled,
+    });
+    next.report = {
+      ...next.report,
+      status: "ready",
+      title: reportView.title || "World Memory 시장 상황 인식",
+      generatedAt: recoveredReportAt || nowIso(),
+      path: safeArtifactPath(reportArtifact.htmlPath || reportArtifact.jsonPath),
+      htmlPath: safeArtifactPath(reportArtifact.htmlPath),
+      jsonPath: safeArtifactPath(reportArtifact.jsonPath),
+      textPath: safeArtifactPath(reportArtifact.textPath),
+      summary: reportView.summary || next.report.summary || "",
+      suggestions: reportChangeSuggestions(reportView),
+      text: reportPlainText(reportView),
+      view: reportView,
+    };
+    recovered = true;
+  }
+
+  if (recoveredCollectionAt && !next.collector.lastSuccessfulAt) {
+    next.collector.lastSuccessfulAt = recoveredCollectionAt;
+    recovered = true;
+  }
+  if (recoveredReportAt && !next.collector.lastReportSuccessfulAt) {
+    next.collector.lastReportSuccessfulAt = recoveredReportAt;
+    recovered = true;
+  }
+
+  if (!recovered) return { state, recovered: false };
+
+  const finishedAt = [recoveredReportAt, recoveredCollectionAt, next.collector.lastFinishedAt]
+    .filter(Boolean)
+    .sort((a, b) => timestampMs(b) - timestampMs(a))[0] || nowIso();
+  const recoveredNextRunAt = recoveredCollectionAt ? addMs(recoveredCollectionAt, WORLD_MEMORY_INTERVAL_MS) : "";
+  const currentNextRunMs = timestampMs(next.schedule.nextRunAt);
+  const recoveredNextRunMs = timestampMs(recoveredNextRunAt);
+
+  next.collector = {
+    ...next.collector,
+    running: false,
+    status: "ok",
+    lastAction: "월드 메모리 상태 파일을 DB/보고서 로그에서 복구했습니다.",
+    lastError: "",
+    lastFinishedAt: finishedAt,
+    lastTrigger: next.collector.lastTrigger || "artifact-recovery",
+  };
+  if (!next.schedule.activeCycle && !next.schedule.pausedUntil && recoveredNextRunMs) {
+    next.schedule.nextRunAt =
+      !currentNextRunMs || currentNextRunMs > recoveredNextRunMs
+        ? recoveredNextRunAt
+        : next.schedule.nextRunAt;
+  }
+  next.schedule.nextRetryAt = next.schedule.nextRetryAt || "";
+  next.schedule.activeCycle = next.schedule.activeCycle || null;
+
+  next = appendHistory(next, {
+    type: "state_recovery",
+    status: "ok",
+    trigger: "artifact-recovery",
+    recoveredCollectionAt,
+    recoveredReportAt,
+    dbEntryCount: Number(dbSnapshot?.entryCount || 0),
+    reportJsonPath: safeArtifactPath(reportArtifact?.jsonPath || ""),
+  });
+
+  return { state: next, recovered: true };
+}
+
 function readCollectorState() {
   ensureWorldMemoryDirs();
   const raw = readJsonFile(WORLD_MEMORY_STATE_PATH);
+  const base = defaultCollectorState();
   if (!raw || typeof raw !== "object") {
-    const initial = defaultCollectorState();
-    writeCollectorState(initial);
-    return initial;
+    const recovery = recoverWorldMemoryCollectorStateFromArtifacts(base);
+    return writeCollectorState(recovery.state);
   }
 
-  const base = defaultCollectorState();
   const report = { ...base.report, ...(raw.report || {}) };
   if (report.view && typeof report.view === "object" && !Array.isArray(report.view)) {
     report.view = filterWorldMemoryReportView(report.view, {
@@ -191,7 +528,7 @@ function readCollectorState() {
     report.suggestions = reportChangeSuggestions(report.view);
     report.text = reportPlainText(report.view);
   }
-  return {
+  const state = {
     ...base,
     ...raw,
     collector: { ...base.collector, ...(raw.collector || {}) },
@@ -201,6 +538,9 @@ function readCollectorState() {
     changeSuggestionLedger: normalizeChangeSuggestionLedger(raw.changeSuggestionLedger),
     history: Array.isArray(raw.history) ? raw.history.slice(0, WORLD_MEMORY_HISTORY_LIMIT) : [],
   };
+  const recovery = recoverWorldMemoryCollectorStateFromArtifacts(state);
+  if (recovery.recovered) return writeCollectorState(recovery.state);
+  return recovery.state;
 }
 
 function writeCollectorState(state) {
@@ -1811,6 +2151,28 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
     const deadlineAt = addMs(scheduledAt, WORLD_MEMORY_INTERVAL_MS);
     const modelPolicy = resolveWorldMemoryModelPolicy();
     const steps = [];
+    const connectivity = await probeInternetConnectivity();
+    if (!connectivity.ok) {
+      const checkedAt = connectivity.checkedAt || nowIso();
+      updateCollectorState((state) =>
+        applyWorldMemoryOfflineWaitState(state, {
+          cycleId,
+          trigger,
+          scheduledAt,
+          deadlineAt,
+          attempt,
+          checkedAt,
+          connectivity,
+        })
+      );
+      return {
+        ok: false,
+        cycleId,
+        skipped: true,
+        code: "WORLD_MEMORY_OFFLINE",
+        error: connectivity.error || "인터넷 연결 확인 실패",
+      };
+    }
 
     updateCollectorState((state) => ({
       ...state,
@@ -2157,7 +2519,11 @@ function scheduleWorldMemoryCollector(delayOverrideMs = null) {
   let targetMs = nextRunMs;
 
   if (pausedUntilMs > now) targetMs = pausedUntilMs;
-  if (retryAtMs > now) targetMs = Math.min(targetMs, retryAtMs);
+  if (state.schedule.activeCycle && retryAtMs > now) {
+    targetMs = retryAtMs;
+  } else if (retryAtMs > now) {
+    targetMs = Math.min(targetMs, retryAtMs);
+  }
 
   const delayMs = delayOverrideMs === null ? Math.max(0, targetMs - now) : Math.max(0, delayOverrideMs);
   runtime.nextTimerAt = new Date(now + delayMs).toISOString();
@@ -2191,7 +2557,7 @@ async function handleWorldMemoryTimer() {
   const retryAtMs = timestampMs(state.schedule.nextRetryAt);
   if (activeCycle && retryAtMs && now >= retryAtMs) {
     const deadlineAtMs = timestampMs(activeCycle.deadlineAt);
-    if (deadlineAtMs && now >= deadlineAtMs) {
+    if (deadlineAtMs && now >= deadlineAtMs && !activeCycle.awaitingConnectivity) {
       updateCollectorState((current) =>
         appendHistory(
           {
@@ -2226,9 +2592,15 @@ async function handleWorldMemoryTimer() {
     }
     void executeWorldMemoryCycle({
       trigger: "scheduled",
-      scheduledAt: activeCycle.scheduledAt,
-      attempt: Number(activeCycle.attempt || 1) + 1,
+      scheduledAt: activeCycle.awaitingConnectivity ? nowIso() : activeCycle.scheduledAt,
+      attempt: activeCycle.awaitingConnectivity
+        ? Number(activeCycle.attempt || 1)
+        : Number(activeCycle.attempt || 1) + 1,
     });
+    return;
+  }
+  if (activeCycle && retryAtMs && now < retryAtMs) {
+    scheduleWorldMemoryCollector();
     return;
   }
 
@@ -2251,7 +2623,10 @@ export function startWorldMemoryCollector() {
     stopWorldMemoryCollector({ persist: false });
     return false;
   }
-  if (runtime.started) return true;
+  if (runtime.started) {
+    scheduleWorldMemoryCollector();
+    return true;
+  }
   ensureWorldMemoryDirs();
   runtime.started = true;
   updateCollectorState((state) => ({
@@ -2320,6 +2695,9 @@ async function buildWorldMemoryStatus() {
   ensureWorldMemoryDirs();
   const collectorState = readCollectorState();
   const runtime = runtimeState();
+  if (runtime.started && !runtime.inFlight && isCollectorScheduleDue(collectorState)) {
+    scheduleWorldMemoryCollector(0);
+  }
   const python = findPythonCommand();
   const dependencies = probePythonDependencies(python);
   let init = null;

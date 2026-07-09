@@ -1,10 +1,13 @@
 import { handleEconomicCalendarEndpoint } from "./economicCalendarApi.mjs";
 import { handleEarningsEndpoint } from "./earningsApi.mjs";
 import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mjs";
+import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
 import { handleMemoryEndpoint } from "./memoryApi.mjs";
 import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
+import { handleTossInvestEndpoint } from "./tossInvestApi.mjs";
+import { handleTransactionSettingsEndpoint } from "./transactionSettings.mjs";
 import { handleWorldMemoryEndpoint, startWorldMemoryCollector } from "./worldMemoryApi.mjs";
 import {
   getCodexOptionsAsync,
@@ -33,6 +36,10 @@ export function codexApiPlugin() {
       startNewsFeedCollector();
       startWorldMemoryCollector();
       startMagazineScheduler();
+
+      server.middlewares.use("/api/market-symbols/search", async (req, res) => {
+        await handleMarketSymbolCatalogEndpoint("search", req, res);
+      });
 
       server.middlewares.use("/api/news-feed/settings", async (req, res) => {
         await handleNewsFeedEndpoint("settings", req, res);
@@ -94,6 +101,114 @@ export function codexApiPlugin() {
         await handleLazyArcaAuthEndpoint("session", req, res);
       });
 
+      server.middlewares.use("/api/tossinvest/auth/status", async (req, res) => {
+        await handleTossInvestEndpoint("status", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/auth/credentials", async (req, res) => {
+        await handleTossInvestEndpoint("credentials", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/auth/unlock", async (req, res) => {
+        await handleTossInvestEndpoint("unlock", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/auth/lock", async (req, res) => {
+        await handleTossInvestEndpoint("lock", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/auth/probe", async (req, res) => {
+        await handleTossInvestEndpoint("probe", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/network/public-ip", async (req, res) => {
+        await handleTossInvestEndpoint("public-ip", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/order-sync/status", async (req, res) => {
+        await handleTossInvestEndpoint("order-sync-status", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/order-sync/settings", async (req, res) => {
+        await handleTossInvestEndpoint("order-sync-settings", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/order-sync/run", async (req, res) => {
+        await handleTossInvestEndpoint("order-sync-run", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/order-sync/rebuild", async (req, res) => {
+        await handleTossInvestEndpoint("order-sync-rebuild", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/order-sync/investment-history", async (req, res) => {
+        await handleTossInvestEndpoint("order-sync-investment-history", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/order-sync/position-status", async (req, res) => {
+        await handleTossInvestEndpoint("order-sync-position-status", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/investment-status", async (req, res) => {
+        await handleTossInvestEndpoint("investment-status", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/prices", async (req, res) => {
+        await handleTossInvestEndpoint("prices", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/stocks", async (req, res) => {
+        await handleTossInvestEndpoint("stocks", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/candles", async (req, res) => {
+        await handleTossInvestEndpoint("candles", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/exchange-rate", async (req, res) => {
+        await handleTossInvestEndpoint("exchange-rate", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/market-calendar/kr", async (req, res) => {
+        await handleTossInvestEndpoint("market-calendar-kr", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/market-calendar/KR", async (req, res) => {
+        await handleTossInvestEndpoint("market-calendar-kr", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/market-calendar/us", async (req, res) => {
+        await handleTossInvestEndpoint("market-calendar-us", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/market-calendar/US", async (req, res) => {
+        await handleTossInvestEndpoint("market-calendar-us", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/orders/detail", async (req, res) => {
+        await handleTossInvestEndpoint("order", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/orders", async (req, res) => {
+        await handleTossInvestEndpoint("orders", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/conditional-orders/detail", async (req, res) => {
+        await handleTossInvestEndpoint("conditional-order", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/conditional-orders", async (req, res) => {
+        await handleTossInvestEndpoint("conditional-orders", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/holdings", async (req, res) => {
+        await handleTossInvestEndpoint("holdings", req, res);
+      });
+
+      server.middlewares.use("/api/tossinvest/accounts", async (req, res) => {
+        await handleTossInvestEndpoint("accounts", req, res);
+      });
+
       server.middlewares.use("/api/earnings/upcoming", async (req, res) => {
         await handleEarningsEndpoint("upcoming", req, res);
       });
@@ -116,6 +231,10 @@ export function codexApiPlugin() {
 
       server.middlewares.use("/api/portfolio/backtest", async (req, res) => {
         await handlePortfolioEndpoint("backtest", req, res);
+      });
+
+      server.middlewares.use("/api/transactions/settings", async (req, res) => {
+        await handleTransactionSettingsEndpoint(req, res);
       });
 
       server.middlewares.use("/api/reports", async (req, res) => {
