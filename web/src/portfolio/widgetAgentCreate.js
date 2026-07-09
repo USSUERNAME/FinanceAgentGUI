@@ -29,6 +29,16 @@ const AGENT_CREATE_ACTION_TOKENS = new Set([
   "chart",
   "pie",
   "allocation",
+  "price_history",
+  "asset_history",
+  "investment_history",
+  "seasonal_comparison",
+  "seasonal_return",
+  "annual_return_comparison",
+  "position_status",
+  "holdings_status",
+  "holdings_composition",
+  "investment_position_status",
   "function",
   "strategy",
   "signal",
@@ -49,11 +59,163 @@ function portfolioAgentDefaultKindForVisualType(visualType = "") {
   if (visualType === "table") return "포트폴리오 표";
   if (visualType === "function") return "함수 위젯";
   if (visualType === "line") return "백테스트 비교";
+  if (visualType === "price-history") return "보유 자산 과거 내역 차트";
+  if (visualType === "position-status") return "투자 종목 현황";
+  if (visualType === "seasonal-comparison") return "시즌별 비교";
   if (visualType === "metrics-table") return "백테스트 지표";
   if (visualType === "markdown") return "마크다운 위젯";
   if (visualType === "allocation") return "포트폴리오 차트";
   if (visualType === "checklist") return "체크리스트";
   return "프롬프트 위젯";
+}
+
+function normalizeAssetHistoryCurrency(value = "") {
+  return String(value || "").toUpperCase() === "USD" ? "USD" : "KRW";
+}
+
+function normalizePositionStatusView(value = "") {
+  return String(value || "").toLowerCase() === "pie" ? "pie" : "bar";
+}
+
+function buildAssetHistoryChartSpec(patch = {}) {
+  const chartSpec = patch.chartSpec && typeof patch.chartSpec === "object" ? patch.chartSpec : {};
+  const query = chartSpec.query && typeof chartSpec.query === "object" ? chartSpec.query : {};
+  const currency = normalizeAssetHistoryCurrency(query.currency || chartSpec.currency || patch.currency || patch.valueCurrency || "KRW");
+  return {
+    ...chartSpec,
+    type: "price-history",
+    engine: "lightweight-charts",
+    chartType: "area",
+    role: chartSpec.role || "asset_cost_basis_history",
+    dataProvider: chartSpec.dataProvider || "토스 증권 Open API",
+    source: chartSpec.source || "tossinvest-position-reconstruction",
+    query: {
+      startDate: String(query.startDate || "").trim(),
+      startMode: query.startMode || (query.startDate ? "custom" : "first_trade"),
+      effectiveStartDate: String(query.effectiveStartDate || query.startDate || "").trim(),
+      endDate: String(query.endDate || "").trim(),
+      endMode: query.endMode || (query.endDate ? "custom" : "latest"),
+      effectiveEndDate: String(query.effectiveEndDate || query.endDate || "").trim(),
+      effectiveEndLabel: query.effectiveEndLabel || (query.endDate ? "" : "latest"),
+      timeframe: String(query.timeframe || chartSpec.timeframe || patch.timeframe || "1d").trim() || "1d",
+      currency,
+    },
+  };
+}
+
+function normalizeAgentPriceHistoryPatch(patch = {}) {
+  const visualType = patch.visualType || "";
+  if (visualType !== "price-history") return patch;
+  const preferredW = Math.max(3, Number(patch.preferredW || patch.w || 0) || 0);
+  const preferredH = Math.max(3, Number(patch.preferredH || patch.h || 0) || 0);
+  const kind = !patch.kind || patch.kind === "프롬프트 위젯" ? portfolioAgentDefaultKindForVisualType(visualType) : patch.kind;
+  return {
+    ...patch,
+    title: patch.title || "보유 자산 과거 내역",
+    kind,
+    dataset: [],
+    chartSpec: buildAssetHistoryChartSpec(patch),
+    badges: patch.badges?.length ? patch.badges : ["Lightweight Charts"],
+    preferredW,
+    preferredH,
+    outputRole: patch.outputRole || "asset_history",
+    updatePolicy: patch.updatePolicy || "auto",
+  };
+}
+
+function buildPositionStatusChartSpec(patch = {}) {
+  const chartSpec = patch.chartSpec && typeof patch.chartSpec === "object" ? patch.chartSpec : {};
+  const query = chartSpec.query && typeof chartSpec.query === "object" ? chartSpec.query : {};
+  const currency = normalizeAssetHistoryCurrency(query.currency || chartSpec.currency || patch.currency || patch.valueCurrency || "KRW");
+  const view = normalizePositionStatusView(query.view || chartSpec.view || patch.view || "bar");
+  return {
+    ...chartSpec,
+    type: "position-status",
+    engine: "react-css",
+    chartType: view === "pie" ? "pie" : "stacked-bar",
+    role: chartSpec.role || "investment_position_status",
+    dataProvider: chartSpec.dataProvider || "토스 증권 Open API",
+    source: chartSpec.source || "tossinvest-position-reconstruction",
+    query: {
+      endDate: String(query.endDate || "").trim(),
+      endMode: query.endMode || (query.endDate ? "custom" : "latest"),
+      effectiveEndDate: String(query.effectiveEndDate || query.endDate || "").trim(),
+      effectiveEndLabel: query.effectiveEndLabel || (query.endDate ? "" : "latest"),
+      currency,
+      view,
+    },
+  };
+}
+
+function normalizeAgentPositionStatusPatch(patch = {}) {
+  const visualType = patch.visualType || "";
+  if (visualType !== "position-status") return patch;
+  const preferredW = Math.max(3, Number(patch.preferredW || patch.w || 0) || 0);
+  const preferredH = Math.max(3, Number(patch.preferredH || patch.h || 0) || 0);
+  const kind = !patch.kind || patch.kind === "프롬프트 위젯" ? portfolioAgentDefaultKindForVisualType(visualType) : patch.kind;
+  return {
+    ...patch,
+    title: patch.title || "투자 종목 현황",
+    kind,
+    dataset: [],
+    chartSpec: buildPositionStatusChartSpec(patch),
+    badges: patch.badges?.length ? patch.badges : ["토스 증권 Open API"],
+    preferredW,
+    preferredH,
+    outputRole: patch.outputRole || "position_status",
+    updatePolicy: patch.updatePolicy || "auto",
+  };
+}
+
+function buildSeasonalComparisonChartSpec(patch = {}) {
+  const chartSpec = patch.chartSpec && typeof patch.chartSpec === "object" ? patch.chartSpec : {};
+  const query = chartSpec.query && typeof chartSpec.query === "object" ? chartSpec.query : {};
+  const currency = normalizeAssetHistoryCurrency(query.currency || chartSpec.currency || patch.currency || patch.valueCurrency || "KRW");
+  return {
+    ...chartSpec,
+    type: "seasonal-comparison",
+    engine: "lightweight-charts",
+    chartType: "line",
+    role: chartSpec.role || "annual_return_overlay",
+    dataProvider: chartSpec.dataProvider || "토스 증권 Open API",
+    source: chartSpec.source || "tossinvest-position-reconstruction",
+    query: {
+      startDate: String(query.startDate || "").trim(),
+      startMode: query.startMode || "first_trade",
+      effectiveStartDate: String(query.effectiveStartDate || query.startDate || "").trim(),
+      endDate: String(query.endDate || "").trim(),
+      endMode: query.endMode || (query.endDate ? "custom" : "latest"),
+      effectiveEndDate: String(query.effectiveEndDate || query.endDate || "").trim(),
+      effectiveEndLabel: query.effectiveEndLabel || (query.endDate ? "" : "latest"),
+      timeframe: "1d",
+      currency,
+      returnMode: query.returnMode || "year_to_date",
+    },
+  };
+}
+
+function normalizeAgentSeasonalComparisonPatch(patch = {}) {
+  const visualType = patch.visualType || "";
+  if (visualType !== "seasonal-comparison") return patch;
+  const preferredW = Math.max(3, Number(patch.preferredW || patch.w || 0) || 0);
+  const preferredH = Math.max(3, Number(patch.preferredH || patch.h || 0) || 0);
+  const kind = !patch.kind || patch.kind === "프롬프트 위젯" ? portfolioAgentDefaultKindForVisualType(visualType) : patch.kind;
+  return {
+    ...patch,
+    title: patch.title || "시즌별 비교",
+    kind,
+    dataset: [],
+    chartSpec: buildSeasonalComparisonChartSpec(patch),
+    badges: patch.badges?.length ? patch.badges : ["Lightweight Charts"],
+    preferredW,
+    preferredH,
+    outputRole: patch.outputRole || "seasonal_comparison",
+    updatePolicy: patch.updatePolicy || "auto",
+  };
+}
+
+function normalizeAgentAssetPatch(patch = {}) {
+  return normalizeAgentSeasonalComparisonPatch(normalizeAgentPositionStatusPatch(normalizeAgentPriceHistoryPatch(patch)));
 }
 
 export function portfolioAgentWidgetActionName(parsedAction = {}, request = {}) {
@@ -118,7 +280,7 @@ export function portfolioAgentWidgetCreateIntent({
 
 export function buildPortfolioAgentCreatedWidgetState({
   currentWidgets = [],
-  patch = {},
+  patch: rawPatch = {},
   request = {},
   createdDisplayId = "",
   allocationDisplayId = "",
@@ -129,6 +291,7 @@ export function buildPortfolioAgentCreatedWidgetState({
   findPlacement = findPortfolioWidgetPlacement,
   canPlace = canPlacePortfolioWidget,
 } = {}) {
+  const patch = normalizeAgentAssetPatch(rawPatch);
   const createdTitle = patch.title || "새 포트폴리오 위젯";
   const createdPrompt = cleanPortfolioWidgetText(request?.prompt || patch.lastAgentAnswer || "", 1200);
   const createdVisualType = patch.visualType || "memo";
@@ -148,7 +311,8 @@ export function buildPortfolioAgentCreatedWidgetState({
 
   const { preferredW, preferredH, ...widgetPatch } = patch;
   const visualNeedsRoom =
-    widgetPatch.dataset?.length > 0 || ["line", "allocation", "table", "metrics-table", "checklist", "function", "markdown"].includes(createdVisualType);
+    widgetPatch.dataset?.length > 0 ||
+    ["line", "allocation", "table", "metrics-table", "checklist", "function", "markdown", "position-status", "seasonal-comparison"].includes(createdVisualType);
   const placement = findPlacement(
     currentWidgets,
     preferredW || (isMarkdownWidget ? 3 : visualNeedsRoom ? 2 : 1),

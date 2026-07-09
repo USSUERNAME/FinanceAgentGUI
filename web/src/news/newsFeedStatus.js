@@ -2,6 +2,34 @@ export function newsFeedStatusLabel(status) {
   return newsFeedHealthState(status).statusLabel;
 }
 
+const marketSummarySidebarStates = {
+  none: {
+    level: "none",
+    title: "News Feed 시장 상태: 특이 긴급 신호 없음",
+    ariaLabel: "News Feed 시장 상태 특이 긴급 신호 없음",
+  },
+  watch: {
+    level: "watch",
+    title: "News Feed 시장 상태: 관찰 필요",
+    ariaLabel: "News Feed 시장 상태 관찰 필요",
+  },
+  urgent: {
+    level: "urgent",
+    title: "News Feed 시장 상태: 긴급 확인 필요",
+    ariaLabel: "News Feed 시장 상태 긴급 확인 필요",
+  },
+  critical: {
+    level: "critical",
+    title: "News Feed 시장 상태: 비상 확인 필요",
+    ariaLabel: "News Feed 시장 상태 비상 확인 필요",
+  },
+};
+
+function normalizeMarketSummaryAlertLevel(summary) {
+  const level = String(summary?.alertLevel || "none").trim().toLowerCase();
+  return Object.hasOwn(marketSummarySidebarStates, level) ? level : "none";
+}
+
 export function newsFeedFeeds(status) {
   if (status?.feeds?.length) return status.feeds;
   return status?.configuredFeeds || [];
@@ -24,6 +52,11 @@ function newsFeedFeedHealth(status) {
     hasAnyError: errorCount > 0,
     hasPartialError: okCount > 0 && errorCount > 0,
   };
+}
+
+function newsFeedAllEnabledFeedsFailed(status) {
+  const feedHealth = newsFeedFeedHealth(status);
+  return feedHealth.enabledCount > 0 && feedHealth.okCount === 0 && feedHealth.errorCount === feedHealth.enabledCount;
 }
 
 function newsFeedHasPartialFeedError(status) {
@@ -106,5 +139,32 @@ export function newsFeedHealthState(status) {
     pillLabel: "대기/오류",
     title: "News Feed 수집 대기",
     ariaLabel: "News Feed 수집 대기",
+  };
+}
+
+export function newsFeedSidebarHealthState(status, marketSummary = null) {
+  const base = newsFeedHealthState(status);
+  if (newsFeedAllEnabledFeedsFailed(status)) {
+    const collector = status?.collector || {};
+    return {
+      ...base,
+      level: "network-error",
+      sidebarLevel: "network-error",
+      title: collector.lastError ? `News Feed 네트워크 오류: ${collector.lastError}` : "News Feed 네트워크 오류",
+      ariaLabel: "News Feed 네트워크 오류",
+      showSidebarDot: true,
+    };
+  }
+
+  const alertLevel = normalizeMarketSummaryAlertLevel(marketSummary);
+  const summaryState = marketSummarySidebarStates[alertLevel];
+  const severityText = String(marketSummary?.severityKo || "").trim();
+  return {
+    ...base,
+    level: summaryState.level,
+    sidebarLevel: summaryState.level,
+    title: severityText ? `${summaryState.title}: ${severityText}` : summaryState.title,
+    ariaLabel: summaryState.ariaLabel,
+    showSidebarDot: true,
   };
 }

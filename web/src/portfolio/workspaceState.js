@@ -150,6 +150,12 @@ export const portfolioBacktestPeriodOptions = [
   { id: "5y", label: "5년" },
 ];
 
+export const portfolioAssetHistoryTimeframeOptions = [
+  { id: "1d", label: "일별" },
+  { id: "1wk", label: "주별" },
+  { id: "1mo", label: "월별" },
+];
+
 function trimPortfolioMemoryText(value, maxLength = 420) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (!text) return "";
@@ -228,6 +234,7 @@ export function defaultPortfolioWorkspaceState({ workspaceStarted = false } = {}
     workspaceStarted,
     inputText: "",
     backtestPeriod: "1y",
+    assetHistoryRange: normalizePortfolioAssetHistoryRange(),
     benchmark: "",
     workspaceStatus: "draft",
     activityLog: emptyPortfolioActivityLog,
@@ -237,6 +244,73 @@ export function defaultPortfolioWorkspaceState({ workspaceStarted = false } = {}
     nextWidgetDisplayIndex: 1,
     strategyPortfolios: [],
     processedAgentActionKeys: [],
+  };
+}
+
+export function normalizePortfolioAssetHistoryDate(value = "") {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || "").trim());
+  if (!match) return "";
+  const date = `${match[1]}-${match[2]}-${match[3]}`;
+  const parsed = Date.parse(`${date}T00:00:00Z`);
+  return Number.isFinite(parsed) ? date : "";
+}
+
+export function portfolioAssetHistoryTodayDate(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .formatToParts(now)
+    .reduce((acc, part) => {
+      if (part.type !== "literal") acc[part.type] = part.value;
+      return acc;
+    }, {});
+  return parts.year && parts.month && parts.day ? `${parts.year}-${parts.month}-${parts.day}` : "";
+}
+
+export function normalizePortfolioAssetHistoryRange(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const timeframe = portfolioAssetHistoryTimeframeOptions.some((option) => option.id === source.timeframe)
+    ? source.timeframe
+    : "1d";
+  return {
+    startDate: normalizePortfolioAssetHistoryDate(source.startDate || source.start || ""),
+    endDate: normalizePortfolioAssetHistoryDate(source.endDate || source.end || ""),
+    timeframe,
+  };
+}
+
+export function clampPortfolioAssetHistoryRange(value = {}, { minimumDate = "", maximumDate = "" } = {}) {
+  const source = normalizePortfolioAssetHistoryRange(value);
+  const min = normalizePortfolioAssetHistoryDate(minimumDate);
+  const max = normalizePortfolioAssetHistoryDate(maximumDate);
+  let startDate = source.startDate;
+  let endDate = source.endDate;
+
+  if (min && startDate && startDate < min) startDate = min;
+  if (max && endDate && endDate > max) endDate = max;
+  if (max && startDate && startDate > max) startDate = max;
+  if (min && endDate && endDate < min) endDate = min;
+  if (startDate && endDate && endDate < startDate) endDate = startDate;
+
+  return {
+    ...source,
+    startDate,
+    endDate,
+  };
+}
+
+export function normalizePortfolioAssetHistoryDisplayRange(value = {}, options = {}) {
+  const source = clampPortfolioAssetHistoryRange(value, options);
+  const min = normalizePortfolioAssetHistoryDate(options.minimumDate);
+  const max = normalizePortfolioAssetHistoryDate(options.maximumDate);
+
+  return {
+    ...source,
+    startDate: min && source.startDate === min ? "" : source.startDate,
+    endDate: max && source.endDate === max ? "" : source.endDate,
   };
 }
 
@@ -650,6 +724,7 @@ export function normalizePortfolioWorkspaceState(stored, { forceStarted = false 
     workspaceStarted: forceStarted || (typeof stored.workspaceStarted === "boolean" ? stored.workspaceStarted : fallback.workspaceStarted),
     inputText: isLegacyDemoInput ? fallback.inputText : storedInputText.trim() ? storedInputText : fallback.inputText,
     backtestPeriod,
+    assetHistoryRange: isLegacyDemoInput ? fallback.assetHistoryRange : normalizePortfolioAssetHistoryRange(stored.assetHistoryRange),
     benchmark: typeof stored.benchmark === "string" && stored.benchmark.trim() ? stored.benchmark.trim().toUpperCase() : fallback.benchmark,
     workspaceStatus: stored.workspaceStatus === "remembered" || stored.workspaceStatus === "review-ready" ? stored.workspaceStatus : "draft",
     activityLog: !isLegacyDemoInput && Array.isArray(stored.activityLog) && stored.activityLog.length

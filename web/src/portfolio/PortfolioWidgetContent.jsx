@@ -534,7 +534,7 @@ export function PortfolioWidgetProducedContent({ widget, widgets = [] }) {
       </div>
     );
   }
-  if (["allocation", "line"].includes(renderType)) {
+  if (["allocation", "line", "price-history", "position-status", "seasonal-comparison"].includes(renderType)) {
     const chartWidget = renderType === type ? widget : { ...widget, visualType: renderType };
     return (
       <div className="portfolio-widget-produced is-visual-only">

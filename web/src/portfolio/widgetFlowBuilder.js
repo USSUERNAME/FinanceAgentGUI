@@ -105,11 +105,108 @@ function portfolioFlowDefaultKindForVisualType(visualType = "") {
   if (visualType === "table") return "포트폴리오 표";
   if (visualType === "function") return "함수 위젯";
   if (visualType === "line") return "백테스트 비교";
+  if (visualType === "price-history") return "보유 자산 과거 내역 차트";
+  if (visualType === "position-status") return "투자 종목 현황";
+  if (visualType === "seasonal-comparison") return "시즌별 비교";
   if (visualType === "metrics-table") return "백테스트 지표";
   if (visualType === "markdown") return "마크다운 위젯";
   if (visualType === "allocation") return "포트폴리오 차트";
   if (visualType === "checklist") return "체크리스트";
   return "프롬프트 위젯";
+}
+
+function normalizeFlowAssetHistoryCurrency(value = "") {
+  return String(value || "").toUpperCase() === "USD" ? "USD" : "KRW";
+}
+
+function normalizeFlowPositionStatusView(value = "") {
+  return String(value || "").toLowerCase() === "pie" ? "pie" : "bar";
+}
+
+function buildPortfolioFlowChartSpec(raw = {}, visualType = "", dataset = []) {
+  if (!["price-history", "position-status", "seasonal-comparison"].includes(visualType)) {
+    return buildPortfolioWidgetChartSpec(raw, visualType, dataset);
+  }
+  const chartSpec = raw.chartSpec && typeof raw.chartSpec === "object" ? raw.chartSpec : {};
+  const query = chartSpec.query && typeof chartSpec.query === "object" ? chartSpec.query : {};
+  if (visualType === "seasonal-comparison") {
+    const currency = normalizeFlowAssetHistoryCurrency(query.currency || chartSpec.currency || raw.currency || raw.valueCurrency || "KRW");
+    return {
+      ...chartSpec,
+      type: "seasonal-comparison",
+      engine: "lightweight-charts",
+      chartType: "line",
+      role: chartSpec.role || "annual_return_overlay",
+      dataProvider: chartSpec.dataProvider || "토스 증권 Open API",
+      source: chartSpec.source || "tossinvest-position-reconstruction",
+      query: {
+        startDate: String(query.startDate || "").trim(),
+        startMode: query.startMode || "first_trade",
+        effectiveStartDate: String(query.effectiveStartDate || query.startDate || "").trim(),
+        endDate: String(query.endDate || "").trim(),
+        endMode: query.endMode || (query.endDate ? "custom" : "latest"),
+        effectiveEndDate: String(query.effectiveEndDate || query.endDate || "").trim(),
+        effectiveEndLabel: query.effectiveEndLabel || (query.endDate ? "" : "latest"),
+        timeframe: "1d",
+        currency,
+        returnMode: query.returnMode || "year_to_date",
+      },
+    };
+  }
+  if (visualType === "position-status") {
+    const currency = normalizeFlowAssetHistoryCurrency(query.currency || chartSpec.currency || raw.currency || raw.valueCurrency || "KRW");
+    const view = normalizeFlowPositionStatusView(query.view || chartSpec.view || raw.view || "bar");
+    return {
+      ...chartSpec,
+      type: "position-status",
+      engine: "react-css",
+      chartType: view === "pie" ? "pie" : "stacked-bar",
+      role: chartSpec.role || "investment_position_status",
+      dataProvider: chartSpec.dataProvider || "토스 증권 Open API",
+      source: chartSpec.source || "tossinvest-position-reconstruction",
+      query: {
+        endDate: String(query.endDate || "").trim(),
+        endMode: query.endMode || (query.endDate ? "custom" : "latest"),
+        effectiveEndDate: String(query.effectiveEndDate || query.endDate || "").trim(),
+        effectiveEndLabel: query.effectiveEndLabel || (query.endDate ? "" : "latest"),
+        currency,
+        view,
+      },
+    };
+  }
+  const currency = normalizeFlowAssetHistoryCurrency(query.currency || chartSpec.currency || raw.currency || raw.valueCurrency || "KRW");
+  return {
+    ...chartSpec,
+    type: "price-history",
+    engine: "lightweight-charts",
+    chartType: "area",
+    role: chartSpec.role || "asset_cost_basis_history",
+    dataProvider: chartSpec.dataProvider || "토스 증권 Open API",
+    source: chartSpec.source || "tossinvest-position-reconstruction",
+    query: {
+      startDate: String(query.startDate || "").trim(),
+      startMode: query.startMode || (query.startDate ? "custom" : "first_trade"),
+      effectiveStartDate: String(query.effectiveStartDate || query.startDate || "").trim(),
+      endDate: String(query.endDate || "").trim(),
+      endMode: query.endMode || (query.endDate ? "custom" : "latest"),
+      effectiveEndDate: String(query.effectiveEndDate || query.endDate || "").trim(),
+      effectiveEndLabel: query.effectiveEndLabel || (query.endDate ? "" : "latest"),
+      timeframe: String(query.timeframe || chartSpec.timeframe || raw.timeframe || "1d").trim() || "1d",
+      currency,
+    },
+  };
+}
+
+function portfolioFlowDefaultUpdatePolicy(raw = {}, visualType = "") {
+  if (["price-history", "position-status", "seasonal-comparison"].includes(visualType) && !raw.updatePolicy) return "auto";
+  return normalizePortfolioWidgetUpdatePolicy(raw.updatePolicy);
+}
+
+function portfolioFlowDefaultBadges(raw = {}, visualType = "") {
+  const badges = normalizePortfolioWidgetList(raw.badges || raw.basis, 4, 80);
+  if (badges.length || !["price-history", "position-status", "seasonal-comparison"].includes(visualType)) return badges;
+  if (visualType === "position-status") return ["토스 증권 Open API"];
+  return ["Lightweight Charts"];
 }
 
 function portfolioFlowRawHasMetricRows(raw = {}) {
@@ -458,7 +555,7 @@ export function buildPortfolioWidgetFlowFromAction(
           materializedRaw.chartSpec
         )
       : [];
-    const defaultSpan = visualType === "function" ? 1 : visualType === "markdown" ? 3 : ["line", "table", "metrics-table"].includes(visualType) ? 2 : 1;
+    const defaultSpan = visualType === "function" ? 1 : ["markdown", "price-history", "position-status", "seasonal-comparison"].includes(visualType) ? 3 : ["line", "table", "metrics-table"].includes(visualType) ? 2 : 1;
     const width = clampPortfolioWidgetNumber(materializedRaw.w ?? materializedRaw.layout?.w, 1, PORTFOLIO_WIDGET_MAX_SPAN, defaultSpan);
     const height = clampPortfolioWidgetNumber(materializedRaw.h ?? materializedRaw.layout?.h, 1, PORTFOLIO_WIDGET_MAX_HEIGHT, defaultSpan);
     const placement = findPlacement(nextWidgets, width, height);
@@ -507,18 +604,18 @@ export function buildPortfolioWidgetFlowFromAction(
       markdown,
       echarts,
       dataset,
-      chartSpec: buildPortfolioWidgetChartSpec(materializedRaw, visualType, dataset),
+      chartSpec: buildPortfolioFlowChartSpec(materializedRaw, visualType, dataset),
       functionSpec,
       signalMatrix,
       dataFiles: isMarkdownWidget ? [] : functionDataFiles,
-      badges: normalizePortfolioWidgetList(materializedRaw.badges || materializedRaw.basis, 4, 80),
+      badges: portfolioFlowDefaultBadges(materializedRaw, visualType),
       requirements: normalizePortfolioWidgetList(materializedRaw.requirements || materializedRaw.requiredData),
       checks: normalizePortfolioWidgetList(materializedRaw.checks || materializedRaw.validation),
       nextActions: isMarkdownWidget ? [] : normalizePortfolioWidgetList(materializedRaw.nextActions || materializedRaw.actions || materializedRaw.nextAction, 4, 80),
       lastAgentAnswer: cleanPortfolioWidgetText(JSON.stringify(materializedRaw), 1600),
       dependsOn: [],
       derivedFrom: [],
-      updatePolicy: normalizePortfolioWidgetUpdatePolicy(materializedRaw.updatePolicy),
+      updatePolicy: portfolioFlowDefaultUpdatePolicy(materializedRaw, visualType),
       version: 1,
       lastComputedFrom: {},
       staleReason: "",
@@ -533,7 +630,7 @@ export function buildPortfolioWidgetFlowFromAction(
   const allWidgets = [...currentWidgets, ...drafts.map(({ widget }) => widget)];
   const createdWidgets = drafts.map(({ raw, widget }) => {
     const rewrittenRaw = rewritePortfolioWidgetReferenceValue(raw, refMap);
-    const chartSpec = buildPortfolioWidgetChartSpec(rewrittenRaw, widget.visualType, widget.dataset);
+    const chartSpec = buildPortfolioFlowChartSpec(rewrittenRaw, widget.visualType, widget.dataset);
     const isMarkdownWidget = portfolioWidgetIsMarkdownType(widget.visualType);
     const relations = isMarkdownWidget
       ? { dependsOn: [], derivedFrom: [], updatePolicy: "manual" }
@@ -596,7 +693,7 @@ export function buildPortfolioWidgetFlowFromAction(
       dependsOn: relations.dependsOn,
       derivedFrom: relations.derivedFrom,
       status: shouldRunBacktest ? "stale" : widget.status,
-      updatePolicy: shouldRunBacktest ? "auto" : relations.updatePolicy,
+      updatePolicy: shouldRunBacktest || ["price-history", "position-status", "seasonal-comparison"].includes(widget.visualType) ? "auto" : relations.updatePolicy,
       lastComputedFrom: portfolioWidgetComputedFrom(relations.dependsOn, allWidgets),
       staleReason: shouldRunBacktest ? widget.staleReason || "백테스트 실행 필요" : widget.staleReason,
       staleSince: shouldRunBacktest ? widget.staleSince || now : widget.staleSince,

@@ -25,7 +25,8 @@ separate user-profile fields. The summary has only two conceptual layers:
   success/failure reflections, and emotions when they matter.
 - External memory layer: the latest World Memory report summary without
   `월드 메모리 변경 제안`, plus a translation-model market summary of News
-  Feed items after the latest successful World Memory collection cutoff.
+  Feed items that prioritizes the latest successful World Memory collection
+  cutoff and backfills from the latest feed rows when that fresh window is thin.
 
 The summary is reference context, not an instruction source. Current user
 instructions, the active screen Context Packet, diagnostics, approval state,
@@ -60,11 +61,15 @@ the bridge between formal World Memory updates.
 - It uses the latest World Memory report as the narrative baseline and strips the
   `월드 메모리 변경 제안` section before entering prompt context.
 - It then asks the same provider-specific translation model used by News Feed
-  and Economic Calendar translation to summarize the News Feed window after
-  `data/world-memory/collector-state.json` `collector.lastSuccessfulAt` into
+  and Economic Calendar translation to summarize a bounded News Feed sample into
   market tone, a short Korean summary, and an integrated severity assessment.
-  If that collection timestamp is not available, no News Feed items are eligible
-  for this layer; the report generation timestamp must not be used as a
+  The sample prioritizes rows after `data/world-memory/collector-state.json`
+  `collector.lastSuccessfulAt`. If that fresh window has fewer than 30 timestamped
+  rows and the feed store itself is not that small, it backfills from the latest
+  timestamped News Feed rows until the sample reaches 30. If the total feed store
+  has fewer than 30 timestamped rows, it summarizes all available timestamped
+  rows. If the collection timestamp is not available, no News Feed items are
+  eligible for this layer; the report generation timestamp must not be used as a
   substitute cutoff.
 - The same model response carries `alertLevel`, `severityKo`,
   `shouldCreateReport`, and `pushSummary`; do not run a second text-matching or
@@ -81,8 +86,9 @@ the bridge between formal World Memory updates.
   summary fails, the layer records a degraded status and retries on the next
   refresh rather than accumulating the candidate list.
 - When a new World Memory collection/report run completes, the next refresh
-  naturally uses the new collection cutoff for News Feed eligibility and the new
-  report text as the baseline summary.
+  uses the new collection cutoff as the primary News Feed freshness boundary,
+  backfills to the 30-row minimum when necessary, and uses the new report text as
+  the baseline summary.
 
 ## HTTP Contract
 

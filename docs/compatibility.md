@@ -55,6 +55,129 @@ The user logs in manually in the opened browser. The app then captures only Arca
 
 Do not print the session file or raw cookie header. Status UI should show only safe metadata such as connected state, cookie names, domains, and timestamps.
 
+## Toss Securities Open API Read-Only Connector
+
+The Toss Securities connector is a local read-only integration for account,
+holdings, order-history, and conditional-order-history retrieval.
+It must not expose a generic Toss API proxy.
+
+- encrypted credential vault: `data/secrets/tossinvest-credentials.vault.json`
+- legacy plaintext detection only: `data/secrets/tossinvest-credentials.json`
+- order-history sync ledger: `data/tossinvest/tossinvest-ledger.sqlite3`
+- ledger schema contract: `config/tossinvest-ledger.schema.sql`
+- order-history sync user setting: `config/tossinvest-sync.user.json`
+- environment variables: `TOSSINVEST_CLIENT_ID`, `TOSSINVEST_CLIENT_SECRET`
+- base URL: `https://openapi.tossinvest.com`
+
+The Settings UI stores saved credentials in an AES-256-GCM vault whose key is
+derived from the user's vault password with `scrypt`. The vault password is not
+stored. Decrypted credentials stay in the running server process only. Toss
+access tokens are not written to disk; the in-process token cache stores the
+token encrypted with AES-256-GCM using a process-local random key and decrypts it
+only when constructing the outbound `Authorization` header. Raw credentials and
+tokens are never returned to the frontend. Restarting the server or using the
+Settings lock action requires the user to unlock the vault again.
+
+The connector no longer reads the legacy plaintext file automatically. If that
+file is present, Settings should show a warning and a successful encrypted save
+should remove it.
+
+Deleting the saved Toss Securities API key store from Settings also deletes
+`data/tossinvest/tossinvest-ledger.sqlite3` and SQLite sidecar files so
+credentials, locally synced transaction history, reconstructed snapshots, Toss
+daily candles, and Toss USD/KRW exchange rates are cleared together. The same
+cleanup also removes obsolete pre-release generated `position-reconstruction-*`,
+`market-candles/`, and `fx-usdkrw-*` files if they exist locally.
+
+Position reconstruction is SQLite-first. The ledger contains `orders`,
+`sync_state`, `rebuild_runs`, `position_snapshots`, `market_candles`,
+`market_candle_cache_state`, and `fx_rates`. Snapshots are rebuilt only after
+the sync loop reaches the end of Toss history for every account. Intermediate
+sync batches that still have more historical pages do not rebuild snapshots.
+The final rebuild cross-checks current Toss holdings; positive replay positions
+that are absent from current holdings are treated as zero-value extinguished
+positions and excluded from all generated snapshots.
+
+The asset-management rebuild must not use yfinance. Daily candles are fetched
+from the Toss Securities candles endpoint and cached per symbol/date in
+`market_candles`; coverage requests are tracked in
+`market_candle_cache_state`. USD/KRW rates are fetched from the Toss Securities
+exchange-rate endpoint and cached per date in `fx_rates`. These caches are
+runtime-local generated data inside the ledger, not release assets.
+
+Order-history sync must be rate-limit friendly. A sync run should continue
+through historical pages while Toss reports more results, but it must space Toss
+ORDER_HISTORY page requests by at least two seconds. If Toss returns a
+rate-limit response, prefer increasing `config/tossinvest-sync.user.json`
+`pageDelayMs` or waiting for a later sync over increasing request burst size.
+The frontend also sends enabled sync an automatic signal about every ten minutes
+only while Toss is unlocked and connection-tested; if another order-history sync
+is in progress at that moment, the timer signal is skipped.
+
+When Toss returns an IP allowlist error, Settings may call
+`/api/tossinvest/network/public-ip` after the user presses the public-IP check
+button. The local server checks IPv4-only public IP echo services first and
+falls back to IPv6-only services only when IPv4 lookup is unavailable. The
+result is shown only in the local Settings UI so the user can copy it into Toss
+PC's Open API allowlist.
+
+Allowed server endpoints should remain GET-backed read operations such as
+accounts, holdings, historical orders, and conditional-order history. Do not add
+endpoints that call Toss write APIs such as order create, order modify, order
+cancel, conditional-order create, conditional-order modify, or conditional-order
+cancel.
+
+The `거래현황` page is a live read-only view, not a
+`position_snapshots` projection. It uses `/api/tossinvest/investment-status`
+as a local aggregate over Toss accounts, holdings, and prices. The view should
+keep existing rows visible while refreshing text values, avoid remounting the
+whole surface, pause automatic refresh while the browser tab is hidden, and
+coalesce duplicate refreshes for the same account/currency. If the Toss vault is
+locked or credentials are missing, the page should show the same locked/missing
+state as asset management and must not call the live investment endpoint until
+credentials are usable again.
+
+The sidebar and main-section `transaction-currency-switch` preferences, table
+column choices, manual ordering, and 관심 목록 groups with their saved ticker
+lists are file-backed. Watchlist name autocomplete uses the KRX KIND
+listed-company table for domestic listings and the NYSE Listings Directory
+quotes filter for US listing candidates, then validates the final symbol through
+Toss `GET /api/v1/stocks` before saving. Toss's official `stocks` endpoint
+requires `symbols` and does not expose a full text-search or all-symbol
+autocomplete surface, so external symbol-master sources remain lookup hints
+before the same Toss validation step. The shipped default is
+`config/transaction-status.defaults.json`, and local choices are written to
+ignored user config at `config/transaction-status.user.json` through
+`/api/transactions/settings`. Saved `KRW` or `USD` preferences override the live
+payload's primary currency when the user returns to the page.
+
+The `거래현황` live calls are screen-scoped. `내 투자` calls
+`/api/tossinvest/investment-status` only for the selected account's current
+holdings. `관심 목록` does not call the holdings aggregate; it calls
+`/api/tossinvest/prices` only for the symbols in the currently selected
+watchlist folder and uses per-symbol `1d` candles only for those same symbols to
+derive displayed daily, weekly, monthly, and six-month return rates from current
+price versus the matching historical close. While the watchlist surface is
+visible, that selected-folder price refresh runs at a one-second interval. When
+candle history is shorter than the requested period, the period displays `-`
+rather than a synthetic return.
+
+Live market calls must respect Toss Open API market rate-limit groups:
+
+| Group | Local use | Limit policy |
+| --- | --- | --- |
+| `MARKET_INFO` | exchange rate and market calendar reference calls | at most 3 calls/second |
+| `MARKET_DATA` | current prices and quote-like reads | at most 10 calls/second |
+| `MARKET_DATA_CHART` | candles and chart history reads | at most 5 calls/second |
+
+The local server enforces conservative per-group spacing before outbound Toss
+requests. `/api/tossinvest/investment-status` should cache a fresh aggregate for
+short automatic refresh windows, coalesce simultaneous forced refreshes, and
+chunk large price requests into Toss-sized symbol batches. Do not use the Toss
+exchange-rate endpoint to rewrite or merge portfolio cache values; Toss FX is a
+separate current/reference data source and may differ from external or
+historical reconstruction rates.
+
 ## Browser Detection
 
 The handoff code defaults to Google Chrome where available. It looks for browsers in this order:
@@ -225,6 +348,7 @@ From `web`:
 ```bash
 npm run build
 node --check server/arcaAuthApi.mjs
+node --check server/tossInvestApi.mjs
 npm run dev -- --host 127.0.0.1
 ```
 
@@ -232,6 +356,7 @@ Probe auth status:
 
 ```bash
 curl -sS http://127.0.0.1:5173/api/arca/auth/status
+curl -sS http://127.0.0.1:5173/api/tossinvest/auth/status
 ```
 
 Probe start/stop without printing secrets:
@@ -249,6 +374,8 @@ If Vite uses another port, use the printed local URL.
 ## What Not To Do
 
 - Do not commit `data/secrets/arca-session.json`.
+- Do not commit `data/secrets/tossinvest-credentials.vault.json` or legacy `data/secrets/tossinvest-credentials.json`.
+- Do not commit `data/tossinvest/tossinvest-ledger.sqlite3`, `config/tossinvest-sync.user.json`, or `config/transaction-status.user.json`.
 - Do not commit `data/world-memory/world_issue_log.sqlite3` or any generated World Memory runtime file.
 - Do not paste raw cookies into issues, chat, logs, or memory.
 - Do not make a personal absolute path the default browser path.

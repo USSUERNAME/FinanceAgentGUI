@@ -22,6 +22,10 @@ import {
   nextPortfolioWidgetDisplayIndex,
 } from "./widgetIdentity.js";
 import {
+  canPlacePortfolioWidget,
+  findPortfolioWidgetPlacement,
+} from "./widgetLayout.js";
+import {
   portfolioWidgetLooksLikeMetricsTarget as isPortfolioWidgetMetricsTarget,
   portfolioWidgetUsesYfinanceRefresh,
 } from "./widgetRoleClassifier.js";
@@ -29,7 +33,10 @@ import { PortfolioWidgetCanvas } from "./PortfolioWidgetCanvas.jsx";
 import { PortfolioGuidePage } from "./PortfolioGuidePage.jsx";
 import { PortfolioWidgetDeleteDialog } from "./PortfolioWidgetDeleteDialog.jsx";
 import { PortfolioWidgetModal } from "./PortfolioWidgetModal.jsx";
-import { PortfolioWorkspaceHeader } from "./PortfolioWorkspaceHeader.jsx";
+import {
+  PortfolioTossApiStatus,
+  PortfolioWorkspaceHeader,
+} from "./PortfolioWorkspaceHeader.jsx";
 import { PortfolioWorkspaceLegacyPanel } from "./PortfolioWorkspaceLegacyPanel.jsx";
 import {
   PORTFOLIO_CANVAS_MODES,
@@ -63,15 +70,102 @@ import {
   executePortfolioLiveBacktest,
 } from "./liveBacktestRun.js";
 import {
+  clampPortfolioAssetHistoryRange,
   compactPortfolioWidget,
+  normalizePortfolioAssetHistoryDate,
+  normalizePortfolioAssetHistoryDisplayRange,
+  normalizePortfolioAssetHistoryRange,
   normalizePortfolioAgentActionKeys,
   normalizePortfolioStrategyPortfolios,
   normalizePortfolioWidgets,
   normalizePortfolioWorkspaceState,
+  portfolioAssetHistoryTodayDate,
   safePortfolioBacktestPayload,
 } from "./workspaceState.js";
-import { normalizePortfolioScenarioSpec } from "./scenarioContract.js";
+import {
+  PORTFOLIO_SCENARIO_ROOT_ID,
+  normalizePortfolioScenarioSpec,
+} from "./scenarioContract.js";
 import { portfolioWidgetDownstreamDependents } from "./widgetRelations.js";
+import { normalizePortfolioWidgetVisualType } from "./widgetTypes.js";
+
+function tossInvestConnectionIsReady(status, error = "", orderSyncError = "") {
+  if (error || orderSyncError) return false;
+  const credentials = status?.credentials || {};
+  const usable = Boolean(credentials.usable || credentials.unlocked);
+  return Boolean((status?.connected || status?.token?.cached) && usable);
+}
+
+function tossInvestSnapshotIsComplete(orderSyncStatus, busy = false, error = "") {
+  if (busy || error) return false;
+  const reconstruction = orderSyncStatus?.reconstruction || {};
+  return reconstruction.ok === true;
+}
+
+function portfolioWidgetIsAssetPriceHistory(widget = {}) {
+  return normalizePortfolioWidgetVisualType(widget?.visualType || widget?.chartSpec?.type) === "price-history";
+}
+
+function portfolioWidgetIsPositionStatus(widget = {}) {
+  return normalizePortfolioWidgetVisualType(widget?.visualType || widget?.chartSpec?.type) === "position-status";
+}
+
+function portfolioWidgetIsSeasonalComparison(widget = {}) {
+  return normalizePortfolioWidgetVisualType(widget?.visualType || widget?.chartSpec?.type) === "seasonal-comparison";
+}
+
+function portfolioWidgetUsesAssetHistoryCurrency(widget = {}) {
+  return portfolioWidgetIsAssetPriceHistory(widget) || portfolioWidgetIsSeasonalComparison(widget);
+}
+
+function normalizeAssetHistoryCurrency(value = "") {
+  return String(value || "").toUpperCase() === "USD" ? "USD" : "KRW";
+}
+
+function normalizePositionStatusView(value = "") {
+  return String(value || "").toLowerCase() === "pie" ? "pie" : "bar";
+}
+
+function assetHistoryCurrencyFromWidget(widget = {}) {
+  return normalizeAssetHistoryCurrency(
+    widget?.chartSpec?.query?.currency ||
+      widget?.chartSpec?.currency ||
+      widget?.chartSpec?.valueCurrency ||
+      widget?.currency ||
+      "KRW"
+  );
+}
+
+function positionStatusViewFromWidget(widget = {}) {
+  return normalizePositionStatusView(widget?.chartSpec?.query?.view || widget?.chartSpec?.view || widget?.view || "bar");
+}
+
+function assetHistoryChartQueryFromRange(range = {}, { minimumDate = "", maximumDate = "" } = {}) {
+  const clamped = normalizePortfolioAssetHistoryDisplayRange(range, { minimumDate, maximumDate });
+  const startIsCustom = Boolean(clamped.startDate);
+  const endIsCustom = Boolean(clamped.endDate);
+  return {
+    startDate: clamped.startDate,
+    startMode: startIsCustom ? "custom" : "first_trade",
+    effectiveStartDate: startIsCustom ? clamped.startDate : minimumDate,
+    endDate: clamped.endDate,
+    endMode: endIsCustom ? "custom" : "latest",
+    effectiveEndDate: endIsCustom ? clamped.endDate : "",
+    effectiveEndLabel: endIsCustom ? "" : "latest",
+    timeframe: clamped.timeframe || "1d",
+  };
+}
+
+function positionStatusChartQueryFromRange(range = {}, { minimumDate = "", maximumDate = "" } = {}) {
+  const clamped = normalizePortfolioAssetHistoryDisplayRange(range, { minimumDate, maximumDate });
+  const endIsCustom = Boolean(clamped.endDate);
+  return {
+    endDate: clamped.endDate,
+    endMode: endIsCustom ? "custom" : "latest",
+    effectiveEndDate: endIsCustom ? clamped.endDate : "",
+    effectiveEndLabel: endIsCustom ? "" : "latest",
+  };
+}
 
 export function PortfolioWorkspace({
   canvas,
@@ -82,7 +176,23 @@ export function PortfolioWorkspace({
   onWidgetPromptRequest,
   agentWidgetAction,
   onAgentWidgetActionConsumed,
-  agentProvider = "codex-cli",
+  tossInvestError = "",
+  tossInvestErrorCode = "",
+  tossInvestBusy = false,
+  tossInvestStatus = null,
+  tossInvestPublicIp = null,
+  tossInvestPublicIpBusy = false,
+  tossInvestPublicIpError = "",
+  tossInvestOrderSyncStatus = null,
+  tossInvestOrderSyncBusy = false,
+  tossInvestOrderSyncAction = "",
+  tossInvestOrderSyncError = "",
+  tossInvestOrderSyncErrorCode = "",
+  onOpenSettings,
+  onDeleteTossInvestCredentials,
+  onProbeTossInvestConnection,
+  onRunTossInvestOrderSync,
+  onCheckTossInvestPublicIp,
 }) {
   const initialWorkspaceState = useMemo(
     () => normalizePortfolioWorkspaceState(canvas?.workspace, { forceStarted: true }),
@@ -96,6 +206,7 @@ export function PortfolioWorkspace({
   const [workspaceStarted, setWorkspaceStarted] = useState(initialWorkspaceState.workspaceStarted);
   const [inputText, setInputText] = useState(initialWorkspaceState.inputText);
   const [backtestPeriod, setBacktestPeriod] = useState(initialWorkspaceState.backtestPeriod);
+  const [assetHistoryRange, setAssetHistoryRange] = useState(initialWorkspaceState.assetHistoryRange);
   const [benchmark, setBenchmark] = useState(initialWorkspaceState.benchmark);
   const [workspaceStatus, setWorkspaceStatus] = useState(initialWorkspaceState.workspaceStatus);
   const [activityLog, setActivityLog] = useState(initialWorkspaceState.activityLog);
@@ -119,16 +230,68 @@ export function PortfolioWorkspace({
   const summary = useMemo(() => summarizePortfolioRows(holdings), [holdings]);
   const hasLiveBacktest = Boolean(liveBacktest?.ok && Array.isArray(liveBacktest.series) && liveBacktest.series.length);
   const isWidgetCanvasMode = !holdings.length;
+  const isAssetCanvasMode = canvasModeMeta.id === PORTFOLIO_CANVAS_MODES.asset.id;
   const canvasRefreshTargets = useMemo(
-    () => sortPortfolioWidgetsForRefresh(widgets.filter(portfolioWidgetUsesYfinanceRefresh), widgets),
-    [widgets]
+    () => isAssetCanvasMode ? [] : sortPortfolioWidgetsForRefresh(widgets.filter(portfolioWidgetUsesYfinanceRefresh), widgets),
+    [isAssetCanvasMode, widgets]
   );
+  const tossInvestReady = tossInvestConnectionIsReady(tossInvestStatus, tossInvestError, tossInvestOrderSyncError);
+  const tossInvestSnapshotComplete = tossInvestSnapshotIsComplete(
+    tossInvestOrderSyncStatus,
+    tossInvestOrderSyncBusy,
+    tossInvestOrderSyncError
+  );
+  const assetHistoryMinimumDate = normalizePortfolioAssetHistoryDate(
+    tossInvestOrderSyncStatus?.store?.earliestOrderedAt || tossInvestOrderSyncStatus?.store?.earliestFilledAt || ""
+  );
+  const assetHistoryMaximumDate = portfolioAssetHistoryTodayDate();
+  const showAssetHistoryPanel = Boolean(
+    isWidgetCanvasMode &&
+      isAssetCanvasMode &&
+      tossInvestReady &&
+      tossInvestSnapshotComplete &&
+      assetHistoryMinimumDate
+  );
+  const visibleAssetHistoryRange = useMemo(
+    () =>
+      normalizePortfolioAssetHistoryDisplayRange(assetHistoryRange, {
+        minimumDate: assetHistoryMinimumDate,
+        maximumDate: assetHistoryMaximumDate,
+      }),
+    [assetHistoryMaximumDate, assetHistoryMinimumDate, assetHistoryRange]
+  );
+  const assetHistoryContextRange = useMemo(() => {
+    if (!showAssetHistoryPanel) return null;
+    const startIsCustom = Boolean(visibleAssetHistoryRange.startDate);
+    const endIsCustom = Boolean(visibleAssetHistoryRange.endDate);
+    return {
+      ...visibleAssetHistoryRange,
+      startMode: startIsCustom ? "custom" : "first_trade",
+      effectiveStartDate: startIsCustom ? visibleAssetHistoryRange.startDate : assetHistoryMinimumDate,
+      endMode: endIsCustom ? "custom" : "latest",
+      effectiveEndDate: endIsCustom ? visibleAssetHistoryRange.endDate : "",
+      effectiveEndLabel: endIsCustom ? "" : "latest",
+    };
+  }, [assetHistoryMinimumDate, showAssetHistoryPanel, visibleAssetHistoryRange]);
 
   useEffect(() => {
     if (!titleEditing) {
       setTitleDraft(canvasName);
     }
   }, [canvasName, titleEditing]);
+
+  useEffect(() => {
+    if (!showAssetHistoryPanel) return;
+    const current = normalizePortfolioAssetHistoryRange(assetHistoryRange);
+    if (
+      current.startDate === visibleAssetHistoryRange.startDate &&
+      current.endDate === visibleAssetHistoryRange.endDate &&
+      current.timeframe === visibleAssetHistoryRange.timeframe
+    ) {
+      return;
+    }
+    setAssetHistoryRange(visibleAssetHistoryRange);
+  }, [assetHistoryRange, showAssetHistoryPanel, visibleAssetHistoryRange]);
 
   useEffect(() => {
     if (!titleEditing) return;
@@ -174,6 +337,7 @@ export function PortfolioWorkspace({
         workspaceStatus,
         strategyPortfolios,
         scenario,
+        assetHistoryRange: assetHistoryContextRange,
         widgets,
         canvasRefreshTargets,
         holdings,
@@ -190,6 +354,8 @@ export function PortfolioWorkspace({
       }),
     [
       activityLog,
+      assetHistoryContextRange,
+      showAssetHistoryPanel,
       backtestPeriod,
       benchmark,
       canvas?.id,
@@ -226,6 +392,7 @@ export function PortfolioWorkspace({
       workspaceStarted,
       inputText,
       backtestPeriod,
+      assetHistoryRange: normalizePortfolioAssetHistoryRange(assetHistoryRange),
       benchmark,
       workspaceStatus,
       activityLog,
@@ -237,7 +404,7 @@ export function PortfolioWorkspace({
       processedAgentActionKeys: normalizePortfolioAgentActionKeys(processedAgentActionKeys),
     };
     onWorkspaceChange?.(payload);
-  }, [activityLog, backtestPeriod, benchmark, inputText, liveBacktest, nextWidgetDisplayIndex, onWorkspaceChange, processedAgentActionKeys, scenario, strategyPortfolios, widgets, workspaceStarted, workspaceStatus]);
+  }, [activityLog, assetHistoryRange, backtestPeriod, benchmark, inputText, liveBacktest, nextWidgetDisplayIndex, onWorkspaceChange, processedAgentActionKeys, scenario, strategyPortfolios, widgets, workspaceStarted, workspaceStatus]);
 
   function appendLog(message) {
     setActivityLog((current) => [...current.slice(-7), message]);
@@ -339,7 +506,7 @@ export function PortfolioWorkspace({
           "functionSpec.language='portfolio-matrix-dsl', executionMode='matrix-dsl', outputs=['signal_matrix'], program=[...]을 제공하세요.",
         ],
         missing_widget_visual_type: [
-          "모든 새 widget에는 canonical widget.visualType을 명시해야 합니다: table, function, line, metrics-table, markdown, allocation, checklist.",
+          "모든 새 widget에는 canonical widget.visualType을 명시해야 합니다: table, function, line, price-history, position-status, seasonal-comparison, metrics-table, markdown, allocation, checklist.",
           "memo 또는 프롬프트 위젯 fallback은 저장 대상이 아닙니다. 원래 요청에 맞는 실제 산출물 타입으로 다시 작성하세요.",
         ],
         missing_backtest_source: [
@@ -544,6 +711,10 @@ export function PortfolioWorkspace({
 
   async function refreshPortfolioCanvasLatestData() {
     if (canvasRefreshBusy) return;
+    if (isAssetCanvasMode) {
+      appendLog("캔버스 새로고침 보류 · 자산관리는 토스 증권 Open API 동기화 상태를 사용합니다.");
+      return;
+    }
     const targets = sortPortfolioWidgetsForRefresh(widgets.filter(portfolioWidgetUsesYfinanceRefresh), widgets);
     if (!targets.length) {
       appendLog("캔버스 새로고침 보류 · yfinance 기반 위젯이 없습니다.");
@@ -560,6 +731,246 @@ export function PortfolioWorkspace({
     } finally {
       setCanvasRefreshBusy(false);
     }
+  }
+
+  function updateAssetHistoryRange(nextRange) {
+    const normalizedRange = clampPortfolioAssetHistoryRange(nextRange, {
+      minimumDate: assetHistoryMinimumDate,
+      maximumDate: assetHistoryMaximumDate,
+    });
+    const query = assetHistoryChartQueryFromRange(normalizedRange, {
+      minimumDate: assetHistoryMinimumDate,
+      maximumDate: assetHistoryMaximumDate,
+    });
+    const updatedAt = new Date().toISOString();
+    setAssetHistoryRange(normalizedRange);
+    setWidgets((current) =>
+      current.map((widget) => {
+        if (portfolioWidgetIsAssetPriceHistory(widget)) {
+          return {
+              ...widget,
+              chartSpec: {
+                ...(widget.chartSpec || {}),
+                query: {
+                  ...query,
+                  currency: assetHistoryCurrencyFromWidget(widget),
+                },
+              },
+              updatedAt,
+          };
+        }
+        if (portfolioWidgetIsPositionStatus(widget)) {
+          return {
+            ...widget,
+            chartSpec: {
+              ...(widget.chartSpec || {}),
+              query: {
+                ...positionStatusChartQueryFromRange(normalizedRange, {
+                  minimumDate: assetHistoryMinimumDate,
+                  maximumDate: assetHistoryMaximumDate,
+                }),
+                currency: assetHistoryCurrencyFromWidget(widget),
+                view: positionStatusViewFromWidget(widget),
+              },
+            },
+            updatedAt,
+          };
+        }
+        return widget;
+      })
+    );
+  }
+
+  function createAssetWidgetFromPicker({ cell, widgetType } = {}) {
+    if (!["asset-investment-history", "asset-position-status", "asset-seasonal-comparison"].includes(widgetType)) return;
+    const now = new Date().toISOString();
+    const displayId = reservePortfolioWidgetDisplayId(widgets);
+    const isPositionStatusWidget = widgetType === "asset-position-status";
+    const isSeasonalComparisonWidget = widgetType === "asset-seasonal-comparison";
+    const idPrefix = isPositionStatusWidget
+      ? "asset_position_status"
+      : isSeasonalComparisonWidget
+        ? "asset_seasonal_comparison"
+        : "asset_history";
+    const id = `${idPrefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const preferredPlacement = {
+      x: 0,
+      y: Math.max(0, Number(cell?.y || 0)),
+      w: 3,
+      h: 3,
+    };
+    const placement = canPlacePortfolioWidget(widgets, preferredPlacement)
+      ? preferredPlacement
+      : findPortfolioWidgetPlacement(widgets, 3, 3);
+    const query = assetHistoryChartQueryFromRange(visibleAssetHistoryRange, {
+      minimumDate: assetHistoryMinimumDate,
+      maximumDate: assetHistoryMaximumDate,
+    });
+    const positionStatusQuery = positionStatusChartQueryFromRange(visibleAssetHistoryRange, {
+      minimumDate: assetHistoryMinimumDate,
+      maximumDate: assetHistoryMaximumDate,
+    });
+    const seasonalComparisonQuery = {
+      startDate: "",
+      startMode: "first_trade",
+      effectiveStartDate: assetHistoryMinimumDate,
+      endDate: "",
+      endMode: "latest",
+      effectiveEndDate: "",
+      effectiveEndLabel: "latest",
+      timeframe: "1d",
+      currency: "KRW",
+      returnMode: "year_to_date",
+    };
+    const widgetMeta = isPositionStatusWidget
+      ? {
+          outputRole: "position_status",
+          title: "투자 종목 현황",
+          prompt: "토스 증권 Open API 거래내역 동기화 스냅샷의 기준일별 보유 종목 구성",
+          kind: "투자 종목 현황",
+          visualType: "position-status",
+          badges: ["토스 증권 Open API"],
+          chartSpec: {
+            type: "position-status",
+            engine: "react-css",
+            chartType: "stacked-bar",
+            role: "investment_position_status",
+            dataProvider: "토스 증권 Open API",
+            source: "tossinvest-position-reconstruction",
+            query: {
+              ...positionStatusQuery,
+              currency: "KRW",
+              view: "bar",
+            },
+          },
+        }
+      : isSeasonalComparisonWidget
+        ? {
+            outputRole: "seasonal_comparison",
+            title: "시즌별 비교",
+            prompt: "토스 증권 Open API 거래내역 동기화 스냅샷의 첫 거래 연도부터 최신 시점까지 연도별 YTD 수익률 비교",
+            kind: "시즌별 비교",
+            visualType: "seasonal-comparison",
+            badges: ["Lightweight Charts"],
+            chartSpec: {
+              type: "seasonal-comparison",
+              engine: "lightweight-charts",
+              chartType: "line",
+              role: "annual_return_overlay",
+              dataProvider: "토스 증권 Open API",
+              source: "tossinvest-position-reconstruction",
+              query: seasonalComparisonQuery,
+            },
+          }
+        : {
+            outputRole: "asset_history",
+            title: "보유 자산 과거 내역",
+            prompt: "토스 증권 Open API 거래내역 동기화 스냅샷의 투자 원금 변경 내역",
+            kind: "보유 자산 과거 내역 차트",
+            visualType: "price-history",
+            badges: ["Lightweight Charts"],
+            chartSpec: {
+              type: "price-history",
+              engine: "lightweight-charts",
+              chartType: "area",
+              role: "asset_cost_basis_history",
+              dataProvider: "토스 증권 Open API",
+              source: "tossinvest-position-reconstruction",
+              query: {
+                ...query,
+                currency: "KRW",
+              },
+            },
+          };
+    const widget = {
+      id,
+      displayId,
+      graphRole: "process_node",
+      scenarioId: PORTFOLIO_SCENARIO_ROOT_ID,
+      outputRole: widgetMeta.outputRole,
+      ...placement,
+      title: widgetMeta.title,
+      prompt: widgetMeta.prompt,
+      kind: widgetMeta.kind,
+      status: "ready",
+      agentSummary: "",
+      visualType: widgetMeta.visualType,
+      dataset: [],
+      chartSpec: widgetMeta.chartSpec,
+      functionSpec: null,
+      signalMatrix: null,
+      dataFiles: [],
+      badges: widgetMeta.badges,
+      requirements: [],
+      checks: [],
+      nextActions: [],
+      lastAgentAnswer: "",
+      dependsOn: [],
+      derivedFrom: [],
+      updatePolicy: "auto",
+      version: 1,
+      lastComputedFrom: {},
+      staleReason: "",
+      staleSince: "",
+      createdAt: now,
+      updatedAt: now,
+    };
+    setWorkspaceStarted(true);
+    setWorkspaceStatus((current) => (current === "draft" ? "remembered" : current));
+    setWidgets((current) => [...current, widget]);
+    appendLog(`위젯 생성 · ${displayId} ${widgetMeta.kind}`);
+  }
+
+  function updateAssetHistoryCurrency(widget, currency) {
+    if (!portfolioWidgetUsesAssetHistoryCurrency(widget)) return;
+    const nextCurrency = normalizeAssetHistoryCurrency(currency);
+    const updatedAt = new Date().toISOString();
+    setWidgets((current) =>
+      current.map((item) =>
+        item.id === widget.id && portfolioWidgetUsesAssetHistoryCurrency(item)
+          ? {
+              ...item,
+              chartSpec: {
+                ...(item.chartSpec || {}),
+                currency: nextCurrency,
+                valueCurrency: nextCurrency,
+                query: {
+                  ...(item.chartSpec?.query || {}),
+                  currency: nextCurrency,
+                },
+              },
+              updatedAt,
+            }
+          : item
+      )
+    );
+    appendLog(`통화 전환 · ${widget.displayId || widget.title} · ${nextCurrency === "USD" ? "달러" : "원"}`);
+  }
+
+  function updatePositionStatusView(widget, view) {
+    if (!portfolioWidgetIsPositionStatus(widget)) return;
+    const nextView = normalizePositionStatusView(view);
+    const updatedAt = new Date().toISOString();
+    setWidgets((current) =>
+      current.map((item) =>
+        item.id === widget.id && portfolioWidgetIsPositionStatus(item)
+          ? {
+              ...item,
+              chartSpec: {
+                ...(item.chartSpec || {}),
+                view: nextView,
+                chartType: nextView === "pie" ? "pie" : "stacked-bar",
+                query: {
+                  ...(item.chartSpec?.query || {}),
+                  view: nextView,
+                },
+              },
+              updatedAt,
+            }
+          : item
+      )
+    );
+    appendLog(`보기 전환 · ${widget.displayId || widget.title} · ${nextView === "pie" ? "원" : "사각형"}`);
   }
 
   async function runPortfolioWidgetBacktestChart(widget, overrideSources = [], options = {}) {
@@ -760,7 +1171,7 @@ export function PortfolioWorkspace({
         <PortfolioWorkspaceHeader
           canvasName={canvasName}
           modeMeta={canvasModeMeta}
-          isAssetMode={canvasModeMeta.id === PORTFOLIO_CANVAS_MODES.asset.id}
+          isAssetMode={isAssetCanvasMode}
           isWidgetCanvasMode={isWidgetCanvasMode}
           workspaceStatus={workspaceStatus}
           titleEditing={titleEditing}
@@ -776,18 +1187,52 @@ export function PortfolioWorkspace({
           refreshableWidgetCount={canvasRefreshTargets.length}
         />
 
+        {isWidgetCanvasMode && isAssetCanvasMode ? (
+          <PortfolioTossApiStatus
+            status={tossInvestStatus}
+            busy={tossInvestBusy}
+            error={tossInvestError}
+            errorCode={tossInvestErrorCode}
+            publicIp={tossInvestPublicIp}
+            publicIpBusy={tossInvestPublicIpBusy}
+            publicIpError={tossInvestPublicIpError}
+            orderSyncStatus={tossInvestOrderSyncStatus}
+            orderSyncBusy={tossInvestOrderSyncBusy}
+            orderSyncAction={tossInvestOrderSyncAction}
+            orderSyncError={tossInvestOrderSyncError}
+            orderSyncErrorCode={tossInvestOrderSyncErrorCode}
+            onOpenSettings={onOpenSettings}
+            onDeleteCredentials={onDeleteTossInvestCredentials}
+            onProbeConnection={onProbeTossInvestConnection}
+            onRunOrderSync={onRunTossInvestOrderSync}
+            onCheckPublicIp={onCheckTossInvestPublicIp}
+          />
+        ) : null}
+
         {isWidgetCanvasMode ? (
           <>
             <PortfolioWidgetCanvas
               widgets={widgets}
               scenario={scenario}
-              agentProvider={agentProvider}
               setWidgets={setWidgets}
               activityLog={activityLog}
               canvasMode={canvasModeMeta.id}
+              assetHistoryPanel={
+                showAssetHistoryPanel
+                  ? {
+                      range: visibleAssetHistoryRange,
+                      minimumDate: assetHistoryMinimumDate,
+                      maximumDate: assetHistoryMaximumDate,
+                      onRangeChange: updateAssetHistoryRange,
+                    }
+                  : null
+              }
               onCreateCell={openWidgetCreateModal}
+              onCreateAssetWidget={createAssetWidgetFromPicker}
               onDeleteWidget={requestDeletePortfolioWidget}
               onWidgetAction={runPortfolioWidgetAction}
+              onAssetHistoryCurrencyChange={updateAssetHistoryCurrency}
+              onPositionStatusViewChange={updatePositionStatusView}
               onScenarioPromptRequest={openScenarioPromptModal}
               appendLog={appendLog}
             />

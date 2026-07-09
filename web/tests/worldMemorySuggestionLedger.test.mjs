@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  applyWorldMemoryOfflineWaitState,
   completeWorldMemoryCollectionCollectorState,
   completeWorldMemoryReportRefreshCollectorState,
   filterWorldMemoryReportView,
   normalizeWorldMemorySuggestionFingerprint,
+  recoverWorldMemoryCollectorStateFromArtifacts,
 } from "../server/worldMemoryApi.mjs";
 
 const acceptedText =
@@ -169,6 +171,102 @@ test("world memory collection cutoff is captured before report completion", () =
   assert.equal(collector.lastReportSuccessfulAt, "2026-07-05T12:45:00.000Z");
   assert.match(collector.lastAction, /신규 후보 6건/);
   assert.equal(collector.attempt, 2);
+});
+
+test("world memory state recovers empty collector metadata from DB and report artifacts", () => {
+  const recovery = recoverWorldMemoryCollectorStateFromArtifacts(
+    {
+      version: 1,
+      collector: {
+        running: false,
+        status: "idle",
+        lastAction: "대기 중",
+        lastSuccessfulAt: "",
+        lastReportSuccessfulAt: "",
+        lastFinishedAt: "",
+      },
+      schedule: {
+        intervalMs: 21600000,
+        retryIntervalMs: 1800000,
+        retryWindowMs: 21600000,
+        nextRunAt: "2026-07-09T02:52:07.641Z",
+        nextRetryAt: "",
+        pausedUntil: "",
+        activeCycle: null,
+      },
+      report: {
+        status: "empty",
+        generatedAt: "",
+        view: null,
+      },
+      changeSuggestionLedger: {
+        version: 1,
+        handled: [],
+      },
+      history: [],
+    },
+    {
+      dbSnapshot: {
+        entryCount: 376,
+        maxAsOf: "2026-07-08T23:49:30.195569+09:00",
+        maxLoggedAt: "2026-07-08T23:49:30.195570+09:00",
+      },
+      reportArtifact: {
+        generatedAt: "2026-07-08T14:50:43.000Z",
+        htmlPath: "logs/world-memory/world_memory_market_situation_20260708_145043.html",
+        jsonPath: "logs/world-memory/world_memory_market_situation_20260708_145043.json",
+        textPath: "logs/world-memory/world_memory_market_situation_20260708_145043.txt",
+        view: reportViewWithSuggestions(["새 watch state 후보"]),
+      },
+    },
+  );
+
+  assert.equal(recovery.recovered, true);
+  assert.equal(recovery.state.collector.status, "ok");
+  assert.equal(recovery.state.collector.lastSuccessfulAt, "2026-07-08T23:49:30.195570+09:00");
+  assert.equal(recovery.state.collector.lastReportSuccessfulAt, "2026-07-08T14:50:43.000Z");
+  assert.equal(recovery.state.report.status, "ready");
+  assert.equal(recovery.state.report.jsonPath, "logs/world-memory/world_memory_market_situation_20260708_145043.json");
+  assert.equal(recovery.state.schedule.nextRunAt, "2026-07-08T20:49:30.195Z");
+  assert.equal(recovery.state.history[0].type, "state_recovery");
+  assert.equal(recovery.state.history[0].dbEntryCount, 376);
+});
+
+test("world memory offline preflight waits for connectivity without advancing attempts", () => {
+  const state = applyWorldMemoryOfflineWaitState(
+    {
+      collector: {
+        running: false,
+        status: "idle",
+        attempt: 1,
+      },
+      schedule: {
+        nextRunAt: "2026-07-09T00:00:00.000Z",
+        nextRetryAt: "",
+        pausedUntil: "",
+        activeCycle: null,
+      },
+      history: [],
+    },
+    {
+      cycleId: "wm_test",
+      trigger: "scheduled",
+      scheduledAt: "2026-07-09T00:00:00.000Z",
+      deadlineAt: "2026-07-09T06:00:00.000Z",
+      attempt: 1,
+      checkedAt: "2026-07-09T00:01:00.000Z",
+      connectivity: { error: "offline" },
+    },
+  );
+
+  assert.equal(state.collector.status, "offline_wait");
+  assert.equal(state.collector.running, false);
+  assert.equal(state.collector.attempt, 1);
+  assert.equal(state.collector.lastError, "offline");
+  assert.equal(state.schedule.nextRetryAt, "2026-07-09T00:11:00.000Z");
+  assert.equal(state.schedule.activeCycle.awaitingConnectivity, true);
+  assert.equal(state.schedule.activeCycle.attempt, 1);
+  assert.equal(state.history[0].status, "offline_wait");
 });
 
 test("world memory report view omits handled suggestions during collection-cycle output", () => {

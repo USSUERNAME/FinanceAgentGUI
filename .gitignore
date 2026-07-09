@@ -22,6 +22,8 @@ Thumbs.db
 /data/reports/*
 !/data/reports/.gitkeep
 /data/secrets/*
+/data/tossinvest/*
+!/data/tossinvest/.gitkeep
 # Shared memory runtime files include memory_summary.md, user_memory_notebook.md,
 # user_memory_state.json, external_memory_briefing.md, and external_memory_state.json.
 /data/shared-memory/*

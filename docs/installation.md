@@ -207,6 +207,9 @@ Common environment variables:
 - `ARCA_LOGIN_URL`: override for the Arca.live login URL
 - `ARCA_BROWSER_PATH`: explicit Chrome/Edge/Chromium/Brave executable path; Google Chrome is used by default when available
 - `ARCA_USER_AGENT`: optional Arca.live request user agent override
+- `TOSSINVEST_CLIENT_ID`: optional Toss Securities Open API client id for the read-only connector
+- `TOSSINVEST_CLIENT_SECRET`: optional Toss Securities Open API client secret for the read-only connector
+- `TOSSINVEST_BASE_URL`: optional Toss Securities Open API base URL override, default `https://openapi.tossinvest.com`
 - `ANTIGRAVITY_CLI_PATH`: optional explicit path to `agy` when it is not on `PATH`.
 - `ANTIGRAVITY_CLI_MODEL`: optional default Antigravity CLI model override, default `Gemini 3.5 Flash (Medium)`.
 - `ANTIGRAVITY_CLI_PRINT_TIMEOUT`: optional `agy -p` timeout, default `5m`.
@@ -233,6 +236,84 @@ The following are local runtime data and should not be committed:
 
 Never print raw cookies, tokens, API keys, or credentials when debugging.
 
+The Toss Securities connector can read credentials from `TOSSINVEST_CLIENT_ID` and
+`TOSSINVEST_CLIENT_SECRET`, or from the encrypted local runtime vault
+`data/secrets/tossinvest-credentials.vault.json` when saved through Settings.
+The vault uses AES-256-GCM with a `scrypt`-derived 256-bit key. The vault
+password is not stored, so restarting the server or pressing the Settings lock
+button requires unlocking the vault again before account, holdings, or order
+history calls can run. Access tokens are not written to disk. When cached in the
+running server process, they are stored as AES-256-GCM ciphertext using a
+process-local random key and decrypted only for outbound Toss API requests.
+
+When 거래내역 동기화 is enabled in Settings, closed Toss Securities order
+history, reconstruction runs, daily/monthly position snapshots, per-symbol
+daily candles, and USD/KRW exchange rates are stored in the local SQLite ledger
+`data/tossinvest/tossinvest-ledger.sqlite3`. The expected schema is documented
+in `config/tossinvest-ledger.schema.sql` and is created lazily by
+`scripts/tossinvest_ledger_store.py` and
+`scripts/tossinvest_position_reconstruct.py`. The user toggle is written to
+`config/tossinvest-sync.user.json`; the shipped defaults live in
+`config/tossinvest-sync.defaults.json`. The SQLite file and user config are
+runtime-local and must not be committed or included in a release ZIP. The sync
+path uses the existing Toss Open API credentials and Python's standard
+`sqlite3` module; it does not add a Node native SQLite dependency.
+
+The 거래현황 sidebar currency, main-section currency, table column, manual
+ordering, and 관심 목록 groups with their saved ticker lists are stored in
+`config/transaction-status.user.json`; the shipped defaults live in
+`config/transaction-status.defaults.json`. The user file is runtime-local and
+must not be included in a release ZIP. 관심 목록 autocomplete uses the KRX KIND
+listed-company table for domestic stock-name to symbol lookup and the NYSE
+Listings Directory quotes filter for US listing candidates, then validates the
+final symbol with Toss `GET /api/v1/stocks` before saving.
+
+The 거래현황 screens keep Toss live calls scoped to the visible work surface.
+`내 투자` refreshes the selected account's holdings through
+`/api/tossinvest/investment-status`. `관심 목록` refreshes only the symbols in the
+currently selected watchlist folder through `/api/tossinvest/prices`; when it
+needs daily, weekly, monthly, or six-month return rates, it requests `1d`
+candles only for those same symbols, at a one-second interval while the
+watchlist surface is visible. If a listed instrument does not have candle
+history old enough for a period, that period is displayed as `-` instead of
+inventing a return.
+
+Deleting the saved Toss Securities API key store from Settings also deletes the
+local SQLite ledger, SQLite sidecar files, and obsolete pre-release generated
+snapshot/cache files if they exist. The sync toggle configuration remains local
+user config, but the stored transaction rows, snapshots, market candles, and FX
+rates are removed with the credential store.
+
+After the order-history sync loop reaches the end of Toss history for every
+account, the app rebuilds derived position snapshots inside
+`position_snapshots`: month-end snapshots and every calendar day's daily
+snapshot from the first synced trade through the current holdings collection
+date or today. Intermediate sync batches that still have more historical pages
+do not rebuild snapshots. `rebuild_runs.total_snapshots` is known before the
+snapshot loop starts, so Settings and asset-management surfaces can show
+`completed / total` and percent progress while `completed_snapshots` advances.
+The final rebuild cross-checks current Toss holdings; positive replay positions
+that are absent from current holdings are treated as zero-value extinguished
+positions and excluded from all generated snapshots.
+
+Position reconstruction does not use yfinance. It requests daily candles from
+the Toss Securities candles endpoint and stores them by `(symbol, price_date)`
+in `market_candles`, with requested coverage tracked in
+`market_candle_cache_state`. USD/KRW rates are fetched from the Toss Securities
+exchange-rate endpoint and stored by `(base_currency, quote_currency,
+rate_date)` in `fx_rates`. These converted values support cost-basis and
+mark-to-market columns such as `usdKrwRate`, `knownCostBasisUsd`,
+`knownCostBasisKrw`, `marketValueUsd`, and `marketValueKrw`.
+
+Order-history sync is intentionally paced. A sync run keeps fetching historical
+pages while Toss reports more results, but it waits at least two seconds between
+Toss ORDER_HISTORY page requests. A high safety ceiling prevents runaway loops;
+if that ceiling is reached, the saved cursor lets a later sync continue without
+starting over. When the Settings connection is unlocked and verified, enabled
+sync sends an automatic sync signal about every ten minutes. If a manual or
+previous automatic sync is already running when the timer fires, that signal is
+skipped.
+
 ## Quick Verification
 
 Run from `web`:
@@ -247,7 +328,10 @@ Check server modules when editing local API code:
 node --check server/server.mjs
 node --check server/arcaAuthApi.mjs
 node --check server/arcaApi.mjs
+node --check server/tossInvestApi.mjs
 node --check server/worldMemoryApi.mjs
+python scripts/tossinvest_ledger_store.py status
+python scripts/tossinvest_position_reconstruct.py rebuild
 ```
 
 Start the app and probe a local endpoint:
@@ -255,6 +339,7 @@ Start the app and probe a local endpoint:
 ```bash
 npm run dev -- --host 127.0.0.1
 curl -sS http://127.0.0.1:5173/api/arca/auth/status
+curl -sS http://127.0.0.1:5173/api/tossinvest/auth/status
 ```
 
 If Vite chooses another port, use the printed local URL.

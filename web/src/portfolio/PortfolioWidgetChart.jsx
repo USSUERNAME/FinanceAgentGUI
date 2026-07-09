@@ -7,6 +7,9 @@ import {
 import { normalizePortfolioWidgetDataset } from "./datasetParser.js";
 import { PortfolioEChart } from "./PortfolioEChart.jsx";
 import { PortfolioWidgetMiniPreview } from "./PortfolioWidgetPreview.jsx";
+import PortfolioAssetPriceHistoryChart from "./PortfolioAssetPriceHistoryChart.jsx";
+import PortfolioInvestmentPositionStatusChart from "./PortfolioInvestmentPositionStatusChart.jsx";
+import PortfolioSeasonalComparisonChart from "./PortfolioSeasonalComparisonChart.jsx";
 import { formatPortfolioPercent } from "./holdingsSummary.js";
 import { normalizePortfolioWidgetVisualType } from "./widgetTypes.js";
 
@@ -46,6 +49,15 @@ export default function PortfolioWidgetChart({ widget }) {
         ariaLabel={`${widget.title} 인터랙티브 선 차트`}
       />
     );
+  }
+  if (type === "price-history") {
+    return <PortfolioAssetPriceHistoryChart widget={widget} />;
+  }
+  if (type === "position-status") {
+    return <PortfolioInvestmentPositionStatusChart widget={widget} />;
+  }
+  if (type === "seasonal-comparison") {
+    return <PortfolioSeasonalComparisonChart widget={widget} />;
   }
   return <PortfolioWidgetMiniPreview widget={widget} />;
 }

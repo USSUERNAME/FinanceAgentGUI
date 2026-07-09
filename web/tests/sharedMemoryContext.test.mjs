@@ -33,7 +33,7 @@ test("world memory context strips memory change suggestions", () => {
   assert.doesNotMatch(text, /들어가면 안 되는/);
 });
 
-test("external briefing stores a market summary from post-world-memory-collection news, not raw news", () => {
+test("external briefing stores a market summary from the selected News Feed sample, not raw news", () => {
   const briefing = buildExternalNewsBriefing({
     builtAt: "2026-06-27T01:00:00.000Z",
     worldMemoryCutoffAt: "2026-06-27T00:20:00.000Z",
@@ -84,21 +84,68 @@ test("external briefing stores a market summary from post-world-memory-collectio
 
   assert.equal(briefing.reportAt, "2026-06-27T00:30:00.000Z");
   assert.equal(briefing.collectionAt, "2026-06-27T00:20:00.000Z");
-  assert.equal(briefing.consideredCount, 2);
+  assert.equal(briefing.consideredCount, 3);
   assert.match(briefing.text, /News Feed 기준 수집 시각: 2026-06-27T00:20:00.000Z/);
-  assert.match(briefing.text, /월드 메모리 수집 이후 시장 요약/);
+  assert.match(briefing.text, /월드 메모리 기준 시장 요약/);
   assert.match(briefing.text, /혼재 국면/);
   assert.match(briefing.text, /심각성 평가/);
   assert.match(briefing.text, /등급: watch/);
   assert.match(briefing.text, /긴급 절차: 대기/);
   assert.match(briefing.text, /translation-test-model/);
-  assert.match(briefing.text, /대상 보도 수: 2/);
+  assert.match(briefing.text, /대상 보도 수: 3/);
   assert.doesNotMatch(briefing.text, /핵심 신호/);
   assert.doesNotMatch(briefing.text, /주의점/);
   assert.doesNotMatch(briefing.text, /시장에 영향을 줄 수 있는 새 뉴스/);
   assert.doesNotMatch(briefing.text, /월드메모리 수집 기준 이후라 포함되어야 하는 뉴스/);
   assert.doesNotMatch(briefing.text, /보고서 이전 오래된 소식/);
   assert.doesNotMatch(briefing.text, /외부 레이어에 들어가면 안 된다/);
+});
+
+test("external briefing backfills to 30 recent news items when the post-collection window is thin", () => {
+  const olderItems = Array.from({ length: 35 }, (_value, index) => ({
+    feedTitle: "FinancialJuice",
+    translatedTitle: `수집 전 최근 소식 ${index + 1}`,
+    translatedText: "이미 기준 서술에 반영됐을 수 있으므로 요약문에 원문으로 누적하면 안 된다.",
+    publishedAt: new Date(Date.parse("2026-06-27T00:39:00.000Z") - index * 60_000).toISOString(),
+  }));
+  const briefing = buildExternalNewsBriefing({
+    builtAt: "2026-06-27T01:00:00.000Z",
+    worldMemoryCutoffAt: "2026-06-27T00:40:00.000Z",
+    worldReport: {
+      generatedAt: "2026-06-27T00:42:00.000Z",
+      view: {
+        title: "World Memory 시장 상황 인식",
+        summary: "기준 서술은 이미 직전 이벤트를 반영하고 있다.",
+      },
+    },
+    newsStore: {
+      items: [
+        {
+          feedTitle: "FinancialJuice",
+          translatedTitle: "수집 이후 유일한 새 소식",
+          translatedText: "월드메모리 수집 이후 새로 들어온 뉴스",
+          publishedAt: "2026-06-27T00:45:00.000Z",
+        },
+        ...olderItems,
+      ],
+    },
+    marketSummary: {
+      marketTone: "mixed",
+      summaryKo: "수집 이후 새 신호는 적지만 최근 보도 흐름까지 보면 시장은 혼재 국면으로 정리된다.",
+      confidence: 0.61,
+      alertLevel: "watch",
+      severityKo: "최근 보도 표본을 보강해도 긴급 절차를 실행할 정도의 충격은 아니다.",
+      shouldCreateReport: false,
+      pushSummary: "",
+    },
+    marketSummaryStatus: "translation-model",
+  });
+
+  assert.equal(briefing.consideredCount, 30);
+  assert.match(briefing.text, /대상 보도 수: 30/);
+  assert.match(briefing.text, /최근 보도 흐름/);
+  assert.doesNotMatch(briefing.text, /월드메모리 수집 이후 새로 들어온 뉴스/);
+  assert.doesNotMatch(briefing.text, /이미 기준 서술에 반영됐을 수 있으므로/);
 });
 
 test("external briefing does not use report generation time as a News Feed cutoff", () => {
@@ -127,7 +174,7 @@ test("external briefing does not use report generation time as a News Feed cutof
   assert.equal(briefing.collectionAt, "");
   assert.equal(briefing.consideredCount, 0);
   assert.match(briefing.text, /News Feed 기준 수집 시각: 아직 없음/);
-  assert.match(briefing.text, /월드메모리 수집 기준 이후 새 보도 요약 후보가 없습니다/);
+  assert.match(briefing.text, /분석할 수 있는 시장 요약 후보가 없습니다/);
   assert.doesNotMatch(briefing.text, /보고서 작성 이후 새 소식/);
   assert.doesNotMatch(briefing.text, /수집 컷오프가 없으면/);
 });

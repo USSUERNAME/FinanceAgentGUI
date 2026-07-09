@@ -377,7 +377,7 @@ export function buildPortfolioWidgetPatchFromAgentAnswer(answer, request = {}) {
   const visualNeedsRoom =
     dataset.length > 0 ||
     dataFiles.length > 0 ||
-    ["line", "allocation", "table", "metrics-table", "checklist", "function", "markdown"].includes(visualType);
+    ["line", "allocation", "table", "metrics-table", "checklist", "function", "markdown", "position-status", "seasonal-comparison"].includes(visualType);
   const defaultWidgetSpan = visualType === "function" ? 1 : visualType === "markdown" ? 3 : visualNeedsRoom ? 2 : 1;
   const datasetRequirements = dataset.map((row) => `${row.label} ${row.value}%`);
   const rawRequirements = normalizePortfolioWidgetList(

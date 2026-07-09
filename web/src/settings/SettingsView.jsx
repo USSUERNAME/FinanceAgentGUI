@@ -5,12 +5,17 @@ import Check from "lucide-react/dist/esm/icons/check.js";
 import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check-big.js";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.js";
+import Copy from "lucide-react/dist/esm/icons/copy.js";
 import Database from "lucide-react/dist/esm/icons/database.js";
+import Globe2 from "lucide-react/dist/esm/icons/globe-2.js";
+import Info from "lucide-react/dist/esm/icons/info.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
+import LockKeyhole from "lucide-react/dist/esm/icons/lock-keyhole.js";
 import LogIn from "lucide-react/dist/esm/icons/log-in.js";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
 import ShieldCheck from "lucide-react/dist/esm/icons/shield-check.js";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
+import UnlockKeyhole from "lucide-react/dist/esm/icons/unlock-keyhole.js";
 import X from "lucide-react/dist/esm/icons/x.js";
 
 import { emptyMemoryStatus } from "../memory/sharedMemoryDefaults.js";
@@ -86,6 +91,23 @@ const loadingModelGroups = [
     speedOptions: [loadingSpeedOption],
   },
 ];
+
+function formatTossSnapshotProgress(reconstruction = {}) {
+  const progress = reconstruction?.progress || {};
+  const total = Number(progress.total || 0);
+  const completed = Number(progress.completed || 0);
+  const percent = Number(progress.percent);
+  if (!Number.isFinite(total) || total <= 0) {
+    return { fullText: "", percentText: "" };
+  }
+  const safeCompleted = Math.max(0, Math.min(total, Number.isFinite(completed) ? completed : 0));
+  const safePercent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : (safeCompleted / total) * 100;
+  const percentText = `${safePercent.toLocaleString("ko-KR", { maximumFractionDigits: safePercent % 1 === 0 ? 0 : 1 })}%`;
+  return {
+    fullText: `${safeCompleted.toLocaleString("ko-KR")} / ${total.toLocaleString("ko-KR")} · ${percentText}`,
+    percentText,
+  };
+}
 
 const fallbackProviderOptions = [
   {
@@ -224,6 +246,826 @@ function NewsFeedPollIntervalBar({ valueSeconds, disabled, saving, onChange }) {
         <strong>{saving ? "저장 중" : `${selectedMinutes}분마다 수집`}</strong>
         <span>RSS 피드 폴링 주기를 조절합니다.</span>
       </div>
+    </div>
+  );
+}
+
+function tossAccountStatusLabel(account) {
+  return String(account?.accountSeq || "").trim() === "1" ? "기본계좌 확인됨" : "옵션계좌 확인됨";
+}
+
+function formatTossSyncKoreanDateTime(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  })
+    .formatToParts(date)
+    .reduce((acc, part) => {
+      if (part.type !== "literal") acc[part.type] = part.value;
+      return acc;
+    }, {});
+  if (!parts.year || !parts.month || !parts.day || !parts.hour || !parts.minute) return "";
+  return `${parts.year}년 ${parts.month}월 ${parts.day}일 ${parts.hour}:${parts.minute}`;
+}
+
+function tossSyncRangeLabel(store = {}) {
+  const from = formatTossSyncKoreanDateTime(store.earliestOrderedAt);
+  const to = formatTossSyncKoreanDateTime(store.latestOrderedAt);
+  return from && to ? `동기화 됨: ${from} ~ ${to}` : "";
+}
+
+function latestTossSyncAt(store = {}) {
+  const states = Array.isArray(store.states) ? store.states : [];
+  return states
+    .map((state) => state?.last_successful_sync_at || "")
+    .filter(Boolean)
+    .sort()
+    .at(-1) || "";
+}
+
+const TOSS_AUTH_PASSPHRASE_HELP =
+  "API Key와 Secret Key는 사용자 암호로 암호화 되어 저장소에서 보호됩니다. 향후 API Key 사용이 필요해졌을 때 저장소의 암호화 해제를 위한 사용자 암호 입력이 필요할 수 있습니다.";
+
+function scoreTossPassphraseStrength(value) {
+  const text = String(value || "");
+  if (!text) return { score: 0, tone: "weak", label: "입력한 패스워드가 너무 짧습니다." };
+
+  const chars = Array.from(text);
+  const length = chars.length;
+  const uniqueRatio = new Set(chars).size / Math.max(1, length);
+  const tooShort = length < 10;
+  const repeatedPattern = /(.)\1{2,}/.test(text);
+  const sequencePattern = /(0123|1234|2345|3456|4567|5678|6789|7890|abcd|bcde|cdef|qwer|asdf|zxcv)/i.test(text);
+  const commonPattern = /(password|pass|admin|secret|api|key|toss|0000|1111|1234)/i.test(text);
+  const classCount = [
+    /[a-z]/.test(text),
+    /[A-Z]/.test(text),
+    /[0-9]/.test(text),
+    /[^A-Za-z0-9]/.test(text),
+  ].filter(Boolean).length;
+
+  let score = Math.min(38, length * 4);
+  score += classCount * 12;
+  score += Math.round(uniqueRatio * 20);
+  if (classCount >= 3) score += 10;
+  if (length >= 14) score += 8;
+  if (tooShort) score = Math.min(score - 35, 44);
+  if (repeatedPattern) score -= 15;
+  if (sequencePattern) score -= 15;
+  if (commonPattern) score -= 20;
+  if (classCount === 1) score -= 14;
+  if (commonPattern || sequencePattern || repeatedPattern) score = Math.min(score, 59);
+
+  const normalizedScore = Math.max(1, Math.min(100, Math.round(score)));
+  const weakLabel = tooShort
+    ? "입력한 패스워드가 너무 짧습니다."
+    : commonPattern
+      ? "흔한 단어/패턴은 사용을 권장하지 않습니다"
+      : sequencePattern || repeatedPattern
+        ? "연속/키보드 패턴은 사용을 권장하지 않습니다"
+        : "충분하지 못한 보안 수준의 패스워드";
+  if (normalizedScore >= 72) {
+    return { score: normalizedScore, tone: "strong", label: "안전한 패스워드" };
+  }
+  if (normalizedScore >= 45) {
+    return { score: normalizedScore, tone: "medium", label: weakLabel };
+  }
+  return { score: normalizedScore, tone: "weak", label: weakLabel };
+}
+
+function TossPassphraseStrengthPie({ value }) {
+  const text = String(value || "");
+  if (!text) return null;
+
+  const strength = scoreTossPassphraseStrength(text);
+  return (
+    <div
+      className={`toss-auth-strength is-${strength.tone}`}
+      aria-label={`패스워드 강도 ${strength.label}`}
+      title={`패스워드 강도 ${strength.label}`}
+    >
+      <span
+        className="toss-auth-strength-pie"
+        style={{ "--strength-score": `${strength.score}%` }}
+        aria-hidden="true"
+      />
+      <span className="toss-auth-strength-label">{strength.label}</span>
+    </div>
+  );
+}
+
+function TossStoragePassphraseHelp({ helpId, helpOpen, onToggleHelp, containerRef }) {
+  return (
+    <span className="toss-auth-help-anchor" ref={containerRef}>
+      <button
+        className="toss-auth-help-button"
+        type="button"
+        aria-label="저장소 패스워드 설명 보기"
+        aria-controls={helpId}
+        aria-expanded={helpOpen}
+        onClick={onToggleHelp}
+      >
+        <span aria-hidden="true">?</span>
+      </button>
+      {helpOpen ? (
+        <p className="toss-auth-help-popover" id={helpId}>
+          {TOSS_AUTH_PASSPHRASE_HELP}
+        </p>
+      ) : null}
+    </span>
+  );
+}
+
+function TossInvestErrorAlert({
+  error,
+  errorCode,
+  publicIp,
+  publicIpBusy,
+  publicIpError,
+  onCheckPublicIp,
+}) {
+  const [copied, setCopied] = React.useState(false);
+  const publicIpAddress = String(publicIp?.address || "").trim();
+
+  async function handleCopyPublicIp() {
+    if (!publicIpAddress) return;
+    try {
+      await navigator.clipboard.writeText(publicIpAddress);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  if (!error) return null;
+  if (errorCode === "toss_ip_allowlist") {
+    const path = ["설정", "Open API", "허용 IP 관리", "IP 추가"];
+    return (
+      <div className="news-feed-alert toss-auth-alert">
+        <AlertTriangle size={16} strokeWidth={2.2} />
+        <span className="toss-auth-alert-copy">
+          <strong className="toss-auth-alert-title">IP 연결 오류입니다.</strong>
+          <span>
+            토스 증권 PC 버전의{" "}
+            <span className="toss-auth-alert-path" aria-label="토스 증권 PC 버전 설정 경로">
+              {path.map((label, index) => (
+                <React.Fragment key={label}>
+                  {index ? <span className="toss-auth-alert-arrow">→</span> : null}
+                  <span className="toss-auth-alert-step">{label}</span>
+                </React.Fragment>
+              ))}
+            </span>{" "}
+            메뉴에서 현재 사용중이신 회선의 IP 주소를 아직 등록하지 않았을 가능성이 있습니다.
+          </span>
+          <span className="toss-auth-alert-actions">
+            <button
+              className="toss-auth-alert-button"
+              type="button"
+              onClick={onCheckPublicIp}
+              disabled={publicIpBusy}
+            >
+              {publicIpBusy ? (
+                <LoaderCircle className="is-spinning" size={15} strokeWidth={2.2} />
+              ) : (
+                <Globe2 size={15} strokeWidth={2.2} />
+              )}
+              <span>{publicIpBusy ? "확인 중" : "현재 IP 주소 확인"}</span>
+            </button>
+            {publicIpAddress ? (
+              <span className="toss-auth-ip-result">
+                <span className="toss-auth-ip-family">{publicIp.family || "IP"}</span>
+                <code>{publicIpAddress}</code>
+                <button
+                  className="toss-auth-ip-copy"
+                  type="button"
+                  onClick={handleCopyPublicIp}
+                  aria-label="현재 IP 주소 복사"
+                  title="현재 IP 주소 복사"
+                >
+                  {copied ? <Check size={14} strokeWidth={2.2} /> : <Copy size={14} strokeWidth={2.2} />}
+                </button>
+              </span>
+            ) : null}
+          </span>
+          {publicIpError ? <span className="toss-auth-ip-error">{publicIpError}</span> : null}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="news-feed-alert">
+      <AlertTriangle size={16} strokeWidth={2.2} />
+      <span>{error}</span>
+    </div>
+  );
+}
+
+export function TossInvestConnectionSection({
+  status,
+  busy,
+  action,
+  error,
+  errorCode,
+  publicIp,
+  publicIpBusy,
+  publicIpError,
+  autoProbeAfterSave = false,
+  autoProbeAfterUnlock = false,
+  onReload,
+  onSaveCredentials,
+  onUnlockVault,
+  onLockVault,
+  onProbe,
+  onCheckPublicIp,
+  onDeleteCredentials,
+  orderSync,
+}) {
+  const [clientId, setClientId] = React.useState("");
+  const [clientSecret, setClientSecret] = React.useState("");
+  const [savePassphrase, setSavePassphrase] = React.useState("");
+  const [savePassphraseConfirm, setSavePassphraseConfirm] = React.useState("");
+  const [unlockPassphrase, setUnlockPassphrase] = React.useState("");
+  const [passphraseHelpOpen, setPassphraseHelpOpen] = React.useState(false);
+  const passphraseHelpRef = React.useRef(null);
+  const credentials = status?.credentials || {};
+  const visibleError = error || orderSync?.error || "";
+  const visibleErrorCode = errorCode || orderSync?.errorCode || "";
+  const statusLoaded = Boolean(status?.credentials);
+  const configured = Boolean(credentials.configured);
+  const usable = Boolean(credentials.usable || credentials.unlocked);
+  const locked = Boolean(credentials.locked);
+  const connected = Boolean((status?.connected || status?.token?.cached) && usable);
+  const sourceLabel =
+    credentials.source === "env"
+      ? "환경변수"
+    : credentials.source === "vault"
+        ? "암호화 저장소"
+        : configured
+          ? "설정됨"
+          : "미설정";
+  const storageLabel =
+    credentials.source === "env"
+      ? "환경변수"
+      : credentials.storage === "aes-256-gcm-scrypt-local-vault"
+        ? "AES-256-GCM + scrypt"
+        : credentials.storage || "-";
+  const vaultLabel =
+    credentials.source === "env"
+      ? "환경변수 관리"
+      : credentials.invalid
+        ? "파일 확인 필요"
+        : locked
+          ? "잠김"
+          : usable
+            ? "잠금 해제됨"
+            : configured
+              ? "저장됨"
+              : "없음";
+  const statusLabel = visibleError
+    ? "확인 필요"
+    : connected
+      ? "연결 확인됨"
+      : locked
+        ? "저장소 잠겨있음"
+        : usable
+          ? "잠금 해제됨"
+          : configured
+            ? "키 저장됨"
+            : credentials.legacyPlaintextPresent
+              ? "재저장 필요"
+              : "연결 없음";
+  const diagnosticClass = busy
+    ? "settings-agent-diagnostic is-loading"
+    : visibleError || credentials.invalid
+      ? "settings-agent-diagnostic is-error"
+      : connected
+        ? "settings-agent-diagnostic is-ok"
+        : "settings-agent-diagnostic";
+  const StatusIcon = busy ? LoaderCircle : visibleError ? AlertTriangle : connected || usable ? ShieldCheck : locked ? LockKeyhole : Database;
+  const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
+  const accountConnectionLabel = accounts.some((account) => String(account?.accountSeq || "").trim() === "1")
+    ? "기본계좌 확인됨. "
+    : accounts.length
+      ? "옵션계좌 확인됨. "
+      : "";
+  const statusDetail = visibleError
+    ? "토스증권 Open API 연결 상태를 확인해야 합니다."
+    : connected
+      ? `${accountConnectionLabel}주문 실행 API는 이 앱에서 제공하지 않습니다.`
+    : locked
+      ? "암호화된 키 저장소가 잠겨 있습니다. 패스워드로 잠금 해제한 뒤 계좌 조회를 확인합니다."
+      : usable
+        ? "복호화된 키는 현재 서버 메모리에만 있습니다. 연결 테스트로 계좌 조회를 확인할 수 있습니다."
+        : configured
+          ? `${sourceLabel}에서 키를 읽었습니다. 연결 테스트로 계좌 조회를 확인할 수 있습니다.`
+          : "토스 증권 Open API Key를 입력하여 주식채널+와 연결할 수 있습니다.";
+  const envManaged = credentials.source === "env";
+  const canUnlock = !envManaged && locked && unlockPassphrase.length > 0 && !busy;
+  const savePassphraseReady = savePassphrase.length > 0 && savePassphrase === savePassphraseConfirm;
+  const savePassphraseStrength = scoreTossPassphraseStrength(savePassphrase);
+  const savePassphraseSecureEnough = savePassphraseStrength.tone !== "weak";
+  const savePassphraseMismatch = Boolean(savePassphraseConfirm && savePassphrase !== savePassphraseConfirm);
+  const shouldShowCredentialForm = statusLoaded && !configured;
+  const canSave =
+    shouldShowCredentialForm &&
+    !envManaged &&
+    clientId.trim() &&
+    clientSecret.trim() &&
+    savePassphraseReady &&
+    savePassphraseSecureEnough &&
+    !busy;
+  const canProbe = usable && !busy && action !== "probe";
+  const canLock = !envManaged && usable && !locked && !busy;
+  const canDelete = !envManaged && (configured || credentials.legacyPlaintextPresent);
+  const shouldShowConnectionActions = configured || usable || locked || canDelete || busy || action;
+  const shouldShowProbeActions = usable || connected || action === "probe";
+
+  React.useEffect(() => {
+    if (!passphraseHelpOpen) return undefined;
+
+    function closePassphraseHelpOnOutsidePointer(event) {
+      if (passphraseHelpRef.current?.contains(event.target)) return;
+      setPassphraseHelpOpen(false);
+    }
+
+    window.addEventListener("pointerdown", closePassphraseHelpOnOutsidePointer, true);
+    return () => window.removeEventListener("pointerdown", closePassphraseHelpOnOutsidePointer, true);
+  }, [passphraseHelpOpen]);
+
+  async function handleSave(event) {
+    event.preventDefault();
+    if (!canSave) return;
+    const result = await onSaveCredentials({
+      clientId: clientId.trim(),
+      clientSecret: clientSecret.trim(),
+      passphrase: savePassphrase,
+    });
+    if (result) {
+      setClientId("");
+      setClientSecret("");
+      setSavePassphrase("");
+      setSavePassphraseConfirm("");
+    }
+  }
+
+  async function handleUnlock(event) {
+    event.preventDefault();
+    if (!canUnlock) return;
+    const result = await onUnlockVault({ passphrase: unlockPassphrase });
+    if (result) setUnlockPassphrase("");
+  }
+
+  return (
+    <section className="settings-section toss-auth-section" aria-labelledby="toss-auth-settings-title">
+      <div className="settings-section-header">
+        <h2 id="toss-auth-settings-title">토스증권 읽기 전용 연결</h2>
+        <span>{statusLabel}</span>
+      </div>
+
+      <div className={`toss-auth-grid${shouldShowConnectionActions ? "" : " is-status-only"}`}>
+        <div className={diagnosticClass}>
+          <StatusIcon size={17} strokeWidth={2.2} />
+          <div className="toss-auth-status-copy">
+            <p className="toss-auth-status-line">
+            <strong>{statusLabel}</strong>
+              <span className="toss-auth-status-separator" aria-hidden="true">-</span>
+              <span className="toss-auth-status-detail">{statusDetail}</span>
+            </p>
+          </div>
+        </div>
+
+        {shouldShowConnectionActions ? (
+          <div className="arca-auth-actions" aria-label="토스증권 연결 작업">
+            {shouldShowProbeActions ? (
+              <>
+                <button
+                  className="settings-memory-refresh"
+                  type="button"
+                  onClick={onProbe}
+                  disabled={!canProbe}
+                >
+                  {action === "probe" ? (
+                    <LoaderCircle className="is-spinning" size={16} strokeWidth={2.2} />
+                  ) : (
+                    <Check size={16} strokeWidth={2.2} />
+                  )}
+                  <span>연결 테스트</span>
+                </button>
+              </>
+            ) : null}
+            {canLock || action === "lock" ? (
+              <button
+                className="settings-memory-refresh"
+                type="button"
+                onClick={onLockVault}
+                disabled={!canLock || action === "lock"}
+              >
+                {action === "lock" ? (
+                  <LoaderCircle className="is-spinning" size={16} strokeWidth={2.2} />
+                ) : (
+                  <LockKeyhole size={16} strokeWidth={2.2} />
+                )}
+                <span>잠금</span>
+              </button>
+            ) : null}
+            <button
+              className="settings-memory-delete arca-auth-icon-action"
+              type="button"
+              onClick={onDeleteCredentials}
+              disabled={busy || action === "delete" || !canDelete}
+              aria-label="저장된 토스증권 API 키 삭제"
+              title={envManaged ? "환경변수 키는 앱에서 삭제할 수 없습니다" : "저장된 API 키 삭제"}
+            >
+              {action === "delete" ? (
+                <LoaderCircle className="is-spinning" size={16} strokeWidth={2.2} />
+              ) : (
+                <Trash2 size={16} strokeWidth={2.2} />
+              )}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {shouldShowCredentialForm ? (
+        <div className="news-feed-alert toss-auth-setup-hint">
+          <Info size={16} strokeWidth={2.2} />
+          <span className="toss-auth-setup-hint-copy">
+            토스증권 PC 버전에서 <code>설정</code>→<code>Open API</code> 메뉴에서 API Key와 Secret Key를
+            생성할 수 있습니다.
+          </span>
+        </div>
+      ) : null}
+
+      <TossInvestErrorAlert
+        error={visibleError}
+        errorCode={visibleErrorCode}
+        publicIp={publicIp}
+        publicIpBusy={publicIpBusy}
+        publicIpError={publicIpError}
+        onCheckPublicIp={onCheckPublicIp}
+      />
+
+      {credentials.legacyPlaintextPresent ? (
+        <div className="news-feed-alert">
+          <AlertTriangle size={16} strokeWidth={2.2} />
+          <span>
+            이전 평문 키 파일이 감지되었습니다. 새 저장소 패스워드로 다시 저장하면 평문 파일은 제거됩니다.
+          </span>
+        </div>
+      ) : null}
+
+      {locked ? (
+        <form className="toss-auth-unlock-form" onSubmit={handleUnlock}>
+          <label className="toss-auth-field">
+            <span>저장소 패스워드 입력</span>
+            <input
+              id="toss-auth-unlock-passphrase"
+              type="password"
+              value={unlockPassphrase}
+              autoComplete="current-password"
+              spellCheck="false"
+              disabled={busy || envManaged}
+              onChange={(event) => setUnlockPassphrase(event.target.value)}
+              placeholder=""
+            />
+          </label>
+          <button className="settings-memory-refresh toss-auth-save" type="submit" disabled={!canUnlock}>
+            {action === "unlock" || (autoProbeAfterUnlock && action === "probe") ? (
+              <LoaderCircle className="is-spinning" size={16} strokeWidth={2.2} />
+            ) : (
+              <UnlockKeyhole size={16} strokeWidth={2.2} />
+            )}
+            <span>{autoProbeAfterUnlock ? "잠금 해제하고 연결 테스트" : "잠금 해제"}</span>
+          </button>
+        </form>
+      ) : null}
+
+      {shouldShowCredentialForm ? (
+        <form className="toss-auth-form" onSubmit={handleSave}>
+          <div className="toss-auth-form-group">
+            <h3 className="toss-auth-form-title">Open API Key 입력</h3>
+            <label className="toss-auth-field">
+              <span>API Key</span>
+              <input
+                type="text"
+                value={clientId}
+                autoComplete="off"
+                spellCheck="false"
+                disabled={busy || envManaged}
+                onChange={(event) => setClientId(event.target.value)}
+                placeholder=""
+              />
+            </label>
+            <label className="toss-auth-field">
+              <span>Secret Key</span>
+              <input
+                type="password"
+                value={clientSecret}
+                autoComplete="off"
+                spellCheck="false"
+                disabled={busy || envManaged}
+                onChange={(event) => setClientSecret(event.target.value)}
+                placeholder=""
+              />
+            </label>
+          </div>
+          <div className="toss-auth-form-group">
+            <div className="toss-auth-form-title-row">
+              <h3 className="toss-auth-form-title">저장소 패스워드 설정</h3>
+              <TossStoragePassphraseHelp
+                helpId="toss-auth-save-passphrase-help"
+                helpOpen={passphraseHelpOpen}
+                onToggleHelp={() => setPassphraseHelpOpen((current) => !current)}
+                containerRef={passphraseHelpRef}
+              />
+            </div>
+            <label className="toss-auth-field">
+              <span>저장소 패스워드 설정하기</span>
+              <input
+                id="toss-auth-save-passphrase"
+                type="password"
+                value={savePassphrase}
+                autoComplete="new-password"
+                spellCheck="false"
+                disabled={busy || envManaged}
+                onChange={(event) => setSavePassphrase(event.target.value)}
+                placeholder=""
+              />
+            </label>
+            <label className="toss-auth-field">
+              <span>저장소 패스워드 다시 입력하기</span>
+              <input
+                type="password"
+                value={savePassphraseConfirm}
+                autoComplete="new-password"
+                spellCheck="false"
+                disabled={busy || envManaged}
+                onChange={(event) => setSavePassphraseConfirm(event.target.value)}
+                placeholder=""
+                aria-invalid={savePassphraseMismatch ? "true" : "false"}
+              />
+            </label>
+            <TossPassphraseStrengthPie value={savePassphrase} />
+          </div>
+          <div className="toss-auth-form-actions">
+            <button className="settings-memory-refresh toss-auth-save" type="submit" disabled={!canSave}>
+              {action === "save" || (autoProbeAfterSave && action === "probe") ? (
+                <LoaderCircle className="is-spinning" size={16} strokeWidth={2.2} />
+              ) : (
+                <Check size={16} strokeWidth={2.2} />
+              )}
+              <span>{autoProbeAfterSave ? "저장하고 연결 테스트" : "저장하기"}</span>
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      <dl className="arca-auth-meta toss-auth-meta">
+        <div>
+          <dt>키 출처</dt>
+          <dd>{sourceLabel}</dd>
+        </div>
+        <div>
+          <dt>저장소 상태</dt>
+          <dd>{vaultLabel}</dd>
+        </div>
+        <div>
+          <dt>키 암호화</dt>
+          <dd>{storageLabel}</dd>
+        </div>
+        <div>
+          <dt>토큰 캐시</dt>
+          <dd>{status?.token?.cached ? "암호화 메모리 보관 중" : "없음"}</dd>
+        </div>
+        <div>
+          <dt>토큰 만료</dt>
+          <dd>{formatDateTime(status?.token?.expiresAt)}</dd>
+        </div>
+        <div>
+          <dt>토큰 암호화</dt>
+          <dd>{status?.token?.encryptionLabel || "AES-256-GCM · 메모리 전용"}</dd>
+        </div>
+      </dl>
+
+      {accounts.length ? (
+        <div className="toss-auth-account-list" aria-label="토스증권 계좌 목록">
+          <h3 className="toss-auth-account-list-title">계좌 목록</h3>
+          <ul className="toss-auth-accounts">
+            {accounts.map((account) => (
+              <li className="toss-auth-account-row" key={`${account.accountSeq}-${account.accountNo}`}>
+                <span className="toss-auth-account-status">{tossAccountStatusLabel(account)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {orderSync && connected && !visibleError ? <TossInvestOrderSyncSection {...orderSync} connectionStatus={status} /> : null}
+    </section>
+  );
+}
+
+function TossInvestOrderSyncSection({
+  status,
+  busy,
+  action,
+  error,
+  connectionStatus,
+  onToggleEnabled,
+  onRunSync,
+}) {
+  const settings = status?.settings || {};
+  const store = status?.store || {};
+  const enabled = Boolean(status?.enabled || settings.enabled);
+  const credentials = connectionStatus?.credentials || {};
+  const connectionUsable = Boolean(credentials.usable || credentials.unlocked);
+  const connected = Boolean((connectionStatus?.connected || connectionStatus?.token?.cached) && connectionUsable);
+  const orderCount = Number(store.orderCount || 0);
+  const hasSyncedOrders = orderCount > 0;
+  const syncStates = Array.isArray(store.states) ? store.states : [];
+  const reconstruction = status?.reconstruction || {};
+  const reconstructionRunning = reconstruction.status === "running";
+  const reconstructionStale = reconstruction.status === "stale";
+  const reconstructionComplete = reconstruction.ok === true;
+  const reconstructionFailed = reconstruction.ok === false && !["deferred", "stale"].includes(reconstruction.status);
+  const hasNext = Boolean(status?.sync?.hasNext) || syncStates.some((state) => Boolean(state?.has_next));
+  const syncInProgress = busy && action === "sync";
+  const snapshotInProgress = (busy && action === "snapshot") || reconstructionRunning;
+  const snapshotProgress = formatTossSnapshotProgress(reconstruction);
+  const snapshotProgressText = snapshotProgress.fullText;
+  const snapshotPercentText = snapshotProgress.percentText;
+  const syncRange = enabled ? tossSyncRangeLabel(store) : "";
+  const syncStatusText = error
+    ? "확인 필요"
+    : snapshotInProgress
+      ? snapshotProgressText
+        ? `스냅샷 생성중 · ${snapshotProgressText}`
+        : "스냅샷 생성중"
+      : syncInProgress
+        ? "과거 거래 내역 동기화 중"
+        : hasNext
+          ? "과거 거래 내역 더 있음"
+          : reconstructionStale
+            ? "스냅샷 생성 필요"
+          : reconstructionFailed
+            ? "스냅샷 확인 필요"
+            : reconstructionComplete
+              ? "스냅샷 생성 완료"
+              : hasSyncedOrders
+                ? "완료"
+                : enabled
+                  ? "동기화 대기 중"
+                  : "꺼짐";
+  const statusLabel = error
+    ? "확인 필요"
+    : snapshotInProgress
+      ? "스냅샷 생성중"
+      : reconstructionStale
+        ? "생성 필요"
+      : reconstructionFailed
+        ? "확인 필요"
+        : busy
+          ? "동기화 중"
+          : enabled
+            ? "켜짐"
+            : "꺼짐";
+  const headerStatus =
+    snapshotInProgress
+      ? `${orderCount}건 · ${snapshotPercentText ? `스냅샷 ${snapshotPercentText}` : "스냅샷 생성중"} · SQLite`
+      : reconstructionStale
+        ? `${orderCount}건 · 스냅샷 필요 · SQLite`
+      : reconstructionFailed
+        ? `${orderCount}건 · 스냅샷 확인 필요 · SQLite`
+      : reconstructionComplete
+        ? `${orderCount}건 · 스냅샷 완료 · SQLite`
+      : enabled && !error && !busy
+      ? `${orderCount}건 · SQLite`
+      : busy
+        ? hasSyncedOrders
+          ? `${orderCount}건 · 동기화 중 · SQLite`
+          : "동기화 중 · SQLite"
+        : error
+          ? "확인 필요 · SQLite"
+          : "SQLite";
+  const statusNote =
+    snapshotInProgress
+      ? snapshotProgressText
+        ? `거래내역 저장 완료 · 스냅샷 생성중 · ${snapshotProgressText}`
+        : "거래내역 저장 완료 · 스냅샷 생성중"
+      : reconstructionStale
+        ? syncRange
+          ? `스냅샷 생성 필요 · ${syncRange}`
+          : "스냅샷 생성 필요"
+      : reconstructionFailed
+        ? reconstruction.error || "거래내역은 저장되었지만 포지션 스냅샷 생성 결과를 확인해야 합니다."
+      : reconstructionComplete
+        ? syncRange
+          ? `스냅샷 생성 완료 · ${syncRange}`
+          : "스냅샷 생성 완료"
+      : syncInProgress
+      ? hasSyncedOrders
+        ? `과거 거래 내역 동기화 중 · ${orderCount}건 저장`
+        : "과거 거래 내역 동기화 중"
+      : syncRange || error || (busy ? "동기화 중" : enabled ? "동기화 대기 중" : "");
+  const diagnosticClass = busy || snapshotInProgress
+    ? "settings-agent-diagnostic is-loading"
+    : error || reconstructionFailed
+      ? "settings-agent-diagnostic is-error"
+      : enabled && store.exists
+        ? "settings-agent-diagnostic is-ok"
+        : "settings-agent-diagnostic";
+  const StatusIcon = busy || snapshotInProgress ? LoaderCircle : error || reconstructionFailed ? AlertTriangle : Database;
+  const toggleDisabled = busy || reconstructionRunning || (!connected && !enabled);
+  const runDisabled = busy || reconstructionRunning || !enabled || !connected;
+
+  return (
+    <div className="toss-order-sync-subsection" aria-labelledby="toss-order-sync-title">
+      <div className="settings-subsection-header toss-order-sync-subheader">
+        <div className="toss-order-sync-title-copy">
+          <h3 id="toss-order-sync-title">거래내역 동기화</h3>
+          {statusNote ? (
+            <em className={syncRange ? "toss-order-sync-range" : error ? "is-error" : undefined}>{statusNote}</em>
+          ) : null}
+        </div>
+        <div className="toss-order-sync-header-actions">
+          <span className="toss-order-sync-storage-label">{headerStatus}</span>
+          <button
+            type="button"
+            className={enabled ? "settings-toggle is-on" : "settings-toggle"}
+            role="switch"
+            aria-checked={enabled}
+            disabled={toggleDisabled}
+            onClick={() => onToggleEnabled?.(!enabled)}
+          >
+            <span className="settings-toggle-track">
+              <span className="settings-toggle-thumb" />
+            </span>
+            <span>{action === "toggle" ? "저장 중" : enabled ? "켜짐" : "꺼짐"}</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="settings-memory-grid toss-order-sync-grid">
+        <div className={diagnosticClass}>
+          <StatusIcon size={16} strokeWidth={2.2} />
+          <div>
+            <strong>
+              {snapshotInProgress
+                ? snapshotProgressText
+                  ? `스냅샷 생성중 · ${snapshotProgressText}`
+                  : "스냅샷 생성중"
+                : syncInProgress
+                  ? "과거 거래 내역 동기화 중"
+                  : reconstructionStale
+                    ? "포지션 스냅샷 생성 필요"
+                  : reconstructionFailed
+                    ? "포지션 스냅샷 확인 필요"
+                    : reconstructionComplete
+                      ? "포지션 스냅샷 생성 완료"
+                      : enabled
+                        ? "SQLite 거래내역 저장소"
+                        : "SQLite 거래내역 저장소 대기"}
+            </strong>
+          </div>
+        </div>
+        <div className="arca-auth-actions" aria-label="거래내역 동기화 작업">
+          <button className="settings-memory-refresh" type="button" onClick={onRunSync} disabled={runDisabled}>
+            {(busy && (action === "sync" || action === "snapshot")) || reconstructionRunning ? (
+              <LoaderCircle className="is-spinning" size={15} strokeWidth={2.2} />
+            ) : (
+              <RefreshCw size={15} strokeWidth={2.2} />
+            )}
+            <span>{snapshotInProgress ? (snapshotPercentText ? `스냅샷 ${snapshotPercentText}` : "스냅샷 생성중") : busy && action === "sync" ? "동기화 중" : reconstructionStale ? "스냅샷 생성" : "지금 동기화"}</span>
+          </button>
+        </div>
+      </div>
+
+      <dl className="arca-auth-meta toss-order-sync-meta">
+        <div>
+          <dt>저장된 거래 내역</dt>
+          <dd>{orderCount}건</dd>
+        </div>
+        <div>
+          <dt>최초 주문</dt>
+          <dd>{formatTossSyncKoreanDateTime(store.earliestOrderedAt) || "-"}</dd>
+        </div>
+        <div>
+          <dt>최근 주문</dt>
+          <dd>{formatTossSyncKoreanDateTime(store.latestOrderedAt) || "-"}</dd>
+        </div>
+        <div>
+          <dt>동기화 상태</dt>
+          <dd>{syncStatusText}</dd>
+        </div>
+      </dl>
     </div>
   );
 }
@@ -813,15 +1655,20 @@ function ArcaNotificationAuthSection({
   const handoff = status?.handoff || null;
   const handoffAlive = Boolean(handoff?.alive);
   const invalid = Boolean(status?.invalid);
-  const cookieNames = status?.cookieNames?.length ? status.cookieNames.join(", ") : "-";
-  const domains = status?.domains?.length ? status.domains.join(", ") : "-";
   const statusLabel = invalid
-    ? "저장 파일 확인 필요"
+    ? "세션 확인 필요"
     : connected
       ? "알림 세션 저장됨"
       : handoffAlive
         ? "로그인 진행 중"
         : "세션 없음";
+  const statusDetail = invalid
+    ? "저장된 세션을 다시 확인해야 합니다."
+    : connected
+      ? "알림 세션을 저장했습니다. 쿠키 값은 화면에 표시하지 않습니다."
+      : handoffAlive
+        ? "열린 전용 브라우저에서 로그인한 뒤 세션 저장을 누르세요."
+        : "로그인 창을 열고 알림 수신용 세션만 저장합니다.";
   const diagnosticClass = busy
     ? "settings-agent-diagnostic is-loading"
     : invalid || error
@@ -841,14 +1688,11 @@ function ArcaNotificationAuthSection({
       <div className="arca-auth-grid">
         <div className={diagnosticClass}>
           <StatusIcon size={17} strokeWidth={2.2} />
-          <div>
-            <strong>{statusLabel}</strong>
-            <p>
-              {connected
-                ? `${status.sessionFile}에 세션을 저장했습니다. 쿠키 값은 화면에 표시하지 않습니다.`
-                : handoffAlive
-                  ? "열린 전용 브라우저에서 로그인한 뒤 세션 저장을 누르세요."
-                  : "전용 브라우저 프로필로 로그인 창을 열고 알림 수신용 세션만 저장합니다."}
+          <div className="arca-auth-status-copy">
+            <p className="arca-auth-status-line">
+              <strong>{statusLabel}</strong>
+              <span className="arca-auth-status-separator" aria-hidden="true">-</span>
+              <span className="arca-auth-status-detail">{statusDetail}</span>
             </p>
           </div>
         </div>
@@ -933,22 +1777,6 @@ function ArcaNotificationAuthSection({
 
       <dl className="arca-auth-meta">
         <div>
-          <dt>저장 파일</dt>
-          <dd>{status?.sessionFile || "data/secrets/arca-session.json"}</dd>
-        </div>
-        <div>
-          <dt>브라우저 프로필</dt>
-          <dd>{status?.profileDir || "data/arca-browser-profile"}</dd>
-        </div>
-        <div>
-          <dt>쿠키 이름</dt>
-          <dd>{cookieNames}</dd>
-        </div>
-        <div>
-          <dt>도메인</dt>
-          <dd>{domains}</dd>
-        </div>
-        <div>
           <dt>저장 시각</dt>
           <dd>{formatDateTime(status?.updatedAt || status?.capturedAt)}</dd>
         </div>
@@ -1001,6 +1829,8 @@ export default function SettingsView({
   onMagazineSchedulerIntervalChange,
   onMagazineMaxArticlesPerCycleChange,
   onReloadWorldMemory,
+  tossInvest,
+  tossOrderSync,
   arcaAuth,
 }) {
   const feeds = settings?.feeds || [];
@@ -1079,6 +1909,8 @@ export default function SettingsView({
           agentProviderProfiles={agentProviderProfiles}
           agentSettingsLoading={agentSettingsLoading}
         />
+
+        <TossInvestConnectionSection {...tossInvest} orderSync={tossOrderSync} />
 
         <ArcaNotificationAuthSection {...arcaAuth} />
 

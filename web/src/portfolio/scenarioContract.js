@@ -5,10 +5,13 @@ export const PORTFOLIO_SCENARIO_ROOT_ID = "portfolio_scenario_root";
 
 export const PORTFOLIO_WIDGET_OUTPUT_ROLES = Object.freeze({
   allocationSnapshot: "allocation_snapshot",
+  assetHistory: "asset_history",
   backtestResult: "backtest_result",
   metrics: "metrics",
   note: "note",
+  positionStatus: "position_status",
   scenarioGrid: "scenario_grid",
+  seasonalComparison: "seasonal_comparison",
   signalMatrix: "signal_matrix",
   sourceMatrix: "source_matrix",
 });
@@ -164,6 +167,9 @@ export function normalizePortfolioWidgetOutputRole(widget = {}) {
   if (visualType === "function") return PORTFOLIO_WIDGET_OUTPUT_ROLES.signalMatrix;
   if (visualType === "metrics-table") return PORTFOLIO_WIDGET_OUTPUT_ROLES.metrics;
   if (visualType === "allocation") return PORTFOLIO_WIDGET_OUTPUT_ROLES.allocationSnapshot;
+  if (visualType === "price-history") return PORTFOLIO_WIDGET_OUTPUT_ROLES.assetHistory;
+  if (visualType === "position-status") return PORTFOLIO_WIDGET_OUTPUT_ROLES.positionStatus;
+  if (visualType === "seasonal-comparison") return PORTFOLIO_WIDGET_OUTPUT_ROLES.seasonalComparison;
   if (visualType === "line") return PORTFOLIO_WIDGET_OUTPUT_ROLES.backtestResult;
   if (visualType === "table") return PORTFOLIO_WIDGET_OUTPUT_ROLES.sourceMatrix;
   return PORTFOLIO_WIDGET_OUTPUT_ROLES.note;
@@ -173,6 +179,9 @@ const portfolioOutputRoleOrder = Object.freeze({
   [PORTFOLIO_WIDGET_OUTPUT_ROLES.scenarioGrid]: 0,
   [PORTFOLIO_WIDGET_OUTPUT_ROLES.sourceMatrix]: 1,
   [PORTFOLIO_WIDGET_OUTPUT_ROLES.allocationSnapshot]: 2,
+  [PORTFOLIO_WIDGET_OUTPUT_ROLES.assetHistory]: 3,
+  [PORTFOLIO_WIDGET_OUTPUT_ROLES.positionStatus]: 3,
+  [PORTFOLIO_WIDGET_OUTPUT_ROLES.seasonalComparison]: 3,
   [PORTFOLIO_WIDGET_OUTPUT_ROLES.signalMatrix]: 2,
   [PORTFOLIO_WIDGET_OUTPUT_ROLES.backtestResult]: 3,
   [PORTFOLIO_WIDGET_OUTPUT_ROLES.metrics]: 4,

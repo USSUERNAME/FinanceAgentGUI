@@ -6,6 +6,9 @@ export const PORTFOLIO_WIDGET_VISUAL_TYPES = Object.freeze({
   markdown: "markdown",
   memo: "memo",
   metricsTable: "metrics-table",
+  priceHistory: "price-history",
+  positionStatus: "position-status",
+  seasonalComparison: "seasonal-comparison",
   table: "table",
 });
 
@@ -23,6 +26,9 @@ export const PORTFOLIO_WIDGET_CANONICAL_VISUAL_TYPES = Object.freeze([
   PORTFOLIO_WIDGET_VISUAL_TYPES.line,
   PORTFOLIO_WIDGET_VISUAL_TYPES.markdown,
   PORTFOLIO_WIDGET_VISUAL_TYPES.metricsTable,
+  PORTFOLIO_WIDGET_VISUAL_TYPES.priceHistory,
+  PORTFOLIO_WIDGET_VISUAL_TYPES.positionStatus,
+  PORTFOLIO_WIDGET_VISUAL_TYPES.seasonalComparison,
   PORTFOLIO_WIDGET_VISUAL_TYPES.table,
 ]);
 
@@ -44,6 +50,57 @@ export function normalizePortfolioWidgetVisualType(value = "") {
     return PORTFOLIO_WIDGET_VISUAL_TYPES.metricsTable;
   }
   if (["pie", "donut", "allocation", "allocation_chart"].includes(token)) return PORTFOLIO_WIDGET_VISUAL_TYPES.allocation;
+  if (
+    [
+      "price_history",
+      "price_history_chart",
+      "asset_history",
+      "asset_history_chart",
+      "investment_history",
+      "investment_history_chart",
+      "portfolio_value_history",
+    ].includes(token)
+  ) {
+    return PORTFOLIO_WIDGET_VISUAL_TYPES.priceHistory;
+  }
+  if (
+    [
+      "position_status",
+      "position_status_chart",
+      "positions_status",
+      "positions_chart",
+      "holdings_status",
+      "holdings_status_chart",
+      "holdings_composition",
+      "holdings_composition_chart",
+      "investment_position_status",
+      "investment_positions",
+      "investment_positions_chart",
+      "asset_position_status",
+      "asset_positions",
+      "asset_positions_chart",
+    ].includes(token)
+  ) {
+    return PORTFOLIO_WIDGET_VISUAL_TYPES.positionStatus;
+  }
+  if (
+    [
+      "seasonal_comparison",
+      "seasonal_comparison_chart",
+      "seasonal_return",
+      "seasonal_returns",
+      "seasonal_return_chart",
+      "annual_return_comparison",
+      "annual_returns_comparison",
+      "yearly_return_comparison",
+      "yearly_returns_comparison",
+      "year_comparison",
+      "season_by_year",
+      "seasonal",
+    ].includes(token)
+  ) {
+    return PORTFOLIO_WIDGET_VISUAL_TYPES.seasonalComparison;
+  }
   if (["line", "line_chart", "time_series_chart", "backtest_line_chart", "backtest_result"].includes(token)) {
     return PORTFOLIO_WIDGET_VISUAL_TYPES.line;
   }
@@ -66,6 +123,6 @@ export function portfolioWidgetVisualTypeContractIssue(widget = {}) {
     widgetId: widget?.id,
     displayId: widget?.displayId,
     title: widget?.title,
-    message: `${display} 생성 보류 · widget.visualType은 table, function, line, metrics-table, markdown, allocation, checklist 중 하나로 명시해야 합니다. memo/프롬프트 위젯 fallback은 에이전트 산출물로 저장하지 않습니다.`,
+    message: `${display} 생성 보류 · widget.visualType은 table, function, line, price-history, position-status, seasonal-comparison, metrics-table, markdown, allocation, checklist 중 하나로 명시해야 합니다. memo/프롬프트 위젯 fallback은 에이전트 산출물로 저장하지 않습니다.`,
   };
 }
