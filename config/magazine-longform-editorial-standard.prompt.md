@@ -109,6 +109,12 @@ brief under a magazine label.
 Headings mark real changes in the argument, not equal portions of text. A
 section may be much longer than another. Some essays need two headings, others
 five, and some none. Do not decide the number before the argument exists.
+Write the heading as the concrete claim, tension, actor, consequence, or image
+that turns the argument. Do not expose the writer's outline with labels such as
+`강한 반론`, `반론`, `시장 메커니즘`, `논증 전환`, or `근거 사다리` unless a
+named participant or formal source genuinely uses that label and the labeling
+is itself part of the story. The article should perform its counterargument,
+not announce that it is now performing one.
 
 ## Editorial Failure
 
