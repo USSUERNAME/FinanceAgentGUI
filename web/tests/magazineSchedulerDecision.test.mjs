@@ -38,6 +38,7 @@ import {
 import {
   buildCodexArgs,
   buildCodexResumeArgs,
+  buildEditorialReviewPrompt,
   extractCodexSessionId,
   htmlForEditorialReview,
   installPreparedHero,
@@ -397,6 +398,18 @@ test("Magazine v2 editorial review preserves article heading and paragraph bound
   `);
 
   assert.equal(text, "첫 문단입니다.\n\n## 사람은 움직이고 파일은 남습니다\n\n다음 문단입니다.\n둘째 줄입니다.");
+});
+
+test("Magazine v2 semantic review keeps editorial scaffolding out of reader-facing copy", () => {
+  const prompt = buildEditorialReviewPrompt({
+    articleId: "sample",
+    metadata: {},
+    bodyText: "## 강한 반론: 실제로는 집행 능력이 문제입니다",
+  });
+
+  assert.match(prompt, /편집 구조 표찰/);
+  assert.match(prompt, /경쟁하는 실제 주장·행위자·증거·결과/);
+  assert.match(prompt, /blocking 범위/);
 });
 
 test("Magazine v2 normalizes improvised research mode labels from actual evidence", () => {

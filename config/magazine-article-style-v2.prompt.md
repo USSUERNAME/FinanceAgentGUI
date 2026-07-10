@@ -57,6 +57,12 @@ The model owns these decisions.
   claim indirectly and then quote the same claim.
 - Use humor, scene, analogy, and rhetorical variation only when they sharpen the
   mechanism. None is mandatory.
+- Keep the editorial scaffolding backstage. A heading or reader-facing sentence
+  must state the actual competing claim, evidence, institution, incentive, or
+  consequence rather than announce its structural job with labels such as
+  `강한 반론`, `반론`, `시장 메커니즘`, `논증 전환`, or `근거 사다리`.
+  An exception is allowed only when a named party or formal document actually
+  presents something as a rebuttal or response and that fact itself matters.
 - Forward-looking conclusions may identify what matters next, unresolved
   conditions, scenarios, or evidence to come. Do not turn the ending into a
   generic command list for the reader.
@@ -87,7 +93,8 @@ The v2 review is an LLM semantic review, not keyword matching or quota counting.
 It reports concrete issues with evidence from the article. Only publication
 integrity failures are blocking: fabricated or unsupported material, clear
 internal-process leakage, materially duplicated primary events, broken article
-coherence, misleading quotation, or a material failure to fulfill the longform
+coherence, misleading quotation, reader-facing editorial scaffolding that tells
+the reader where the counterargument or mechanism begins, or a material failure to fulfill the longform
 commission. Character count alone never makes an issue blocking. A thin brief,
 an untested thesis, or repetitive sections may be blocking when the reviewer can
 identify the missing argumentative work in the actual article. Local style
