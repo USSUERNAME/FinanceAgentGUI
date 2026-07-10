@@ -163,6 +163,31 @@ export function worldMemoryHealthState(status, { error = "", busy = false, enabl
     };
   }
 
+  if (status.diagnosticsDeferred) {
+    const warning =
+      collectorStatus === "retry_wait" ||
+      Boolean(collector.lastError) ||
+      status?.report?.status !== "ready";
+    if (warning) {
+      return {
+        level: "warning",
+        showSidebarDot: true,
+        isCollecting: Boolean(collector.inFlight || collector.running || busy),
+        statusLabel: "경고",
+        title: "World Memory 수집 상태 확인 필요",
+        ariaLabel: "World Memory 수집 상태 경고",
+      };
+    }
+    return {
+      level: "online",
+      showSidebarDot: true,
+      isCollecting: Boolean(collector.inFlight || collector.running || busy),
+      statusLabel: "수집 정상",
+      title: "World Memory 수집 상태 정상 · 정밀 점검은 화면 진입 시 실행",
+      ariaLabel: "World Memory 수집 상태 정상",
+    };
+  }
+
   const warning =
     collectorStatus === "retry_wait" ||
     Boolean(collector.lastError) ||

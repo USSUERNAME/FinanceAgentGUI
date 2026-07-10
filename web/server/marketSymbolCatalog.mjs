@@ -2,10 +2,13 @@ import { parse } from "node-html-parser";
 import { sendJson } from "./codexProbe.mjs";
 
 const KRX_LISTED_COMPANIES_URL = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13";
+const KRX_ETF_FINDER_URL = "https://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd";
+const KRX_ETF_FINDER_REFERER = "https://data.krx.co.kr/comm/finder/finder_dataetfisu.jsp";
+const KRX_ETF_FINDER_BLD = "dbms/comm/finder/finder_dataetfisu";
 const KRX_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const NYSE_QUOTES_FILTER_URL = "https://www.nyse.com/api/quotes/filter";
 const NYSE_CACHE_TTL_MS = 60 * 60 * 1000;
-const MARKET_SYMBOL_SOURCES = ["KRX KIND", "NYSE Listings Directory"];
+const MARKET_SYMBOL_SOURCES = ["KRX KIND", "KRX ETF Finder", "NYSE Listings Directory"];
 const NYSE_MARKET_BY_MIC = {
   ARCX: "NYSE Arca",
   XASE: "NYSE American",
@@ -17,6 +20,12 @@ const NYSE_MARKET_BY_MIC = {
 };
 
 let krxListedCompanyCache = {
+  fetchedAt: 0,
+  rows: [],
+  promise: null,
+};
+
+let krxEtfCache = {
   fetchedAt: 0,
   rows: [],
   promise: null,
@@ -38,6 +47,11 @@ function cleanLimit(value, fallback = 12) {
 
 function cleanKrxSymbol(value) {
   const symbol = String(value || "").replace(/\D/g, "").slice(0, 6);
+  return symbol.length === 6 ? symbol : "";
+}
+
+function cleanKrxProductSymbol(value) {
+  const symbol = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
   return symbol.length === 6 ? symbol : "";
 }
 
@@ -132,6 +146,74 @@ async function krxListedCompanies() {
   return krxListedCompanyCache.promise;
 }
 
+function normalizeKrxEtfPayload(payload = {}) {
+  const sourceRows = Array.isArray(payload?.block1) ? payload.block1 : [];
+  const rows = [];
+  const seenSymbols = new Set();
+  for (const item of sourceRows) {
+    if (cleanText(item?.dellistDd || item?.delistDate || "", 20)) continue;
+    const symbol = cleanKrxProductSymbol(item?.short_code || item?.shortCode || item?.symbol);
+    const name = cleanText(item?.codeName || item?.name || item?.label || symbol, 180);
+    if (!symbol || !name || seenSymbols.has(symbol)) continue;
+    seenSymbols.add(symbol);
+    rows.push({
+      symbol,
+      name,
+      englishName: "",
+      market: "KRX ETF",
+      securityType: "ETF",
+      source: "KRX ETF Finder",
+    });
+  }
+  return rows;
+}
+
+async function fetchKrxEtfs() {
+  const form = new URLSearchParams({
+    bld: KRX_ETF_FINDER_BLD,
+    locale: "ko_KR",
+    delListIn: "",
+    searchText: "",
+  });
+  const response = await fetch(KRX_ETF_FINDER_URL, {
+    method: "POST",
+    headers: {
+      "Accept": "application/json, text/javascript, */*; q=0.01",
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      "Origin": "https://data.krx.co.kr",
+      "Referer": KRX_ETF_FINDER_REFERER,
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    body: form,
+  });
+  if (!response.ok) {
+    throw new Error(`KRX ETF 목록을 불러오지 못했습니다. HTTP ${response.status}`);
+  }
+  const rows = normalizeKrxEtfPayload(await response.json());
+  if (!rows.length) throw new Error("KRX ETF 목록 파싱 결과가 비어 있습니다.");
+  return rows;
+}
+
+async function krxEtfs() {
+  const now = Date.now();
+  if (krxEtfCache.rows.length && now - krxEtfCache.fetchedAt < KRX_CACHE_TTL_MS) {
+    return krxEtfCache.rows;
+  }
+  if (!krxEtfCache.promise) {
+    krxEtfCache.promise = fetchKrxEtfs()
+      .then((rows) => {
+        krxEtfCache = { fetchedAt: Date.now(), rows, promise: null };
+        return rows;
+      })
+      .catch((error) => {
+        krxEtfCache.promise = null;
+        throw error;
+      });
+  }
+  return krxEtfCache.promise;
+}
+
 function marketFromNyseQuoteUrl(url) {
   const micCode = cleanText(String(url || "").match(/\/quote\/([^:/?#]+):/)?.[1] || "", 12).toUpperCase();
   return NYSE_MARKET_BY_MIC[micCode] || micCode || "US";
@@ -162,7 +244,7 @@ function toNyseFriendlyName(value) {
     .replace(/\bLlc\b/g, "LLC");
 }
 
-function normalizeNyseListingRow(item = {}) {
+function normalizeNyseListingRow(item = {}, { securityType = "" } = {}) {
   const symbol = cleanUsSymbol(
     item.normalizedTicker || item.symbolExchangeTicker || item.symbolTicker || item.ticker || item.symbol
   );
@@ -180,16 +262,17 @@ function normalizeNyseListingRow(item = {}) {
       ? friendlyName
       : "",
     market: NYSE_MARKET_BY_MIC[market.toUpperCase()] || market || "US",
+    securityType,
     source: "NYSE Listings Directory",
   };
 }
 
-function normalizeNyseListingsPayload(payload) {
+function normalizeNyseListingsPayload(payload, options = {}) {
   const sourceRows = Array.isArray(payload?.result) ? payload.result : Array.isArray(payload) ? payload : [];
   const rows = [];
   const seenSymbols = new Set();
   for (const item of sourceRows) {
-    const row = normalizeNyseListingRow(item);
+    const row = normalizeNyseListingRow(item, options);
     if (!row || seenSymbols.has(row.symbol)) continue;
     seenSymbols.add(row.symbol);
     rows.push(row);
@@ -197,7 +280,7 @@ function normalizeNyseListingsPayload(payload) {
   return rows;
 }
 
-async function fetchNyseListingsSearch(query, limit = 12) {
+async function fetchNyseListingsSearch(query, limit = 12, instrumentType = "EQUITY", securityType = "") {
   const filterToken = cleanQuery(query);
   if (!filterToken || !shouldSearchNyseListings(filterToken)) return [];
   const response = await fetch(NYSE_QUOTES_FILTER_URL, {
@@ -210,32 +293,32 @@ async function fetchNyseListingsSearch(query, limit = 12) {
       "User-Agent": "FinanceAgentGUI local symbol lookup",
     },
     body: JSON.stringify({
-      instrumentType: "EQUITY",
+      instrumentType,
       pageNumber: 1,
       sortColumn: "NORMALIZED_TICKER",
       sortOrder: "ASC",
-      maxResultsPerPage: cleanLimit(limit, 12),
+      maxResultsPerPage: 30,
       filterToken,
     }),
   });
   if (!response.ok) {
     throw new Error(`NYSE 종목 검색을 불러오지 못했습니다. HTTP ${response.status}`);
   }
-  return normalizeNyseListingsPayload(await response.json());
+  return normalizeNyseListingsPayload(await response.json(), { securityType });
 }
 
-async function searchNyseListings(query, limit = 12) {
+async function searchNyseListings(query, limit = 12, instrumentType = "EQUITY", securityType = "") {
   const clean = cleanQuery(query);
   if (!clean || !shouldSearchNyseListings(clean)) return [];
   const normalizedLimit = cleanLimit(limit, 12);
-  const cacheKey = `${normalizeSearchText(clean)}:${normalizedLimit}`;
+  const cacheKey = `${instrumentType}:${normalizeSearchText(clean)}:${normalizedLimit}`;
   const now = Date.now();
   const cached = nyseListingsSearchCache.get(cacheKey);
   if (cached?.promise) return cached.promise;
   if (cached && Array.isArray(cached.rows) && now - cached.fetchedAt < NYSE_CACHE_TTL_MS) {
     return cached.rows;
   }
-  const promise = fetchNyseListingsSearch(clean, normalizedLimit)
+  const promise = fetchNyseListingsSearch(clean, normalizedLimit, instrumentType, securityType)
     .then((rows) => {
       nyseListingsSearchCache.set(cacheKey, {
         fetchedAt: Date.now(),
@@ -254,6 +337,10 @@ async function searchNyseListings(query, limit = 12) {
     });
   nyseListingsSearchCache.set(cacheKey, { fetchedAt: now, rows: [], promise });
   return promise;
+}
+
+async function searchNyseEtfListings(query, limit = 12) {
+  return searchNyseListings(query, limit, "EXCHANGE_TRADED_FUND", "ETF");
 }
 
 function scoreMarketSymbolRow(row, query) {
@@ -283,6 +370,10 @@ function rankMarketSymbolRows(rows, query, limit = 12) {
 }
 
 function searchKrxListedCompanies(rows, query, limit = 12) {
+  return rankMarketSymbolRows(rows, query, limit);
+}
+
+function searchKrxEtfs(rows, query, limit = 12) {
   return rankMarketSymbolRows(rows, query, limit);
 }
 
@@ -318,6 +409,13 @@ export async function handleMarketSymbolCatalogEndpoint(kind, req, res) {
     }
     const limit = cleanLimit(url.searchParams.get("limit"), 12);
     const sourceLookups = [];
+    sourceLookups.push(
+      krxEtfs().then((rows) => ({
+        source: "KRX ETF Finder",
+        rows: searchKrxEtfs(rows, query, limit),
+        fetchedAt: krxEtfCache.fetchedAt,
+      }))
+    );
     if (shouldSearchKrxListedCompanies(query)) {
       sourceLookups.push(
         krxListedCompanies().then((rows) => ({
@@ -331,6 +429,13 @@ export async function handleMarketSymbolCatalogEndpoint(kind, req, res) {
       sourceLookups.push(
         searchNyseListings(query, limit).then((rows) => ({
           source: "NYSE Listings Directory",
+          rows,
+          fetchedAt: Date.now(),
+        }))
+      );
+      sourceLookups.push(
+        searchNyseEtfListings(query, limit).then((rows) => ({
+          source: "NYSE ETF Listings Directory",
           rows,
           fetchedAt: Date.now(),
         }))
@@ -362,7 +467,10 @@ export async function handleMarketSymbolCatalogEndpoint(kind, req, res) {
 
 export const __marketSymbolCatalogTestHooks = {
   parseKrxListedCompaniesHtml,
+  normalizeKrxEtfPayload,
   normalizeNyseListingsPayload,
   searchNyseListings,
+  searchNyseEtfListings,
   searchKrxListedCompanies,
+  searchKrxEtfs,
 };

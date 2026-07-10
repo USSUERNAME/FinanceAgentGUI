@@ -189,7 +189,10 @@ export const antigravityModelGroups = [
         detail: "Antigravity CLI 기본 모델입니다.",
       },
     ],
-    speedOptions: [standardSpeedOption],
+    reasoningEmbedded: true,
+    reasoningControl: "model-variant",
+    speedControl: "unsupported",
+    speedOptions: [],
   },
 ];
 
@@ -218,6 +221,12 @@ const antigravityReasoningLevels = [
     cli: "",
     detail: "Gemini thinking level high",
   },
+  {
+    id: "thinking",
+    label: "사고 모드 (Thinking)",
+    cli: "",
+    detail: "모델 이름에 포함된 Antigravity 사고 모드입니다.",
+  },
 ];
 
 function labelAntigravityModel(name) {
@@ -234,16 +243,28 @@ export function modelGroupsFromAntigravityCatalog(catalog) {
   const models = Array.isArray(catalog?.models) ? catalog.models : [];
   const groups = models
     .filter((item) => item?.selectable && item?.name)
-    .map((item) => ({
-      id: item.name,
-      slug: item.name,
-      label: labelAntigravityModel(item.name),
-      displayName: item.displayName || item.name,
-      description: "Antigravity CLI model returned by agy models.",
-      defaultReasoningLevel: item.reasoningLevel?.toLowerCase() || "medium",
-      reasoningLevels: antigravityReasoningLevels,
-      speedOptions: [standardSpeedOption],
-    }));
+    .map((item) => {
+      const reasoningLevel = item.reasoningLevel?.toLowerCase() || "medium";
+      const reasoningOption = antigravityReasoningLevels.find((option) => option.id === reasoningLevel) || {
+        id: reasoningLevel,
+        label: reasoningLevel,
+        cli: "",
+        detail: "모델 이름에 포함된 Antigravity CLI 추론 수준입니다.",
+      };
+      return {
+        id: item.name,
+        slug: item.name,
+        label: labelAntigravityModel(item.name),
+        displayName: item.displayName || item.name,
+        description: "Antigravity CLI model returned by agy models.",
+        defaultReasoningLevel: reasoningLevel,
+        reasoningLevels: [reasoningOption],
+        reasoningEmbedded: true,
+        reasoningControl: "model-variant",
+        speedControl: "unsupported",
+        speedOptions: [],
+      };
+    });
   return groups.length ? groups : antigravityModelGroups;
 }
 
@@ -259,4 +280,15 @@ export function getSpeedOptions(modelGroup) {
       return true;
     }),
   ];
+}
+
+export function getSpeedOptionsForReasoning(modelGroup, reasoning) {
+  const reasoningId = String(reasoning || modelGroup?.defaultReasoningLevel || "").trim();
+  return getSpeedOptions(modelGroup).filter((option) => {
+    if (option.id === "standard") return true;
+    const supported = Array.isArray(option.supportedReasoningLevels)
+      ? option.supportedReasoningLevels
+      : [];
+    return !supported.length || supported.includes(reasoningId);
+  });
 }

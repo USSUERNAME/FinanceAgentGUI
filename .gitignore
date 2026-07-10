@@ -15,10 +15,13 @@ Thumbs.db
 # Private runtime memory and user workspace state
 /data/agent-attachments/*
 /data/arca-browser-profile/*
+/data/backups/*
 /data/magazine/*
 !/data/magazine/.gitkeep
 /data/notifications/*
 !/data/notifications/.gitkeep
+/data/invest-simulator/*
+!/data/invest-simulator/.gitkeep
 /data/reports/*
 !/data/reports/.gitkeep
 /data/secrets/*

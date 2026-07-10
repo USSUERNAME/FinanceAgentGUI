@@ -134,7 +134,7 @@ function rangeLabel(payload, seriesModels) {
   return [first || "첫 거래일", latest || "최신"].join(" ~ ");
 }
 
-export default function PortfolioSeasonalComparisonChart({ widget }) {
+export default function PortfolioSeasonalComparisonChart({ widget, onWidgetDisplayData }) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRefs = useRef(new Map());
@@ -284,6 +284,38 @@ export default function PortfolioSeasonalComparisonChart({ widget }) {
   const latestModel = seriesModels.find((model) => model.isLatest) || seriesModels[seriesModels.length - 1] || null;
   const metricLabel = payload?.metricLabel || "평가금액";
   const valueLabel = payload?.valueLabel || `${query.currency === "USD" ? "달러" : "원화"} ${metricLabel}`;
+  const displayData = useMemo(() => ({
+    schemaVersion: "portfolio-widget-display-data.v1",
+    kind: "asset-seasonal-comparison",
+    query,
+    summary: {
+      status: loading ? "loading" : error ? "error" : seriesModels.length ? "ready" : "empty",
+      error,
+      dataProvider: payload?.dataProvider || "토스 증권 Open API",
+      metricLabel,
+      valueLabel,
+      unit: payload?.unit || query.currency,
+      rawPointCount: historyPoints.length,
+      yearCount: seriesModels.length,
+      years: seriesModels.map((model) => model.year),
+      latestYear: latestModel?.year || null,
+      latestYearReturn: latestModel?.finalReturn,
+    },
+    data: {
+      rawPoints: historyPoints,
+      yearlySeries: seriesModels.map((model) => ({
+        year: model.year,
+        baseDate: model.baseDate,
+        endDate: model.endDate,
+        finalReturn: model.finalReturn,
+        points: model.data,
+      })),
+    },
+  }), [error, historyPoints, latestModel, loading, metricLabel, payload, query, seriesModels, valueLabel]);
+
+  useEffect(() => {
+    onWidgetDisplayData?.(widget?.id, displayData);
+  }, [displayData, onWidgetDisplayData, widget?.id]);
 
   function toggleYear(year) {
     const key = String(year);

@@ -138,8 +138,8 @@ state as asset management and must not call the live investment endpoint until
 credentials are usable again.
 
 The sidebar and main-section `transaction-currency-switch` preferences, table
-column choices, manual ordering, and 관심 목록 groups with their saved ticker
-lists are file-backed. Watchlist name autocomplete uses the KRX KIND
+column choices, manual ordering, and 관심 목록 groups with their saved instruments
+are file-backed. Watchlist name autocomplete uses the KRX KIND
 listed-company table for domestic listings and the NYSE Listings Directory
 quotes filter for US listing candidates, then validates the final symbol through
 Toss `GET /api/v1/stocks` before saving. Toss's official `stocks` endpoint
@@ -148,19 +148,72 @@ autocomplete surface, so external symbol-master sources remain lookup hints
 before the same Toss validation step. The shipped default is
 `config/transaction-status.defaults.json`, and local choices are written to
 ignored user config at `config/transaction-status.user.json` through
-`/api/transactions/settings`. Saved `KRW` or `USD` preferences override the live
-payload's primary currency when the user returns to the page.
+`/api/transactions/settings`. Settings schema v2 preserves legacy `symbols[]`
+and adds provider-qualified `instruments[]`; a symbols-only user file remains
+readable and is not silently reclassified as crypto. Saved `KRW` or `USD`
+preferences override the live payload's primary currency when the user returns
+to the page.
+
+Binance Spot autocomplete is local filtering over the public `exchangeInfo`
+catalog, not a separate Binance autocomplete endpoint. The local market-data
+connector intentionally exposes only currently `TRADING` USDT Spot pairs and
+uses `instrumentId`, `provider`, `venue`, `assetClass`, `baseAsset`,
+`quoteAsset`, `settlementAsset`, `status`, and `sessionPolicy` metadata instead
+of inferring a market from an alphabetic symbol. Public price, 24-hour volume,
+candle, and exchange metadata requests use `data-api.binance.vision` without an
+API key. Provider timeout, stale/degraded state, and upstream 418/429 limits are
+reported separately from Toss credential state. A Binance simulator order is
+blocked during the upstream retry window, when the cached catalog is stale, or
+when its current-price execution reference is older than 60 seconds; the server
+does not fall back to a client-supplied price or an assumed `TRADING` status.
 
 The `거래현황` live calls are screen-scoped. `내 투자` calls
 `/api/tossinvest/investment-status` only for the selected account's current
-holdings. `관심 목록` does not call the holdings aggregate; it calls
-`/api/tossinvest/prices` only for the symbols in the currently selected
-watchlist folder and uses per-symbol `1d` candles only for those same symbols to
-derive displayed daily, weekly, monthly, and six-month return rates from current
-price versus the matching historical close. While the watchlist surface is
-visible, that selected-folder price refresh runs at a one-second interval. When
-candle history is shorter than the requested period, the period displays `-`
-rather than a synthetic return.
+holdings. `관심 목록` does not call the holdings aggregate; it partitions the
+selected folder by provider and requests only those stock or Binance instruments.
+Mixed folders continue to show Binance rows if Toss credentials are locked.
+Binance's `priceChangePercent` is already percent-valued and must not be scaled
+again; longer-period returns use UTC-aligned Binance daily candles. When candle
+history is shorter than the requested period, the period displays `-` rather
+than a synthetic return.
+
+Investment simulator accounts are local-only and use their own SQLite store at
+`data/invest-simulator/simulator.sqlite3`, with the schema tracked in
+`config/invest-simulator.schema.sql`. The `/api/invest-simulator/*` endpoints
+call `scripts/invest_simulator_store.py` through Python's standard `sqlite3`
+module. Simulator account creation appends an `initial_cash` ledger event,
+FX conversion appends an `fx_exchange` event, market buys append `stock_buy`,
+and market sells append `stock_sell`; filled orders also write matching
+`simulator_orders` and `simulator_trades` rows. Cash balances and positions
+must be replayed from the simulator ledger and trade rows. The simulator order
+path must enforce KRW settlement for Korean stocks and USD settlement for US
+stocks at the store/API layer, not only in the frontend. Binance Spot USDT pairs
+also settle against the existing USD balance under an explicit `USDT = USD`
+practice assumption; there is no USDT balance or USD/USDT FX event. Binance
+orders use `status = TRADING`, `sessionPolicy = 24x7`, provider availability,
+and non-stale current-price data instead of a KR/US market calendar. Fills use
+the latest standard price without bid/ask, depth, or slippage modeling. Because
+account-specific Binance commission is authenticated user data, no-key fills
+record fee `0 USD` and `feeAssumption = zero-no-public-account-rate`. The HTTP
+order API requires a per-intent idempotency key, which the UI preserves across
+retries until that order succeeds. Sells must reject orders above the current
+position quantity and reduce remaining cost basis by average cost. When a
+simulator account is selected in `거래현황`, the UI refreshes
+the local simulator account snapshot and provider-specific read-only price/candle
+data so simulated positions show current price and daily-return movement.
+Simulator daily profit uses previous close for carried positions, but same-day
+buy lots use their actual fill cost as the daily baseline so first-day daily
+profit cannot exceed total profit solely because the stock moved before entry.
+Simulator account renames update `simulator_accounts.name` and append an
+`account_renamed` ledger event. Simulator deletion archives the account and appends
+an `account_archived` ledger event; it must not hard-delete account, trade,
+snapshot, or ledger history rows. This store is separate from
+`data/tossinvest/tossinvest-ledger.sqlite3`; simulator cash, orders, trades,
+snapshots, and FX events must not be written into the real Toss order-history
+sync ledger. The simulator UI may still use Toss read-only market endpoints
+for current prices, candles, and USD/KRW reference rates while keeping all
+simulated user actions in the simulator ledger.
+The complete v2 storage and replay contract is in `docs/invest-simulator.md`.
 
 Live market calls must respect Toss Open API market rate-limit groups:
 
@@ -343,6 +396,15 @@ If login opens a 404 page:
 
 ## Safe Diagnostic Commands
 
+From the project root, inspect local stores and publish safety without reading
+row payloads or printing matched secret values:
+
+```bash
+python scripts/sqlite_store_doctor.py
+python scripts/sqlite_store_setup.py plan --initialize-missing
+python scripts/release_safety_check.py --strict
+```
+
 From `web`:
 
 ```bash
@@ -376,6 +438,8 @@ If Vite uses another port, use the printed local URL.
 - Do not commit `data/secrets/arca-session.json`.
 - Do not commit `data/secrets/tossinvest-credentials.vault.json` or legacy `data/secrets/tossinvest-credentials.json`.
 - Do not commit `data/tossinvest/tossinvest-ledger.sqlite3`, `config/tossinvest-sync.user.json`, or `config/transaction-status.user.json`.
+- Do not commit `data/invest-simulator/simulator.sqlite3` or its SQLite sidecar files.
+- Do not commit `data/magazine/event-signature-index.sqlite3`, `data/backups/`, or generated Magazine articles.
 - Do not commit `data/world-memory/world_issue_log.sqlite3` or any generated World Memory runtime file.
 - Do not paste raw cookies into issues, chat, logs, or memory.
 - Do not make a personal absolute path the default browser path.
@@ -388,10 +452,12 @@ When the user says "fix this on my machine":
 
 1. Identify the OS, shell, Node version, browser used, and exact failing endpoint.
 2. Read `docs/installation.md` and this file.
-3. Check whether `ARCA_BROWSER_PATH` or `ARCA_LOGIN_URL` would solve the issue without code changes.
-4. If code changes are needed, keep them under the app tree.
-5. Run `node --check` on edited server modules.
-6. Run `npm run build`.
-7. Start the local server and test the narrow endpoint.
-8. Do not display raw secrets.
-9. Update this document with any durable compatibility lesson.
+3. Run the read-only SQLite doctor and release safety check from the project root; do not inspect secret contents directly.
+4. For GitHub updates or DB setup, read `docs/update-and-release-safety.md` and `docs/sqlite-stores.md`, stop the server, review the setup plan, and back up before migration.
+5. Check whether `ARCA_BROWSER_PATH` or `ARCA_LOGIN_URL` would solve the issue without code changes.
+6. If code changes are needed, keep them under the app tree.
+7. Run `node --check` on edited server modules.
+8. Run `npm run build`.
+9. Start the local server and test the narrow endpoint.
+10. Do not display raw secrets.
+11. Update this document with any durable compatibility lesson.

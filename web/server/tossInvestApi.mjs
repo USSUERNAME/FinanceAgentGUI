@@ -14,6 +14,7 @@ import { isIP } from "node:net";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readJsonBody, sendJson } from "./codexProbe.mjs";
+import { decorateTossOverseasEtfNames } from "./tossEtfNameTranslation.mjs";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const GUIBUILD_ROOT = resolve(WEB_ROOT, "..");
@@ -2109,14 +2110,16 @@ async function liveInvestmentStatusFromRequest(req) {
   const cacheKey = `${credentialsScope}:${accountSeq || "default"}:${requestedCurrency}`;
   const cached = liveInvestmentStatusCache.get(cacheKey);
   if (!force && cached && Date.now() - cached.createdAtMs <= LIVE_INVESTMENT_STATUS_CACHE_TTL_MS) {
-    return {
+    return decorateTossOverseasEtfNames({
       ...cached.payload,
       cached: true,
       cacheAgeMs: Date.now() - cached.createdAtMs,
-    };
+    });
   }
   if (liveInvestmentStatusInFlight.has(cacheKey)) {
-    return liveInvestmentStatusInFlight.get(cacheKey);
+    return liveInvestmentStatusInFlight
+      .get(cacheKey)
+      .then((payload) => decorateTossOverseasEtfNames(payload));
   }
   const promise = buildLiveInvestmentStatus({ accountSeq, requestedCurrency }).then((payload) => {
     liveInvestmentStatusCache.set(cacheKey, { createdAtMs: Date.now(), payload });
@@ -2124,7 +2127,7 @@ async function liveInvestmentStatusFromRequest(req) {
   });
   liveInvestmentStatusInFlight.set(cacheKey, promise);
   try {
-    return await promise;
+    return decorateTossOverseasEtfNames(await promise);
   } finally {
     liveInvestmentStatusInFlight.delete(cacheKey);
   }

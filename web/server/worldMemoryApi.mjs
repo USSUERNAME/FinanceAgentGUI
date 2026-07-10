@@ -43,6 +43,13 @@ const WORLD_MEMORY_CONNECTIVITY_PROBE_URLS = [
 const WORLD_MEMORY_HISTORY_LIMIT = 16;
 const WORLD_MEMORY_HANDLED_CHANGE_SUGGESTION_LIMIT = 40;
 const OUTPUT_LIMIT = 1024 * 1024;
+const STEP_TEXT_LIMIT = 24 * 1024;
+const MODEL_INPUT_SECTION_LIMIT = 48 * 1024;
+const MODEL_PREFLIGHT_LIMIT = 180 * 1024;
+const MODEL_JSON_SECTION_LIMIT = 96 * 1024;
+const MODEL_FEED_SCAN_LIMIT = 64 * 1024;
+const WORLD_MEMORY_CONNECTIVITY_STALE_IN_FLIGHT_MS =
+  WORLD_MEMORY_CONNECTIVITY_TIMEOUT_MS * WORLD_MEMORY_CONNECTIVITY_PROBE_URLS.length + 5000;
 const runtimeKey = Symbol.for("financeAgentGui.worldMemoryCollector");
 const changeSuggestionMutationActions = new Set([
   "stateAdd",
@@ -97,6 +104,11 @@ function timestampMs(dateLike) {
   return Number.isFinite(value) ? value : 0;
 }
 
+export function isConnectivityHttpStatus(statusCode) {
+  const code = Number(statusCode || 0);
+  return Number.isFinite(code) && code > 0 && code < 500;
+}
+
 function isCollectorScheduleDue(state = {}, now = Date.now()) {
   const schedule = state.schedule || {};
   const pausedUntilMs = timestampMs(schedule.pausedUntil);
@@ -134,7 +146,7 @@ function requestConnectivityProbe(url, timeoutMs = WORLD_MEMORY_CONNECTIVITY_TIM
         res.on("end", () => {
           const statusCode = Number(res.statusCode || 0);
           resolveProbe({
-            ok: statusCode >= 200 && statusCode < 400,
+            ok: isConnectivityHttpStatus(statusCode),
             url,
             statusCode,
           });
@@ -253,10 +265,35 @@ function runtimeState() {
       started: false,
       timer: null,
       inFlight: null,
+      inFlightStartedAt: "",
+      inFlightCycleId: "",
       nextTimerAt: "",
     };
   }
   return globalThis[runtimeKey];
+}
+
+export function shouldClearWorldMemoryConnectivityInFlight(state = {}, runtime = {}, now = Date.now()) {
+  if (!runtime?.inFlight) return false;
+  const collector = state.collector || {};
+  const schedule = state.schedule || {};
+  const activeCycle = schedule.activeCycle || {};
+  const retryAtMs = timestampMs(activeCycle.nextRetryAt || schedule.nextRetryAt);
+  const waitingForConnectivity = collector.status === "offline_wait" || activeCycle.awaitingConnectivity === true;
+  if (!waitingForConnectivity || collector.running || !retryAtMs || now < retryAtMs) return false;
+
+  const startedAtMs = timestampMs(runtime.inFlightStartedAt);
+  if (!startedAtMs) return true;
+  return now - startedAtMs > WORLD_MEMORY_CONNECTIVITY_STALE_IN_FLIGHT_MS;
+}
+
+function clearStaleWorldMemoryConnectivityInFlight(state = {}, now = Date.now()) {
+  const runtime = runtimeState();
+  if (!shouldClearWorldMemoryConnectivityInFlight(state, runtime, now)) return false;
+  runtime.inFlight = null;
+  runtime.inFlightStartedAt = "";
+  runtime.inFlightCycleId = "";
+  return true;
 }
 
 function defaultCollectorState() {
@@ -536,18 +573,37 @@ function readCollectorState() {
     modelPolicy: { ...base.modelPolicy, ...(raw.modelPolicy || {}) },
     report,
     changeSuggestionLedger: normalizeChangeSuggestionLedger(raw.changeSuggestionLedger),
-    history: Array.isArray(raw.history) ? raw.history.slice(0, WORLD_MEMORY_HISTORY_LIMIT) : [],
+    history: compactCollectorHistory(raw.history),
   };
   const recovery = recoverWorldMemoryCollectorStateFromArtifacts(state);
   if (recovery.recovered) return writeCollectorState(recovery.state);
   return recovery.state;
 }
 
+function compactCollectorHistory(history = []) {
+  if (!Array.isArray(history)) return [];
+  return history
+    .slice(0, WORLD_MEMORY_HISTORY_LIMIT)
+    .map((record) => {
+      if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+      return {
+        ...record,
+        steps: Array.isArray(record.steps)
+          ? record.steps.map((step) => {
+              if (!step || typeof step !== "object" || Array.isArray(step)) return step;
+              if (!Object.prototype.hasOwnProperty.call(step, "text")) return step;
+              return { ...step, text: safeOutput(step.text, STEP_TEXT_LIMIT) };
+            })
+          : record.steps,
+      };
+    });
+}
+
 function writeCollectorState(state) {
   const next = {
     ...state,
     updatedAt: nowIso(),
-    history: Array.isArray(state.history) ? state.history.slice(0, WORLD_MEMORY_HISTORY_LIMIT) : [],
+    history: compactCollectorHistory(state.history),
   };
   writeJsonFile(WORLD_MEMORY_STATE_PATH, next);
   return next;
@@ -647,14 +703,14 @@ function updateCollectorState(mutator) {
 function appendHistory(state, record) {
   return {
     ...state,
-    history: [
+    history: compactCollectorHistory([
       {
         id: record.id || `wm_${Date.now()}`,
         at: nowIso(),
         ...record,
       },
       ...(Array.isArray(state.history) ? state.history : []),
-    ].slice(0, WORLD_MEMORY_HISTORY_LIMIT),
+    ]),
   };
 }
 
@@ -941,6 +997,7 @@ function defaultModelPolicy() {
       model: "gpt-5.5",
       modelLabel: "latest available Codex model",
       reasoning: "high",
+      speed: "standard",
       role: "collection + report generation",
     },
     antigravity: {
@@ -949,6 +1006,7 @@ function defaultModelPolicy() {
       model: "Gemini 3.5 Flash (Medium)",
       modelLabel: "latest available Antigravity model",
       reasoning: "medium",
+      speed: "standard",
       role: "collection + report generation",
     },
     resolvedAt: "",
@@ -973,18 +1031,46 @@ function resolveWorldMemoryModelPolicy() {
     const settings = readWorldMemorySettings();
     const configuredProvider = normalizeWorldMemoryProviderSetting(settings.managementProvider);
     const preferredProvider = resolvePreferredWorldMemoryProvider(settings.managementProvider, options);
-    const codexGroup = Array.isArray(options.modelGroups) ? options.modelGroups[0] : null;
+    const codexGroups = Array.isArray(options.modelGroups) ? options.modelGroups : [];
+    const agentProviderSettings = options.agentSettings?.settings?.providers || {};
+    const codexPreferredModel = settings.managementModel || agentProviderSettings["codex-cli"]?.model || "";
+    const codexGroup =
+      codexGroups.find((group) => group?.slug === codexPreferredModel) || codexGroups[0] || null;
     const codexReasoningLevels = Array.isArray(codexGroup?.reasoningLevels)
       ? codexGroup.reasoningLevels.map((level) => level.id)
       : [];
     const antigravityModels = Array.isArray(options.antigravityModelCatalog?.models)
       ? options.antigravityModelCatalog.models.filter((item) => item?.selectable && item?.name)
       : [];
+    const antigravityPreferredModel = settings.managementModel || agentProviderSettings["antigravity-cli"]?.model || "";
+    const antigravityModelEntry =
+      antigravityModels.find((item) => item.name === antigravityPreferredModel) || antigravityModels[0] || null;
     const antigravityModel =
-      antigravityModels[0]?.name ||
+      antigravityModelEntry?.name ||
       options.antigravity?.defaultModel ||
-      options.agentSettings?.settings?.providers?.["antigravity-cli"]?.model ||
+      agentProviderSettings["antigravity-cli"]?.model ||
       fallback.antigravity.model;
+    const codexPreferredReasoning = settings.managementReasoning || agentProviderSettings["codex-cli"]?.reasoning || "";
+    const codexReasoning = codexReasoningLevels.includes(codexPreferredReasoning)
+      ? codexPreferredReasoning
+      : codexReasoningLevels.includes(codexGroup?.defaultReasoningLevel)
+        ? codexGroup.defaultReasoningLevel
+        : codexReasoningLevels.includes("high")
+          ? "high"
+          : codexReasoningLevels[0] || "high";
+    const codexSpeedOptions = Array.isArray(codexGroup?.speedOptions) ? codexGroup.speedOptions : [];
+    const codexPreferredSpeed = settings.managementSpeed || agentProviderSettings["codex-cli"]?.speed || "standard";
+    const codexSpeed = codexSpeedOptions.some((option) => {
+      if (option?.id !== codexPreferredSpeed) return false;
+      const supported = Array.isArray(option.supportedReasoningLevels) ? option.supportedReasoningLevels : [];
+      return !supported.length || supported.includes(codexReasoning);
+    })
+      ? codexPreferredSpeed
+      : "standard";
+    const antigravityReasoning =
+      settings.managementReasoning ||
+      agentProviderSettings["antigravity-cli"]?.reasoning ||
+      String(antigravityModel.match(/\(([^)]+)\)\s*$/)?.[1] || "medium").toLowerCase();
 
     return {
       preferredProvider,
@@ -994,16 +1080,16 @@ function resolveWorldMemoryModelPolicy() {
         available: Boolean(options.codex?.available),
         model: codexGroup?.slug || options.codex?.config?.model || fallback.codex.model,
         modelLabel: codexGroup?.displayName || codexGroup?.slug || fallback.codex.modelLabel,
-        reasoning: codexReasoningLevels.includes("high")
-          ? "high"
-          : codexGroup?.defaultReasoningLevel || codexReasoningLevels[0] || "high",
+        reasoning: codexReasoning,
+        speed: codexSpeed,
       },
       antigravity: {
         ...fallback.antigravity,
         available: Boolean(options.antigravity?.ready),
         model: antigravityModel,
-        modelLabel: antigravityModels[0]?.displayName || antigravityModel,
-        reasoning: "medium",
+        modelLabel: antigravityModelEntry?.displayName || antigravityModel,
+        reasoning: antigravityReasoning,
+        speed: "standard",
         credentialMode: options.antigravity?.credentialMode || "",
       },
       resolvedAt: nowIso(),
@@ -1021,10 +1107,25 @@ function resolveWorldMemoryModelPolicy() {
   }
 }
 
-function safeOutput(text) {
+function safeOutput(text, limit = OUTPUT_LIMIT) {
   const source = String(text || "");
-  if (source.length <= OUTPUT_LIMIT) return source;
-  return `${source.slice(0, OUTPUT_LIMIT)}\n...[truncated ${source.length - OUTPUT_LIMIT} chars]`;
+  const maxLength = Number.isFinite(Number(limit)) && Number(limit) > 0
+    ? Math.floor(Number(limit))
+    : OUTPUT_LIMIT;
+  if (source.length <= maxLength) return source;
+  return `${source.slice(0, maxLength)}\n...[truncated ${source.length - maxLength} chars]`;
+}
+
+function safeStepText(result) {
+  return safeOutput(stepText(result), STEP_TEXT_LIMIT);
+}
+
+function promptTextFromResult(result, limit = MODEL_INPUT_SECTION_LIMIT) {
+  return safeOutput(result?.outputText || result?.stdout || "", limit);
+}
+
+function jsonForPrompt(value, limit = MODEL_JSON_SECTION_LIMIT) {
+  return safeOutput(JSON.stringify(value || {}, null, 2), limit);
 }
 
 function tryParseJson(text) {
@@ -1624,13 +1725,13 @@ function buildSituationReportPrompt({
     ),
     "",
     "월드 메모리 최근 로그 JSON:",
-    JSON.stringify(listJson || {}, null, 2),
+    jsonForPrompt(listJson),
     "",
     "현재 state JSON:",
-    JSON.stringify(statesJson || {}, null, 2),
+    jsonForPrompt(statesJson),
     "",
     "audit JSON:",
-    JSON.stringify(auditJson || {}, null, 2),
+    jsonForPrompt(auditJson, 32 * 1024),
     "",
     "이번 import 요약:",
     importSummary || "import 요약 없음",
@@ -1642,7 +1743,7 @@ function buildSituationReportPrompt({
     formatHandledChangeSuggestionsForPrompt(handledChangeSuggestions),
     "",
     "이번 FEED 스캔:",
-    feedScan || "FEED 스캔 없음",
+    safeOutput(feedScan || "FEED 스캔 없음", MODEL_FEED_SCAN_LIMIT),
   ].join("\n");
 }
 
@@ -1876,7 +1977,7 @@ async function runWorldMemoryModelText({ prompt, modelPolicy, taskType }) {
       answer: String(result.answer || "").trim(),
       provider: "antigravity-cli",
       model: result.model || modelPolicy.antigravity.model,
-      reasoning: "medium",
+      reasoning: modelPolicy.antigravity.reasoning || "medium",
       elapsedMs: result.elapsedMs,
     };
   }
@@ -1890,7 +1991,8 @@ async function runWorldMemoryModelText({ prompt, modelPolicy, taskType }) {
       provider: "codex-cli",
       prompt,
       model: modelPolicy.codex.model,
-      reasoning: "high",
+      reasoning: modelPolicy.codex.reasoning || "high",
+      speed: modelPolicy.codex.speed || "standard",
       approval: "never",
       taskType,
       timeoutMs: WORLD_MEMORY_MODEL_TIMEOUT_MS,
@@ -1899,7 +2001,7 @@ async function runWorldMemoryModelText({ prompt, modelPolicy, taskType }) {
       answer: String(result.answer || "").trim(),
       provider: "codex-cli",
       model: result.model,
-      reasoning: result.reasoning || "high",
+      reasoning: result.reasoning || modelPolicy.codex.reasoning || "high",
       elapsedMs: result.elapsedMs,
     };
   } catch (error) {
@@ -2022,7 +2124,7 @@ async function refreshWorldMemoryReportSnapshot({
 
   try {
     const init = await runCommandFromBody({ action: "init" });
-    steps.push({ id: "init", ok: init.ok, text: stepText(init) });
+    steps.push({ id: "init", ok: init.ok, text: safeStepText(init) });
     if (!init.ok) throw new Error(init.error || "월드 메모리 DB 초기화 실패");
 
     const [taxonomyRefresh, auditAfter, harnessAfter, embedAfter, listAfter, statesAfter] = await Promise.all([
@@ -2034,12 +2136,12 @@ async function refreshWorldMemoryReportSnapshot({
       runCommandFromBody({ action: "states", status: "all", limit: 80 }),
     ]);
     steps.push(
-      { id: "taxonomy-refresh", ok: taxonomyRefresh.ok, text: stepText(taxonomyRefresh) },
-      { id: "audit-after", ok: auditAfter.ok, text: stepText(auditAfter) },
-      { id: "harness-after", ok: harnessAfter.ok, text: stepText(harnessAfter) },
-      { id: "embed-after", ok: embedAfter.ok, text: stepText(embedAfter) },
-      { id: "list-after", ok: listAfter.ok, text: stepText(listAfter) },
-      { id: "states-after", ok: statesAfter.ok, text: stepText(statesAfter) }
+      { id: "taxonomy-refresh", ok: taxonomyRefresh.ok, text: safeStepText(taxonomyRefresh) },
+      { id: "audit-after", ok: auditAfter.ok, text: safeStepText(auditAfter) },
+      { id: "harness-after", ok: harnessAfter.ok, text: safeStepText(harnessAfter) },
+      { id: "embed-after", ok: embedAfter.ok, text: safeStepText(embedAfter) },
+      { id: "list-after", ok: listAfter.ok, text: safeStepText(listAfter) },
+      { id: "states-after", ok: statesAfter.ok, text: safeStepText(statesAfter) }
     );
     if (!auditAfter.ok) throw new Error(auditAfter.error || "audit 실패");
     if (!harnessAfter.ok) throw new Error(harnessAfter.error || "harness 실패");
@@ -2054,7 +2156,7 @@ async function refreshWorldMemoryReportSnapshot({
         reason ? `갱신 사유: ${reason}` : "",
       ].filter(Boolean).join("\n"),
       importSummary: sourceAction ? `사용자 승인 변경 액션 이후 제안 목록 재계산: ${sourceAction}` : "보고서/변경 제안 수동 갱신",
-      harnessSummary: stepText(harnessAfter),
+      harnessSummary: safeStepText(harnessAfter),
       handledChangeSuggestions: readCollectorState().changeSuggestionLedger?.handled || [],
       modelPolicy,
     });
@@ -2146,8 +2248,10 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
   if (runtime.inFlight) return runtime.inFlight;
 
   const cycleId = `wm_${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "")}`;
+  const startedAt = nowIso();
+  runtime.inFlightStartedAt = startedAt;
+  runtime.inFlightCycleId = cycleId;
   runtime.inFlight = (async () => {
-    const startedAt = nowIso();
     const deadlineAt = addMs(scheduledAt, WORLD_MEMORY_INTERVAL_MS);
     const modelPolicy = resolveWorldMemoryModelPolicy();
     const steps = [];
@@ -2203,7 +2307,7 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
 
     try {
       const init = await runCommandFromBody({ action: "init" });
-      steps.push({ id: "init", ok: init.ok, text: stepText(init) });
+      steps.push({ id: "init", ok: init.ok, text: safeStepText(init) });
       if (!init.ok) throw new Error(init.error || "월드 메모리 DB 초기화 실패");
 
       const [listBefore, statesBefore, taxonomyRefresh, stateKeyTaxonomy, subjectTaxonomy, embedBefore] =
@@ -2216,31 +2320,31 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
           runCommandFromBody({ action: "embedStatus" }),
         ]);
       steps.push(
-        { id: "list-before", ok: listBefore.ok, text: stepText(listBefore) },
-        { id: "states-before", ok: statesBefore.ok, text: stepText(statesBefore) },
-        { id: "taxonomy-refresh", ok: taxonomyRefresh.ok, text: stepText(taxonomyRefresh) },
-        { id: "taxonomy-state-key", ok: stateKeyTaxonomy.ok, text: stepText(stateKeyTaxonomy) },
-        { id: "taxonomy-subject", ok: subjectTaxonomy.ok, text: stepText(subjectTaxonomy) },
-        { id: "embed-before", ok: embedBefore.ok, text: stepText(embedBefore) }
+        { id: "list-before", ok: listBefore.ok, text: safeStepText(listBefore) },
+        { id: "states-before", ok: statesBefore.ok, text: safeStepText(statesBefore) },
+        { id: "taxonomy-refresh", ok: taxonomyRefresh.ok, text: safeStepText(taxonomyRefresh) },
+        { id: "taxonomy-state-key", ok: stateKeyTaxonomy.ok, text: safeStepText(stateKeyTaxonomy) },
+        { id: "taxonomy-subject", ok: subjectTaxonomy.ok, text: safeStepText(subjectTaxonomy) },
+        { id: "embed-before", ok: embedBefore.ok, text: safeStepText(embedBefore) }
       );
 
       const feedScan = await runCommandFromBody({ action: "feedScan" });
-      steps.push({ id: "feed-scan", ok: feedScan.ok, text: stepText(feedScan), artifact: feedScan.artifact });
+      steps.push({ id: "feed-scan", ok: feedScan.ok, text: safeStepText(feedScan), artifact: feedScan.artifact });
       if (!feedScan.ok) throw new Error(feedScan.error || "FEED 스캔 실패");
 
       const preflight = [
         "# list --days 30 --entry-mode all",
-        listBefore.outputText || listBefore.stdout || "",
+        promptTextFromResult(listBefore),
         "# states --status active",
-        statesBefore.outputText || statesBefore.stdout || "",
+        promptTextFromResult(statesBefore),
         "# taxonomy --refresh",
-        taxonomyRefresh.outputText || taxonomyRefresh.stdout || "",
+        promptTextFromResult(taxonomyRefresh),
         "# taxonomy --type state_key",
-        stateKeyTaxonomy.outputText || stateKeyTaxonomy.stdout || "",
+        promptTextFromResult(stateKeyTaxonomy),
         "# taxonomy --type subject",
-        subjectTaxonomy.outputText || subjectTaxonomy.stdout || "",
+        promptTextFromResult(subjectTaxonomy),
         "# embed-status",
-        embedBefore.outputText || embedBefore.stdout || "",
+        promptTextFromResult(embedBefore),
       ].join("\n\n");
 
       updateCollectorState((state) => ({
@@ -2253,8 +2357,8 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
       }));
 
       const generated = await runBriefGeneration({
-        preflight: safeOutput(preflight),
-        feedScan: feedScan.outputText,
+        preflight: safeOutput(preflight, MODEL_PREFLIGHT_LIMIT),
+        feedScan: safeOutput(feedScan.outputText, MODEL_FEED_SCAN_LIMIT),
         modelPolicy,
       });
       const briefPath = join(WORLD_MEMORY_LOG_DIR, `world_memory_briefs_${stampForFile()}.json`);
@@ -2285,7 +2389,7 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
         });
         briefImport = { ...briefImport, outputText: briefImport.stdout };
       }
-      steps.push({ id: "brief-import", ok: briefImport.ok, text: stepText(briefImport) });
+      steps.push({ id: "brief-import", ok: briefImport.ok, text: safeStepText(briefImport) });
       if (!briefImport.ok) throw new Error(briefImport.error || "brief-import 실패");
 
       const [auditAfter, harnessAfter, embedAfter, listAfter, statesAfter] = await Promise.all([
@@ -2296,11 +2400,11 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
         runCommandFromBody({ action: "states", status: "all", limit: 80 }),
       ]);
       steps.push(
-        { id: "audit-after", ok: auditAfter.ok, text: stepText(auditAfter) },
-        { id: "harness-after", ok: harnessAfter.ok, text: stepText(harnessAfter) },
-        { id: "embed-after", ok: embedAfter.ok, text: stepText(embedAfter) },
-        { id: "list-after", ok: listAfter.ok, text: stepText(listAfter) },
-        { id: "states-after", ok: statesAfter.ok, text: stepText(statesAfter) }
+        { id: "audit-after", ok: auditAfter.ok, text: safeStepText(auditAfter) },
+        { id: "harness-after", ok: harnessAfter.ok, text: safeStepText(harnessAfter) },
+        { id: "embed-after", ok: embedAfter.ok, text: safeStepText(embedAfter) },
+        { id: "list-after", ok: listAfter.ok, text: safeStepText(listAfter) },
+        { id: "states-after", ok: statesAfter.ok, text: safeStepText(statesAfter) }
       );
       if (!auditAfter.ok) throw new Error(auditAfter.error || "audit 실패");
       if (!harnessAfter.ok) throw new Error(harnessAfter.error || "harness 실패");
@@ -2320,9 +2424,9 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
         listJson: listAfter.json,
         statesJson: statesAfter.json,
         auditJson: auditAfter.json,
-        feedScan: feedScan.outputText,
-        importSummary: stepText(briefImport),
-        harnessSummary: stepText(harnessAfter),
+        feedScan: safeOutput(feedScan.outputText, MODEL_FEED_SCAN_LIMIT),
+        importSummary: safeStepText(briefImport),
+        harnessSummary: safeStepText(harnessAfter),
         handledChangeSuggestions: readCollectorState().changeSuggestionLedger?.handled || [],
         modelPolicy,
       });
@@ -2453,7 +2557,11 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
       if (trigger !== "manual") scheduleWorldMemoryCollector();
       return { ok: false, cycleId, error: error.message, steps };
     } finally {
-      runtime.inFlight = null;
+      if (runtime.inFlightCycleId === cycleId) {
+        runtime.inFlight = null;
+        runtime.inFlightStartedAt = "";
+        runtime.inFlightCycleId = "";
+      }
       scheduleWorldMemoryCollector();
     }
   })();
@@ -2511,6 +2619,7 @@ function scheduleWorldMemoryCollector(delayOverrideMs = null) {
   if (runtime.timer) clearTimeout(runtime.timer);
 
   let state = normalizeMissedSchedules(readCollectorState());
+  clearStaleWorldMemoryConnectivityInFlight(state);
   state = writeCollectorState(state);
   const now = Date.now();
   const pausedUntilMs = timestampMs(state.schedule.pausedUntil);
@@ -2539,12 +2648,14 @@ async function handleWorldMemoryTimer() {
     stopWorldMemoryCollector();
     return;
   }
+  const currentState = readCollectorState();
+  clearStaleWorldMemoryConnectivityInFlight(currentState);
   if (runtime.inFlight) {
     scheduleWorldMemoryCollector(WORLD_MEMORY_RETRY_INTERVAL_MS);
     return;
   }
 
-  let state = normalizeMissedSchedules(readCollectorState());
+  let state = normalizeMissedSchedules(currentState);
   state = writeCollectorState(state);
   const now = Date.now();
   const pausedUntilMs = timestampMs(state.schedule.pausedUntil);
@@ -2686,6 +2797,41 @@ function pauseWorldMemoryCollection() {
   return state;
 }
 
+function buildWorldMemorySummaryStatus() {
+  const settings = readWorldMemorySettings();
+  if (!settings.enabled) {
+    return buildWorldMemoryDisabledStatus(settings);
+  }
+
+  ensureWorldMemoryDirs();
+  const collectorState = readCollectorState();
+  const runtime = runtimeState();
+  const dbExists = existsSync(WORLD_MEMORY_DB_PATH);
+  return {
+    ok: dbExists,
+    enabled: true,
+    diagnosticsDeferred: true,
+    settings,
+    configPath: "config/world-memory.user.json",
+    defaultConfigPath: "config/world-memory.defaults.json",
+    db: {
+      exists: dbExists,
+      path: safeRelative(WORLD_MEMORY_DB_PATH),
+    },
+    collector: {
+      ...collectorState.collector,
+      schedulerStarted: runtime.started,
+      inFlight: Boolean(runtime.inFlight),
+      nextTimerAt: runtime.nextTimerAt,
+    },
+    schedule: collectorState.schedule,
+    report: filterStoredReport(
+      collectorState.report,
+      collectorState.changeSuggestionLedger?.handled || []
+    ),
+  };
+}
+
 async function buildWorldMemoryStatus() {
   const settings = readWorldMemorySettings();
   if (!settings.enabled) {
@@ -2695,6 +2841,7 @@ async function buildWorldMemoryStatus() {
   ensureWorldMemoryDirs();
   const collectorState = readCollectorState();
   const runtime = runtimeState();
+  clearStaleWorldMemoryConnectivityInFlight(collectorState);
   if (runtime.started && !runtime.inFlight && isCollectorScheduleDue(collectorState)) {
     scheduleWorldMemoryCollector(0);
   }
@@ -2877,7 +3024,13 @@ export async function handleWorldMemoryEndpoint(kind, req, res) {
       return;
     }
     try {
-      sendJson(res, await buildWorldMemoryStatus());
+      const url = new URL(req.url || "/", "http://127.0.0.1");
+      sendJson(
+        res,
+        url.searchParams.get("mode") === "summary"
+          ? buildWorldMemorySummaryStatus()
+          : await buildWorldMemoryStatus()
+      );
     } catch (error) {
       sendJson(res, { ok: false, error: error.message }, 500);
     }

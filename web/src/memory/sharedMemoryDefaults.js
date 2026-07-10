@@ -11,6 +11,7 @@ export const emptyMemoryStatus = {
       nextBuildAt: "",
       basedOnWorldMemoryReportAt: "",
       basedOnWorldMemoryCollectionAt: "",
+      selectionPolicy: "",
       intervalMs: 15 * 60 * 1000,
       newsItemsConsidered: 0,
       newsItemsSummarized: 0,

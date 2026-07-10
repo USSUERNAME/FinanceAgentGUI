@@ -148,6 +148,51 @@ test("external briefing backfills to 30 recent news items when the post-collecti
   assert.doesNotMatch(briefing.text, /이미 기준 서술에 반영됐을 수 있으므로/);
 });
 
+test("external briefing keeps all post-collection news items when more than 30 are available", () => {
+  const newerItems = Array.from({ length: 36 }, (_value, index) => ({
+    feedTitle: "FinancialJuice",
+    translatedTitle: `수집 이후 새 소식 ${index + 1}`,
+    translatedText: "수집 이후 후보가 많으면 30건으로 자르면 안 된다.",
+    publishedAt: new Date(Date.parse("2026-06-27T01:30:00.000Z") - index * 60_000).toISOString(),
+  }));
+  const olderItems = Array.from({ length: 10 }, (_value, index) => ({
+    feedTitle: "FinancialJuice",
+    translatedTitle: `수집 전 최근 소식 ${index + 1}`,
+    translatedText: "30건 초과 post-cutoff 후보가 있으면 백필에 들어오면 안 된다.",
+    publishedAt: new Date(Date.parse("2026-06-27T00:39:00.000Z") - index * 60_000).toISOString(),
+  }));
+  const briefing = buildExternalNewsBriefing({
+    builtAt: "2026-06-27T01:40:00.000Z",
+    worldMemoryCutoffAt: "2026-06-27T00:40:00.000Z",
+    worldReport: {
+      generatedAt: "2026-06-27T00:42:00.000Z",
+      view: {
+        title: "World Memory 시장 상황 인식",
+        summary: "기준 서술은 이미 직전 이벤트를 반영하고 있다.",
+      },
+    },
+    newsStore: {
+      items: [...newerItems, ...olderItems],
+    },
+    marketSummary: {
+      marketTone: "mixed",
+      summaryKo: "수집 이후 보도 후보가 30건을 넘으면 전체 흐름을 놓고 시장 톤을 판단한다.",
+      confidence: 0.64,
+      alertLevel: "watch",
+      severityKo: "후보가 많더라도 긴급 절차를 실행할 정도의 충격은 아니다.",
+      shouldCreateReport: false,
+      pushSummary: "",
+    },
+    marketSummaryStatus: "translation-model",
+  });
+
+  assert.equal(briefing.consideredCount, 36);
+  assert.match(briefing.text, /대상 보도 수: 36/);
+  assert.match(briefing.text, /전체 흐름/);
+  assert.doesNotMatch(briefing.text, /30건으로 자르면 안 된다/);
+  assert.doesNotMatch(briefing.text, /백필에 들어오면 안 된다/);
+});
+
 test("external briefing does not use report generation time as a News Feed cutoff", () => {
   const briefing = buildExternalNewsBriefing({
     builtAt: "2026-06-27T01:00:00.000Z",

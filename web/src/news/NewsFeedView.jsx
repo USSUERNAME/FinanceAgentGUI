@@ -267,6 +267,7 @@ export default function NewsFeedView({
   status,
   items,
   busy,
+  refreshBusy,
   loadingMore,
   error,
   hasMore,
@@ -295,6 +296,12 @@ export default function NewsFeedView({
   ]
     .filter(Boolean)
     .join(" ");
+  const collectionInFlight = Boolean(collector.inFlight);
+  const refreshLabel = refreshBusy
+    ? "수집 요청 중"
+    : collectionInFlight
+      ? "백그라운드 수집 중"
+      : "수동 수집";
 
   useEffect(() => {
     return () => {
@@ -337,9 +344,14 @@ export default function NewsFeedView({
             <span className="status-dot" />
             <span>{healthState.pillLabel}</span>
           </div>
-          <button className="board-refresh-button" type="button" onClick={onRefresh} disabled={busy || collector.inFlight}>
-            {busy || collector.inFlight ? <LoaderCircle size={16} strokeWidth={2.2} /> : <RefreshCw size={16} strokeWidth={2.2} />}
-            <span>{busy || collector.inFlight ? "수집 중" : "수동 수집"}</span>
+          <button
+            className={["board-refresh-button", refreshBusy ? "is-loading" : ""].filter(Boolean).join(" ")}
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshBusy || collectionInFlight}
+          >
+            {refreshBusy ? <LoaderCircle size={16} strokeWidth={2.2} /> : <RefreshCw size={16} strokeWidth={2.2} />}
+            <span>{refreshLabel}</span>
           </button>
         </header>
 
@@ -500,6 +512,13 @@ export default function NewsFeedView({
               </article>
             );
           })}
+
+          {!items.length && busy ? (
+            <div className="news-feed-empty is-loading" role="status">
+              <LoaderCircle size={20} strokeWidth={2} />
+              <span>최신 News Feed 30건 불러오는 중</span>
+            </div>
+          ) : null}
 
           {!items.length && !busy ? (
             <div className="news-feed-empty">

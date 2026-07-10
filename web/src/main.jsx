@@ -59,10 +59,17 @@ function showGlobalRuntimeError(error) {
 window.addEventListener("error", (event) => showGlobalRuntimeError(event.error || event.message));
 window.addEventListener("unhandledrejection", (event) => showGlobalRuntimeError(event.reason));
 
+const app = (
+  <AppErrorBoundary>
+    <App />
+  </AppErrorBoundary>
+);
+
+// StrictMode intentionally replays mount effects in development. This app's mount
+// effects call local APIs and external services, so keep the replay opt-in for
+// diagnostics instead of doubling every reload by default.
 createRoot(document.getElementById("root")).render(
-  <StrictMode>
-    <AppErrorBoundary>
-      <App />
-    </AppErrorBoundary>
-  </StrictMode>
+  import.meta.env.DEV && import.meta.env.VITE_REACT_STRICT_MODE === "1"
+    ? <StrictMode>{app}</StrictMode>
+    : app
 );

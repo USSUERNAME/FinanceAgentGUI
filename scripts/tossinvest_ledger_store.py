@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import hashlib
 import json
+import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -8,8 +9,8 @@ from pathlib import Path
 
 
 GUIBUILD_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = GUIBUILD_ROOT / "data" / "tossinvest"
-DB_PATH = DATA_DIR / "tossinvest-ledger.sqlite3"
+DEFAULT_DB_PATH = GUIBUILD_ROOT / "data" / "tossinvest" / "tossinvest-ledger.sqlite3"
+DB_PATH = Path(os.environ.get("FINANCE_AGENT_GUI_TOSSINVEST_DB_PATH", DEFAULT_DB_PATH))
 SCHEMA_VERSION = 2
 
 
@@ -18,7 +19,10 @@ def iso_now():
 
 
 def rel(path):
-    return str(path.relative_to(GUIBUILD_ROOT))
+    try:
+        return str(Path(path).resolve().relative_to(GUIBUILD_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def output(payload):
@@ -34,7 +38,7 @@ def read_payload():
 
 def connect(create=False):
     if create:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not DB_PATH.exists() and not create:
         return None
     conn = sqlite3.connect(DB_PATH)
@@ -44,6 +48,11 @@ def connect(create=False):
 
 
 def init_db(conn):
+    current_schema_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    if current_schema_version > SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Toss ledger schema version {current_schema_version} is newer than supported version {SCHEMA_VERSION}"
+        )
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS orders (
@@ -207,6 +216,19 @@ def init_db(conn):
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
+def initialize():
+    existed = DB_PATH.exists()
+    conn = connect(create=True)
+    try:
+        result = summarize_store(conn)
+        result["initialized"] = not existed
+        result["schemaPath"] = "config/tossinvest-ledger.schema.sql"
+        result["actualSchemaVersion"] = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        return result
+    finally:
+        conn.close()
+
+
 def clean_text(value):
     if value is None:
         return None
@@ -295,7 +317,9 @@ def summarize_store(conn):
         "ok": True,
         "exists": DB_PATH.exists(),
         "schemaVersion": SCHEMA_VERSION,
+        "actualSchemaVersion": int(conn.execute("PRAGMA user_version").fetchone()[0]),
         "dbPath": rel(DB_PATH),
+        "schemaPath": "config/tossinvest-ledger.schema.sql",
         "orderCount": int(summary["order_count"] or 0),
         "accountCount": int(summary["account_count"] or 0),
         "earliestOrderedAt": summary["earliest_ordered_at"] or "",
@@ -312,7 +336,9 @@ def status():
             "ok": True,
             "exists": False,
             "schemaVersion": SCHEMA_VERSION,
+            "actualSchemaVersion": None,
             "dbPath": rel(DB_PATH),
+            "schemaPath": "config/tossinvest-ledger.schema.sql",
             "orderCount": 0,
             "accountCount": 0,
             "earliestOrderedAt": "",
@@ -497,6 +523,9 @@ def upsert():
 
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else "status"
+    if command == "init":
+        output(initialize())
+        return
     if command == "status":
         output(status())
         return

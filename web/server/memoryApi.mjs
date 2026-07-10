@@ -8,7 +8,9 @@ import {
 import { runEmergencyProcedureForMarketSummary } from "./notificationsApi.mjs";
 
 async function sharedMemoryStatusWithEmergencyProcedure(options = {}) {
-  const status = sharedMemoryStatus(options);
+  const { runEmergencyProcedure = true, ...statusOptions } = options;
+  const status = sharedMemoryStatus(statusOptions);
+  if (!runEmergencyProcedure) return status;
   const marketSummary = status.contextMemory?.marketSummary || null;
   if (!marketSummary || typeof marketSummary !== "object") return status;
   try {
@@ -69,7 +71,15 @@ export async function handleMemoryEndpoint(kind, req, res) {
     }
 
     if (req.method === "GET") {
-      sendJson(res, await sharedMemoryStatusWithEmergencyProcedure({ limit, offset }));
+      sendJson(
+        res,
+        await sharedMemoryStatusWithEmergencyProcedure({
+          limit,
+          offset,
+          refresh: false,
+          runEmergencyProcedure: false,
+        })
+      );
       return;
     }
 

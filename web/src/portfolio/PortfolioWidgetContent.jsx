@@ -30,6 +30,8 @@ import {
 import { portfolioFunctionSpecForWidget } from "./widgetStrategySpec.js";
 import { normalizePortfolioWidgetVisualType } from "./widgetTypes.js";
 import { PortfolioWidgetMiniPreview } from "./PortfolioWidgetPreview.jsx";
+import { PortfolioAssetEvaluationTable } from "./PortfolioAssetEvaluationTable.jsx";
+import { portfolioWidgetIsAssetEvaluationTable } from "./portfolioAssetMetrics.js";
 import { MarkdownText } from "../utils/MarkdownText.jsx";
 
 const PortfolioWidgetChart = React.lazy(() => import("./PortfolioWidgetChart.jsx"));
@@ -491,7 +493,7 @@ function PortfolioWidgetMarkdown({ widget }) {
   );
 }
 
-export function PortfolioWidgetProducedContent({ widget, widgets = [] }) {
+export function PortfolioWidgetProducedContent({ widget, widgets = [], onWidgetDisplayData }) {
   const type = normalizePortfolioWidgetVisualType(widget?.visualType);
   const hasBacktestResultSeries =
     widget?.outputRole === "backtest_result" &&
@@ -509,7 +511,15 @@ export function PortfolioWidgetProducedContent({ widget, widgets = [] }) {
   if (renderType === "metrics-table") {
     return (
       <div className="portfolio-widget-produced is-metrics-table-only">
-        <PortfolioWidgetMetricsTable widget={widget} widgets={widgets} />
+        {portfolioWidgetIsAssetEvaluationTable(widget) ? (
+          <PortfolioAssetEvaluationTable
+            widget={widget}
+            widgets={widgets}
+            onWidgetDisplayData={onWidgetDisplayData}
+          />
+        ) : (
+          <PortfolioWidgetMetricsTable widget={widget} widgets={widgets} />
+        )}
       </div>
     );
   }
@@ -539,7 +549,7 @@ export function PortfolioWidgetProducedContent({ widget, widgets = [] }) {
     return (
       <div className="portfolio-widget-produced is-visual-only">
         <React.Suspense fallback={<PortfolioWidgetMiniPreview widget={widget} />}>
-          <PortfolioWidgetChart widget={chartWidget} />
+          <PortfolioWidgetChart widget={chartWidget} onWidgetDisplayData={onWidgetDisplayData} />
         </React.Suspense>
       </div>
     );

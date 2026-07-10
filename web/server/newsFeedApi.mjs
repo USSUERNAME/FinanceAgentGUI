@@ -23,6 +23,7 @@ import {
   ANTIGRAVITY_TRANSLATION_REASONING,
   selectAntigravityModelForReasoning,
 } from "../src/agent/antigravityModelSelection.js";
+import { selectCodexTranslationModel } from "../src/agent/codexTranslationModelSelection.js";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const GUIBUILD_ROOT = resolve(WEB_ROOT, "..");
@@ -708,12 +709,27 @@ function publicSnapshot({ limit = 80, offset = 0, readState = null, viewState = 
   const snapshotViewState = viewState || readNewsFeedViewState();
   const config = readNewsFeedConfig();
   const store = readStore();
-  const sortedItems = store.items
-    .slice()
-    .sort((a, b) => String(b.publishedAt || b.fetchedAt).localeCompare(String(a.publishedAt || a.fetchedAt)));
+  const sortedItems = limit > 0
+    ? store.items
+        .slice()
+        .sort((a, b) => String(b.publishedAt || b.fetchedAt).localeCompare(String(a.publishedAt || a.fetchedAt)))
+    : [];
   const items = sortedItems
     .slice(offset, offset + limit)
     .map(publicItem);
+  const latestItem = store.items.reduce((latest, item) => {
+    if (!latest) return item;
+    const itemTimestamp = String(item.publishedAt || item.fetchedAt || "");
+    const latestTimestamp = String(latest.publishedAt || latest.fetchedAt || "");
+    return itemTimestamp > latestTimestamp ? item : latest;
+  }, null);
+  const readStateSnapshot = newsFeedReadStateSnapshot(store, snapshotReadState);
+  const itemCount = store.items.length;
+  const contentRevision = [
+    itemCount,
+    latestItem?.id || "",
+    readStateSnapshot.latestTranslatedAt || "",
+  ].join(":");
 
   return {
     ok: true,
@@ -724,12 +740,14 @@ function publicSnapshot({ limit = 80, offset = 0, readState = null, viewState = 
       title: feed.title,
       enabled: feed.enabled,
     })),
-    itemCount: sortedItems.length,
-    readState: newsFeedReadStateSnapshot(store, snapshotReadState),
+    itemCount,
+    latestItemId: latestItem?.id || "",
+    contentRevision,
+    readState: readStateSnapshot,
     viewState: newsFeedViewStateSnapshot(snapshotViewState),
     offset,
     limit,
-    hasMore: offset + items.length < sortedItems.length,
+    hasMore: offset + items.length < itemCount,
     items,
   };
 }
@@ -784,24 +802,15 @@ function latestAntigravityTranslationModel(options) {
 }
 
 function codexTranslationModel(options) {
-  const group = options.modelGroups?.[0];
-  if (!group?.slug) {
-    throw new Error("Codex 모델 카탈로그가 비어 있습니다.");
-  }
-
-  const supported = (group.reasoningLevels || []).map((level) => level.id);
-  const reasoning =
-    ["minimal", "low", "medium", "high", "xhigh"].find((level) => supported.includes(level)) ||
-    group.defaultReasoningLevel ||
-    supported[0] ||
-    "low";
+  const selection = selectCodexTranslationModel({
+    cliVersion: options.codex?.version,
+    models: options.modelGroups,
+  });
 
   return {
     provider: "codex-cli",
     providerLabel: "Codex CLI",
-    model: group.slug,
-    modelLabel: group.slug,
-    reasoning,
+    ...selection,
   };
 }
 
@@ -1343,7 +1352,7 @@ async function refreshNewsFeeds(reason = "manual") {
       void startPendingNewsFeedTranslation(config.translationBatchSize);
     }
 
-    return publicSnapshot();
+    return publicSnapshot({ limit: 0 });
   })().finally(() => {
     const config = readNewsFeedConfig();
     runtime.inFlight = null;
@@ -1498,8 +1507,17 @@ export async function handleNewsFeedEndpoint(kind, req, res) {
         sendJson(res, { ok: false, error: "method not allowed" }, 405);
         return;
       }
-      await refreshNewsFeeds("manual");
-      sendJson(res, publicSnapshot());
+      const collectionAlreadyRunning = Boolean(runtimeState().inFlight);
+      void refreshNewsFeeds("manual").catch(() => {});
+      sendJson(
+        res,
+        {
+          ...publicSnapshot({ limit: 0 }),
+          accepted: !collectionAlreadyRunning,
+          collectionAlreadyRunning,
+        },
+        collectionAlreadyRunning ? 200 : 202
+      );
       return;
     }
 

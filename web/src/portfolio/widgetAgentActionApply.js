@@ -107,6 +107,37 @@ function portfolioDeleteActionConfirmed(action = {}) {
   );
 }
 
+function portfolioActionCreatesWidget(actionName = "", parsedAction = null) {
+  const normalizedAction = String(actionName || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  return (
+    normalizedAction === "create" ||
+    /(?:^|_)create_(?:portfolio_)?widget(?:_flow)?(?:$|_)/.test(normalizedAction) ||
+    normalizedAction === "render_portfolio_artifact" ||
+    (Array.isArray(parsedAction?.widgets) && parsedAction.widgets.length > 0)
+  );
+}
+
+function buildAssetWidgetCreationBlockedState({
+  actionKey = "",
+  consumeId = "",
+  currentWidgets = [],
+  nextDisplayIndex = 1,
+} = {}) {
+  return {
+    status: "asset-widget-creation-disabled",
+    actionKey,
+    consumeId,
+    widgets: currentWidgets,
+    nextDisplayIndex,
+    workspaceStarted: true,
+    rememberWorkspace: false,
+    logMessages: ["자산관리 위젯 생성 보류 · 캔버스 빈 칸의 + 버튼에서 직접 추가해 주세요."],
+  };
+}
+
 export function buildPortfolioAgentWidgetActionApplyState({
   agentWidgetAction,
   canvasId = "",
@@ -142,6 +173,15 @@ export function buildPortfolioAgentWidgetActionApplyState({
 
   const actionName = portfolioAgentWidgetActionName(parsedAction, agentWidgetAction.request);
   const hasWidgetPayload = portfolioAgentWidgetHasPayload(parsedAction);
+  const isAssetMode = canvasModeId === assetCanvasModeId;
+  if (isAssetMode && portfolioActionCreatesWidget(actionName, parsedAction)) {
+    return buildAssetWidgetCreationBlockedState({
+      actionKey,
+      consumeId,
+      currentWidgets,
+      nextDisplayIndex,
+    });
+  }
   const parsedScenario =
     parsedAction?.scenario && typeof parsedAction.scenario === "object"
       ? normalizePortfolioScenarioSpec(parsedAction.scenario, { backtestPeriod: currentScenario?.runs?.[0]?.period || "1y" })
@@ -461,6 +501,14 @@ export function buildPortfolioAgentWidgetActionApplyState({
         nextDisplayIndex,
         logMessages: ["에이전트 적용 보류 · 대상 위젯 없음"],
       };
+    }
+    if (isAssetMode) {
+      return buildAssetWidgetCreationBlockedState({
+        actionKey,
+        consumeId,
+        currentWidgets,
+        nextDisplayIndex,
+      });
     }
     const visualTypeIssue = portfolioWidgetVisualTypeContractIssue(patch);
     if (visualTypeIssue) {

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "enabled": true,
+  "root": "data/magazine/editorial-exemplars",
+  "maxExemplars": 3,
+  "maxArticleChars": 18000,
+  "maxEditorialMapChars": 6000
+}

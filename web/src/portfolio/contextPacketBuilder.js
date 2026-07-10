@@ -19,7 +19,14 @@ const portfolioContextAvailableActions = [
   "update_derived_widget",
 ];
 
-function portfolioContextWidget(widget = {}) {
+const assetManagementBlockedCreationActions = new Set([
+  "create_portfolio_widget",
+  "create_function_widget",
+  "import_holdings",
+  "render_portfolio_artifact",
+]);
+
+function portfolioContextWidget(widget = {}, displayData = null) {
   return {
     id: widget.id,
     displayId: widget.displayId,
@@ -49,6 +56,7 @@ function portfolioContextWidget(widget = {}) {
     lastComputedFrom: widget.lastComputedFrom,
     staleReason: widget.staleReason,
     staleSince: widget.staleSince,
+    displayData: displayData && typeof displayData === "object" ? displayData : null,
   };
 }
 
@@ -128,6 +136,7 @@ export function buildPortfolioContextPacket({
   portfolioSchemaTables = [],
   portfolioTheoryPrinciples = [],
   activityLog = [],
+  widgetDisplayDataById = {},
 } = {}) {
   const modeMeta = canvasModeMeta || {};
   const isAssetCanvas = modeMeta.id === assetCanvasModeId;
@@ -156,6 +165,20 @@ export function buildPortfolioContextPacket({
     },
     workspaceMode: isWidgetCanvasMode ? "widget-canvas" : "analysis-canvas",
     workspaceStatus,
+    widgetCreationPolicy: isAssetCanvas
+      ? {
+          owner: "user",
+          entryPoint: "canvas-empty-cell-plus",
+          label: "+",
+          agentCanCreate: false,
+          guidance: "전략 캔버스보다 위젯 구조가 단순하므로 사용자가 캔버스 빈 칸의 + 버튼에서 직접 선택합니다.",
+        }
+      : {
+          owner: "sidebar-agent",
+          entryPoint: "agent-widget-action",
+          agentCanCreate: true,
+          guidance: "전략 캔버스는 사이드바 에이전트가 typed widget graph를 생성할 수 있습니다.",
+        },
     scenario: isAssetCanvas
       ? null
       : {
@@ -190,7 +213,15 @@ export function buildPortfolioContextPacket({
       dataSources: Array.isArray(strategy.dataSources) ? strategy.dataSources : [],
       assumptions: Array.isArray(strategy.assumptions) ? strategy.assumptions : [],
     })),
-    widgets: widgets.map(portfolioContextWidget),
+    widgets: widgets.map((widget) => portfolioContextWidget(widget, widgetDisplayDataById?.[widget.id])),
+    widgetDataRetrieval: {
+      mode: "query-scoped-local-rag",
+      scope: "current-canvas-visible-widget-data",
+      indexedWidgetCount: widgets.filter((widget) => widgetDisplayDataById?.[widget.id]).length,
+      availableWidgetCount: widgets.length,
+      persistence: "request-only",
+      guidance: "요약은 Context Packet에 직접 포함되고 전체 표시 데이터는 사용자 질문에 맞춰 서버에서 청크 검색됩니다.",
+    },
     widgetDependencyGraph: widgets.map(portfolioContextWidgetDependency),
     canvasRefresh: {
       actionId: "refresh_canvas_latest_data",
@@ -228,7 +259,9 @@ export function buildPortfolioContextPacket({
     liveBacktest: portfolioLiveBacktestContext(liveBacktest, hasLiveBacktest),
     schemaDraft: portfolioSchemaTables,
     principles: portfolioTheoryPrinciples.map((item) => item.title),
-    availableActions: portfolioContextAvailableActions,
+    availableActions: isAssetCanvas
+      ? portfolioContextAvailableActions.filter((actionId) => !assetManagementBlockedCreationActions.has(actionId))
+      : portfolioContextAvailableActions,
     logsTail: activityLog.slice(-5),
   };
 }

@@ -5,11 +5,14 @@ import X from "lucide-react/dist/esm/icons/x.js";
 export function PortfolioWidgetDeleteDialog({
   target,
   dependents = [],
+  cascadeDependents = [],
   onCancel,
   onConfirm,
 }) {
   if (!target) return null;
   const targetLabel = [target.displayId, target.title].filter(Boolean).join(" · ") || "선택한 위젯";
+  const cascadeIds = new Set(cascadeDependents.map((widget) => widget.id));
+  const disconnectedCount = dependents.filter((widget) => !cascadeIds.has(widget.id)).length;
   return (
     <div className="portfolio-widget-modal-backdrop" role="presentation" onMouseDown={onCancel}>
       <section
@@ -33,8 +36,13 @@ export function PortfolioWidgetDeleteDialog({
           <div>
             <strong>{targetLabel}</strong>
             <p>
-              이 위젯을 참조하는 하위 위젯이 있습니다. 삭제하면 아래 위젯은 관계가 끊긴 상태로 표시되고,
-              다시 연결하거나 재계산해야 합니다.
+              {cascadeDependents.length ? `종속된 평가 테이블 ${cascadeDependents.length}개도 같이 삭제됩니다.` : ""}
+              {cascadeDependents.length && disconnectedCount ? " " : ""}
+              {disconnectedCount
+                ? `나머지 하위 위젯 ${disconnectedCount}개는 관계가 끊긴 상태로 표시됩니다.`
+                : !cascadeDependents.length
+                  ? "이 위젯을 참조하는 하위 위젯은 관계가 끊긴 상태로 표시되고, 다시 연결하거나 재계산해야 합니다."
+                  : ""}
             </p>
           </div>
         </div>
@@ -43,6 +51,7 @@ export function PortfolioWidgetDeleteDialog({
             <li key={widget.id}>
               <strong>{widget.displayId || widget.id}</strong>
               <span>{widget.title}</span>
+              {cascadeIds.has(widget.id) ? <em>함께 삭제</em> : null}
             </li>
           ))}
         </ul>

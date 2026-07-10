@@ -36,6 +36,7 @@ import {
   portfolioWidgetShouldAutoRunBacktest,
 } from "./widgetActions.js";
 import { normalizePortfolioSignalMatrix } from "./signalMatrixCompiler.js";
+import { portfolioWidgetIsAssetEvaluationTable } from "./portfolioAssetMetrics.js";
 import {
   PORTFOLIO_SCENARIO_ROOT_ID,
   normalizePortfolioScenarioSpec,
@@ -591,6 +592,7 @@ function portfolioStoredWidgetHasMetricRows(widget = {}) {
 function repairStoredPeriodComparisonWorkspace({ widgets = [], scenario = null, backtestPeriod = "1y" } = {}) {
   if (!portfolioScenarioHasIncompleteComparisonRuns(scenario)) return { widgets, scenario };
   const target = widgets.find((widget) => {
+    if (portfolioWidgetIsAssetEvaluationTable(widget)) return false;
     if (widget?.visualType === "line" || widget?.outputRole === "backtest_result") return true;
     return widget?.visualType === "metrics-table" && !portfolioStoredWidgetHasMetricRows(widget);
   });

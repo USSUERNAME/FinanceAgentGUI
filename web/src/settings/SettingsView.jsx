@@ -19,6 +19,7 @@ import UnlockKeyhole from "lucide-react/dist/esm/icons/unlock-keyhole.js";
 import X from "lucide-react/dist/esm/icons/x.js";
 
 import { emptyMemoryStatus } from "../memory/sharedMemoryDefaults.js";
+import { getSpeedOptionsForReasoning } from "../agent/agentOptions.js";
 import { FeedSourceLabel } from "../news/FeedSourceLabel.jsx";
 import { formatDateTime } from "../utils/formatters.js";
 import { worldMemoryAuditValue, worldMemoryStatusLabel } from "../worldMemory/statusHelpers.js";
@@ -192,29 +193,47 @@ function profileForProvider(providerId, providerProfiles = []) {
   return providerProfiles.find((profile) => profile.id === providerId) || null;
 }
 
-function magazineReasoningOptionsForProvider(providerId, providerProfiles = []) {
+function featureModelGroupsForProvider(providerId, providerProfiles = []) {
   const profile = profileForProvider(providerId, providerProfiles);
-  const options = Array.isArray(profile?.reasoningOptions) ? profile.reasoningOptions : [];
-  if (options.length) return options;
-  return providerId === "antigravity-cli"
-    ? fallbackAntigravityReasoningOptions
-    : fallbackModelGroups[0].reasoningLevels;
+  const groups = Array.isArray(profile?.modelGroups) ? profile.modelGroups : [];
+  return groups.length ? groups : fallbackModelGroups;
 }
 
-function magazineReasoningDefaultForProvider(providerId, providerProfiles = [], options = []) {
+function featureModelOptions(groups = []) {
+  return groups.map((group, index) => ({
+    id: group.slug,
+    label: index === 0 ? `최신 버전 · ${group.displayName || group.slug}` : group.displayName || group.slug,
+  }));
+}
+
+function selectedFeatureModelGroup(value, providerId, providerProfiles = []) {
   const profile = profileForProvider(providerId, providerProfiles);
+  const groups = featureModelGroupsForProvider(providerId, providerProfiles);
+  const candidate = String(value || "").trim();
+  return groups.find((group) => group.slug === candidate) ||
+    groups.find((group) => group.slug === profile?.model) ||
+    groups[0] || fallbackModelGroups[0];
+}
+
+function featureReasoningOptions(modelGroup, providerId) {
+  const options = Array.isArray(modelGroup?.reasoningLevels) ? modelGroup.reasoningLevels : [];
+  if (options.length) return options;
+  return providerId === "antigravity-cli" ? fallbackAntigravityReasoningOptions : fallbackModelGroups[0].reasoningLevels;
+}
+
+function featureReasoningValue(value, modelGroup, providerId, providerProfiles = []) {
+  const profile = profileForProvider(providerId, providerProfiles);
+  const options = featureReasoningOptions(modelGroup, providerId);
   const optionIds = new Set(options.map((option) => option.id));
+  const candidate = String(value || "").trim();
+  if (optionIds.has(candidate)) return candidate;
   if (optionIds.has(profile?.reasoning)) return profile.reasoning;
-  const defaultReasoning = providerId === "antigravity-cli" ? "medium" : "high";
+  const defaultReasoning = modelGroup?.defaultReasoningLevel || (providerId === "antigravity-cli" ? "medium" : "high");
   return optionIds.has(defaultReasoning) ? defaultReasoning : options[0]?.id || "";
 }
 
-function selectedMagazineReasoningValue(value, providerId, providerProfiles = [], options = []) {
-  const optionIds = new Set(options.map((option) => option.id));
-  const candidate = String(value || "").trim();
-  return optionIds.has(candidate)
-    ? candidate
-    : magazineReasoningDefaultForProvider(providerId, providerProfiles, options);
+function featureSpeedOptions(modelGroup, reasoning) {
+  return getSpeedOptionsForReasoning(modelGroup, reasoning);
 }
 
 function NewsFeedPollIntervalBar({ valueSeconds, disabled, saving, onChange }) {
@@ -487,6 +506,7 @@ export function TossInvestConnectionSection({
   onCheckPublicIp,
   onDeleteCredentials,
   orderSync,
+  transactionStatusVisibility,
 }) {
   const [clientId, setClientId] = React.useState("");
   const [clientSecret, setClientSecret] = React.useState("");
@@ -868,6 +888,43 @@ export function TossInvestConnectionSection({
         </div>
       ) : null}
 
+      {transactionStatusVisibility ? (
+        <div
+          className={
+            transactionStatusVisibility.hidden
+              ? "settings-feature-row is-enabled"
+              : "settings-feature-row is-disabled"
+          }
+        >
+          <div className="settings-source-main">
+            <strong className="settings-feature-title">거래 현황 숨기기</strong>
+            <em className={transactionStatusVisibility.error ? "is-error" : undefined}>
+              {transactionStatusVisibility.error ||
+                "토스 API를 사용하지 않는 경우 사이드바에서 거래 현황 메뉴를 숨깁니다."}
+            </em>
+          </div>
+          <button
+            type="button"
+            className={transactionStatusVisibility.hidden ? "settings-toggle is-on" : "settings-toggle"}
+            role="switch"
+            aria-checked={transactionStatusVisibility.hidden}
+            disabled={transactionStatusVisibility.busy || transactionStatusVisibility.saving}
+            onClick={() => transactionStatusVisibility.onChange?.(!transactionStatusVisibility.hidden)}
+          >
+            <span className="settings-toggle-track">
+              <span className="settings-toggle-thumb" />
+            </span>
+            <span>
+              {transactionStatusVisibility.saving
+                ? "저장 중"
+                : transactionStatusVisibility.hidden
+                  ? "켜짐"
+                  : "꺼짐"}
+            </span>
+          </button>
+        </div>
+      ) : null}
+
       {orderSync && connected && !visibleError ? <TossInvestOrderSyncSection {...orderSync} connectionStatus={status} /> : null}
     </section>
   );
@@ -1157,12 +1214,23 @@ function SettingsSelectField({
   description = "",
   disabled = false,
   getOptionLabel = (option) => option.label,
+  actionLabel = "",
+  actionBusy = false,
+  onAction = null,
 }) {
   const safeOptions = options.length ? options : [{ id: "", label: "대기" }];
 
   return (
-    <label className="settings-select-field" htmlFor={id}>
-      <span>{label}</span>
+    <div className="settings-select-field">
+      <div className="settings-select-label-row">
+        <label htmlFor={id}>{label}</label>
+        {actionLabel && onAction ? (
+          <button type="button" disabled={disabled || actionBusy} onClick={onAction}>
+            <RefreshCw size={12} strokeWidth={2.2} aria-hidden="true" />
+            <span>{actionBusy ? "불러오는 중" : actionLabel}</span>
+          </button>
+        ) : null}
+      </div>
       <span className="settings-select-shell">
         <select
           id={id}
@@ -1179,7 +1247,7 @@ function SettingsSelectField({
         <ChevronDown size={16} strokeWidth={2.2} aria-hidden="true" />
       </span>
       {description ? <span className="settings-select-description">{description}</span> : null}
-    </label>
+    </div>
   );
 }
 
@@ -1205,6 +1273,8 @@ function AgentSettingsSection({
   onSpeedChange,
   settingsError,
   loading = false,
+  modelCatalogRefreshing = false,
+  onReloadModelCatalog = () => {},
 }) {
   const safeProviderOptions = loading
     ? [{ id: "loading", label: "설정 불러오는 중", available: false }]
@@ -1323,6 +1393,9 @@ function AgentSettingsSection({
                 ? `최신 버전 · ${group.displayName || group.slug}`
                 : group.displayName || group.slug,
           }));
+          const profileModelGroup =
+            profileModelGroups.find((group) => group.slug === profile.model) || profileModelGroups[0];
+          const reasoningEmbedded = Boolean(profileModelGroup?.reasoningEmbedded);
           const diagnosticClass = profile.enabled
             ? profile.status?.available
               ? "settings-agent-diagnostic is-ok"
@@ -1397,23 +1470,37 @@ function AgentSettingsSection({
                     options={profileModelOptions}
                     onChange={(nextModel) => onProviderSettingChange(profile.id, { model: nextModel })}
                     disabled={loading}
+                    description={reasoningEmbedded
+                      ? "추론 수준은 모델 변형에 포함됩니다. Antigravity CLI에는 별도 추론·속도 옵션이 없습니다."
+                      : ""}
+                    actionLabel={reasoningEmbedded ? "목록 다시 불러오기" : ""}
+                    actionBusy={modelCatalogRefreshing}
+                    onAction={onReloadModelCatalog}
                   />
-                  <SettingsSelectField
-                    id={`agent-${profile.id}-reasoning-level`}
-                    label="추론 수준"
-                    value={profile.reasoning}
-                    options={profileReasoningOptions}
-                    onChange={(nextReasoning) => onProviderSettingChange(profile.id, { reasoning: nextReasoning })}
-                    disabled={loading}
-                  />
-                  <SettingsSelectField
-                    id={`agent-${profile.id}-speed`}
-                    label="속도"
-                    value={profile.speed}
-                    options={profileSpeedOptions}
-                    onChange={(nextSpeed) => onProviderSettingChange(profile.id, { speed: nextSpeed })}
-                    disabled={loading}
-                  />
+                  {!reasoningEmbedded ? (
+                    <SettingsSelectField
+                      id={`agent-${profile.id}-reasoning-level`}
+                      label="추론 수준"
+                      value={profile.reasoning}
+                      options={profileReasoningOptions}
+                      onChange={(nextReasoning) => onProviderSettingChange(profile.id, { reasoning: nextReasoning })}
+                      disabled={loading}
+                      actionLabel="목록 다시 불러오기"
+                      actionBusy={modelCatalogRefreshing}
+                      onAction={onReloadModelCatalog}
+                    />
+                  ) : null}
+                  {profileSpeedOptions.length > 1 ? (
+                    <SettingsSelectField
+                      id={`agent-${profile.id}-speed`}
+                      label="속도"
+                      value={profile.speed}
+                      options={profileSpeedOptions}
+                      onChange={(nextSpeed) => onProviderSettingChange(profile.id, { speed: nextSpeed })}
+                      disabled={loading}
+                      description={profileSpeedOptions.find((option) => option.id === profile.speed)?.detail || ""}
+                    />
+                  ) : null}
                 </div>
               ) : null}
             </article>
@@ -1822,15 +1909,15 @@ export default function SettingsView({
   magazineSettingsError,
   onToggleWorldMemoryTech,
   onToggleWorldMemoryEnabled,
-  onWorldMemoryManagementProviderChange,
+  onWorldMemoryManagementSettingsChange,
   onToggleMagazineEnabled,
-  onMagazineWritingProviderChange,
-  onMagazineWritingReasoningChange,
+  onMagazineWritingSettingsChange,
   onMagazineSchedulerIntervalChange,
   onMagazineMaxArticlesPerCycleChange,
   onReloadWorldMemory,
   tossInvest,
   tossOrderSync,
+  transactionStatusVisibility,
   arcaAuth,
 }) {
   const feeds = settings?.feeds || [];
@@ -1898,19 +1985,24 @@ export default function SettingsView({
           magazineSettingsError={magazineSettingsError}
           onToggleTech={onToggleWorldMemoryTech}
           onToggleEnabled={onToggleWorldMemoryEnabled}
-          onManagementProviderChange={onWorldMemoryManagementProviderChange}
+          onManagementSettingsChange={onWorldMemoryManagementSettingsChange}
           onToggleMagazineEnabled={onToggleMagazineEnabled}
-          onMagazineWritingProviderChange={onMagazineWritingProviderChange}
-          onMagazineWritingReasoningChange={onMagazineWritingReasoningChange}
+          onMagazineWritingSettingsChange={onMagazineWritingSettingsChange}
           onMagazineSchedulerIntervalChange={onMagazineSchedulerIntervalChange}
           onMagazineMaxArticlesPerCycleChange={onMagazineMaxArticlesPerCycleChange}
           onReload={onReloadWorldMemory}
           agentProvider={agentProvider}
           agentProviderProfiles={agentProviderProfiles}
           agentSettingsLoading={agentSettingsLoading}
+          modelCatalogRefreshing={Boolean(agentSettingsSection.modelCatalogRefreshing)}
+          onReloadModelCatalog={agentSettingsSection.onReloadModelCatalog}
         />
 
-        <TossInvestConnectionSection {...tossInvest} orderSync={tossOrderSync} />
+        <TossInvestConnectionSection
+          {...tossInvest}
+          orderSync={tossOrderSync}
+          transactionStatusVisibility={transactionStatusVisibility}
+        />
 
         <ArcaNotificationAuthSection {...arcaAuth} />
 
@@ -2005,20 +2097,51 @@ function WorldMemoryDiagnosticsSection({
   magazineSettingsError = "",
   onToggleTech,
   onToggleEnabled,
-  onManagementProviderChange = () => {},
+  onManagementSettingsChange = () => {},
   onToggleMagazineEnabled,
-  onMagazineWritingProviderChange = () => {},
-  onMagazineWritingReasoningChange = () => {},
+  onMagazineWritingSettingsChange = () => {},
   onMagazineSchedulerIntervalChange = () => {},
   onMagazineMaxArticlesPerCycleChange = () => {},
   onReload,
   agentProvider = "codex-cli",
   agentProviderProfiles = [],
   agentSettingsLoading = false,
+  modelCatalogRefreshing = false,
+  onReloadModelCatalog = () => {},
 }) {
   const enabled = Boolean(settings?.enabled ?? status?.enabled);
   const toggleBusy = settingsBusy || settingsSaving;
   const managementProvider = settings?.settings?.managementProvider || settings?.managementProvider || "default";
+  const managementSelectedProvider = normalizeMagazineProviderId(managementProvider);
+  const managementEffectiveProvider = managementSelectedProvider === "default"
+    ? normalizeRuntimeProviderId(agentProvider)
+    : managementSelectedProvider;
+  const managementProviderProfile = profileForProvider(managementEffectiveProvider, agentProviderProfiles);
+  const managementModelGroup = selectedFeatureModelGroup(
+    settings?.settings?.managementModel || settings?.managementModel,
+    managementEffectiveProvider,
+    agentProviderProfiles
+  );
+  const managementModelOptions = featureModelOptions(
+    featureModelGroupsForProvider(managementEffectiveProvider, agentProviderProfiles)
+  );
+  const managementReasoningOptions = featureReasoningOptions(managementModelGroup, managementEffectiveProvider);
+  const managementReasoning = featureReasoningValue(
+    settings?.settings?.managementReasoning || settings?.managementReasoning,
+    managementModelGroup,
+    managementEffectiveProvider,
+    agentProviderProfiles
+  );
+  const managementReasoningOption =
+    managementReasoningOptions.find((option) => option.id === managementReasoning) || managementReasoningOptions[0];
+  const managementSpeedOptions = featureSpeedOptions(managementModelGroup, managementReasoning);
+  const managementSpeed = managementSpeedOptions.some(
+    (option) => option.id === (settings?.settings?.managementSpeed || settings?.managementSpeed)
+  )
+    ? settings?.settings?.managementSpeed || settings?.managementSpeed
+    : managementSpeedOptions[0]?.id || "standard";
+  const managementProviderLabel =
+    managementProviderProfile?.label || (managementEffectiveProvider === "antigravity-cli" ? "Antigravity CLI" : "Codex CLI");
   const magazineEnabled = enabled && Boolean(magazineSettings?.enabled);
   const magazineToggleBusy = magazineSettingsBusy || magazineSettingsSaving;
   const magazineToggleDisabled = !enabled || magazineToggleBusy;
@@ -2029,19 +2152,30 @@ function WorldMemoryDiagnosticsSection({
     ? normalizeRuntimeProviderId(agentProvider)
     : magazineSelectedProvider;
   const magazineProviderProfile = profileForProvider(magazineEffectiveProvider, agentProviderProfiles);
-  const magazineReasoningOptions = magazineReasoningOptionsForProvider(
+  const magazineModelGroup = selectedFeatureModelGroup(
+    magazineSettings?.settings?.writingModel || magazineSettings?.writingModel,
     magazineEffectiveProvider,
     agentProviderProfiles
   );
-  const magazineWritingReasoning = selectedMagazineReasoningValue(
+  const magazineModelOptions = featureModelOptions(
+    featureModelGroupsForProvider(magazineEffectiveProvider, agentProviderProfiles)
+  );
+  const magazineReasoningOptions = featureReasoningOptions(magazineModelGroup, magazineEffectiveProvider);
+  const magazineWritingReasoning = featureReasoningValue(
     magazineSettings?.settings?.writingReasoning || magazineSettings?.writingReasoning,
+    magazineModelGroup,
     magazineEffectiveProvider,
-    agentProviderProfiles,
-    magazineReasoningOptions
+    agentProviderProfiles
   );
   const magazineReasoningOption =
     magazineReasoningOptions.find((option) => option.id === magazineWritingReasoning) ||
     magazineReasoningOptions[0];
+  const magazineSpeedOptions = featureSpeedOptions(magazineModelGroup, magazineWritingReasoning);
+  const magazineWritingSpeed = magazineSpeedOptions.some(
+    (option) => option.id === (magazineSettings?.settings?.writingSpeed || magazineSettings?.writingSpeed)
+  )
+    ? magazineSettings?.settings?.writingSpeed || magazineSettings?.writingSpeed
+    : magazineSpeedOptions[0]?.id || "standard";
   const magazineReasoningProviderLabel =
     magazineProviderProfile?.label || (magazineEffectiveProvider === "antigravity-cli" ? "Antigravity CLI" : "Codex CLI");
   const magazineSchedulerIntervalHours = Math.max(
@@ -2203,16 +2337,89 @@ function WorldMemoryDiagnosticsSection({
       ) : null}
 
       {enabled ? (
-        <div className="settings-feature-control">
+        <div className="settings-feature-control settings-feature-control-grid">
           <SettingsSelectField
             id="world-memory-management-provider"
-            label="월드 메모리 관리 모델"
+            label="월드 메모리 관리 모델 제공자"
             value={managementProvider}
             options={agentModelProviderOptions}
             disabled={toggleBusy}
-            onChange={onManagementProviderChange}
+            onChange={(nextProvider) => {
+              const nextSelectedProvider = normalizeMagazineProviderId(nextProvider);
+              const nextEffectiveProvider = nextSelectedProvider === "default"
+                ? normalizeRuntimeProviderId(agentProvider)
+                : nextSelectedProvider;
+              const nextGroup = selectedFeatureModelGroup("", nextEffectiveProvider, agentProviderProfiles);
+              const nextReasoning = featureReasoningValue("", nextGroup, nextEffectiveProvider, agentProviderProfiles);
+              onManagementSettingsChange({
+                managementProvider: nextProvider,
+                managementModel: nextGroup.slug,
+                managementReasoning: nextReasoning,
+                managementSpeed: featureSpeedOptions(nextGroup, nextReasoning)[0]?.id || "standard",
+              });
+            }}
             description="수집, 보고서/변경 제안 갱신, World Memory 화면 우측 채팅에 적용합니다."
           />
+          <SettingsSelectField
+            id="world-memory-management-model"
+            label="월드 메모리 관리 모델"
+            value={managementModelGroup.slug}
+            options={managementModelOptions}
+            disabled={toggleBusy || agentSettingsLoading}
+            onChange={(nextModel) => {
+              const nextGroup = selectedFeatureModelGroup(nextModel, managementEffectiveProvider, agentProviderProfiles);
+              const nextReasoning = featureReasoningValue(
+                managementReasoning,
+                nextGroup,
+                managementEffectiveProvider,
+                agentProviderProfiles
+              );
+              onManagementSettingsChange({
+                managementModel: nextGroup.slug,
+                managementReasoning: nextReasoning,
+                managementSpeed: featureSpeedOptions(nextGroup, nextReasoning)[0]?.id || "standard",
+              });
+            }}
+            description={managementModelGroup.reasoningEmbedded
+              ? "추론 수준은 모델 변형에 포함됩니다. Antigravity CLI에는 별도 추론·속도 옵션이 없습니다."
+              : ""}
+            actionLabel={managementModelGroup.reasoningEmbedded ? "목록 다시 불러오기" : ""}
+            actionBusy={modelCatalogRefreshing}
+            onAction={onReloadModelCatalog}
+          />
+          {!managementModelGroup.reasoningEmbedded ? (
+            <SettingsSelectField
+              id="world-memory-management-reasoning"
+              label="월드 메모리 추론 수준"
+              value={managementReasoning}
+              options={managementReasoningOptions}
+              disabled={toggleBusy || agentSettingsLoading}
+              onChange={(nextReasoning) => {
+                const nextSpeedOptions = featureSpeedOptions(managementModelGroup, nextReasoning);
+                onManagementSettingsChange({
+                  managementReasoning: nextReasoning,
+                  managementSpeed: nextSpeedOptions.some((option) => option.id === managementSpeed)
+                    ? managementSpeed
+                    : "standard",
+                });
+              }}
+              description={`${managementProviderLabel} · ${managementReasoningOption?.detail || "관리 작업에 적용합니다."}`}
+              actionLabel="목록 다시 불러오기"
+              actionBusy={modelCatalogRefreshing}
+              onAction={onReloadModelCatalog}
+            />
+          ) : null}
+          {managementSpeedOptions.length > 1 ? (
+            <SettingsSelectField
+              id="world-memory-management-speed"
+              label="월드 메모리 처리 속도"
+              value={managementSpeed}
+              options={managementSpeedOptions}
+              disabled={toggleBusy || agentSettingsLoading}
+              onChange={(managementSpeed) => onManagementSettingsChange({ managementSpeed })}
+              description={managementSpeedOptions.find((option) => option.id === managementSpeed)?.detail || ""}
+            />
+          ) : null}
         </div>
       ) : null}
 
@@ -2275,7 +2482,7 @@ function WorldMemoryDiagnosticsSection({
         <div className="settings-feature-control settings-feature-control-grid">
           <SettingsSelectField
             id="magazine-writing-provider"
-            label="매거진 작성 모델"
+            label="매거진 작성 모델 제공자"
             value={magazineWritingProvider}
             options={agentModelProviderOptions}
             disabled={magazineToggleBusy}
@@ -2284,33 +2491,81 @@ function WorldMemoryDiagnosticsSection({
               const nextEffectiveProvider = nextSelectedProvider === "default"
                 ? normalizeRuntimeProviderId(agentProvider)
                 : nextSelectedProvider;
-              const nextReasoningOptions = magazineReasoningOptionsForProvider(
-                nextEffectiveProvider,
-                agentProviderProfiles
-              );
-              const nextReasoning = selectedMagazineReasoningValue(
-                magazineWritingReasoning,
-                nextEffectiveProvider,
-                agentProviderProfiles,
-                nextReasoningOptions
-              );
-              onMagazineWritingProviderChange(nextProvider, nextReasoning);
+              const nextGroup = selectedFeatureModelGroup("", nextEffectiveProvider, agentProviderProfiles);
+              const nextReasoning = featureReasoningValue("", nextGroup, nextEffectiveProvider, agentProviderProfiles);
+              onMagazineWritingSettingsChange({
+                writingProvider: nextProvider,
+                writingModel: nextGroup.slug,
+                writingReasoning: nextReasoning,
+                writingSpeed: featureSpeedOptions(nextGroup, nextReasoning)[0]?.id || "standard",
+              });
             }}
             description="자동 매거진 기사 수 산정과 기사 작성에 적용합니다."
           />
           <SettingsSelectField
-            id="magazine-writing-reasoning"
-            label="매거진 추론 수준"
-            value={magazineWritingReasoning}
-            options={magazineReasoningOptions}
+            id="magazine-writing-model"
+            label="매거진 작성 모델"
+            value={magazineModelGroup.slug}
+            options={magazineModelOptions}
             disabled={magazineToggleBusy || agentSettingsLoading}
-            onChange={onMagazineWritingReasoningChange}
-            description={
-              agentSettingsLoading
-                ? "에이전트 설정을 불러온 뒤 CLI별 목록을 표시합니다."
-                : `${magazineReasoningProviderLabel} 기준 · ${magazineReasoningOption?.detail || "기사 수 산정과 기사 작성에 적용합니다."}`
-            }
+            onChange={(nextModel) => {
+              const nextGroup = selectedFeatureModelGroup(nextModel, magazineEffectiveProvider, agentProviderProfiles);
+              const nextReasoning = featureReasoningValue(
+                magazineWritingReasoning,
+                nextGroup,
+                magazineEffectiveProvider,
+                agentProviderProfiles
+              );
+              onMagazineWritingSettingsChange({
+                writingModel: nextGroup.slug,
+                writingReasoning: nextReasoning,
+                writingSpeed: featureSpeedOptions(nextGroup, nextReasoning)[0]?.id || "standard",
+              });
+            }}
+            description={magazineModelGroup.reasoningEmbedded
+              ? "추론 수준은 모델 변형에 포함됩니다. Antigravity CLI에는 별도 추론·속도 옵션이 없습니다."
+              : ""}
+            actionLabel={magazineModelGroup.reasoningEmbedded ? "목록 다시 불러오기" : ""}
+            actionBusy={modelCatalogRefreshing}
+            onAction={onReloadModelCatalog}
           />
+          {!magazineModelGroup.reasoningEmbedded ? (
+            <SettingsSelectField
+              id="magazine-writing-reasoning"
+              label="매거진 추론 수준"
+              value={magazineWritingReasoning}
+              options={magazineReasoningOptions}
+              disabled={magazineToggleBusy || agentSettingsLoading}
+              onChange={(nextReasoning) => {
+                const nextSpeedOptions = featureSpeedOptions(magazineModelGroup, nextReasoning);
+                onMagazineWritingSettingsChange({
+                  writingReasoning: nextReasoning,
+                  writingSpeed: nextSpeedOptions.some((option) => option.id === magazineWritingSpeed)
+                    ? magazineWritingSpeed
+                    : "standard",
+                });
+              }}
+              actionLabel="목록 다시 불러오기"
+              actionBusy={modelCatalogRefreshing}
+              onAction={onReloadModelCatalog}
+              description={
+                agentSettingsLoading
+                  ? "에이전트 설정을 불러온 뒤 CLI별 목록을 표시합니다."
+                  : `${magazineReasoningProviderLabel} 기준 · ${magazineReasoningOption?.detail || "기사 수 산정과 기사 작성에 적용합니다."}`
+              }
+            />
+          ) : null}
+          {magazineSpeedOptions.length > 1 ? (
+            <SettingsSelectField
+              id="magazine-writing-speed"
+              label="매거진 작성 속도"
+              value={magazineWritingSpeed}
+              options={magazineSpeedOptions}
+              disabled={magazineToggleBusy || agentSettingsLoading}
+              onChange={(writingSpeed) => onMagazineWritingSettingsChange({ writingSpeed })}
+              description={magazineSpeedOptions.find((option) => option.id === magazineWritingSpeed)?.detail || ""}
+            />
+          ) : null}
         </div>
       ) : null}
     </section>

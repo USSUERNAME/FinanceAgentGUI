@@ -5,8 +5,10 @@ import {
   completeWorldMemoryCollectionCollectorState,
   completeWorldMemoryReportRefreshCollectorState,
   filterWorldMemoryReportView,
+  isConnectivityHttpStatus,
   normalizeWorldMemorySuggestionFingerprint,
   recoverWorldMemoryCollectorStateFromArtifacts,
+  shouldClearWorldMemoryConnectivityInFlight,
 } from "../server/worldMemoryApi.mjs";
 
 const acceptedText =
@@ -267,6 +269,47 @@ test("world memory offline preflight waits for connectivity without advancing at
   assert.equal(state.schedule.activeCycle.awaitingConnectivity, true);
   assert.equal(state.schedule.activeCycle.attempt, 1);
   assert.equal(state.history[0].status, "offline_wait");
+});
+
+test("world memory connectivity probe treats reachable 4xx as online", () => {
+  assert.equal(isConnectivityHttpStatus(204), true);
+  assert.equal(isConnectivityHttpStatus(302), true);
+  assert.equal(isConnectivityHttpStatus(404), true);
+  assert.equal(isConnectivityHttpStatus(500), false);
+  assert.equal(isConnectivityHttpStatus(0), false);
+});
+
+test("world memory clears stale connectivity in-flight state after retry time passes", () => {
+  const state = {
+    collector: {
+      running: false,
+      status: "offline_wait",
+    },
+    schedule: {
+      nextRetryAt: "2026-07-09T00:11:00.000Z",
+      activeCycle: {
+        awaitingConnectivity: true,
+        nextRetryAt: "2026-07-09T00:11:00.000Z",
+      },
+    },
+  };
+
+  assert.equal(
+    shouldClearWorldMemoryConnectivityInFlight(
+      state,
+      { inFlight: true, inFlightStartedAt: "2026-07-09T00:00:00.000Z" },
+      new Date("2026-07-09T00:11:01.000Z").getTime(),
+    ),
+    true,
+  );
+  assert.equal(
+    shouldClearWorldMemoryConnectivityInFlight(
+      state,
+      { inFlight: true, inFlightStartedAt: "2026-07-09T00:10:58.000Z" },
+      new Date("2026-07-09T00:11:01.000Z").getTime(),
+    ),
+    false,
+  );
 });
 
 test("world memory report view omits handled suggestions during collection-cycle output", () => {

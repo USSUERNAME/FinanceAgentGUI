@@ -2,6 +2,7 @@
 import argparse
 import bisect
 import json
+import os
 import sqlite3
 import sys
 import uuid
@@ -12,7 +13,9 @@ from pathlib import Path
 
 
 GUIBUILD_ROOT = Path(__file__).resolve().parents[1]
-DB_PATH = GUIBUILD_ROOT / "data" / "tossinvest" / "tossinvest-ledger.sqlite3"
+DEFAULT_DB_PATH = GUIBUILD_ROOT / "data" / "tossinvest" / "tossinvest-ledger.sqlite3"
+DB_PATH = Path(os.environ.get("FINANCE_AGENT_GUI_TOSSINVEST_DB_PATH", DEFAULT_DB_PATH))
+SCHEMA_VERSION = 2
 EPSILON = Decimal("0.000000001")
 KST = timezone(timedelta(hours=9))
 
@@ -113,6 +116,11 @@ def connect():
 
 
 def init_snapshot_db(conn):
+    current_schema_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    if current_schema_version > SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Toss ledger schema version {current_schema_version} is newer than supported version {SCHEMA_VERSION}"
+        )
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS rebuild_runs (
@@ -215,7 +223,7 @@ def init_snapshot_db(conn):
           ON position_snapshots (symbol, snapshot_date);
         """
     )
-    conn.execute("PRAGMA user_version = 2")
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
 def read_payload():

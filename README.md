@@ -11,12 +11,16 @@ stored locally and excluded from Git.
 
 - Install and run: [docs/installation.md](docs/installation.md)
 - Compatibility and repair notes: [docs/compatibility.md](docs/compatibility.md)
+- Local SQLite install/update/repair: [docs/sqlite-stores.md](docs/sqlite-stores.md)
+- GitHub update and release privacy: [docs/update-and-release-safety.md](docs/update-and-release-safety.md)
 - Runtime agent instructions: [AGENTS.md](AGENTS.md)
 
 ## Current Scope
 
 - News Feed collection and settings
 - World Memory local engine controls
+- Toss transaction sync and investment simulators
+- Magazine generation and novelty indexing
 - Portfolio workspaces, widgets, and backtest helpers
 - Report browsing and saved report artifacts
 - Local agent chat surfaces for operational workflows
