@@ -109,7 +109,7 @@ function PortfolioPositionPie({ items = [], activeItem = null, onActivate, onCle
   );
 }
 
-export default function PortfolioInvestmentPositionStatusChart({ widget }) {
+export default function PortfolioInvestmentPositionStatusChart({ widget, onWidgetDisplayData }) {
   const stageRef = useRef(null);
   const chartSpec = widget?.chartSpec && typeof widget.chartSpec === "object" ? widget.chartSpec : {};
   const query = useMemo(() => normalizePositionStatusQuery(chartSpec), [chartSpec]);
@@ -166,12 +166,35 @@ export default function PortfolioInvestmentPositionStatusChart({ widget }) {
     return () => observer.disconnect();
   }, [query.view]);
 
-  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const items = useMemo(() => (Array.isArray(payload?.items) ? payload.items : []), [payload]);
   const topItem = items[0] || null;
   const activeItem = hoveredItem || topItem;
   const unit = payload?.unit || query.currency || "KRW";
   const listItems = items.slice(0, 18);
   const view = query.view;
+  const displayData = useMemo(() => ({
+    schemaVersion: "portfolio-widget-display-data.v1",
+    kind: "asset-position-status",
+    query,
+    summary: {
+      status: loading ? "loading" : error ? "error" : items.length ? "ready" : "empty",
+      error,
+      dataProvider: payload?.dataProvider || "토스 증권 Open API",
+      source: payload?.source || "position-reconstruction",
+      asOfDate: payload?.asOfDate || payload?.snapshotDate || query.endDate || "",
+      unit,
+      totalValue: payload?.totalValue,
+      itemCount: items.length,
+      topPosition: items[0] || null,
+    },
+    data: {
+      items,
+    },
+  }), [error, items, loading, payload, query, unit]);
+
+  useEffect(() => {
+    onWidgetDisplayData?.(widget?.id, displayData);
+  }, [displayData, onWidgetDisplayData, widget?.id]);
   const pieLayout = useMemo(() => {
     const width = Number(stageSize.width || 0);
     const height = Number(stageSize.height || 0);

@@ -1,6 +1,6 @@
 {
   "name": "finance-agent-gui-web",
-  "version": "0.5.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,10 @@
     "server:service:stop": "node ../scripts/local-server-service.mjs stop",
     "server:service:restart": "node ../scripts/local-server-service.mjs restart",
     "server:service:status": "node ../scripts/local-server-service.mjs status",
-    "server:service:uninstall": "node ../scripts/local-server-service.mjs uninstall"
+    "server:service:uninstall": "node ../scripts/local-server-service.mjs uninstall",
+    "db:doctor": "python ../scripts/sqlite_store_doctor.py",
+    "db:setup:plan": "python ../scripts/sqlite_store_setup.py plan --initialize-missing",
+    "release:safety": "python ../scripts/release_safety_check.py --strict"
   },
   "dependencies": {
     "echarts": "^6.1.0",

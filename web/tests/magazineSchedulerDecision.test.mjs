@@ -1,11 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   buildMagazineTopicDiscoverySlots,
   chooseMagazineTopicDiscoveryLane,
   compactPostCutoffNewsFeedItemsForDecision,
   compactWorldMemoryScoutCandidatesForDecision,
+  decideMagazineArticleSlotTopic,
   fallbackMagazineArticleCountDecision,
   normalizeMagazineSchedulerNextRunAt,
   normalizeMagazineArticleCountDecision,
@@ -13,8 +17,33 @@ import {
 import {
   normalizeMagazineSchedulerIntervalHours,
   normalizeMagazineSchedulerMaxArticlesPerCycle,
+  normalizeMagazineWritingModel,
   normalizeMagazineWritingReasoning,
+  normalizeMagazineWritingSpeed,
 } from "../server/magazineSettings.mjs";
+import {
+  normalizeWorldMemoryManagementModel,
+  normalizeWorldMemoryManagementReasoning,
+  normalizeWorldMemoryManagementSpeed,
+} from "../server/worldMemorySettings.mjs";
+import {
+  getSpeedOptionsForReasoning,
+  modelGroupsFromAntigravityCatalog,
+} from "../src/agent/agentOptions.js";
+import {
+  codexServiceTierArgs,
+  codexSpeedOptionsFromModel,
+  normalizeCodexSpeed,
+} from "../server/agentSpeed.mjs";
+import {
+  buildCodexArgs,
+  buildCodexResumeArgs,
+  extractCodexSessionId,
+  htmlForEditorialReview,
+  installPreparedHero,
+  normalizeGeneratedResearchMode,
+  normalizeLockedTopic,
+} from "../../scripts/magazine_generate_with_codex.mjs";
 
 test("magazine scheduler preserves a model decision to skip with reason", () => {
   const decision = normalizeMagazineArticleCountDecision(
@@ -123,6 +152,20 @@ test("magazine topic discovery rolls independently for each article slot", () =>
   );
 });
 
+test("magazine news-feed slots reuse the count-decision candidate as locked preflight", async () => {
+  const candidate = { title: "뉴욕 구독 규제", reason: "새 규칙 채택", urgency: "medium" };
+  const result = await decideMagazineArticleSlotTopic({
+    cycle: {
+      agent: { provider: "codex-cli", model: "gpt-5.6-sol" },
+      articleCountDecision: { confidence: 0.9, candidateAngles: [candidate] },
+    },
+    index: 0,
+    slot: { topicDiscoveryLane: { id: "news-feed-primary", label: "News Feed 우선" } },
+  });
+  assert.equal(result.decision.policy, "magazine-slot-topic-reuse-v2");
+  assert.deepEqual(result.candidateAngle, candidate);
+});
+
 test("magazine World Memory scout candidates dedupe recent article anchors", () => {
   const rows = [
     {
@@ -211,5 +254,193 @@ test("magazine writing reasoning accepts only known CLI reasoning levels", () =>
   assert.equal(normalizeMagazineWritingReasoning("minimal"), "minimal");
   assert.equal(normalizeMagazineWritingReasoning("LOW"), "low");
   assert.equal(normalizeMagazineWritingReasoning("xhigh"), "xhigh");
+  assert.equal(normalizeMagazineWritingReasoning("max"), "max");
+  assert.equal(normalizeMagazineWritingReasoning("ultra"), "ultra");
   assert.equal(normalizeMagazineWritingReasoning("turbo"), "");
+});
+
+test("feature-specific model settings keep safe catalog values", () => {
+  assert.equal(normalizeMagazineWritingModel("gpt-5.6-sol"), "gpt-5.6-sol");
+  assert.equal(normalizeMagazineWritingModel("Gemini 3.5 Flash (High)\n"), "Gemini 3.5 Flash (High)");
+  assert.equal(normalizeMagazineWritingSpeed("priority"), "priority");
+  assert.equal(normalizeMagazineWritingSpeed("turbo"), "standard");
+  assert.equal(normalizeWorldMemoryManagementModel("gpt-5.6-terra"), "gpt-5.6-terra");
+  assert.equal(normalizeWorldMemoryManagementReasoning("ULTRA"), "ultra");
+  assert.equal(normalizeWorldMemoryManagementSpeed("fast"), "priority");
+});
+
+test("Antigravity catalog models embed reasoning instead of exposing a second selector", () => {
+  const groups = modelGroupsFromAntigravityCatalog({
+    models: [
+      {
+        name: "Gemini 3.5 Flash (High)",
+        displayName: "Gemini 3.5 Flash (High)",
+        reasoningLevel: "High",
+        selectable: true,
+      },
+    ],
+  });
+
+  assert.equal(groups[0].reasoningEmbedded, true);
+  assert.equal(groups[0].defaultReasoningLevel, "high");
+  assert.deepEqual(groups[0].reasoningLevels.map((item) => item.id), ["high"]);
+  assert.deepEqual(groups[0].speedOptions, []);
+});
+
+test("Antigravity Thinking is a model variant with no separate speed control", () => {
+  const groups = modelGroupsFromAntigravityCatalog({
+    models: [
+      {
+        name: "Claude Sonnet 4.6 (Thinking)",
+        displayName: "Claude Sonnet 4.6 (Thinking)",
+        reasoningLevel: "Thinking",
+        selectable: true,
+      },
+    ],
+  });
+
+  assert.equal(groups[0].reasoningControl, "model-variant");
+  assert.equal(groups[0].speedControl, "unsupported");
+  assert.equal(groups[0].reasoningLevels[0].label, "사고 모드 (Thinking)");
+  assert.deepEqual(getSpeedOptionsForReasoning(groups[0], "thinking").map((item) => item.id), ["standard"]);
+});
+
+test("Codex speed tiers are filtered by the selected reasoning level", () => {
+  const speedOptions = codexSpeedOptionsFromModel({
+    supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }],
+    service_tiers: [
+      {
+        id: "priority",
+        name: "Fast",
+        description: "1.5x speed, increased usage",
+        supported_reasoning_levels: [{ effort: "low" }],
+      },
+    ],
+  });
+  const group = { defaultReasoningLevel: "low", speedOptions };
+
+  assert.deepEqual(getSpeedOptionsForReasoning(group, "low").map((item) => item.id), ["standard", "priority"]);
+  assert.deepEqual(getSpeedOptionsForReasoning(group, "high").map((item) => item.id), ["standard"]);
+  assert.equal(speedOptions[1].cli, '-c service_tier="priority"');
+});
+
+test("Codex priority speed reaches CLI arguments and fast aliases normalize", () => {
+  assert.equal(normalizeCodexSpeed("fast"), "priority");
+  assert.deepEqual(codexServiceTierArgs("standard"), []);
+  assert.deepEqual(codexServiceTierArgs("priority"), ["-c", 'service_tier="priority"']);
+
+  const args = buildCodexArgs({
+    approval: "never",
+    sandbox: "workspace-write",
+    model: "gpt-5.6-terra",
+    reasoning: "medium",
+    speed: "priority",
+    outputPath: "/tmp/article.txt",
+    prompt: "test",
+  });
+  assert.equal(args.includes('service_tier="priority"'), true);
+});
+
+test("Magazine v2 writer persists a resumable Codex session without using --last", () => {
+  const initialArgs = buildCodexArgs({
+    approval: "never",
+    sandbox: "workspace-write",
+    model: "gpt-5.6-sol",
+    reasoning: "medium",
+    outputPath: "/tmp/writer.txt",
+    prompt: "write",
+    persistSession: true,
+    jsonEvents: true,
+  });
+  assert.equal(initialArgs.includes("--ephemeral"), false);
+  assert.equal(initialArgs.includes("--json"), true);
+
+  const sessionId = "019f4d60-31df-7912-a647-6a98fdd017ef";
+  const resumeArgs = buildCodexResumeArgs({
+    sessionId,
+    model: "gpt-5.6-sol",
+    reasoning: "medium",
+    outputPath: "/tmp/repair.txt",
+    prompt: "repair",
+  });
+  assert.deepEqual(resumeArgs.slice(0, 3), ["exec", "resume", sessionId]);
+  assert.equal(resumeArgs.includes("--last"), false);
+});
+
+test("Magazine v2 extracts explicit Codex session ids and normalizes locked topics", () => {
+  const sessionId = "019f4d60-31df-7912-a647-6a98fdd017ef";
+  assert.equal(
+    extractCodexSessionId({ stdout: `${JSON.stringify({ type: "thread.started", thread_id: sessionId })}\n` }),
+    sessionId,
+  );
+  assert.equal(extractCodexSessionId({ stderr: `session id: ${sessionId}\n` }), sessionId);
+  assert.deepEqual(normalizeLockedTopic({
+    title: "  새 규제 집행  ",
+    reason: "독립 델타",
+    newsFeedIds: ["nf_1", "nf_1", "nf_2"],
+  }), {
+    title: "새 규제 집행",
+    reason: "독립 델타",
+    storyFamily: "",
+    editorialAngle: "",
+    primaryEvent: "",
+    newsFeedIds: ["nf_1", "nf_2"],
+    researchQueries: [],
+  });
+});
+
+test("Magazine v2 editorial review preserves article heading and paragraph boundaries", () => {
+  const text = htmlForEditorialReview(`
+    <p>첫 문단입니다.</p>
+    <h2>사람은 움직이고 파일은 남습니다</h2>
+    <p>다음 문단입니다.<br>둘째 줄입니다.</p>
+  `);
+
+  assert.equal(text, "첫 문단입니다.\n\n## 사람은 움직이고 파일은 남습니다\n\n다음 문단입니다.\n둘째 줄입니다.");
+});
+
+test("Magazine v2 normalizes improvised research mode labels from actual evidence", () => {
+  assert.equal(normalizeGeneratedResearchMode({
+    researchMode: "news-feed-first-with-external-research",
+    newsFeed: { items: [{ id: "nf_1" }] },
+  }), "news-feed-first");
+  assert.equal(normalizeGeneratedResearchMode({
+    newsFeed: { items: [{ id: "nf_1" }] },
+    worldMemory: { vectorSearch: { hits: [{ id: "wm_1" }] } },
+  }), "news-feed-with-world-memory-backup");
+  assert.equal(normalizeGeneratedResearchMode({ sourceBasis: [{ url: "https://example.com" }] }), "external-research");
+});
+
+test("Magazine v2 installs an early prepared hero into the single written article", () => {
+  const root = mkdtempSync(join(tmpdir(), "magazine-prepared-hero-"));
+  try {
+    const preparedArticleDir = join(root, "prepared", "locked-topic");
+    const articleDirectory = join(root, "articles");
+    const articleDir = join(articleDirectory, "written-article");
+    mkdirSync(join(preparedArticleDir, "assets"), { recursive: true });
+    mkdirSync(articleDir, { recursive: true });
+    writeFileSync(join(preparedArticleDir, "assets", "hero.png"), Buffer.alloc(12 * 1024, 1));
+
+    const patches = installPreparedHero({
+      preparedHero: {
+        preparedArticleDir,
+        patch: {
+          heroImage: {
+            src: "assets/hero.png",
+            alt: "검증 이미지",
+            credit: "Source",
+            sourceUrl: "https://example.com/hero",
+            license: "Open",
+          },
+        },
+      },
+      articleDirectory,
+    });
+
+    assert.equal(patches.has("written-article"), true);
+    assert.equal(existsSync(join(articleDir, "assets", "hero.png")), true);
+    assert.deepEqual(readFileSync(join(articleDir, "assets", "hero.png")), Buffer.alloc(12 * 1024, 1));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

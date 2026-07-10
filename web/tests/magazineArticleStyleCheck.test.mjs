@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const GUIBUILD_ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const CHECK_SCRIPT = join(GUIBUILD_ROOT, "scripts", "magazine_article_style_check.mjs");
+const V2_CHECK_SCRIPT = join(GUIBUILD_ROOT, "scripts", "magazine_article_quality_check.mjs");
 
 function makeArticleBody({ internalPhrase = "" } = {}) {
   const lead = internalPhrase
@@ -153,6 +154,14 @@ function runCheck(articleRoot) {
 
 function runCheckWithEnv(articleRoot, env = {}) {
   return execFileSync(process.execPath, [CHECK_SCRIPT, "--strict", "--json"], {
+    cwd: GUIBUILD_ROOT,
+    env: { ...process.env, ...env, MAGAZINE_ARTICLES_DIR: join(articleRoot, "articles") },
+    encoding: "utf8",
+  });
+}
+
+function runV2Check(articleRoot, env = {}) {
+  return execFileSync(process.execPath, [V2_CHECK_SCRIPT, "--strict", "--json"], {
     cwd: GUIBUILD_ROOT,
     env: { ...process.env, ...env, MAGAZINE_ARTICLES_DIR: join(articleRoot, "articles") },
     encoding: "utf8",
@@ -849,4 +858,76 @@ test("magazine style check allows reused continuity anchors when a fresh News Fe
 
   const output = JSON.parse(runCheck(articleRoot));
   assert.equal(output.ok, true);
+});
+
+test("magazine v2 quality check treats length and density as advisory without legacy self-certification", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-v2-advisory-"));
+  const body = `<article class="magazine-article">
+    <h2>짧지만 완결된 사건</h2>
+    <p>공식 발표는 새로운 가격 조건과 시행 시점을 함께 제시했습니다.</p>
+    <p>시장에 중요한 변화는 발표의 길이가 아니라 실제 계약과 가격에 반영되는 속도입니다.</p>
+  </article>`;
+  writeArticle(articleRoot, {
+    body,
+    metadataPatch: {
+      sourceBasis: [
+        "https://example.com/official-release",
+        "https://example.com/market-data",
+        "https://example.com/company-filing",
+      ],
+      worldMemory: null,
+      researchMode: "external-research",
+      readerToneDecision: null,
+      quoteFlowDecision: null,
+      editorialReviewDecision: {
+        policy: "magazine-editorial-review-v2",
+        method: "LLM_SEMANTIC_REVIEW",
+        reviewer: "magazine-editorial-review-llm",
+        summary: "짧지만 근거와 메커니즘이 연결된 기사입니다.",
+        issues: [],
+      },
+    },
+  });
+
+  const output = JSON.parse(runV2Check(articleRoot));
+  assert.equal(output.ok, true);
+  assert.equal(output.errors.length, 0);
+  assert.ok(output.advisories.some((issue) => issue.code === "body-too-short"));
+  assert.ok(output.advisories.some((issue) => issue.code === "paragraph-count-low"));
+  assert.equal(output.legacySummary.ignoredSelfCertificationIssues >= 2, true);
+});
+
+test("magazine v2 quality check blocks only explicit semantic publication issues", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-v2-blocking-"));
+  writeArticle(articleRoot, {
+    body: makeArticleBody(),
+    metadataPatch: {
+      editorialReviewDecision: {
+        policy: "magazine-editorial-review-v2",
+        method: "LLM_SEMANTIC_REVIEW",
+        reviewer: "magazine-editorial-review-llm",
+        summary: "핵심 수치의 근거 연결을 고쳐야 합니다.",
+        issues: [
+          {
+            severity: "blocking",
+            code: "unsupported-core-number",
+            location: "도입부",
+            rationale: "핵심 수치가 sourceBasis의 어느 근거와도 연결되지 않습니다.",
+            suggestedFix: "근거를 확인하거나 수치를 삭제합니다.",
+            confidence: 0.96,
+          },
+        ],
+      },
+    },
+  });
+
+  assert.throws(
+    () => runV2Check(articleRoot),
+    (error) => {
+      const output = JSON.parse(error.stdout);
+      assert.equal(output.ok, false);
+      assert.ok(output.errors.some((issue) => issue.code === "unsupported-core-number"));
+      return true;
+    },
+  );
 });

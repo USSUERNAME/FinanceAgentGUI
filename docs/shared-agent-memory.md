@@ -63,6 +63,11 @@ the bridge between formal World Memory updates.
 - It then asks the same provider-specific translation model used by News Feed
   and Economic Calendar translation to summarize a bounded News Feed sample into
   market tone, a short Korean summary, and an integrated severity assessment.
+  When Codex CLI is selected, versions below `0.144.0` use `gpt-5.5` with
+  `reasoning=low`; version `0.144.0` and newer use `gpt-5.6-luna` with the
+  lowest Luna reasoning level exposed by the CLI catalog (currently `low`).
+  News Feed, Economic Calendar, this shared-memory summary, and the visible
+  translation-model label must all use the same version-gated selector.
   The sample prioritizes rows after `data/world-memory/collector-state.json`
   `collector.lastSuccessfulAt`. If that fresh window has fewer than 30 timestamped
   rows and the feed store itself is not that small, it backfills from the latest
@@ -87,8 +92,9 @@ the bridge between formal World Memory updates.
   refresh rather than accumulating the candidate list.
 - When a new World Memory collection/report run completes, the next refresh
   uses the new collection cutoff as the primary News Feed freshness boundary,
-  backfills to the 30-row minimum when necessary, and uses the new report text as
-  the baseline summary.
+  keeps every post-collection News Feed item available in local storage,
+  backfills only when that set is below the 30-row minimum, and uses the new
+  report text as the baseline summary.
 
 ## HTTP Contract
 

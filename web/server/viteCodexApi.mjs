@@ -1,5 +1,7 @@
 import { handleEconomicCalendarEndpoint } from "./economicCalendarApi.mjs";
 import { handleEarningsEndpoint } from "./earningsApi.mjs";
+import { handleBinanceMarketDataEndpoint } from "./binanceMarketDataApi.mjs";
+import { handleInvestSimulatorEndpoint } from "./investSimulatorApi.mjs";
 import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mjs";
 import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
 import { handleMemoryEndpoint } from "./memoryApi.mjs";
@@ -7,6 +9,7 @@ import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
 import { handleTossInvestEndpoint } from "./tossInvestApi.mjs";
+import { handleTossEtfNameTranslationEndpoint } from "./tossEtfNameTranslation.mjs";
 import { handleTransactionSettingsEndpoint } from "./transactionSettings.mjs";
 import { handleWorldMemoryEndpoint, startWorldMemoryCollector } from "./worldMemoryApi.mjs";
 import {
@@ -36,6 +39,30 @@ export function codexApiPlugin() {
       startNewsFeedCollector();
       startWorldMemoryCollector();
       startMagazineScheduler();
+
+      server.middlewares.use("/api/market-data/instruments/search", async (req, res) => {
+        await handleBinanceMarketDataEndpoint("instrument-search", req, res);
+      });
+
+      server.middlewares.use("/api/market-data/instruments", async (req, res) => {
+        await handleBinanceMarketDataEndpoint("instrument", req, res);
+      });
+
+      server.middlewares.use("/api/market-data/quotes", async (req, res) => {
+        await handleBinanceMarketDataEndpoint("quotes", req, res);
+      });
+
+      server.middlewares.use("/api/market-data/candles", async (req, res) => {
+        await handleBinanceMarketDataEndpoint("candles", req, res);
+      });
+
+      server.middlewares.use("/api/market-data/execution-price", async (req, res) => {
+        await handleBinanceMarketDataEndpoint("execution-price", req, res);
+      });
+
+      server.middlewares.use("/api/market-data/providers/status", async (req, res) => {
+        await handleBinanceMarketDataEndpoint("provider-status", req, res);
+      });
 
       server.middlewares.use("/api/market-symbols/search", async (req, res) => {
         await handleMarketSymbolCatalogEndpoint("search", req, res);
@@ -152,6 +179,9 @@ export function codexApiPlugin() {
       server.middlewares.use("/api/tossinvest/investment-status", async (req, res) => {
         await handleTossInvestEndpoint("investment-status", req, res);
       });
+      server.middlewares.use("/api/tossinvest/etf-name-translations", async (req, res) => {
+        await handleTossEtfNameTranslationEndpoint(req, res);
+      });
 
       server.middlewares.use("/api/tossinvest/prices", async (req, res) => {
         await handleTossInvestEndpoint("prices", req, res);
@@ -235,6 +265,26 @@ export function codexApiPlugin() {
 
       server.middlewares.use("/api/transactions/settings", async (req, res) => {
         await handleTransactionSettingsEndpoint(req, res);
+      });
+
+      server.middlewares.use("/api/invest-simulator/status", async (req, res) => {
+        await handleInvestSimulatorEndpoint("status", req, res);
+      });
+
+      server.middlewares.use("/api/invest-simulator/accounts", async (req, res) => {
+        await handleInvestSimulatorEndpoint("accounts", req, res);
+      });
+
+      server.middlewares.use("/api/invest-simulator/events", async (req, res) => {
+        await handleInvestSimulatorEndpoint("events", req, res);
+      });
+
+      server.middlewares.use("/api/invest-simulator/orders", async (req, res) => {
+        await handleInvestSimulatorEndpoint("orders", req, res);
+      });
+
+      server.middlewares.use("/api/invest-simulator/exchange", async (req, res) => {
+        await handleInvestSimulatorEndpoint("exchange", req, res);
       });
 
       server.middlewares.use("/api/reports", async (req, res) => {
@@ -343,9 +393,10 @@ export function codexApiPlugin() {
         }
       });
 
-      server.middlewares.use("/api/codex/options", async (_req, res) => {
+      server.middlewares.use("/api/codex/options", async (req, res) => {
         try {
-          sendJson(res, await getCodexOptionsAsync());
+          const url = new URL(req.url || "/", "http://127.0.0.1");
+          sendJson(res, await getCodexOptionsAsync({ force: url.searchParams.get("refresh") === "1" }));
         } catch (error) {
           sendJson(res, { error: error.message }, 500);
         }

@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { portfolioContextForPrompt, resolveAgentRetrievalPolicy } from "../server/codexProbe.mjs";
+import {
+  portfolioContextForPrompt,
+  portfolioWidgetRagContextForPrompt,
+  resolveAgentRetrievalPolicy,
+} from "../server/codexProbe.mjs";
 import {
   buildPortfolioChatActionInstructions,
   buildPortfolioWidgetAgentPrompt,
@@ -232,6 +236,53 @@ test("portfolio prompt context preserves metrics-table widget rows", () => {
   assert.equal(widget.chartSpec.metrics[0].cagr, 32.24);
   assert.equal(widget.chartSpec.metrics[1].mdd, -7.88);
   assert.deepEqual(widget.dependsOn, ["w-backtest"]);
+});
+
+test("asset widget prompt uses compact display summaries and retrieves full matching rows through local RAG", () => {
+  const points = Array.from({ length: 420 }, (_, index) => ({
+    time: `row-${String(index).padStart(3, "0")}`,
+    value: index === 317 ? 987654321 : index * 10,
+    note: index === 317 ? "needle-delta" : "ordinary",
+  }));
+  const rawContext = {
+    screen: "portfolio-canvas",
+    canvas: { id: "asset-canvas", name: "자산 관리", mode: "asset-management" },
+    portfolioMode: "asset-management",
+    widgetDataRetrieval: {
+      mode: "query-scoped-local-rag",
+      scope: "current-canvas-visible-widget-data",
+      indexedWidgetCount: 1,
+      persistence: "request-only",
+    },
+    widgets: [
+      {
+        id: "asset-history-1",
+        displayId: "W-007",
+        title: "보유 자산 과거 내역",
+        kind: "보유 자산 과거 내역 차트",
+        visualType: "price-history",
+        displayData: {
+          schemaVersion: "portfolio-widget-display-data.v1",
+          kind: "asset-price-history",
+          query: { currency: "KRW", timeframe: "1d" },
+          summary: { status: "ready", pointCount: points.length, latestValue: 4190 },
+          data: { points },
+        },
+      },
+    ],
+  };
+
+  const compact = portfolioContextForPrompt(rawContext);
+  assert.equal(compact.widgets[0].displayData.summary.pointCount, 420);
+  assert.equal(compact.widgets[0].displayData.retrieval.fullDataAvailable, true);
+  assert.equal("data" in compact.widgets[0].displayData, false);
+
+  const rag = portfolioWidgetRagContextForPrompt(rawContext, "W-007 needle-delta 987654321 행을 확인해줘");
+  assert.equal(rag.retrievalMode, "query-scoped-local-rag");
+  assert.equal(rag.searchedWidgetCount, 1);
+  assert.ok(rag.totalChunkCount > 1);
+  assert.ok(rag.chunks.some((chunk) => JSON.stringify(chunk.data).includes("needle-delta")));
+  assert.ok(rag.chunks.some((chunk) => JSON.stringify(chunk.data).includes("987654321")));
 });
 
 test("portfolio agent prompts require structured period-comparison scenario runs", () => {

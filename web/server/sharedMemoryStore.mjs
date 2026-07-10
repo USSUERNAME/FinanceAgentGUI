@@ -18,6 +18,7 @@ import {
   ANTIGRAVITY_TRANSLATION_REASONING,
   selectAntigravityModelForReasoning,
 } from "../src/agent/antigravityModelSelection.js";
+import { selectCodexTranslationModel } from "../src/agent/codexTranslationModelSelection.js";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const GUIBUILD_ROOT = resolve(WEB_ROOT, "..");
@@ -40,7 +41,7 @@ const INDEX_RECORD_LIMIT = 200;
 const USER_MEMORY_RETRY_INTERVAL_MS = 60 * 60 * 1000;
 const EXTERNAL_BRIEFING_INTERVAL_MS = 15 * 60 * 1000;
 const EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT = 30;
-const EXTERNAL_BRIEFING_NEWS_ITEM_LIMIT = 30;
+const EXTERNAL_BRIEFING_SELECTION_POLICY = "post-world-memory-update-all-then-minimum-30-recent-backfill";
 const EXTERNAL_BRIEFING_MODEL_TIMEOUT_MS = 60 * 1000;
 const MEMORY_TIME_ZONE = process.env.FINANCE_AGENT_GUI_MEMORY_TZ || "Asia/Seoul";
 const MEMORY_SUMMARY_TEXT_LIMIT = 16000;
@@ -241,11 +242,6 @@ function readAgentSettings() {
   };
 }
 
-function normalizeReasoningLevel(value, fallback = "low") {
-  const safe = cleanText(value, 32).toLowerCase();
-  return ["minimal", "low", "medium", "high", "xhigh"].includes(safe) ? safe : fallback;
-}
-
 function readCodexModelGroups() {
   try {
     const raw = execFileSync("codex", ["debug", "models"], {
@@ -264,26 +260,30 @@ function readCodexModelGroups() {
   }
 }
 
-function codexTranslationModelInfo(settings = readAgentSettings()) {
+function readCodexVersion() {
+  try {
+    return execFileSync("codex", ["--version"], {
+      cwd: WEB_ROOT,
+      encoding: "utf8",
+      timeout: 5000,
+      maxBuffer: 128 * 1024,
+      env: { ...process.env, NO_COLOR: "1" },
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function codexTranslationModelInfo() {
   const models = readCodexModelGroups();
-  const configuredModel = cleanText(settings.providers?.[CODEX_PROVIDER_ID]?.model || settings.model || "gpt-5.5", 120);
-  const model =
-    models.find((item) => item.slug === configuredModel || item.id === configuredModel || item.name === configuredModel) ||
-    models[0] ||
-    { slug: configuredModel, default_reasoning_level: "low", supported_reasoning_levels: [{ effort: "low" }] };
-  const slug = cleanText(model.slug || model.id || model.name || configuredModel, 120);
-  const supported = Array.isArray(model.supported_reasoning_levels)
-    ? model.supported_reasoning_levels.map((level) => level?.effort || level).filter(Boolean)
-    : [];
-  const reasoning =
-    ["minimal", "low", "medium", "high", "xhigh"].find((level) => supported.includes(level)) ||
-    normalizeReasoningLevel(model.default_reasoning_level, "low");
+  const selection = selectCodexTranslationModel({
+    cliVersion: readCodexVersion(),
+    models,
+  });
   return {
     provider: CODEX_PROVIDER_ID,
     providerLabel: "Codex CLI",
-    model: slug,
-    modelLabel: slug,
-    reasoning,
+    ...selection,
   };
 }
 
@@ -366,7 +366,7 @@ export function chooseSharedMemoryTranslationModel() {
   if (selectedProvider === ANTIGRAVITY_PROVIDER_ID) {
     return antigravityTranslationModelInfo(settings);
   }
-  return codexTranslationModelInfo(settings);
+  return codexTranslationModelInfo();
 }
 
 export function runCodexJsonModel(prompt, schema, modelInfo, timeoutMs = EXTERNAL_BRIEFING_MODEL_TIMEOUT_MS) {
@@ -500,6 +500,7 @@ function defaultExternalMemoryState() {
       nextBuildAt: "",
       basedOnWorldMemoryReportAt: "",
       basedOnWorldMemoryCollectionAt: "",
+      selectionPolicy: "",
       newsItemsConsidered: 0,
       alertLevel: "none",
       severityKo: "",
@@ -815,16 +816,19 @@ function timestampedNewsItems(newsStore = null) {
 function externalNewsItemsForMarketSummary({
   newsStore = null,
   worldMemoryCutoffAt = "",
-  limit = EXTERNAL_BRIEFING_NEWS_ITEM_LIMIT,
+  limit = null,
   minimumCount = EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT,
 } = {}) {
   const cutoffMs = timestampMs(worldMemoryCutoffAt || "");
   if (!cutoffMs) return [];
-  const requestedLimit = Math.max(0, Math.floor(Number(limit) || 0));
+  const requestedLimit =
+    limit === null || limit === undefined
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, Math.floor(Number(limit) || 0));
   if (!requestedLimit) return [];
   const minimum = Math.max(0, Math.floor(Number(minimumCount) || 0));
   const itemLimit = Math.max(requestedLimit, minimum);
-  const targetMinimum = Math.min(itemLimit, minimum);
+  const targetMinimum = Number.isFinite(itemLimit) ? Math.min(itemLimit, minimum) : minimum;
   const timestamped = timestampedNewsItems(newsStore);
   const selected = timestamped.filter(({ time }) => time > cutoffMs).slice(0, itemLimit);
 
@@ -864,6 +868,7 @@ function externalMarketSummaryPrompt({ worldReport = null, items = [], builtAt =
   return [
     "너는 FinanceAgentGUI의 컨텍스트 메모리에 들어갈 짧은 시장 브리핑을 작성하는 번역/요약 모델이다.",
     "입력 보도는 최신 World Memory 수집 성공 시각 이후 항목을 우선한다.",
+    `그 이후 항목이 ${EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT}건 이상이면 전부 들어온다.`,
     `그 이후 항목이 ${EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT}건 미만이고 로컬 News Feed 저장소에 시각 정보가 있는 항목이 충분하면, 최신 항목으로 ${EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT}건까지 보강된 표본이 들어올 수 있다.`,
     "afterWorldMemoryCollection=false인 보강 항목은 이미 기준 World Memory 서술에 일부 반영됐을 수 있으므로 새로 발생한 사건처럼 단정하지 말고 현재 시장 톤과 리스크를 보정하는 근거로만 다룬다.",
     "World Memory 보고서 요약은 기준 서술로만 쓰고, News Feed 후보의 1차 컷오프는 수집 성공 시각을 따른다.",
@@ -899,7 +904,7 @@ function externalMarketSummaryPrompt({ worldReport = null, items = [], builtAt =
         builtAt,
         worldMemoryReportAt: reportAt,
         worldMemoryCollectionAt: cutoffAt,
-        selectionPolicy: "post-world-memory-update-first-minimum-30-recent-backfill",
+        selectionPolicy: EXTERNAL_BRIEFING_SELECTION_POLICY,
         minimumNewsItemsWhenAvailable: EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT,
         worldMemoryBaseline: clampText(worldText, 1800),
         items: inputItems,
@@ -1132,6 +1137,7 @@ function publicExternalMarketSummary() {
     nextBuildAt: cleanText(briefing.nextBuildAt || "", 80),
     basedOnWorldMemoryReportAt: cleanText(briefing.basedOnWorldMemoryReportAt || "", 80),
     basedOnWorldMemoryCollectionAt: cleanText(briefing.basedOnWorldMemoryCollectionAt || "", 80),
+    selectionPolicy: cleanText(briefing.selectionPolicy || "", 120),
     intervalMs: Number(briefing.intervalMs || EXTERNAL_BRIEFING_INTERVAL_MS),
     newsItemsConsidered: Number(briefing.newsItemsConsidered ?? parsed.newsItemsConsidered ?? 0),
     newsItemsSummarized: Number(briefing.newsItemsSummarized ?? briefing.newsItemsConsidered ?? parsed.newsItemsConsidered ?? 0),
@@ -1276,7 +1282,12 @@ function refreshExternalMemoryBriefingIfDue(date = new Date()) {
   const state = readExternalMemoryState();
   const briefing = state.briefing || {};
   const currentText = readTextFile(EXTERNAL_MEMORY_BRIEFING_PATH);
-  if (currentText && briefing.nextBuildAt && timestampMs(briefing.nextBuildAt) > Date.now()) {
+  if (
+    currentText &&
+    briefing.selectionPolicy === EXTERNAL_BRIEFING_SELECTION_POLICY &&
+    briefing.nextBuildAt &&
+    timestampMs(briefing.nextBuildAt) > Date.now()
+  ) {
     return currentText;
   }
 
@@ -1344,6 +1355,7 @@ function refreshExternalMemoryBriefingIfDue(date = new Date()) {
         nextBuildAt: addMs(now, EXTERNAL_BRIEFING_INTERVAL_MS),
         basedOnWorldMemoryReportAt: built.reportAt || "",
         basedOnWorldMemoryCollectionAt: built.collectionAt || "",
+        selectionPolicy: EXTERNAL_BRIEFING_SELECTION_POLICY,
         newsItemsConsidered: built.consideredCount,
         newsItemsSummarized: summaryItems.length,
         summaryMode: marketSummaryResult.status,
@@ -1586,10 +1598,12 @@ export function querySharedMemories({ query = "", screen = "", provider = "", li
     .map((item) => item.record);
 }
 
-export function sharedMemoryStatus({ limit = PUBLIC_RECORD_LIMIT, offset = 0 } = {}) {
+export function sharedMemoryStatus({ limit = PUBLIC_RECORD_LIMIT, offset = 0, refresh = true } = {}) {
   ensureMemoryDir();
-  runDueUserMemoryCompression();
-  refreshContextMemorySummary();
+  if (refresh) {
+    runDueUserMemoryCompression();
+    refreshContextMemorySummary();
+  }
   const records = readRawRecords();
   const safeLimit = normalizedLimit(limit);
   const safeOffset = normalizedOffset(offset);

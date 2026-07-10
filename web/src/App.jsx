@@ -19,7 +19,7 @@ import {
   fallbackApprovalOptions,
   fallbackModelGroups,
   fallbackProviderOptions,
-  getSpeedOptions,
+  getSpeedOptionsForReasoning,
   loadingApprovalOptions,
   loadingModelGroups,
   modelGroupsFromAntigravityCatalog,
@@ -29,12 +29,14 @@ import {
   ANTIGRAVITY_TRANSLATION_FALLBACK_MODEL,
   selectAntigravityModelForReasoning,
 } from "./agent/antigravityModelSelection.js";
+import { selectCodexTranslationModel } from "./agent/codexTranslationModelSelection.js";
 import { attachmentsSummary } from "./agent/attachments.js";
 import { messageToHistoryText, parseSseEvent } from "./agent/chatProtocol.js";
 import { buildPromptWithArticleContext } from "./arca/articleContext.js";
 import StockChannelView from "./arca/StockChannelView.jsx";
 import { buildEarningAnalysisPrompt, displayEarningValue } from "./calendars/earningPrompt.js";
 import { emptyMemoryStatus } from "./memory/sharedMemoryDefaults.js";
+import { mergeNewsFeedFirstPage, newsFeedContentRevision } from "./news/newsFeedPagination.js";
 import {
   parsePortfolioWidgetJsonAction,
   stripPortfolioWidgetActionBlocks,
@@ -43,10 +45,6 @@ import {
   isPortfolioWidgetReferenceToken,
   parsePortfolioWidgetNumber,
 } from "./portfolio/datasetParser.js";
-import {
-  buildPortfolioChatActionInstructions,
-  buildPortfolioWidgetAgentPrompt,
-} from "./portfolio/agentPromptBuilder.js";
 import {
   selectPortfolioWidgetRequestAttachments,
 } from "./portfolio/widgetRequestAttachments.js";
@@ -1301,12 +1299,18 @@ const defaultWorldMemorySettings = {
   ok: true,
   enabled: false,
   managementProvider: "default",
+  managementModel: "",
+  managementReasoning: "",
+  managementSpeed: "standard",
   configPath: "config/world-memory.user.json",
   defaultConfigPath: "config/world-memory.defaults.json",
   settings: {
     version: 1,
     enabled: false,
     managementProvider: "default",
+    managementModel: "",
+    managementReasoning: "",
+    managementSpeed: "standard",
   },
 };
 
@@ -1315,7 +1319,9 @@ const defaultMagazineSettings = {
   enabled: false,
   worldMemoryEnabled: false,
   writingProvider: "default",
+  writingModel: "",
   writingReasoning: "",
+  writingSpeed: "standard",
   schedulerIntervalHours: 6,
   schedulerMaxArticlesPerCycle: 2,
   disabledReason: "",
@@ -1325,9 +1331,21 @@ const defaultMagazineSettings = {
     version: 1,
     enabled: false,
     writingProvider: "default",
+    writingModel: "",
     writingReasoning: "",
+    writingSpeed: "standard",
     schedulerIntervalHours: 6,
     schedulerMaxArticlesPerCycle: 2,
+  },
+};
+
+const defaultTransactionSettings = {
+  ok: true,
+  configPath: "config/transaction-status.user.json",
+  defaultConfigPath: "config/transaction-status.defaults.json",
+  settings: {
+    version: 2,
+    menuHidden: false,
   },
 };
 
@@ -1851,6 +1869,7 @@ function App() {
   const [agentUserSettings, setAgentUserSettings] = useState(emptyAgentSettings);
   const [agentSettingsError, setAgentSettingsError] = useState("");
   const [agentOptionsReady, setAgentOptionsReady] = useState(false);
+  const [modelCatalogRefreshing, setModelCatalogRefreshing] = useState(false);
   const [personaMode, setPersonaMode] = useState("none");
   const [chatMessages, setChatMessages] = useState(initialChatMessages);
   const [worldMemoryChatMessages, setWorldMemoryChatMessages] = useState(initialChatMessages);
@@ -1891,6 +1910,7 @@ function App() {
     available: false,
     label: "Codex CLI 확인 중",
     commandPreview: "",
+    version: "",
   });
   const [approval, setApproval] = useState(fallbackApprovalOptions[0].id);
   const [model, setModel] = useState(fallbackModelGroups[0].slug);
@@ -1925,6 +1945,10 @@ function App() {
   const [tossInvestOrderSyncAction, setTossInvestOrderSyncAction] = useState("");
   const [tossInvestOrderSyncError, setTossInvestOrderSyncError] = useState("");
   const [tossInvestOrderSyncErrorCode, setTossInvestOrderSyncErrorCode] = useState("");
+  const [transactionSettings, setTransactionSettings] = useState(defaultTransactionSettings);
+  const [transactionSettingsBusy, setTransactionSettingsBusy] = useState(false);
+  const [transactionSettingsSaving, setTransactionSettingsSaving] = useState(false);
+  const [transactionSettingsError, setTransactionSettingsError] = useState("");
   const tossInvestCredentials = tossInvestStatus?.credentials || {};
   const tossInvestConnectionUsable = Boolean(tossInvestCredentials.usable || tossInvestCredentials.unlocked);
   const tossInvestConnected = Boolean(
@@ -1948,6 +1972,7 @@ function App() {
   const [newsFeedStatus, setNewsFeedStatus] = useState(null);
   const [newsFeedItems, setNewsFeedItems] = useState([]);
   const [newsFeedBusy, setNewsFeedBusy] = useState(false);
+  const [newsFeedRefreshBusy, setNewsFeedRefreshBusy] = useState(false);
   const [newsFeedLoadingMore, setNewsFeedLoadingMore] = useState(false);
   const [newsFeedHasMore, setNewsFeedHasMore] = useState(false);
   const [newsFeedError, setNewsFeedError] = useState("");
@@ -2003,11 +2028,17 @@ function App() {
   const fileInputRef = useRef(null);
   const activeViewRef = useRef(activeView);
   const portfolioCanvasStoreRef = useRef(portfolioCanvasStore);
+  const transactionStatusContextRef = useRef(null);
   const portfolioCanvasFileReadyRef = useRef(false);
-  const newsFeedItemsCountRef = useRef(0);
-  const newsFeedLatestTranslatedAtRef = useRef("");
+  const portfolioCanvasFileSignatureRef = useRef("");
+  const newsFeedContentRevisionRef = useRef("");
   const magazineArticleCountRef = useRef(0);
   const magazineLatestArticleAtRef = useRef("");
+  const handleTransactionStatusContextChange = useCallback((contextPacket) => {
+    transactionStatusContextRef.current = contextPacket && typeof contextPacket === "object"
+      ? contextPacket
+      : null;
+  }, []);
   const openMagazineTopic = useCallback((event, topicLabel) => {
     event.preventDefault();
     magazineCanvasRef.current?.scrollTo({ top: 0, behavior: "auto" });
@@ -2073,7 +2104,7 @@ function App() {
     setMagazineCopyStatus("copying");
     setMagazineCopyError("");
     try {
-      const magazineRuntime = providerRuntimeForProvider(magazineWritingProviderId());
+      const magazineRuntime = magazineWritingRuntime();
       const result = await writeMagazineArticleToClipboard(magazineReaderArticleRef.current, {
         provider: magazineActiveArticle?.generationAgent?.provider || magazineRuntime.provider,
       });
@@ -2193,7 +2224,7 @@ function App() {
     }, 700);
 
     try {
-      const magazineRuntime = providerRuntimeForProvider(magazineWritingProviderId());
+      const magazineRuntime = magazineWritingRuntime();
       const response = await fetch("/api/magazine/comments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2203,6 +2234,7 @@ function App() {
           provider: magazineRuntime.provider,
           model: magazineRuntime.selectedModelGroup?.slug,
           reasoning: magazineRuntime.selectedReasoning?.id,
+          speed: magazineRuntime.selectedSpeed?.id,
           approval: magazineRuntime.selectedApproval?.id,
         }),
       });
@@ -2277,6 +2309,7 @@ function App() {
   const activeApprovalOptions = agentProvider === ANTIGRAVITY_PROVIDER_ID ? antigravityPolicyOptions : approvalOptions;
   const worldMemoryEnabled = Boolean(worldMemorySettings?.enabled);
   const magazineEnabled = worldMemoryEnabled && Boolean(magazineSettings?.enabled);
+  const transactionStatusHidden = Boolean(transactionSettings?.settings?.menuHidden);
   const selectedModelGroup = useMemo(
     () => activeModelGroups.find((item) => item.slug === model) ?? activeModelGroups[0] ?? fallbackModelGroups[0],
     [model, activeModelGroups]
@@ -2291,7 +2324,10 @@ function App() {
       reasoningOptions[0],
     [reasoning, reasoningOptions, selectedModelGroup]
   );
-  const speedOptions = useMemo(() => getSpeedOptions(selectedModelGroup), [selectedModelGroup]);
+  const speedOptions = useMemo(
+    () => getSpeedOptionsForReasoning(selectedModelGroup, selectedReasoning?.id || reasoning),
+    [reasoning, selectedModelGroup, selectedReasoning]
+  );
   const selectedSpeed = useMemo(
     () => speedOptions.find((item) => item.id === speed) ?? speedOptions[0],
     [speed, speedOptions]
@@ -2302,7 +2338,9 @@ function App() {
     enabled: worldMemoryEnabled,
     error: worldMemoryError || worldMemorySettingsError,
   });
-  const modelSummaryLabel = `${selectedModelGroup?.label || "모델"} ${selectedReasoning?.label || ""}`.trim();
+  const modelSummaryLabel = selectedModelGroup?.reasoningEmbedded
+    ? selectedModelGroup?.label || "모델"
+    : `${selectedModelGroup?.label || "모델"} ${selectedReasoning?.label || ""}`.trim();
   const selectedApproval = useMemo(
     () => activeApprovalOptions.find((item) => item.id === approval) ?? activeApprovalOptions[0],
     [approval, activeApprovalOptions]
@@ -2362,15 +2400,12 @@ function App() {
       return `Antigravity CLI · ${translationModel}`;
     }
 
-    const translationGroup = modelGroups[0] || selectedModelGroup;
-    const supported = (translationGroup?.reasoningLevels || []).map((level) => level.id);
-    const translationReasoning =
-      ["minimal", "low", "medium", "high", "xhigh"].find((level) => supported.includes(level)) ||
-      translationGroup?.defaultReasoningLevel ||
-      supported[0] ||
-      "low";
-    return translationGroup?.slug ? `${translationGroup.slug} · ${translationReasoning}` : "";
-  }, [agentOptionsReady, agentProvider, antigravityCatalogGroups, selectedModelGroup, model, modelGroups]);
+    const translation = selectCodexTranslationModel({
+      cliVersion: codexStatus.version,
+      models: modelGroups,
+    });
+    return `${translation.model} · ${translation.reasoning}`;
+  }, [agentOptionsReady, agentProvider, antigravityCatalogGroups, selectedModelGroup, model, modelGroups, codexStatus.version]);
   const newsFeedMarketSummary = memoryStatus?.contextMemory?.marketSummary || null;
   const newsFeedMarketSummaryCollapsed = newsFeedStatus?.viewState?.marketSummaryCollapsed !== false;
   const activeCategoryLabel = useMemo(() => {
@@ -2415,7 +2450,7 @@ function App() {
     const nextReasoning = nextReasoningLevels.some((item) => item.id === preferred.reasoning)
       ? preferred.reasoning
       : nextGroup.defaultReasoningLevel || nextReasoningLevels[0]?.id || "medium";
-    const nextSpeedOptions = getSpeedOptions(nextGroup);
+    const nextSpeedOptions = getSpeedOptionsForReasoning(nextGroup, nextReasoning);
     const nextSpeed = nextSpeedOptions.some((item) => item.id === preferred.speed)
       ? preferred.speed
       : "standard";
@@ -2642,6 +2677,22 @@ function App() {
     );
   }
 
+  function worldMemoryManagementRuntime() {
+    return providerRuntimeForProvider(worldMemoryManagementProviderId(), {
+      model: worldMemorySettings?.settings?.managementModel || worldMemorySettings?.managementModel || "",
+      reasoning: worldMemorySettings?.settings?.managementReasoning || worldMemorySettings?.managementReasoning || "",
+      speed: worldMemorySettings?.settings?.managementSpeed || worldMemorySettings?.managementSpeed || "",
+    });
+  }
+
+  function magazineWritingRuntime() {
+    return providerRuntimeForProvider(magazineWritingProviderId(), {
+      model: magazineSettings?.settings?.writingModel || magazineSettings?.writingModel || "",
+      reasoning: magazineSettings?.settings?.writingReasoning || magazineSettings?.writingReasoning || "",
+      speed: magazineSettings?.settings?.writingSpeed || magazineSettings?.writingSpeed || "",
+    });
+  }
+
   function commandPreviewForRuntime(runtime) {
     if (!agentOptionsReady) {
       return "에이전트 설정 불러오는 중";
@@ -2654,14 +2705,11 @@ function App() {
     const approvalFlag = runtime.selectedApproval?.cli || "";
     const modelFlag = runtime.selectedModelGroup?.slug ? `-m ${runtime.selectedModelGroup.slug}` : "";
     const reasoningFlag = runtime.selectedReasoning?.cli || "";
-    const speedHint =
-      runtime.selectedSpeed && runtime.selectedSpeed.id !== "standard"
-        ? `[speed: ${runtime.selectedSpeed.label}${runtime.selectedSpeed.pending ? " · CLI config 확인 필요" : ""}]`
-        : "";
-    return ["codex", approvalFlag, modelFlag, reasoningFlag, speedHint].filter(Boolean).join(" ");
+    const speedFlag = runtime.selectedSpeed?.cli || "";
+    return ["codex", approvalFlag, modelFlag, reasoningFlag, speedFlag].filter(Boolean).join(" ");
   }
 
-  function providerRuntimeForProvider(providerId) {
+  function providerRuntimeForProvider(providerId, overrides = {}) {
     const runtimeProvider = providerId === ANTIGRAVITY_PROVIDER_ID ? ANTIGRAVITY_PROVIDER_ID : CODEX_PROVIDER_ID;
     const providerStatus =
       providerOptions.find((item) => item.id === runtimeProvider) ||
@@ -2674,7 +2722,7 @@ function App() {
         : approvalOptions.length
           ? approvalOptions
           : fallbackApprovalOptions;
-    const providerSelection =
+    const baseSelection =
       runtimeProvider === agentProvider
         ? {
             provider: runtimeProvider,
@@ -2684,6 +2732,10 @@ function App() {
             speed: selectedSpeed?.id || speed,
           }
         : selectionForProvider(runtimeProvider, agentProviderSettings(runtimeProvider));
+    const providerSelection = selectionForProvider(runtimeProvider, {
+      ...baseSelection,
+      ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => String(value || "").trim())),
+    });
     const providerModelGroup =
       providerModelGroups.find((item) => item.slug === providerSelection.model) ||
       providerModelGroups[0] ||
@@ -2691,7 +2743,7 @@ function App() {
     const providerReasoningOptions = providerModelGroup?.reasoningLevels?.length
       ? providerModelGroup.reasoningLevels
       : fallbackModelGroups[0].reasoningLevels;
-    const providerSpeedOptions = getSpeedOptions(providerModelGroup);
+    const providerSpeedOptions = getSpeedOptionsForReasoning(providerModelGroup, providerSelection.reasoning);
     const runtime = {
       provider: runtimeProvider,
       selectedProvider: providerStatus,
@@ -2713,7 +2765,9 @@ function App() {
     };
     return {
       ...runtime,
-      modelSummaryLabel: `${runtime.selectedModelGroup?.label || "모델"} ${runtime.selectedReasoning?.label || ""}`.trim(),
+      modelSummaryLabel: runtime.selectedModelGroup?.reasoningEmbedded
+        ? runtime.selectedModelGroup?.label || "모델"
+        : `${runtime.selectedModelGroup?.label || "모델"} ${runtime.selectedReasoning?.label || ""}`.trim(),
       commandPreview: commandPreviewForRuntime(runtime),
     };
   }
@@ -3020,6 +3074,7 @@ function App() {
         throw new Error(payload.error || `HTTP ${response.status}`);
       }
 
+      newsFeedContentRevisionRef.current = newsFeedContentRevision(payload);
       setNewsFeedStatus((current) => ({
         ...(current || {}),
         itemCount: payload.itemCount,
@@ -3195,6 +3250,71 @@ function App() {
     }
   }
 
+  async function loadTransactionSettings({ quiet = false } = {}) {
+    if (!quiet) {
+      setTransactionSettingsBusy(true);
+      setTransactionSettingsError("");
+    }
+    try {
+      const response = await fetch("/api/transactions/settings", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      const nextSettings = {
+        ...defaultTransactionSettings,
+        ...payload,
+        settings: {
+          ...defaultTransactionSettings.settings,
+          ...(payload.settings || {}),
+        },
+      };
+      setTransactionSettings(nextSettings);
+      return nextSettings;
+    } catch (error) {
+      setTransactionSettingsError(error.message);
+      return null;
+    } finally {
+      if (!quiet) setTransactionSettingsBusy(false);
+    }
+  }
+
+  async function updateTransactionStatusHidden(menuHidden) {
+    if (transactionSettingsSaving) return null;
+    setTransactionSettingsSaving(true);
+    setTransactionSettingsError("");
+    try {
+      const response = await fetch("/api/transactions/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ menuHidden }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      const nextSettings = {
+        ...defaultTransactionSettings,
+        ...payload,
+        settings: {
+          ...defaultTransactionSettings.settings,
+          ...(payload.settings || {}),
+        },
+      };
+      setTransactionSettings(nextSettings);
+      if (nextSettings.settings.menuHidden && activeViewRef.current === "transaction-status") {
+        setActiveView("stock");
+      }
+      return nextSettings;
+    } catch (error) {
+      setTransactionSettingsError(error.message);
+      return null;
+    } finally {
+      setTransactionSettingsSaving(false);
+    }
+  }
+
   async function loadMagazineSettings({ quiet = false } = {}) {
     if (!quiet) {
       setMagazineSettingsBusy(true);
@@ -3229,11 +3349,14 @@ function App() {
     }
   }
 
-  async function loadWorldMemoryStatus() {
+  async function loadWorldMemoryStatus({ summary = false } = {}) {
     setWorldMemoryBusy(true);
     setWorldMemoryError("");
     try {
-      const response = await fetch("/api/world-memory/status", { cache: "no-store" });
+      const response = await fetch(
+        summary ? "/api/world-memory/status?mode=summary" : "/api/world-memory/status",
+        { cache: "no-store" }
+      );
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload.error || `HTTP ${response.status}`);
@@ -3329,9 +3452,24 @@ function App() {
     }
   }
 
-  async function updateWorldMemoryManagementProvider(managementProvider) {
+  async function updateWorldMemoryManagementSettings(patch = {}) {
     if (worldMemorySettingsSaving) return;
-    const safeProvider = normalizeAgentModelProvider(managementProvider);
+    const source = patch && typeof patch === "object" ? patch : {};
+    const body = {
+      ...(Object.prototype.hasOwnProperty.call(source, "managementProvider")
+        ? { managementProvider: normalizeAgentModelProvider(source.managementProvider) }
+        : {}),
+      ...(String(source.managementModel || "").trim()
+        ? { managementModel: String(source.managementModel).trim() }
+        : {}),
+      ...(String(source.managementReasoning || "").trim()
+        ? { managementReasoning: String(source.managementReasoning).trim() }
+        : {}),
+      ...(String(source.managementSpeed || "").trim()
+        ? { managementSpeed: String(source.managementSpeed).trim() }
+        : {}),
+    };
+    if (!Object.keys(body).length) return;
     setWorldMemorySettingsSaving(true);
     setWorldMemorySettingsError("");
     try {
@@ -3339,7 +3477,7 @@ function App() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ managementProvider: safeProvider }),
+        body: JSON.stringify(body),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) {
@@ -3386,10 +3524,24 @@ function App() {
     }
   }
 
-  async function updateMagazineWritingProvider(writingProvider, writingReasoning = "") {
+  async function updateMagazineWritingSettings(patch = {}) {
     if (magazineSettingsSaving) return;
-    const safeProvider = normalizeAgentModelProvider(writingProvider);
-    const safeReasoning = String(writingReasoning || "").trim();
+    const source = patch && typeof patch === "object" ? patch : {};
+    const body = {
+      ...(Object.prototype.hasOwnProperty.call(source, "writingProvider")
+        ? { writingProvider: normalizeAgentModelProvider(source.writingProvider) }
+        : {}),
+      ...(String(source.writingModel || "").trim()
+        ? { writingModel: String(source.writingModel).trim() }
+        : {}),
+      ...(String(source.writingReasoning || "").trim()
+        ? { writingReasoning: String(source.writingReasoning).trim() }
+        : {}),
+      ...(String(source.writingSpeed || "").trim()
+        ? { writingSpeed: String(source.writingSpeed).trim() }
+        : {}),
+    };
+    if (!Object.keys(body).length) return;
     setMagazineSettingsSaving(true);
     setMagazineSettingsError("");
     try {
@@ -3397,46 +3549,7 @@ function App() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({
-          writingProvider: safeProvider,
-          ...(safeReasoning ? { writingReasoning: safeReasoning } : {}),
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const nextSettings = { ...defaultMagazineSettings, ...payload };
-      setMagazineSettings(nextSettings);
-      setMagazineStatus((current) => ({
-        ...(current || {}),
-        settings: nextSettings,
-        scheduler: current?.scheduler
-          ? {
-              ...current.scheduler,
-              settings: nextSettings,
-            }
-          : current?.scheduler,
-      }));
-    } catch (error) {
-      setMagazineSettingsError(error.message);
-    } finally {
-      setMagazineSettingsSaving(false);
-    }
-  }
-
-  async function updateMagazineWritingReasoning(writingReasoning) {
-    if (magazineSettingsSaving) return;
-    const safeReasoning = String(writingReasoning || "").trim();
-    if (!safeReasoning) return;
-    setMagazineSettingsSaving(true);
-    setMagazineSettingsError("");
-    try {
-      const response = await fetch("/api/magazine/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ writingReasoning: safeReasoning }),
+        body: JSON.stringify(body),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) {
@@ -4209,6 +4322,7 @@ function App() {
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error || `HTTP ${response.status}`);
       }
+      newsFeedContentRevisionRef.current = newsFeedContentRevision(payload);
       setNewsFeedStatus((current) =>
         payload.collector || payload.feeds
           ? payload
@@ -4235,6 +4349,7 @@ function App() {
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error || `HTTP ${response.status}`);
       }
+      newsFeedContentRevisionRef.current = newsFeedContentRevision(payload);
       setNewsFeedStatus(payload);
       return payload;
     } catch {
@@ -4425,7 +4540,7 @@ function App() {
   }
 
   async function refreshNewsFeed() {
-    setNewsFeedBusy(true);
+    setNewsFeedRefreshBusy(true);
     setNewsFeedError("");
     try {
       const response = await fetch("/api/news-feed/refresh", {
@@ -4436,13 +4551,12 @@ function App() {
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error || `HTTP ${response.status}`);
       }
+      newsFeedContentRevisionRef.current = newsFeedContentRevision(payload);
       setNewsFeedStatus(payload);
-      setNewsFeedItems(payload.items || []);
-      setNewsFeedHasMore(Boolean(payload.hasMore));
     } catch (error) {
       setNewsFeedError(error.message);
     } finally {
-      setNewsFeedBusy(false);
+      setNewsFeedRefreshBusy(false);
     }
   }
 
@@ -4611,9 +4725,11 @@ function App() {
     void addChatAttachmentFiles(files);
   }
 
-  async function refreshAgentOptions({ isCancelled = () => false } = {}) {
+  async function refreshAgentOptions({ isCancelled = () => false, force = false } = {}) {
     try {
-      const response = await fetch("/api/codex/options", { cache: "no-store" });
+      const response = await fetch(force ? "/api/codex/options?refresh=1" : "/api/codex/options", {
+        cache: "no-store",
+      });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -4656,6 +4772,7 @@ function App() {
           ? "Codex CLI 연결됨"
           : payload.codex?.error || "Codex CLI 연결 실패",
         commandPreview: "",
+        version: payload.codex?.version || "",
       });
     } catch (error) {
       if (isCancelled()) return;
@@ -4668,6 +4785,16 @@ function App() {
     }
   }
 
+  async function reloadAgentModelCatalog() {
+    if (modelCatalogRefreshing) return;
+    setModelCatalogRefreshing(true);
+    try {
+      await refreshAgentOptions({ force: true });
+    } finally {
+      setModelCatalogRefreshing(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     void refreshAgentOptions({ isCancelled: () => cancelled });
@@ -4677,17 +4804,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    void loadSharedMemoryStatus();
-  }, []);
-
-  useEffect(() => {
-    void loadWorldMemorySettings({ quiet: true, refreshStatus: true });
-    void loadMagazineSettings({ quiet: true });
-  }, []);
-
-  useEffect(() => {
-    void loadTossInvestStatus({ quiet: true });
-    void loadTossInvestOrderSyncStatus({ quiet: true });
+    void Promise.all([
+      loadWorldMemorySettings({ quiet: true }),
+      loadWorldMemoryStatus({ summary: true }),
+      loadTransactionSettings({ quiet: true }),
+    ]);
   }, []);
 
   useEffect(() => {
@@ -4713,18 +4834,7 @@ function App() {
   }, [tossInvestOrderSyncBusy, tossInvestOrderSyncAction]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void refreshMagazineCatalog({ signal: controller.signal }).catch((error) => {
-      if (error.name !== "AbortError") {
-        console.warn("Magazine catalog load failed", error);
-      }
-    });
-    return () => {
-      controller.abort();
-    };
-  }, []);
-
-  useEffect(() => {
+    if (activeView !== "magazine") return undefined;
     const controller = new AbortController();
     async function loadMagazinePreferences() {
       try {
@@ -4746,7 +4856,7 @@ function App() {
     return () => {
       controller.abort();
     };
-  }, []);
+  }, [activeView]);
 
   useEffect(() => {
     if (!magazineActiveArticle?.id) return undefined;
@@ -4855,6 +4965,7 @@ function App() {
             : fileStore;
 
         if (portfolioCanvasStoreHasCanvases(nextStore) || portfolioCanvasStoreHasCanvases(fileStore)) {
+          portfolioCanvasFileSignatureRef.current = JSON.stringify(normalizePortfolioCanvasStore(nextStore));
           setPortfolioCanvasStore(normalizePortfolioCanvasStore(nextStore));
           writeStoredPortfolioCanvasStore(nextStore);
         }
@@ -4882,19 +4993,18 @@ function App() {
   useEffect(() => {
     if (!portfolioCanvasFileReadyRef.current) return;
     const nextStore = normalizePortfolioCanvasStore(portfolioCanvasStore);
+    const nextSignature = JSON.stringify(nextStore);
+    if (nextSignature === portfolioCanvasFileSignatureRef.current) return;
     const timer = window.setTimeout(() => {
-      void savePortfolioCanvasStoreFile(nextStore).catch(() => {});
+      portfolioCanvasFileSignatureRef.current = nextSignature;
+      void savePortfolioCanvasStoreFile(nextStore).catch(() => {
+        if (portfolioCanvasFileSignatureRef.current === nextSignature) {
+          portfolioCanvasFileSignatureRef.current = "";
+        }
+      });
     }, PORTFOLIO_CANVAS_FILE_SAVE_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [portfolioCanvasStore]);
-
-  useEffect(() => {
-    newsFeedItemsCountRef.current = newsFeedItems.length;
-  }, [newsFeedItems.length]);
-
-  useEffect(() => {
-    newsFeedLatestTranslatedAtRef.current = newsFeedStatus?.readState?.latestTranslatedAt || "";
-  }, [newsFeedStatus?.readState?.latestTranslatedAt]);
 
   useEffect(() => {
     magazineArticleCountRef.current = Number(
@@ -4917,19 +5027,22 @@ function App() {
           throw new Error(payload.error || `HTTP ${response.status}`);
         }
         if (cancelled) return;
-        const latestTranslatedAt = payload.readState?.latestTranslatedAt || "";
+        const previousContentRevision = newsFeedContentRevisionRef.current;
+        const nextContentRevision = newsFeedContentRevision(payload);
+        newsFeedContentRevisionRef.current = nextContentRevision;
         setNewsFeedStatus(payload);
 
         if (
           activeViewRef.current === "news-feed" &&
-          (Number(payload.itemCount || 0) !== newsFeedItemsCountRef.current ||
-            latestTranslatedAt !== newsFeedLatestTranslatedAtRef.current)
+          previousContentRevision &&
+          nextContentRevision !== previousContentRevision
         ) {
           const itemsResponse = await fetch(`/api/news-feed/items?limit=${NEWS_FEED_PAGE_SIZE}&offset=0`, {
             cache: "no-store",
           });
           const itemsPayload = await itemsResponse.json().catch(() => ({}));
           if (!cancelled && itemsResponse.ok && itemsPayload.ok) {
+            newsFeedContentRevisionRef.current = newsFeedContentRevision(itemsPayload);
             setNewsFeedStatus((current) => ({
               ...(current || {}),
               itemCount: itemsPayload.itemCount,
@@ -4939,7 +5052,7 @@ function App() {
               hasMore: itemsPayload.hasMore,
             }));
             setNewsFeedHasMore(Boolean(itemsPayload.hasMore));
-            setNewsFeedItems(itemsPayload.items || []);
+            setNewsFeedItems((current) => mergeNewsFeedFirstPage(current, itemsPayload.items || []));
           }
         }
       } catch (error) {
@@ -5107,12 +5220,9 @@ function App() {
     let cancelled = false;
 
     async function openNewsFeed() {
-      await markNewsFeedOpened();
+      await Promise.all([markNewsFeedOpened(), loadNewsFeedItems({ reset: true })]);
       if (cancelled) return;
-      await loadNewsFeedItems({ reset: true });
-      if (!cancelled) {
-        void refreshNewsFeedStatus();
-      }
+      void refreshNewsFeedStatus();
     }
 
     void openNewsFeed();
@@ -5144,9 +5254,6 @@ function App() {
           console.warn("Magazine catalog refresh failed", error);
         }
       }
-      if (!cancelled) {
-        void refreshMagazineStatus().catch(() => {});
-      }
     }
 
     void openMagazine();
@@ -5164,12 +5271,17 @@ function App() {
     void loadArcaAuthStatus({ quiet: true });
     void loadTossInvestStatus({ quiet: true });
     void loadTossInvestOrderSyncStatus({ quiet: true });
+    void loadTransactionSettings();
   }, [activeView]);
 
   useEffect(() => {
     if (activeView !== "transaction-status") return;
+    if (transactionStatusHidden) {
+      setActiveView("stock");
+      return;
+    }
     void loadTossInvestStatus({ quiet: true });
-  }, [activeView]);
+  }, [activeView, transactionStatusHidden]);
 
   useEffect(() => {
     if (activeView !== "portfolio-canvas" || !activePortfolioCanvas) return;
@@ -5284,11 +5396,8 @@ function App() {
     const approvalFlag = selectedApproval?.cli || "";
     const modelFlag = selectedModelGroup?.slug ? `-m ${selectedModelGroup.slug}` : "";
     const reasoningFlag = selectedReasoning?.cli || "";
-    const speedHint =
-      selectedSpeed && selectedSpeed.id !== "standard"
-        ? `[speed: ${selectedSpeed.label}${selectedSpeed.pending ? " · CLI config 확인 필요" : ""}]`
-        : "";
-    return ["codex", approvalFlag, modelFlag, reasoningFlag, speedHint].filter(Boolean).join(" ");
+    const speedFlag = selectedSpeed?.cli || "";
+    return ["codex", approvalFlag, modelFlag, reasoningFlag, speedFlag].filter(Boolean).join(" ");
   }, [agentOptionsReady, agentProvider, selectedProvider, selectedApproval, selectedModelGroup, selectedReasoning, selectedSpeed]);
 
   function buildPendingAssistant(id, runtime = providerRuntimeForProvider(agentProvider)) {
@@ -5427,14 +5536,21 @@ function App() {
         : isPortfolioScreenForMessage
           ? portfolioContext
           : null;
-    const promptWithContext = [
-      buildPromptWithArticleContext(promptTextForAgent, articleForMessage),
-      isPortfolioScreenForMessage
-        ? buildPortfolioChatActionInstructions(portfolioContextForMessage, {
+    const transactionStatusContextForMessage = screenForMessage === "transaction-status"
+      ? transactionStatusContextRef.current
+      : null;
+    const portfolioActionInstructions = isPortfolioScreenForMessage
+      ? (await import("./portfolio/agentPromptBuilder.js")).buildPortfolioChatActionInstructions(
+          portfolioContextForMessage,
+          {
             modeMeta: portfolioCanvasModeMeta(portfolioContextForMessage?.portfolioMode || portfolioContextForMessage?.canvas?.mode),
             assetCanvasModeId: PORTFOLIO_CANVAS_MODES.asset.id,
-          })
-        : "",
+          }
+        )
+      : "";
+    const promptWithContext = [
+      buildPromptWithArticleContext(promptTextForAgent, articleForMessage),
+      portfolioActionInstructions,
       attachmentsSummary(attachmentsForMessage),
     ].filter(Boolean).join("\n\n");
     const boardIndexContext =
@@ -5514,6 +5630,7 @@ function App() {
           provider: messageRuntime.provider,
           model: messageRuntime.selectedModelGroup?.slug,
           reasoning: messageRuntime.selectedReasoning?.id,
+          speed: messageRuntime.selectedSpeed?.id,
           approval: messageRuntime.selectedApproval?.id,
           personaMode:
             options.disablePersonaMode || !personaEligibleScreens.has(screenForMessage)
@@ -5545,6 +5662,9 @@ function App() {
           calendarContext,
           magazineArticleContext: magazineArticleContextForMessage,
           portfolioContext: portfolioContextForMessage,
+          portfolioRetrievalQuery: isPortfolioScreenForMessage ? promptTextForAgent : "",
+          transactionStatusContext: transactionStatusContextForMessage,
+          transactionStatusRetrievalQuery: screenForMessage === "transaction-status" ? promptTextForAgent : "",
           visibleScreenSnapshot,
           attachments: attachmentsForMessage.map((attachment) => ({
             id: attachment.id,
@@ -5920,7 +6040,7 @@ function App() {
     });
   }
 
-  function handlePortfolioWidgetPromptRequest(request) {
+  async function handlePortfolioWidgetPromptRequest(request) {
     const requestWithId = {
       ...request,
       requestId: `portfolio_widget_request_${Date.now()}`,
@@ -5938,6 +6058,7 @@ function App() {
       ...requestWithId,
       attachments: requestAttachments,
     };
+    const { buildPortfolioWidgetAgentPrompt } = await import("./portfolio/agentPromptBuilder.js");
     const agentPrompt = buildPortfolioWidgetAgentPrompt(requestWithAttachments, {
       modeMeta: portfolioCanvasModeMeta(requestWithId.canvasMode),
       assetCanvasModeId: PORTFOLIO_CANVAS_MODES.asset.id,
@@ -5984,7 +6105,7 @@ function App() {
     if (!queuedPortfolioWidgetRequest || !agentOptionsReady || activePortfolioChatIsSending) return;
     const request = queuedPortfolioWidgetRequest;
     setQueuedPortfolioWidgetRequest(null);
-    handlePortfolioWidgetPromptRequest(request);
+    void handlePortfolioWidgetPromptRequest(request);
   }, [queuedPortfolioWidgetRequest, agentOptionsReady, activePortfolioChatIsSending]);
 
   async function analyzeEarningEvent(event) {
@@ -6022,6 +6143,7 @@ function App() {
           provider: agentProvider,
           model: selectedModelGroup?.slug,
           reasoning: selectedReasoning?.id,
+          speed: selectedSpeed?.id,
           approval: selectedApproval?.id,
           screen: "earning-calendar",
           includeWorldMemoryContext: false,
@@ -6188,8 +6310,8 @@ function App() {
   }
 
   const defaultAgentRuntime = providerRuntimeForProvider(agentProvider);
-  const worldMemoryAgentRuntime = providerRuntimeForProvider(worldMemoryManagementProviderId());
-  const magazineAgentRuntime = providerRuntimeForProvider(magazineWritingProviderId());
+  const worldMemoryAgentRuntime = worldMemoryManagementRuntime();
+  const magazineAgentRuntime = magazineWritingRuntime();
   const sidebarAgentRuntime =
     activeView === "world-memory" && worldMemoryEnabled
       ? worldMemoryAgentRuntime
@@ -6227,7 +6349,7 @@ function App() {
     const providerReasoningOptions = providerModelGroup?.reasoningLevels?.length
       ? providerModelGroup.reasoningLevels
       : fallbackModelGroups[0].reasoningLevels;
-    const providerSpeedOptions = getSpeedOptions(providerModelGroup);
+    const providerSpeedOptions = getSpeedOptionsForReasoning(providerModelGroup, providerSelection.reasoning);
 
     return {
       id: providerId,
@@ -6313,6 +6435,7 @@ function App() {
         portfolioCanvasMenuId={portfolioCanvasMenuId}
         portfolioCanvases={portfolioCanvases}
         portfolioSidebarOpen={portfolioSidebarOpen}
+        transactionStatusHidden={transactionStatusHidden}
         worldMemoryEnabled={worldMemoryEnabled}
         worldMemoryHealth={worldMemoryHealth}
       />
@@ -6364,7 +6487,8 @@ function App() {
                 worldMemorySettingsBusy ||
                 magazineSettingsBusy ||
                 tossInvestBusy ||
-                tossInvestOrderSyncBusy
+                tossInvestOrderSyncBusy ||
+                transactionSettingsBusy
               }
               savingFeedId={newsFeedSettingsSavingId}
               error={newsFeedSettingsError}
@@ -6374,6 +6498,7 @@ function App() {
                 void loadMagazineSettings({ quiet: true });
                 void loadTossInvestStatus();
                 void loadTossInvestOrderSyncStatus();
+                void loadTransactionSettings();
               }}
               onToggleFeed={toggleNewsFeedSource}
               onPollIntervalChange={updateNewsFeedPollInterval}
@@ -6411,15 +6536,21 @@ function App() {
               magazineSettingsError={magazineSettingsError}
               onToggleWorldMemoryTech={() => setWorldMemoryTechOpen((open) => !open)}
               onToggleWorldMemoryEnabled={updateWorldMemoryEnabled}
-              onWorldMemoryManagementProviderChange={updateWorldMemoryManagementProvider}
+              onWorldMemoryManagementSettingsChange={updateWorldMemoryManagementSettings}
               onToggleMagazineEnabled={updateMagazineEnabled}
-              onMagazineWritingProviderChange={updateMagazineWritingProvider}
-              onMagazineWritingReasoningChange={updateMagazineWritingReasoning}
+              onMagazineWritingSettingsChange={updateMagazineWritingSettings}
               onMagazineSchedulerIntervalChange={updateMagazineSchedulerInterval}
               onMagazineMaxArticlesPerCycleChange={updateMagazineMaxArticlesPerCycle}
               onReloadWorldMemory={loadWorldMemoryStatus}
               tossInvest={tossInvestConnectionProps}
               tossOrderSync={tossInvestOrderSyncProps}
+              transactionStatusVisibility={{
+                hidden: transactionStatusHidden,
+                busy: transactionSettingsBusy,
+                saving: transactionSettingsSaving,
+                error: transactionSettingsError,
+                onChange: updateTransactionStatusHidden,
+              }}
               arcaAuth={{
                 status: arcaAuthStatus,
                 busy: arcaAuthBusy,
@@ -6456,6 +6587,8 @@ function App() {
                 onPersonaModeChange: updatePersonaMode,
                 settingsError: agentSettingsError,
                 loading: !agentOptionsReady,
+                modelCatalogRefreshing,
+                onReloadModelCatalog: reloadAgentModelCatalog,
               }}
             />
           </React.Suspense>
@@ -6534,11 +6667,11 @@ function App() {
             tossPublicIpError={tossInvestPublicIpError}
             onOpenSettings={openTossInvestDialog}
             onDeleteCredentials={deleteTossInvestCredentials}
-            onProbeConnection={probeTossInvestConnection}
             onCheckPublicIp={checkTossInvestPublicIp}
             onReload={() => {
-              void loadTossInvestStatus({ quiet: true });
+              void loadTossInvestStatus();
             }}
+            onContextChange={handleTransactionStatusContextChange}
           />
         </React.Suspense>
       ) : activeView === "world-memory" && worldMemoryEnabled ? (
@@ -6575,6 +6708,7 @@ function App() {
               status={newsFeedStatus}
               items={newsFeedItems}
               busy={newsFeedBusy}
+              refreshBusy={newsFeedRefreshBusy}
               loadingMore={newsFeedLoadingMore}
               error={newsFeedError}
               hasMore={newsFeedHasMore}

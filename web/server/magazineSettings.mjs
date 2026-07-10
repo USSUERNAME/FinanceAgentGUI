@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeCodexSpeed } from "./agentSpeed.mjs";
 import { isWorldMemoryEnabled } from "./worldMemorySettings.mjs";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -13,13 +14,15 @@ const fallbackSettings = {
   version: 1,
   enabled: false,
   writingProvider: "default",
+  writingModel: "",
   writingReasoning: "",
+  writingSpeed: "standard",
   schedulerIntervalHours: 6,
   schedulerMaxArticlesPerCycle: 2,
 };
 
 const MODEL_PROVIDER_IDS = new Set(["default", "codex-cli", "antigravity-cli"]);
-const REASONING_LEVEL_IDS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
+const REASONING_LEVEL_IDS = new Set(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 const DEFAULT_SCHEDULER_INTERVAL_HOURS = 6;
 const MIN_SCHEDULER_INTERVAL_HOURS = 1;
 const MAX_SCHEDULER_INTERVAL_HOURS = 10;
@@ -76,6 +79,16 @@ export function normalizeMagazineWritingReasoning(value, fallback = fallbackSett
   return REASONING_LEVEL_IDS.has(safeFallback) ? safeFallback : fallbackSettings.writingReasoning;
 }
 
+export function normalizeMagazineWritingModel(value, fallback = fallbackSettings.writingModel) {
+  const candidate = String(value ?? "").trim().replace(/[\r\n\0]/g, "").slice(0, 160);
+  if (candidate) return candidate;
+  return String(fallback ?? "").trim().replace(/[\r\n\0]/g, "").slice(0, 160);
+}
+
+export function normalizeMagazineWritingSpeed(value, fallback = fallbackSettings.writingSpeed) {
+  return normalizeCodexSpeed(value, fallback);
+}
+
 function normalizeMagazineSettings(raw = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
   const writingProvider = source.writingProvider || source.authorProvider || fallbackSettings.writingProvider;
@@ -85,9 +98,11 @@ function normalizeMagazineSettings(raw = {}) {
     writingProvider: MODEL_PROVIDER_IDS.has(writingProvider)
       ? writingProvider
       : fallbackSettings.writingProvider,
+    writingModel: normalizeMagazineWritingModel(source.writingModel ?? source.model),
     writingReasoning: normalizeMagazineWritingReasoning(
       source.writingReasoning ?? source.writingReasoningLevel ?? fallbackSettings.writingReasoning
     ),
+    writingSpeed: normalizeMagazineWritingSpeed(source.writingSpeed ?? source.speed),
     schedulerIntervalHours: normalizeMagazineSchedulerIntervalHours(
       source.schedulerIntervalHours ?? source.intervalHours ?? fallbackSettings.schedulerIntervalHours
     ),
@@ -120,9 +135,11 @@ export function writeMagazineSettingsPatch(patch = {}) {
   const source = patch && typeof patch === "object" ? patch : {};
   const hasEnabled = Object.prototype.hasOwnProperty.call(source, "enabled");
   const hasWritingProvider = Object.prototype.hasOwnProperty.call(source, "writingProvider");
+  const hasWritingModel = Object.prototype.hasOwnProperty.call(source, "writingModel");
   const hasWritingReasoning =
     Object.prototype.hasOwnProperty.call(source, "writingReasoning") ||
     Object.prototype.hasOwnProperty.call(source, "writingReasoningLevel");
+  const hasWritingSpeed = Object.prototype.hasOwnProperty.call(source, "writingSpeed");
   const hasSchedulerIntervalHours = Object.prototype.hasOwnProperty.call(source, "schedulerIntervalHours");
   const hasSchedulerMaxArticlesPerCycle = Object.prototype.hasOwnProperty.call(
     source,
@@ -132,12 +149,14 @@ export function writeMagazineSettingsPatch(patch = {}) {
   if (
     !hasEnabled &&
     !hasWritingProvider &&
+    !hasWritingModel &&
     !hasWritingReasoning &&
+    !hasWritingSpeed &&
     !hasSchedulerIntervalHours &&
     !hasSchedulerMaxArticlesPerCycle &&
     !hasDisabledReason
   ) {
-    throw new Error("enabled, writingProvider, writingReasoning, schedulerIntervalHours, or schedulerMaxArticlesPerCycle is required");
+    throw new Error("enabled, writingProvider, writingModel, writingReasoning, writingSpeed, schedulerIntervalHours, or schedulerMaxArticlesPerCycle is required");
   }
   if (hasEnabled && source.enabled === true && !isWorldMemoryEnabled()) {
     const error = new Error("World Memory must be enabled before Magazine can be enabled");
@@ -151,9 +170,11 @@ export function writeMagazineSettingsPatch(patch = {}) {
     ...currentSettings,
     enabled: nextEnabled,
     ...(hasWritingProvider ? { writingProvider: source.writingProvider } : {}),
+    ...(hasWritingModel ? { writingModel: source.writingModel } : {}),
     ...(hasWritingReasoning
       ? { writingReasoning: source.writingReasoning ?? source.writingReasoningLevel }
       : {}),
+    ...(hasWritingSpeed ? { writingSpeed: source.writingSpeed } : {}),
     ...(hasSchedulerIntervalHours ? { schedulerIntervalHours: source.schedulerIntervalHours } : {}),
     ...(hasSchedulerMaxArticlesPerCycle
       ? { schedulerMaxArticlesPerCycle: source.schedulerMaxArticlesPerCycle }
@@ -185,7 +206,9 @@ export function publicMagazineSettingsSnapshot() {
     enabled,
     worldMemoryEnabled,
     writingProvider: settings.writingProvider,
+    writingModel: settings.writingModel,
     writingReasoning: settings.writingReasoning,
+    writingSpeed: settings.writingSpeed,
     schedulerIntervalHours: settings.schedulerIntervalHours,
     schedulerIntervalMs: settings.schedulerIntervalHours * 60 * 60 * 1000,
     schedulerMaxArticlesPerCycle: settings.schedulerMaxArticlesPerCycle,

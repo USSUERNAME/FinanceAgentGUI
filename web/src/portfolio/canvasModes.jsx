@@ -11,7 +11,7 @@ export const PORTFOLIO_CANVAS_MODES = {
     defaultNamePrefix: "이름 없는 자산 캔버스",
     buttonLabel: "자산 관리 캔버스 생성",
     description: "실제 보유 자산, 원금, 평가금액, 손익, 업데이트 이력을 추적합니다.",
-    actionGuidance: "실제 자산 데이터는 금액, 수량, 원금, 평가금액, 데이터 출처를 우선 확인해야 합니다.",
+    actionGuidance: "실제 자산 데이터는 금액, 수량, 원금, 평가금액, 데이터 출처를 우선 확인하고, 새 위젯은 사용자가 캔버스의 + 버튼에서 직접 선택합니다.",
     Icon: WalletCards,
     accentClass: "is-asset",
   },

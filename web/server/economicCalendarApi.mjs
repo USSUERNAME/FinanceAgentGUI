@@ -9,6 +9,7 @@ import {
   ANTIGRAVITY_TRANSLATION_REASONING,
   selectAntigravityModelForReasoning,
 } from "../src/agent/antigravityModelSelection.js";
+import { selectCodexTranslationModel } from "../src/agent/codexTranslationModelSelection.js";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const GUIBUILD_ROOT = resolve(WEB_ROOT, "..");
@@ -415,22 +416,15 @@ function latestAntigravityTranslationModel(options) {
 }
 
 function codexEconomicTranslationModel(options) {
-  const group = options.modelGroups?.[0];
-  if (!group?.slug) throw new Error("Codex 모델 카탈로그가 비어 있습니다.");
-
-  const supported = (group.reasoningLevels || []).map((level) => level.id);
-  const reasoning =
-    ["minimal", "low", "medium", "high", "xhigh"].find((level) => supported.includes(level)) ||
-    group.defaultReasoningLevel ||
-    supported[0] ||
-    "low";
+  const selection = selectCodexTranslationModel({
+    cliVersion: options.codex?.version,
+    models: options.modelGroups,
+  });
 
   return {
     provider: "codex-cli",
     providerLabel: "Codex CLI",
-    model: group.slug,
-    modelLabel: group.slug,
-    reasoning,
+    ...selection,
   };
 }
 

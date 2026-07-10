@@ -11,7 +11,16 @@ data/magazine/articles/<article-id>/
     hero.jpg
 data/magazine/editorial-preferences.json
 data/magazine/editorial-bias.json
+data/magazine/event-signature-index.sqlite3
 ```
+
+The event-signature SQLite file is a local, rebuildable derived index. Its
+tracked blueprint is `config/magazine-event-signature-index.schema.sql`; create
+or migrate its empty shape with
+`python scripts/magazine_event_signature_index.py init`. Do not commit or ship
+the populated index or an empty seed copy. Use `scripts/sqlite_store_doctor.py`
+for read-only schema/integrity checks and `docs/sqlite-stores.md` for update-time
+backup and migration.
 
 The canonical topic catalog lives in `config/magazine-topics.json`. Each article must set `metadata.topics` to 1-3 `topics[].label` values from that file. One primary topic is required; up to two secondary topics are optional. Three topics is a maximum, not a target, so do not fill weak secondary topics just to use all slots. Do not store ad-hoc tags, companies, industries, or subtopics in `metadata.topics`; use `storyFamily`, `editorialAngle`, `noveltyNote`, body copy, or source fields for those details instead. If a generator returns more than three topics, the runtime keeps only the first three registered topics.
 
@@ -122,11 +131,29 @@ Scheduled topic discovery normally uses the eligible post-update News Feed set a
 
 Store `metadata.eventSignature` for new articles as a primary event-card claimlet, not a prose summary: `role:"primary"`, `actor`, `action`, `object[]`, `time`, `marketMechanism`, and `sourceIds[]`. For articles that intentionally connect several facts, `metadata.eventSignatures[]` may contain exactly one `role:"primary"` card plus zero or more `role:"supporting"` cards. The primary event signature is the text that should be embedded for duplicate discovery; do not embed the whole article body for novelty checks.
 
-Novelty is enforced before publish, not only by prompt wording. Scheduled/staged generation runs the strict checker against the staged article plus the latest uploaded production article baseline. A candidate is rejected when it reuses a recent article's exact `newsFeed.items[].id`, reuses the same non-image external/source URL anchor, or leans on the same primary `worldMemory.vectorSearch.hits[0].eventId` plus the same `storyFamily` without any fresh local item or source URL anchor. Independent delta is not whole-article embedding distance and not hero-image difference; it must be a fresh evidence anchor such as a new eligible local item, official/external source URL, number, policy execution, price reaction, or company action that happened after the previous article. Primary continuity event overlap is treated as context, not a standalone veto. Ambiguous cases should be judged as `same_event`, `independent_followup`, or `unrelated` by LLM editorial judgment, not by text matching or a fixed day-count embargo.
+Novelty is enforced before publish, not only by prompt wording. Scheduled/staged generation checks the staged article against the latest uploaded production article baseline. Exact primary event-signature reuse and reused local evidence ids remain blocking. A shared statistics page, filing portal, standing dataset, IR page, or other source URL is only an editorial similarity signal in the v2 harness; it is not by itself proof that two articles cover the same event. Independent delta is not whole-article embedding distance and not hero-image difference; it must be a fresh evidence anchor such as a new eligible local item, official/external source URL, number, policy execution, price reaction, or company action that happened after the previous article. Primary continuity event overlap is treated as context, not a standalone veto. Ambiguous cases should be judged as `same_event`, `independent_followup`, or `unrelated` by LLM editorial judgment, not by text matching or a fixed day-count embargo.
 
 `scripts/magazine_event_signature_index.py` uses the same `sentence-transformers` model as World Memory (`ibm-granite/granite-embedding-97m-multilingual-r2` by default) to embed the primary `eventSignature + source titles + noveltyNote` into `data/magazine/event-signature-index.sqlite3`. Exact primary-signature/source reuse is a hard failure. High embedding similarity without source reuse is a near-duplicate candidate for LLM novelty judgment; set `MAGAZINE_EVENT_SIGNATURE_STRICT=1` to fail those warnings during stricter runs. Article deletion removes the matching event-signature index row when present.
 
 ## Article Writing Harness
+
+The default profile is `v2`, defined in `config/magazine-article-style-v2.prompt.md` and checked by `scripts/magazine_article_quality_check.mjs`. It keeps publication integrity, evidence, exact-event novelty, files, topics, and image rights as blocking gates. Length, paragraph count, H2 rhythm, optional wit, quotation count, five-source density, and issue-slate mix are advisory signals and do not automatically trigger a rewrite. The writer receives at most the newest 24 eligible local news candidates in its initial prompt and can inspect the local store when older context is needed.
+
+Magazine v2's default commission is the original Korean longform standard in `config/magazine-longform-editorial-standard.prompt.md`. It targets the argumentative and reporting depth of a substantial weekend essay or reported review: an early contestable thesis, evidence with distinct functions, a serious counterargument, historical or institutional context where useful, concrete consequences, deliberately uneven section rhythm, and an ending that sharpens rather than repeats the opening. The usual Korean scope is roughly 5,500-8,500 non-space characters, but the reviewer must never turn that range into a character-count gate. A materially thin brief can fail only when semantic review identifies the missing argumentative work in the actual article.
+
+Approved Korean few-shot exemplars are local runtime assets under `data/magazine/editorial-exemplars/<exemplar-id>/`. Each exemplar contains `article.md`, `metadata.json`, and `editorial-map.json`; only metadata with `approved:true` is eligible. `config/magazine-editorial-exemplars.json` controls the root, count, and prompt-size limits. The full approved articles and their editorial maps are supplied only to the v2 writer. The independent reviewer receives the shorter editorial maps, while topic preflight and image sourcing receive neither. Exemplar facts and source lists are never evidence for a new article, and the writer is explicitly prohibited from copying their wording, metaphors, title patterns, named entities, or section order. The active exemplar ids are recorded in `metadata.generationAgent.editorialExemplars`. The runtime directory remains gitignored because these exemplars may be derived from the user's private World Memory and are not release assets by default.
+
+Run `node scripts/magazine_editorial_exemplar_check.mjs --strict` before setting or retaining `approved:true`. The checker verifies the local package contract and reports the longform scope as an advisory; factual accuracy, argumentative quality, and originality still require semantic editorial review.
+
+The previous exhaustive contract remains unchanged as the `legacy` profile in `config/magazine-article-style.prompt.md` and `scripts/magazine_article_style_check.mjs`. Use `--harness legacy` or `MAGAZINE_HARNESS_PROFILE=legacy` for compatibility or comparison runs. Legacy reader-tone and quote-flow self-classification metadata remains readable but is not required by v2.
+
+After body-first title finalization, v2 stores one `metadata.editorialReviewDecision` with `policy:"magazine-editorial-review-v2"`, `method:"LLM_SEMANTIC_REVIEW"`, and concrete `issues[]`. The schema does not prefill pass booleans. Only issues explicitly classified as `blocking` stop publication; advisory review findings remain visible without forcing repair.
+
+The v2 fast path separates editorial work from operations without changing the prose contract. News-feed-primary scheduler slots reuse the candidate angle already chosen by the article-count decision instead of making a second slot-selection LLM call. Direct CLI runs use a short topic preflight. The selected angle is passed as a locked topic; the writer must stop with `topic-reselect-required` instead of switching subjects after research has begun. For a one-article run, image sourcing starts from that locked topic at the same time as the writer, so image search and download normally sit behind body generation instead of extending the critical path. After the body is available, the independent semantic reviewer proposes the final body-first title while the generator installs the prepared image patch. If early image preparation fails, only the image worker falls back to the post-write retry path. Separate patches are merged centrally to prevent concurrent lost updates.
+
+Codex v2 writer sessions are persisted so their explicit session id can be used for blocking-content repair through `codex exec resume <session-id>`. The pipeline never uses `--last`. The independent reviewer stays in a separate session so writer context does not turn review into self-certification. Image failure retries only the image worker; embedding/index infrastructure failures abort without asking the writer to rewrite the article.
+
+The detailed rules below document the legacy profile and historical editorial preferences. For v2 generation, the shorter v2 prompt is authoritative where the two profiles differ.
 
 Magazine article prose should feel edited, not templated.
 
@@ -147,7 +174,7 @@ Magazine article prose should feel edited, not templated.
 - Do not indirectly paraphrase a statement and then attach a direct quote that says the same thing. If exact wording is verified and the quote is worth using, let the direct quote be the first expression of that claim. The preceding sentence should explain why this voice matters, not summarize the quote in advance.
 - Quotes and attributions are not decorative proof stamps. Do not explain the whole point in body prose and then repeat it in a quote. A quoted or attributed moment should do one clear job: introduce a new fact, sharpen disagreement, explain the implication of a number, reveal who benefits or pays, or set up the next paragraph's mechanism.
 - Make the prose around a quote do real work. The sentence before the quote should create the need for that source voice without restating it, and the sentence after it should use the quote to move the article forward. If the quote does not change what the reader understands, keep the verified direct quote and rewrite the preceding paraphrase as context, or remove the quote entirely.
-- Media names, organizations, and people names should be written as `original name(Korean name)` on first mention in reader-facing article copy. For well-known acronyms, use `original name(ACRONYM·Korean name)`, such as `International Energy Agency(IEA·국제에너지기구)`. Subsequent mentions can use the acronym or Korean short form when readability benefits.
+- Write media, organization, and personal names in the form a Korean reader would naturally encounter. Do not mechanically attach an original-language name to every familiar proper noun. When a less familiar name or acronym genuinely needs disambiguation, introduce it once as `한국어명(원어명·약어)` or the shortest natural equivalent, such as `미국 에너지정보청(EIA)`, and then use the Korean short form or acronym.
 - Hero images must be real article-related images, not generated SVG/vector mockups. Prefer free/open images and official source images when they carry the story well. For local private reading, public news/photos can be used when they are materially more accurate for a person, company, or specific event; record a clear `usageNote` such as `editorial-private-use; local personal reading only`.
 - Store local hero assets as bitmap files under `assets/` and record `credit`, `sourceUrl` or `pageUrl`, and license/rights/usage notes in `metadata.heroImage`. Wikimedia Commons files can be downloaded with `Special:FilePath`; official or news photos should use the original/representative image URL when available. Verify local assets with `file`, `ls -lh`, and the strict checker instead of creating placeholders.
 - Image search should be bounded. After at most three `search_web` calls, either download a viable candidate or report the failed URLs/commands. Do not keep searching while leaving the article without a real local bitmap.
@@ -183,20 +210,26 @@ Deep analysis articles can include ECharts blocks in `metadata.json`:
 
 Keep `option` JSON-serializable and use the existing local ECharts renderer.
 
-Run the project-local style and novelty check before publishing generated articles:
+Run the default v2 quality and novelty check before publishing generated articles:
 
 ```bash
-node scripts/magazine_article_style_check.mjs
+node scripts/magazine_article_quality_check.mjs
+node scripts/magazine_article_quality_check.mjs --strict
+```
+
+Run the unchanged legacy checker only for a legacy comparison:
+
+```bash
 node scripts/magazine_article_style_check.mjs --strict
 ```
 
 Generate a fresh issue through the connected Codex CLI:
 
 ```bash
-node scripts/magazine_generate_with_codex.mjs --replace --count 5
+node scripts/magazine_generate_with_codex.mjs --count 1 --harness v2
 ```
 
-The generator runs Codex CLI from the standalone `GuiBuild/` root, reads the magazine harness files, edits only local magazine runtime article folders, finalizes each title from the completed body only, stores LLM reader-tone and quote-flow decisions in metadata, and then runs `node scripts/magazine_article_style_check.mjs --strict`. If a repair round changes the body, the generator runs the body-only title pass plus the LLM metadata classification passes again before the next strict check.
+The generator runs Codex CLI from the standalone `GuiBuild/` root, reads the selected magazine harness, and edits only local magazine runtime article folders. The default one-article v2 path locks the topic, runs body writing and early image sourcing concurrently, installs the verified image patch, runs independent semantic review, uses the reviewer's body-first title, and then runs `node scripts/magazine_article_quality_check.mjs --strict`; advisory items do not fail the run. Multi-article and early-image-failure cases retain the safe post-write image worker. The legacy path retains the separate title, reader-tone, and quote-flow passes plus `node scripts/magazine_article_style_check.mjs --strict`.
 
 For staged scheduler runs, the generator sets `MAGAZINE_BASELINE_ARTICLES_DIR=data/magazine/articles` and `MAGAZINE_BASELINE_ARTICLE_LIMIT=12` so the strict checker can compare candidates with recently uploaded articles before publish.
 
@@ -260,7 +293,7 @@ POST /api/magazine/read-state
 
 `PATCH /api/magazine/settings` also accepts `{"schedulerMaxArticlesPerCycle":2}`. The value is stored in `config/magazine.user.json`, defaults to `2`, and is clamped to the Settings UI range of 1-3 articles. This setting is the maximum the model may choose for a cycle; the decision harness can still select fewer articles, including `targetCount=0`, when the evidence does not support more.
 
-`PATCH /api/magazine/settings` also accepts `{"writingProvider":"antigravity-cli","writingReasoning":"low"}`. `writingProvider` stays independent from the default chat agent, and `writingReasoning` is the Magazine-only reasoning level used for article-count judgment and article generation. The Settings page must show Codex CLI reasoning levels when the effective Magazine provider is Codex, and Antigravity CLI reasoning levels when the effective Magazine provider is Antigravity.
+`PATCH /api/magazine/settings` also accepts `{"writingProvider":"codex-cli","writingModel":"gpt-5.6-sol","writingReasoning":"max","writingSpeed":"priority"}`. These values stay independent from the default chat agent and drive article-count judgment, article generation, every title/classification/repair pass, Magazine comments, and the Magazine sidebar runtime. The Settings page orders the controls as provider, model, model-specific reasoning, then speed only when that model/reasoning combination advertises a real speed tier. Codex `priority` is executed as `-c service_tier="priority"`; unsupported or stale speed values fall back to `standard`. The local CLI model catalog can be reloaded on demand. Antigravity CLI 1.1.1 exposes neither a reasoning flag nor a speed flag: entries such as `Gemini 3.5 Flash (High)` and `Claude Sonnet 4.6 (Thinking)` are complete model variants, so the separate reasoning and speed selectors stay hidden.
 
 `POST /api/magazine/status` accepts `{"action":"runNow"}` to request an immediate manual scheduler cycle. The cycle still runs the article-count decision harness first, so a valid result can be `targetCount=0` with a reader-visible reason instead of forcing an article. The API starts the cycle in the background, returns the refreshed status snapshot, and rejects the request while a scheduler or generation cycle is already active.
 

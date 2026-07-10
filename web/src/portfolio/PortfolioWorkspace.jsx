@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   portfolioWidgetActionRoute,
@@ -55,6 +55,10 @@ import { selectPortfolioAutoRefreshCandidate } from "./widgetAutoRefresh.js";
 import { buildPortfolioAgentWidgetActionApplyState } from "./widgetAgentActionApply.js";
 import { buildDerivedPortfolioWidgetRefreshRequest } from "./widgetRefreshPrompts.js";
 import { buildPortfolioMetricsTableSyncPatch } from "./widgetMetrics.js";
+import {
+  portfolioAssetEvaluationMetricColumns,
+  portfolioWidgetIsAssetEvaluationTable,
+} from "./portfolioAssetMetrics.js";
 import { buildPortfolioRestoreTableActionState } from "./widgetRestore.js";
 import {
   buildPortfolioBacktestChartPreparation,
@@ -115,7 +119,7 @@ function portfolioWidgetIsSeasonalComparison(widget = {}) {
 }
 
 function portfolioWidgetUsesAssetHistoryCurrency(widget = {}) {
-  return portfolioWidgetIsAssetPriceHistory(widget) || portfolioWidgetIsSeasonalComparison(widget);
+  return portfolioWidgetIsAssetPriceHistory(widget) || portfolioWidgetIsPositionStatus(widget) || portfolioWidgetIsSeasonalComparison(widget);
 }
 
 function normalizeAssetHistoryCurrency(value = "") {
@@ -222,6 +226,10 @@ export function PortfolioWorkspace({
   const [liveBacktestBusy, setLiveBacktestBusy] = useState(false);
   const [canvasRefreshBusy, setCanvasRefreshBusy] = useState(false);
   const [liveBacktestError, setLiveBacktestError] = useState("");
+  const [widgetDisplayDataState, setWidgetDisplayDataState] = useState(() => ({
+    canvasId: canvas?.id || "",
+    byId: {},
+  }));
   const nextWidgetDisplayIndexRef = useRef(initialWorkspaceState.nextWidgetDisplayIndex);
   const portfolioDependencyAutoRunIdsRef = useRef(new Set());
   const processedAgentActionKeysRef = useRef(new Set(initialWorkspaceState.processedAgentActionKeys));
@@ -273,6 +281,29 @@ export function PortfolioWorkspace({
       effectiveEndLabel: endIsCustom ? "" : "latest",
     };
   }, [assetHistoryMinimumDate, showAssetHistoryPanel, visibleAssetHistoryRange]);
+  const widgetDisplayDataById = widgetDisplayDataState.canvasId === (canvas?.id || "")
+    ? widgetDisplayDataState.byId
+    : {};
+
+  const handleWidgetDisplayData = useCallback((widgetId, displayData) => {
+    const cleanWidgetId = String(widgetId || "").trim();
+    if (!cleanWidgetId) return;
+    const canvasId = canvas?.id || "";
+    setWidgetDisplayDataState((current) => {
+      const currentById = current.canvasId === canvasId ? current.byId : {};
+      if (!displayData) {
+        if (!(cleanWidgetId in currentById)) return current;
+        const nextById = { ...currentById };
+        delete nextById[cleanWidgetId];
+        return { canvasId, byId: nextById };
+      }
+      if (currentById[cleanWidgetId] === displayData) return current;
+      return {
+        canvasId,
+        byId: { ...currentById, [cleanWidgetId]: displayData },
+      };
+    });
+  }, [canvas?.id]);
 
   useEffect(() => {
     if (!titleEditing) {
@@ -351,6 +382,7 @@ export function PortfolioWorkspace({
         portfolioSchemaTables,
         portfolioTheoryPrinciples,
         activityLog,
+        widgetDisplayDataById,
       }),
     [
       activityLog,
@@ -375,6 +407,7 @@ export function PortfolioWorkspace({
       widgets,
       workspaceStarted,
       workspaceStatus,
+      widgetDisplayDataById,
     ]
   );
 
@@ -627,23 +660,33 @@ export function PortfolioWorkspace({
     closeWidgetModal();
   }
 
-  function deletePortfolioWidget(widgetId, sourceWidgets = widgets) {
-    const target = sourceWidgets.find((widget) => widget.id === widgetId);
-    setWidgets((current) =>
-      markPortfolioWidgetMissingDependency(
-        current.filter((widget) => widget.id !== widgetId),
-        target || widgetId,
-        target?.displayId || target?.title
-      )
-    );
-    appendLog(`위젯 삭제 · ${target?.title || widgetId}`);
+  function deletePortfolioWidgets(widgetIds = []) {
+    const requestedIds = new Set(widgetIds.filter(Boolean));
+    if (!requestedIds.size) return;
+    const targets = widgets.filter((widget) => requestedIds.has(widget.id));
+    setWidgets((current) => {
+      const removed = current.filter((widget) => requestedIds.has(widget.id));
+      let next = current.filter((widget) => !requestedIds.has(widget.id));
+      for (const target of removed) {
+        next = markPortfolioWidgetMissingDependency(next, target, target.displayId || target.title);
+      }
+      return next;
+    });
+    appendLog(`위젯 삭제 · ${targets.map((target) => target.title).filter(Boolean).join(", ") || [...requestedIds].join(", ")}`);
+  }
+
+  function deletePortfolioWidget(widgetId) {
+    deletePortfolioWidgets([widgetId]);
   }
 
   function requestDeletePortfolioWidget(widget) {
     if (!widget?.id) return;
     const dependents = portfolioWidgetDownstreamDependents(widget, widgets);
     if (dependents.length) {
-      setPendingDeleteWidget({ target: widget, dependents });
+      const cascadeDependents = dependents.filter((candidate) =>
+        portfolioWidgetIsAssetEvaluationTable(candidate, widget.id)
+      );
+      setPendingDeleteWidget({ target: widget, dependents, cascadeDependents });
       appendLog(`위젯 삭제 확인 필요 · ${widget.displayId || widget.title} → 하위 ${dependents.length}개`);
       return;
     }
@@ -657,8 +700,82 @@ export function PortfolioWorkspace({
   function confirmDeletePortfolioWidget() {
     const target = pendingDeleteWidget?.target;
     if (!target?.id) return;
-    deletePortfolioWidget(target.id);
+    deletePortfolioWidgets([
+      target.id,
+      ...(pendingDeleteWidget?.cascadeDependents || []).map((widget) => widget.id),
+    ]);
     setPendingDeleteWidget(null);
+  }
+
+  function createAssetEvaluationTable(sourceWidget) {
+    if (!portfolioWidgetIsAssetPriceHistory(sourceWidget)) return;
+    const existing = widgets.find((widget) => portfolioWidgetIsAssetEvaluationTable(widget, sourceWidget.id));
+    if (existing) {
+      deletePortfolioWidget(existing.id);
+      return;
+    }
+    const now = new Date().toISOString();
+    const displayId = reservePortfolioWidgetDisplayId(widgets);
+    const id = `asset_evaluation_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const preferredPlacement = {
+      x: 0,
+      y: Math.max(0, Number(sourceWidget.y || 0) + Number(sourceWidget.h || 1)),
+      w: 3,
+      h: 2,
+    };
+    const placement = canPlacePortfolioWidget(widgets, preferredPlacement)
+      ? preferredPlacement
+      : findPortfolioWidgetPlacement(widgets, 3, 2);
+    const evaluationWidget = {
+      id,
+      displayId,
+      graphRole: "process_node",
+      scenarioId: sourceWidget.scenarioId || PORTFOLIO_SCENARIO_ROOT_ID,
+      outputRole: "metrics",
+      ...placement,
+      title: "포트폴리오 평가 테이블",
+      prompt: "보유 자산 과거 내역과 비교 자산의 선택 기간 성과 지표",
+      kind: "포트폴리오 평가 테이블",
+      status: "ready",
+      agentSummary: "연결된 보유 자산 과거 내역의 기간과 비교 자산을 따라 평가 지표를 자동 계산합니다.",
+      visualType: "metrics-table",
+      dataset: [],
+      chartSpec: {
+        type: "metrics-table",
+        role: "asset_history_evaluation",
+        sourceWidgetId: sourceWidget.id,
+        sourceWidgetIds: [sourceWidget.id],
+        metricColumns: portfolioAssetEvaluationMetricColumns,
+        betaBenchmark: "VOO",
+      },
+      functionSpec: null,
+      signalMatrix: null,
+      dataFiles: [],
+      badges: ["자동 평가"],
+      requirements: [],
+      checks: [],
+      nextActions: [],
+      lastAgentAnswer: "",
+      dependsOn: [sourceWidget.id],
+      derivedFrom: [{
+        widgetId: sourceWidget.id,
+        field: "chartSpec.query",
+        role: "asset_history_evaluation",
+      }],
+      updatePolicy: "auto",
+      version: 1,
+      lastComputedFrom: { [sourceWidget.id]: Number(sourceWidget.version || 1) },
+      staleReason: "",
+      staleSince: "",
+      createdAt: now,
+      updatedAt: now,
+    };
+    setWorkspaceStarted(true);
+    setWorkspaceStatus((current) => (current === "draft" ? "remembered" : current));
+    setWidgets((current) => current.some((widget) => portfolioWidgetIsAssetEvaluationTable(widget, sourceWidget.id))
+      ? current
+      : [...current, evaluationWidget]);
+    appendLog(`평가 테이블 생성 · ${displayId} ← ${sourceWidget.displayId || sourceWidget.title}`);
   }
 
   function createAllocationChartFromWidget(sourceWidget) {
@@ -752,6 +869,7 @@ export function PortfolioWorkspace({
               chartSpec: {
                 ...(widget.chartSpec || {}),
                 query: {
+                  ...(widget.chartSpec?.query || {}),
                   ...query,
                   currency: assetHistoryCurrencyFromWidget(widget),
                 },
@@ -1229,10 +1347,12 @@ export function PortfolioWorkspace({
               }
               onCreateCell={openWidgetCreateModal}
               onCreateAssetWidget={createAssetWidgetFromPicker}
+              onCreateAssetEvaluation={createAssetEvaluationTable}
               onDeleteWidget={requestDeletePortfolioWidget}
               onWidgetAction={runPortfolioWidgetAction}
               onAssetHistoryCurrencyChange={updateAssetHistoryCurrency}
               onPositionStatusViewChange={updatePositionStatusView}
+              onWidgetDisplayData={handleWidgetDisplayData}
               onScenarioPromptRequest={openScenarioPromptModal}
               appendLog={appendLog}
             />
@@ -1245,6 +1365,7 @@ export function PortfolioWorkspace({
             <PortfolioWidgetDeleteDialog
               target={pendingDeleteWidget?.target}
               dependents={pendingDeleteWidget?.dependents || []}
+              cascadeDependents={pendingDeleteWidget?.cascadeDependents || []}
               onCancel={cancelDeletePortfolioWidget}
               onConfirm={confirmDeletePortfolioWidget}
             />

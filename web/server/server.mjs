@@ -1,11 +1,13 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { extname, join, resolve } from "node:path";
+import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { handleArcaEndpoint } from "./arcaApi.mjs";
 import { handleArcaAuthEndpoint } from "./arcaAuthApi.mjs";
+import { handleBinanceMarketDataEndpoint } from "./binanceMarketDataApi.mjs";
 import { handleEconomicCalendarEndpoint } from "./economicCalendarApi.mjs";
 import { handleEarningsEndpoint } from "./earningsApi.mjs";
+import { handleInvestSimulatorEndpoint } from "./investSimulatorApi.mjs";
 import { handleMemoryEndpoint } from "./memoryApi.mjs";
 import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mjs";
 import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
@@ -13,6 +15,7 @@ import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
 import { handleTossInvestEndpoint } from "./tossInvestApi.mjs";
+import { handleTossEtfNameTranslationEndpoint } from "./tossEtfNameTranslation.mjs";
 import { handleTransactionSettingsEndpoint } from "./transactionSettings.mjs";
 import { handleWorldMemoryEndpoint, startWorldMemoryCollector } from "./worldMemoryApi.mjs";
 import {
@@ -53,7 +56,13 @@ function serveStatic(req, res) {
     filePath = join(dist, "index.html");
   }
   res.setHeader("Content-Type", mimeTypes[extname(filePath)] || "application/octet-stream");
-  res.setHeader("Cache-Control", "no-store");
+  const immutableAssetsRoot = `${join(dist, "assets")}${sep}`;
+  res.setHeader(
+    "Cache-Control",
+    filePath.startsWith(immutableAssetsRoot)
+      ? "public, max-age=31536000, immutable"
+      : "no-cache"
+  );
   if (req.method === "HEAD") {
     res.end();
     return;
@@ -62,6 +71,36 @@ function serveStatic(req, res) {
 }
 
 const server = createServer(async (req, res) => {
+  if (req.url?.startsWith("/api/market-data/instruments/search")) {
+    await handleBinanceMarketDataEndpoint("instrument-search", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/market-data/instruments")) {
+    await handleBinanceMarketDataEndpoint("instrument", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/market-data/quotes")) {
+    await handleBinanceMarketDataEndpoint("quotes", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/market-data/candles")) {
+    await handleBinanceMarketDataEndpoint("candles", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/market-data/execution-price")) {
+    await handleBinanceMarketDataEndpoint("execution-price", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/market-data/providers/status")) {
+    await handleBinanceMarketDataEndpoint("provider-status", req, res);
+    return;
+  }
+
   if (req.url?.startsWith("/api/market-symbols/search")) {
     await handleMarketSymbolCatalogEndpoint("search", req, res);
     return;
@@ -206,6 +245,10 @@ const server = createServer(async (req, res) => {
     await handleTossInvestEndpoint("investment-status", req, res);
     return;
   }
+  if (req.url?.startsWith("/api/tossinvest/etf-name-translations")) {
+    await handleTossEtfNameTranslationEndpoint(req, res);
+    return;
+  }
 
   if (req.url?.startsWith("/api/tossinvest/prices")) {
     await handleTossInvestEndpoint("prices", req, res);
@@ -299,6 +342,31 @@ const server = createServer(async (req, res) => {
 
   if (req.url?.startsWith("/api/transactions/settings")) {
     await handleTransactionSettingsEndpoint(req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/invest-simulator/status")) {
+    await handleInvestSimulatorEndpoint("status", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/invest-simulator/accounts")) {
+    await handleInvestSimulatorEndpoint("accounts", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/invest-simulator/events")) {
+    await handleInvestSimulatorEndpoint("events", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/invest-simulator/orders")) {
+    await handleInvestSimulatorEndpoint("orders", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/invest-simulator/exchange")) {
+    await handleInvestSimulatorEndpoint("exchange", req, res);
     return;
   }
 
@@ -432,7 +500,8 @@ const server = createServer(async (req, res) => {
 
   if (req.url?.startsWith("/api/codex/options")) {
     try {
-      sendJson(res, await getCodexOptionsAsync());
+      const url = new URL(req.url, `http://${req.headers.host || `${host}:${port}`}`);
+      sendJson(res, await getCodexOptionsAsync({ force: url.searchParams.get("refresh") === "1" }));
     } catch (error) {
       sendJson(res, { error: error.message }, 500);
     }

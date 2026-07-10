@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Check from "lucide-react/dist/esm/icons/check.js";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.js";
+import { getSpeedOptionsForReasoning } from "./agentOptions.js";
 
 const standardSpeedOption = {
   id: "standard",
@@ -28,11 +29,6 @@ const fallbackModelGroup = {
   reasoningLevels: fallbackReasoningLevels,
   speedOptions: [standardSpeedOption],
 };
-
-function speedOptionsFor(modelGroup) {
-  const options = Array.isArray(modelGroup?.speedOptions) ? modelGroup.speedOptions : [];
-  return options.length ? options : [standardSpeedOption];
-}
 
 function useDismissableMenu(open, setOpen, { disabled = false } = {}) {
   const rootRef = useRef(null);
@@ -135,20 +131,24 @@ export function ModelControl({
     reasoningLevels.find((item) => item.id === reasoning) ??
     reasoningLevels.find((item) => item.id === selectedGroup?.defaultReasoningLevel) ??
     reasoningLevels[0];
-  const speedOptions = speedOptionsFor(selectedGroup);
+  const speedOptions = getSpeedOptionsForReasoning(selectedGroup, selectedReasoning?.id || reasoning);
   const selectedSpeed = speedOptions.find((item) => item.id === speed) ?? speedOptions[0];
   const hasSpeedMenu = speedOptions.length > 1;
-  const chipLabel = `${selectedGroup?.label || "모델"} ${selectedReasoning?.label || ""}`.trim();
+  const reasoningEmbedded = Boolean(selectedGroup?.reasoningEmbedded);
+  const chipLabel = reasoningEmbedded
+    ? selectedGroup?.label || "모델"
+    : `${selectedGroup?.label || "모델"} ${selectedReasoning?.label || ""}`.trim();
 
   function selectModel(nextGroup) {
     onModelChange(nextGroup.slug);
     const nextReasoningLevels = nextGroup.reasoningLevels?.length
       ? nextGroup.reasoningLevels
       : fallbackReasoningLevels;
-    if (!nextReasoningLevels.some((item) => item.id === reasoning)) {
-      onReasoningChange(nextGroup.defaultReasoningLevel || nextReasoningLevels[0]?.id || "medium");
-    }
-    if (!speedOptionsFor(nextGroup).some((item) => item.id === speed)) {
+    const nextReasoning = nextReasoningLevels.some((item) => item.id === reasoning)
+      ? reasoning
+      : nextGroup.defaultReasoningLevel || nextReasoningLevels[0]?.id || "medium";
+    if (nextReasoning !== reasoning) onReasoningChange(nextReasoning);
+    if (!getSpeedOptionsForReasoning(nextGroup, nextReasoning).some((item) => item.id === speed)) {
       onSpeedChange("standard");
     }
     setPanel("main");
@@ -167,7 +167,9 @@ export function ModelControl({
           setOpen((next) => !next);
           setPanel("main");
         }}
-        title={`${selectedGroup?.displayName || selectedGroup?.slug} · ${selectedReasoning?.label}`}
+        title={reasoningEmbedded
+          ? selectedGroup?.displayName || selectedGroup?.slug
+          : `${selectedGroup?.displayName || selectedGroup?.slug} · ${selectedReasoning?.label}`}
       >
         <span className="model-dot" aria-hidden="true" />
         <span>{chipLabel}</span>
@@ -178,25 +180,31 @@ export function ModelControl({
         <div className="dropdown-menu model-menu" role="menu">
           {panel === "main" ? (
             <>
-              <div className="menu-section-title">추론</div>
-              {reasoningLevels.map((option) => (
-                <button
-                  type="button"
-                  className="menu-row"
-                  key={option.id}
-                  onClick={() => {
-                    onReasoningChange(option.id);
-                    setOpen(false);
-                  }}
-                >
-                  <span className="menu-row-title">{option.label}</span>
-                  {option.id === selectedReasoning?.id ? (
-                    <Check className="menu-check" size={18} strokeWidth={2.1} />
-                  ) : null}
-                </button>
-              ))}
-
-              <div className="menu-divider" />
+              {!reasoningEmbedded ? (
+                <>
+                  <div className="menu-section-title">추론</div>
+                  {reasoningLevels.map((option) => (
+                    <button
+                      type="button"
+                      className="menu-row"
+                      key={option.id}
+                      onClick={() => {
+                        if (!getSpeedOptionsForReasoning(selectedGroup, option.id).some((item) => item.id === speed)) {
+                          onSpeedChange("standard");
+                        }
+                        onReasoningChange(option.id);
+                        setOpen(false);
+                      }}
+                    >
+                      <span className="menu-row-title">{option.label}</span>
+                      {option.id === selectedReasoning?.id ? (
+                        <Check className="menu-check" size={18} strokeWidth={2.1} />
+                      ) : null}
+                    </button>
+                  ))}
+                  <div className="menu-divider" />
+                </>
+              ) : null}
 
               <button type="button" className="menu-row is-nested" onClick={() => setPanel("model")}>
                 <span className="menu-row-title">{selectedGroup?.displayName || selectedGroup?.slug}</span>

@@ -1,5 +1,8 @@
 {
   "version": 1,
   "enabled": false,
-  "managementProvider": "default"
+  "managementProvider": "default",
+  "managementModel": "",
+  "managementReasoning": "",
+  "managementSpeed": "standard"
 }

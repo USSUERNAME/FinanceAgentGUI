@@ -3,6 +3,7 @@ import Move from "lucide-react/dist/esm/icons/move.js";
 import Plus from "lucide-react/dist/esm/icons/plus.js";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
+import X from "lucide-react/dist/esm/icons/x.js";
 import {
   portfolioWidgetActionMeta,
   portfolioWidgetPrimaryAction,
@@ -29,8 +30,32 @@ import {
   PortfolioWidgetRelationMeta,
 } from "./PortfolioWidgetContent.jsx";
 import { PortfolioAssetHistoryPanel } from "./PortfolioAssetHistoryPanel.jsx";
+import { PortfolioComparisonAssetDialog } from "./PortfolioComparisonAssetDialog.jsx";
 import { PortfolioWidgetFlowMap } from "./PortfolioWidgetFlowMap.jsx";
 import { PortfolioScenarioPanel } from "./PortfolioScenarioPanel.jsx";
+import {
+  portfolioAssetBetaBenchmark,
+  portfolioWidgetIsAssetEvaluationTable,
+} from "./portfolioAssetMetrics.js";
+
+const PORTFOLIO_COMPARISON_ASSET_LIMIT = 5;
+
+function normalizePortfolioComparisonAssets(widget = {}) {
+  const source = widget?.chartSpec?.query?.comparisonAssets;
+  if (!Array.isArray(source)) return [];
+  const seen = new Set();
+  return source.slice(0, PORTFOLIO_COMPARISON_ASSET_LIMIT).flatMap((row) => {
+    const symbol = String(row?.symbol || row?.ticker || row || "").trim().toUpperCase().replace(/\s+/g, "").slice(0, 32);
+    if (!symbol || seen.has(symbol)) return [];
+    seen.add(symbol);
+    return [{
+      symbol,
+      name: String(row?.name || row?.label || symbol).trim().slice(0, 180),
+      englishName: String(row?.englishName || "").trim().slice(0, 180),
+      market: String(row?.market || "").trim().slice(0, 60),
+    }];
+  });
+}
 
 export function PortfolioWidgetCanvas({
   widgets,
@@ -41,10 +66,12 @@ export function PortfolioWidgetCanvas({
   assetHistoryPanel = null,
   onCreateCell,
   onCreateAssetWidget,
+  onCreateAssetEvaluation,
   onDeleteWidget,
   onWidgetAction,
   onAssetHistoryCurrencyChange,
   onPositionStatusViewChange,
+  onWidgetDisplayData,
   onScenarioPromptRequest,
   appendLog,
 }) {
@@ -53,6 +80,9 @@ export function PortfolioWidgetCanvas({
   const gridModel = useMemo(() => portfolioGridModel(widgets), [widgets]);
   const [activeWidgetInteraction, setActiveWidgetInteraction] = useState(null);
   const [activeAssetPickerCell, setActiveAssetPickerCell] = useState(null);
+  const [comparisonOverlayWidgetId, setComparisonOverlayWidgetId] = useState("");
+  const [comparisonAssetDialogWidgetId, setComparisonAssetDialogWidgetId] = useState("");
+  const [comparisonDraftAssets, setComparisonDraftAssets] = useState([]);
   const showAssetHistoryPanel = Boolean(assetHistoryPanel && canvasMode === "asset-management");
   const isAssetCanvas = canvasMode === "asset-management";
 
@@ -90,7 +120,25 @@ export function PortfolioWidgetCanvas({
   }
 
   function widgetUsesAssetHistoryCurrency(widgetVisualType) {
-    return widgetVisualType === "price-history" || widgetVisualType === "seasonal-comparison";
+    return ["price-history", "position-status", "seasonal-comparison"].includes(widgetVisualType);
+  }
+
+  function changeAssetEvaluationBetaBenchmark(widget, nextBenchmarkId) {
+    const nextBenchmark = portfolioAssetBetaBenchmark(nextBenchmarkId);
+    setWidgets((current) => current.map((candidate) => (
+      candidate.id === widget.id
+        ? {
+            ...candidate,
+            chartSpec: {
+              ...(candidate.chartSpec || {}),
+              betaBenchmark: nextBenchmark.id,
+            },
+            version: Math.max(1, Number(candidate.version || 1)) + 1,
+            updatedAt: new Date().toISOString(),
+          }
+        : candidate
+    )));
+    appendLog?.(`BETA 기준 변경 · ${widget.displayId || widget.title} → ${nextBenchmark.label}`);
   }
 
   function gridPointerMetrics(gridNode) {
@@ -439,6 +487,16 @@ export function PortfolioWidgetCanvas({
           const isAssetPriceHistoryWidget = widgetVisualType === "price-history";
           const isSeasonalComparisonWidget = widgetVisualType === "seasonal-comparison";
           const isPositionStatusWidget = widgetVisualType === "position-status";
+          const isAssetEvaluationWidget = portfolioWidgetIsAssetEvaluationTable(widget);
+          const selectedBetaBenchmark = isAssetEvaluationWidget
+            ? portfolioAssetBetaBenchmark(widget?.chartSpec?.betaBenchmark)
+            : null;
+          const committedComparisonAssets = isAssetPriceHistoryWidget ? normalizePortfolioComparisonAssets(widget) : [];
+          const comparisonOverlayIsOpen = isAssetPriceHistoryWidget && comparisonOverlayWidgetId === widget.id;
+          const comparisonModeIsActive = comparisonOverlayIsOpen || committedComparisonAssets.length > 0;
+          const evaluationTableIsActive = isAssetPriceHistoryWidget && widgets.some((candidate) =>
+            portfolioWidgetIsAssetEvaluationTable(candidate, widget.id)
+          );
           const selectedAssetHistoryCurrency = widgetUsesAssetHistoryCurrency(widgetVisualType) ? assetHistoryCurrency(widget) : "";
           const selectedPositionStatusView = isPositionStatusWidget ? positionStatusView(widget) : "";
           const isMovingWidget = activeMoveInteraction?.widgetId === widget.id;
@@ -492,6 +550,9 @@ export function PortfolioWidgetCanvas({
                   `is-${normalizePortfolioWidgetStatus(widget.status)}`,
                   ["allocation", "line", "price-history", "position-status", "seasonal-comparison"].includes(widgetVisualType) ? "is-visual-widget" : "",
                   isCompactVisualWidget ? "is-compact-visual" : "",
+                  ["allocation", "line", "price-history", "position-status", "seasonal-comparison"].includes(widgetVisualType) && Number(renderedLayout.h || 1) <= 1
+                    ? "is-minimal-height"
+                    : "",
                   isMovingWidget ? "is-moving" : "",
                   isResizingWidget ? "is-resizing" : "",
                   isActiveInvalid ? "is-drop-invalid" : "",
@@ -517,7 +578,63 @@ export function PortfolioWidgetCanvas({
                         <RefreshCw size={14} strokeWidth={2.3} />
                       </button>
                     ) : null}
-                    {isAssetPriceHistoryWidget || isSeasonalComparisonWidget ? (
+                    {isAssetPriceHistoryWidget ? (
+                      <button
+                        className={`portfolio-widget-compare-button portfolio-widget-evaluation-button ${evaluationTableIsActive ? "is-active" : ""}`}
+                        type="button"
+                        aria-pressed={evaluationTableIsActive}
+                        aria-label={`${widget.title} 평가 테이블`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onCreateAssetEvaluation?.(widget);
+                        }}
+                      >
+                        평가 테이블
+                      </button>
+                    ) : null}
+                    {isAssetPriceHistoryWidget ? (
+                      <button
+                        className={`portfolio-widget-compare-button ${comparisonModeIsActive ? "is-active" : ""}`}
+                        type="button"
+                        aria-haspopup="dialog"
+                        aria-expanded={comparisonOverlayIsOpen}
+                        aria-pressed={comparisonModeIsActive}
+                        aria-label={`${widget.title} 비교하기`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setComparisonDraftAssets(normalizePortfolioComparisonAssets(widget));
+                          setComparisonOverlayWidgetId(widget.id);
+                        }}
+                      >
+                        비교하기
+                      </button>
+                    ) : null}
+                    {isAssetPriceHistoryWidget ? (
+                      <button
+                        className="portfolio-widget-currency-toggle portfolio-widget-cycle-toggle"
+                        type="button"
+                        aria-label={`${widget.title} ${selectedAssetHistoryCurrency === "USD" ? "원으로" : "달러로"} 전환 · 현재 ${selectedAssetHistoryCurrency === "USD" ? "달러" : "원"}`}
+                        title={`${selectedAssetHistoryCurrency === "USD" ? "원으로" : "달러로"} 전환`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onAssetHistoryCurrencyChange?.(
+                            widget,
+                            selectedAssetHistoryCurrency === "USD" ? "KRW" : "USD"
+                          );
+                        }}
+                      >
+                        <span className={selectedAssetHistoryCurrency === "USD" ? "is-selected" : ""} aria-hidden="true">
+                          달러
+                        </span>
+                        <span className={selectedAssetHistoryCurrency === "KRW" ? "is-selected" : ""} aria-hidden="true">
+                          원
+                        </span>
+                      </button>
+                    ) : null}
+                    {isSeasonalComparisonWidget ? (
                       <div
                         className="portfolio-widget-currency-toggle"
                         role="group"
@@ -548,33 +665,75 @@ export function PortfolioWidgetCanvas({
                       </div>
                     ) : null}
                     {isPositionStatusWidget ? (
-                      <div
-                        className="portfolio-widget-currency-toggle"
-                        role="group"
-                        aria-label={`${widget.title} 투자 종목 현황 보기`}
+                      <button
+                        className="portfolio-widget-currency-toggle portfolio-widget-cycle-toggle"
+                        type="button"
+                        aria-label={`${widget.title} ${selectedAssetHistoryCurrency === "USD" ? "원으로" : "달러로"} 전환 · 현재 ${selectedAssetHistoryCurrency === "USD" ? "달러" : "원"}`}
+                        title={`${selectedAssetHistoryCurrency === "USD" ? "원으로" : "달러로"} 전환`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onAssetHistoryCurrencyChange?.(
+                            widget,
+                            selectedAssetHistoryCurrency === "USD" ? "KRW" : "USD"
+                          );
+                        }}
                       >
-                        {[
-                          ["pie", "원"],
-                          ["bar", "사각형"],
-                        ].map(([view, label]) => (
-                          <button
-                            className={selectedPositionStatusView === view ? "is-selected" : ""}
-                            type="button"
-                            key={`${widget.id}-${view}`}
-                            aria-pressed={selectedPositionStatusView === view}
-                            aria-label={`${widget.title} ${label} 보기`}
-                            title={`${label} 보기`}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              if (selectedPositionStatusView !== view) {
-                                onPositionStatusViewChange?.(widget, view);
-                              }
-                            }}
-                          >
-                            {label}
-                          </button>
-                        ))}
+                        <span className={selectedAssetHistoryCurrency === "KRW" ? "is-selected" : ""} aria-hidden="true">
+                          원
+                        </span>
+                        <span className={selectedAssetHistoryCurrency === "USD" ? "is-selected" : ""} aria-hidden="true">
+                          달러
+                        </span>
+                      </button>
+                    ) : null}
+                    {isPositionStatusWidget ? (
+                      <button
+                        className="portfolio-widget-currency-toggle portfolio-widget-cycle-toggle"
+                        type="button"
+                        aria-label={`${widget.title} ${selectedPositionStatusView === "pie" ? "사각형" : "원"} 보기로 전환 · 현재 ${selectedPositionStatusView === "pie" ? "원" : "사각형"}`}
+                        title={`${selectedPositionStatusView === "pie" ? "사각형" : "원"} 보기로 전환`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onPositionStatusViewChange?.(
+                            widget,
+                            selectedPositionStatusView === "pie" ? "bar" : "pie"
+                          );
+                        }}
+                      >
+                        <span className={selectedPositionStatusView === "pie" ? "is-selected" : ""} aria-hidden="true">
+                          원
+                        </span>
+                        <span className={selectedPositionStatusView === "bar" ? "is-selected" : ""} aria-hidden="true">
+                          사각형
+                        </span>
+                      </button>
+                    ) : null}
+                    {isAssetEvaluationWidget ? (
+                      <div className="portfolio-widget-beta-control">
+                        <span>BETA:</span>
+                        <button
+                          className="portfolio-widget-currency-toggle portfolio-widget-cycle-toggle portfolio-widget-beta-toggle"
+                          type="button"
+                          aria-label={`${widget.title} BETA 기준 ${selectedBetaBenchmark.id === "KODEX_200" ? "VOO" : "KODEX 200"}로 전환 · 현재 ${selectedBetaBenchmark.label}`}
+                          title={`BETA 기준 ${selectedBetaBenchmark.id === "KODEX_200" ? "VOO" : "KODEX 200"}로 전환`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            changeAssetEvaluationBetaBenchmark(
+                              widget,
+                              selectedBetaBenchmark.id === "KODEX_200" ? "VOO" : "KODEX_200"
+                            );
+                          }}
+                        >
+                          <span className={selectedBetaBenchmark.id === "VOO" ? "is-selected" : ""} aria-hidden="true">
+                            VOO
+                          </span>
+                          <span className={selectedBetaBenchmark.id === "KODEX_200" ? "is-selected" : ""} aria-hidden="true">
+                            KODEX 200
+                          </span>
+                        </button>
                       </div>
                     ) : null}
                     <button
@@ -590,7 +749,11 @@ export function PortfolioWidgetCanvas({
                 </header>
                 <PortfolioWidgetRelationMeta widget={widget} widgets={widgets} />
                 {widget.agentSummary || widget.dataset?.length || widget.status === "ready" ? (
-                  <PortfolioWidgetProducedContent widget={widget} widgets={widgets} />
+                  <PortfolioWidgetProducedContent
+                    widget={widget}
+                    widgets={widgets}
+                    onWidgetDisplayData={onWidgetDisplayData}
+                  />
                 ) : (
                   <p>{widget.prompt || "프롬프트를 입력하면 이 위젯의 역할과 데이터 요구사항이 여기에 남습니다."}</p>
                 )}
@@ -610,6 +773,126 @@ export function PortfolioWidgetCanvas({
                     </button>
                   </div>
                 </div>
+                {comparisonOverlayIsOpen ? (
+                  <div
+                    className="portfolio-widget-comparison-overlay"
+                    role="dialog"
+                    aria-label={`${widget.title} 비교 자산 선택`}
+                  >
+                    <button
+                      className="portfolio-widget-comparison-close"
+                      type="button"
+                      autoFocus
+                      aria-label={`${widget.title} 비교 오버레이 닫기`}
+                      title="닫기"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setComparisonAssetDialogWidgetId("");
+                        setComparisonOverlayWidgetId("");
+                      }}
+                    >
+                      <X size={16} strokeWidth={2.4} aria-hidden="true" />
+                    </button>
+                    <div className={`portfolio-widget-comparison-body ${comparisonDraftAssets.length ? "has-assets" : ""}`}>
+                      {comparisonDraftAssets.length ? (
+                        <div className="portfolio-widget-comparison-selection">
+                          <div className="portfolio-widget-comparison-list" aria-label="비교할 자산 목록">
+                            {comparisonDraftAssets.map((asset) => (
+                              <div className="portfolio-widget-comparison-row" key={`${widget.id}-${asset.symbol}`}>
+                                <strong>{asset.symbol}</strong>
+                                <span title={[asset.name, asset.englishName].filter(Boolean).join(" · ")}>
+                                  {[asset.name, asset.englishName].filter(Boolean).join(" · ") || asset.symbol}
+                                </span>
+                                <button
+                                  type="button"
+                                  aria-label={`${asset.symbol} 비교 자산에서 삭제`}
+                                  title="비교 자산에서 삭제"
+                                  onClick={() => {
+                                    setComparisonDraftAssets((current) => current.filter((item) => item.symbol !== asset.symbol));
+                                  }}
+                                >
+                                  <Trash2 size={15} strokeWidth={2.2} aria-hidden="true" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          {comparisonDraftAssets.length < PORTFOLIO_COMPARISON_ASSET_LIMIT ? (
+                            <button
+                              className="portfolio-widget-comparison-add-more"
+                              type="button"
+                              onClick={() => setComparisonAssetDialogWidgetId(widget.id)}
+                            >
+                              <Plus size={15} strokeWidth={2.35} aria-hidden="true" />
+                              <span>비교할 자산 더 추가하기</span>
+                            </button>
+                          ) : (
+                            <span className="portfolio-widget-comparison-limit">비교 자산 5개를 모두 추가했습니다</span>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          className="portfolio-widget-comparison-add"
+                          type="button"
+                          aria-describedby={`${widget.id}-comparison-overlay-description`}
+                          onClick={() => setComparisonAssetDialogWidgetId(widget.id)}
+                        >
+                          <span className="portfolio-widget-comparison-add-icon" aria-hidden="true">
+                            <Plus size={22} strokeWidth={2.4} />
+                          </span>
+                          <span className="portfolio-widget-comparison-add-copy">
+                            <strong id={`${widget.id}-comparison-overlay-title`}>비교할 자산 추가하기</strong>
+                            <span id={`${widget.id}-comparison-overlay-description`}>
+                              현재 차트와 함께 볼 자산을 선택하세요
+                            </span>
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      className="portfolio-widget-comparison-confirm"
+                      type="button"
+                      disabled={!comparisonDraftAssets.length && !committedComparisonAssets.length}
+                      onClick={() => {
+                        setWidgets((current) => current.map((item) => (
+                          item.id === widget.id
+                            ? {
+                                ...item,
+                                chartSpec: {
+                                  ...(item.chartSpec || {}),
+                                  chartType: comparisonDraftAssets.length ? "line" : "area",
+                                  query: {
+                                    ...(item.chartSpec?.query || {}),
+                                    comparisonAssets: comparisonDraftAssets,
+                                  },
+                                },
+                                updatedAt: new Date().toISOString(),
+                              }
+                            : item
+                        )));
+                        appendLog?.(`비교 자산 적용 · ${widget.displayId || widget.id} · ${comparisonDraftAssets.length}개`);
+                        setComparisonAssetDialogWidgetId("");
+                        setComparisonOverlayWidgetId("");
+                      }}
+                    >
+                      확인
+                    </button>
+                  </div>
+                ) : null}
+                {comparisonAssetDialogWidgetId === widget.id ? (
+                  <PortfolioComparisonAssetDialog
+                    excludedSymbols={comparisonDraftAssets.map((asset) => asset.symbol)}
+                    onCancel={() => setComparisonAssetDialogWidgetId("")}
+                    onSubmit={(asset) => {
+                      setComparisonDraftAssets((current) => (
+                        current.length >= PORTFOLIO_COMPARISON_ASSET_LIMIT || current.some((item) => item.symbol === asset.symbol)
+                          ? current
+                          : [...current, asset]
+                      ));
+                      setComparisonAssetDialogWidgetId("");
+                    }}
+                  />
+                ) : null}
                 {resizeZones(widget)}
               </article>
             </React.Fragment>

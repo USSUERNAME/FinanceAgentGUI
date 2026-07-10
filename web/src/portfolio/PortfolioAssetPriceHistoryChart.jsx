@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AreaSeries, ColorType, TickMarkType, createChart } from "lightweight-charts";
+import PortfolioAssetComparisonChart from "./PortfolioAssetComparisonChart.jsx";
 
 function normalizeHistoryQuery(chartSpec = {}) {
   const query = chartSpec?.query && typeof chartSpec.query === "object" ? chartSpec.query : {};
@@ -111,7 +112,15 @@ function normalizeChartData(points = []) {
   return [...byTime.values()].sort((left, right) => left.time.localeCompare(right.time));
 }
 
-export default function PortfolioAssetPriceHistoryChart({ widget }) {
+export default function PortfolioAssetPriceHistoryChart({ widget, onWidgetDisplayData }) {
+  const comparisonAssets = widget?.chartSpec?.query?.comparisonAssets;
+  if (Array.isArray(comparisonAssets) && comparisonAssets.length) {
+    return <PortfolioAssetComparisonChart widget={widget} onWidgetDisplayData={onWidgetDisplayData} />;
+  }
+  return <PortfolioAssetPriceHistoryAreaChart widget={widget} onWidgetDisplayData={onWidgetDisplayData} />;
+}
+
+function PortfolioAssetPriceHistoryAreaChart({ widget, onWidgetDisplayData }) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
@@ -151,6 +160,31 @@ export default function PortfolioAssetPriceHistoryChart({ widget }) {
   }, [query]);
 
   const chartData = useMemo(() => normalizeChartData(payload?.points), [payload]);
+  const displayData = useMemo(() => ({
+    schemaVersion: "portfolio-widget-display-data.v1",
+    kind: "asset-price-history",
+    query,
+    summary: {
+      status: loading ? "loading" : error ? "error" : chartData.length ? "ready" : "empty",
+      error,
+      dataProvider: payload?.dataProvider || "토스 증권 Open API",
+      source: payload?.source || "position-reconstruction",
+      metricLabel,
+      valueLabel,
+      unit: payload?.unit || query.currency,
+      pointCount: chartData.length,
+      startTime: chartData[0]?.time || "",
+      endTime: chartData.at(-1)?.time || payload?.timelineEndDate || "",
+      latestValue: chartData.at(-1)?.value,
+    },
+    data: {
+      points: chartData,
+    },
+  }), [chartData, error, loading, metricLabel, payload, query, valueLabel]);
+
+  useEffect(() => {
+    onWidgetDisplayData?.(widget?.id, displayData);
+  }, [displayData, onWidgetDisplayData, widget?.id]);
 
   useEffect(() => {
     const node = containerRef.current;

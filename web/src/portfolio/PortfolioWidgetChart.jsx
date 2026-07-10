@@ -13,7 +13,7 @@ import PortfolioSeasonalComparisonChart from "./PortfolioSeasonalComparisonChart
 import { formatPortfolioPercent } from "./holdingsSummary.js";
 import { normalizePortfolioWidgetVisualType } from "./widgetTypes.js";
 
-export default function PortfolioWidgetChart({ widget }) {
+export default function PortfolioWidgetChart({ widget, onWidgetDisplayData }) {
   const type = normalizePortfolioWidgetVisualType(widget?.visualType);
   const allocationOption = useMemo(() => buildPortfolioWidgetAllocationOption(widget), [widget]);
   const lineOption = useMemo(() => buildPortfolioWidgetLineOption(widget), [widget]);
@@ -51,13 +51,13 @@ export default function PortfolioWidgetChart({ widget }) {
     );
   }
   if (type === "price-history") {
-    return <PortfolioAssetPriceHistoryChart widget={widget} />;
+    return <PortfolioAssetPriceHistoryChart widget={widget} onWidgetDisplayData={onWidgetDisplayData} />;
   }
   if (type === "position-status") {
-    return <PortfolioInvestmentPositionStatusChart widget={widget} />;
+    return <PortfolioInvestmentPositionStatusChart widget={widget} onWidgetDisplayData={onWidgetDisplayData} />;
   }
   if (type === "seasonal-comparison") {
-    return <PortfolioSeasonalComparisonChart widget={widget} />;
+    return <PortfolioSeasonalComparisonChart widget={widget} onWidgetDisplayData={onWidgetDisplayData} />;
   }
   return <PortfolioWidgetMiniPreview widget={widget} />;
 }

@@ -1,0 +1,75 @@
+{
+  "contractVersion": 1,
+  "distributionPolicy": {
+    "shipRuntimeDatabases": false,
+    "shipEmptySeedDatabases": false,
+    "preserveExistingDatabases": true,
+    "backupBeforeMigration": true
+  },
+  "stores": [
+    {
+      "id": "world-memory",
+      "label": "World Memory",
+      "dbPath": "data/world-memory/world_issue_log.sqlite3",
+      "schemaPath": "config/world-memory.schema.sql",
+      "ownerScript": "scripts/world_memory_cli.py",
+      "initCommand": [
+        "python",
+        "scripts/world_memory_cli.py",
+        "init"
+      ],
+      "schemaVersion": null,
+      "lazy": true,
+      "rebuildable": false,
+      "dataClass": "authoritative-user-state"
+    },
+    {
+      "id": "tossinvest-ledger",
+      "label": "Toss Securities order-history ledger",
+      "dbPath": "data/tossinvest/tossinvest-ledger.sqlite3",
+      "schemaPath": "config/tossinvest-ledger.schema.sql",
+      "ownerScript": "scripts/tossinvest_ledger_store.py",
+      "initCommand": [
+        "python",
+        "scripts/tossinvest_ledger_store.py",
+        "init"
+      ],
+      "schemaVersion": 2,
+      "lazy": true,
+      "rebuildable": true,
+      "dataClass": "credential-scoped-synced-state"
+    },
+    {
+      "id": "invest-simulator",
+      "label": "Investment simulator ledger",
+      "dbPath": "data/invest-simulator/simulator.sqlite3",
+      "schemaPath": "config/invest-simulator.schema.sql",
+      "ownerScript": "scripts/invest_simulator_store.py",
+      "initCommand": [
+        "python",
+        "scripts/invest_simulator_store.py",
+        "init"
+      ],
+      "schemaVersion": 2,
+      "lazy": true,
+      "rebuildable": false,
+      "dataClass": "authoritative-user-state"
+    },
+    {
+      "id": "magazine-event-signatures",
+      "label": "Magazine event-signature index",
+      "dbPath": "data/magazine/event-signature-index.sqlite3",
+      "schemaPath": "config/magazine-event-signature-index.schema.sql",
+      "ownerScript": "scripts/magazine_event_signature_index.py",
+      "initCommand": [
+        "python",
+        "scripts/magazine_event_signature_index.py",
+        "init"
+      ],
+      "schemaVersion": 1,
+      "lazy": true,
+      "rebuildable": true,
+      "dataClass": "derived-index"
+    }
+  ]
+}

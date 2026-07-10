@@ -21,13 +21,13 @@ const leftSidebarSections = [
     title: "작업",
     items: [
       { label: "주식채널", icon: Home, view: "stock", statusKey: "arcaNotifications" },
+      { label: "거래 현황", icon: ReceiptText, view: "transaction-status" },
       { label: "News Feed", icon: Newspaper, view: "news-feed", statusKey: "newsFeed" },
       { label: "Magazine", icon: BookOpenText, view: "magazine" },
       { label: "Earning Calendar", icon: CalendarDays, view: "earning-calendar" },
       { label: "Economic Calendar", icon: Landmark, view: "economic-calendar" },
       { label: "채팅", icon: MessageSquare, view: "chat" },
       { label: "보고서", icon: FileText, view: "reports" },
-      { label: "거래현황", icon: ReceiptText, view: "transaction-status" },
       { label: "포트폴리오", icon: PieChart, view: "portfolio" },
     ],
   },
@@ -86,6 +86,7 @@ export function AppNavigation({
   portfolioCanvasMenuId,
   portfolioCanvases,
   portfolioSidebarOpen,
+  transactionStatusHidden = false,
   worldMemoryEnabled = false,
   worldMemoryHealth,
 }) {
@@ -108,6 +109,7 @@ export function AppNavigation({
               {section.items
                 .filter((item) => item.view !== "world-memory" || worldMemoryEnabled)
                 .filter((item) => item.view !== "magazine" || magazineEnabled)
+                .filter((item) => item.view !== "transaction-status" || !transactionStatusHidden)
                 .map((item) => {
                   const Icon = item.icon;
                   const itemStatusHealth =

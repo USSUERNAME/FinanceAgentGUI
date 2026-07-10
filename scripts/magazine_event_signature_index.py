@@ -19,6 +19,7 @@ DEFAULT_MODEL = "ibm-granite/granite-embedding-97m-multilingual-r2"
 DEFAULT_BATCH_SIZE = 16
 DEFAULT_WARN_THRESHOLD = 0.9
 DEFAULT_ERROR_THRESHOLD = 0.97
+SCHEMA_VERSION = 1
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -29,6 +30,13 @@ def normalize_space(value: Any) -> str:
 def resolve_project_path(value: str) -> Path:
     path = Path(value)
     return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def display_project_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def truncate_text(value: Any, limit: int = 220) -> str:
@@ -314,6 +322,12 @@ def run_backfill(args: argparse.Namespace) -> int:
 def connect_index(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
+    current_schema_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    if current_schema_version > SCHEMA_VERSION:
+        conn.close()
+        raise RuntimeError(
+            f"Magazine index schema version {current_schema_version} is newer than supported version {SCHEMA_VERSION}"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS magazine_event_signature_embeddings (
@@ -332,7 +346,34 @@ def connect_index(path: Path) -> sqlite3.Connection:
         "CREATE INDEX IF NOT EXISTS idx_magazine_event_signature_hash "
         "ON magazine_event_signature_embeddings(signature_hash)"
     )
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    conn.commit()
     return conn
+
+
+def run_init(args: argparse.Namespace) -> int:
+    index_path = resolve_project_path(args.index_path)
+    existed = index_path.exists()
+    conn = connect_index(index_path)
+    try:
+        row_count = int(
+            conn.execute("SELECT COUNT(*) FROM magazine_event_signature_embeddings").fetchone()[0]
+        )
+        actual_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    finally:
+        conn.close()
+    payload = {
+        "ok": True,
+        "initialized": not existed,
+        "indexPath": display_project_path(index_path),
+        "schemaPath": "config/magazine-event-signature-index.schema.sql",
+        "schemaVersion": actual_version,
+        "rowCount": row_count,
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2) if args.json else (
+        f"Magazine event-signature index ready: rows={row_count} schema={actual_version}"
+    ))
+    return 0
 
 
 def upsert_embeddings(conn: sqlite3.Connection, records: list[dict[str, Any]], vectors: list[list[float]], *, engine: str, model: str) -> None:
@@ -480,7 +521,7 @@ def run_check(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Embed magazine event signatures and audit near-duplicate articles.")
-    parser.add_argument("command", choices=["check", "backfill"], nargs="?", default="check")
+    parser.add_argument("command", choices=["init", "check", "backfill"], nargs="?", default="check")
     parser.add_argument("--articles-dir", default="data/magazine/articles")
     parser.add_argument("--baseline-articles-dir", default="")
     parser.add_argument("--baseline-limit", type=int, default=12)
@@ -500,6 +541,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.command == "init":
+        return run_init(args)
     if args.command == "backfill":
         return run_backfill(args)
     if args.command == "check":

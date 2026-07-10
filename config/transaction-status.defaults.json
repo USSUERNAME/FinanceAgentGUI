@@ -1,7 +1,12 @@
 {
-  "version": 1,
+  "version": 2,
+  "menuHidden": false,
   "sidebarDisplayCurrency": "auto",
   "mainDisplayCurrency": "auto",
+  "sidebarValueMode": "value",
+  "investmentChartMode": "area",
+  "investmentChartIntervalMode": "1d",
+  "investmentChartVolumeVisible": false,
   "mainTableColumns": [],
   "sidebarManualOrder": [],
   "watchlistGroups": []

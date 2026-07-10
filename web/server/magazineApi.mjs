@@ -4,7 +4,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, rmS
 import { readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runCodexChat, sendJson } from "./codexProbe.mjs";
+import { getCodexOptions, runCodexChat, sendJson } from "./codexProbe.mjs";
 import {
   isMagazineEnabled,
   publicMagazineSettingsSnapshot,
@@ -29,6 +29,7 @@ const WORLD_MEMORY_STATE_PATH = join(GUIBUILD_ROOT, "data", "world-memory", "col
 const AGENT_SETTINGS_DEFAULT_PATH = join(GUIBUILD_ROOT, "config", "agent-settings.defaults.json");
 const AGENT_SETTINGS_USER_PATH = join(GUIBUILD_ROOT, "config", "agent-settings.user.json");
 const MAX_ARTICLES = 200;
+const MAGAZINE_STATUS_RECORD_CACHE_MS = 60 * 1000;
 const MAX_ARTICLE_HTML_BYTES = 2 * 1024 * 1024;
 const MAX_PREFERENCE_EVENTS = 5000;
 const MAX_BIAS_EVENTS = 5000;
@@ -46,8 +47,10 @@ const WORLD_MEMORY_VECTOR_POLICY = {
 };
 const MAGAZINE_CODEX_PROVIDER_ID = "codex-cli";
 const MAGAZINE_ANTIGRAVITY_PROVIDER_ID = "antigravity-cli";
-const MAGAZINE_CODEX_REASONING_IDS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
+const MAGAZINE_CODEX_REASONING_IDS = new Set(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 const MAGAZINE_ANTIGRAVITY_REASONING_IDS = new Set(["minimal", "low", "medium", "high"]);
+
+let magazineStatusRecordCache = null;
 
 const MAGAZINE_GENERATION_TIMEOUT_MS = 31 * 60 * 1000;
 const MAGAZINE_SCHEDULER_DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -121,6 +124,10 @@ function cleanText(value) {
     .replace(/[ \u00a0]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function uniqueStrings(values = []) {
+  return Array.from(new Set((Array.isArray(values) ? values : []).map(cleanText).filter(Boolean)));
 }
 
 const magazineBodyChromePatterns = [
@@ -1204,6 +1211,7 @@ async function classifyMagazineCommentBias({ body, article, comments, commentTex
       provider: cleanText(body.provider || ""),
       model: cleanText(body.model || ""),
       reasoning: cleanText(body.reasoning || "medium"),
+      speed: cleanText(body.speed || "standard"),
       approval: "never",
       personaMode: "none",
       prompt: buildMagazineCommentBiasPrompt({
@@ -1422,6 +1430,54 @@ export async function listMagazineArticles() {
   };
 }
 
+async function listMagazineArticleStatusRecords() {
+  ensureMagazineDirs();
+  const directoryStat = await stat(MAGAZINE_ARTICLES_DIR);
+  const now = Date.now();
+  if (
+    magazineStatusRecordCache &&
+    magazineStatusRecordCache.directoryMtimeMs === directoryStat.mtimeMs &&
+    now - magazineStatusRecordCache.cachedAt < MAGAZINE_STATUS_RECORD_CACHE_MS
+  ) {
+    return magazineStatusRecordCache.records;
+  }
+
+  const entries = (await readdir(MAGAZINE_ARTICLES_DIR, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && ARTICLE_ID_PATTERN.test(entry.name));
+  const records = [];
+  const batchSize = 32;
+  for (let index = 0; index < entries.length; index += batchSize) {
+    const batch = entries.slice(index, index + batchSize);
+    const batchRecords = await Promise.all(
+      batch.map(async (entry) => {
+        try {
+          const metadata = JSON.parse(
+            await readFile(join(MAGAZINE_ARTICLES_DIR, entry.name, "metadata.json"), "utf8")
+          );
+          return {
+            id: entry.name,
+            title: cleanText(metadata.title || entry.name),
+            publishedAt: cleanText(metadata.publishedAt || ""),
+            createdAt: cleanText(metadata.createdAt || ""),
+            updatedAt: cleanText(metadata.updatedAt || ""),
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
+    records.push(...batchRecords.filter(Boolean));
+  }
+  records.sort(sortByLatest);
+  const limitedRecords = records.slice(0, MAX_ARTICLES);
+  magazineStatusRecordCache = {
+    cachedAt: now,
+    directoryMtimeMs: directoryStat.mtimeMs,
+    records: limitedRecords,
+  };
+  return limitedRecords;
+}
+
 export async function deleteMagazineArticle(articleId) {
   ensureMagazineDirs();
   const id = normalizeArticleId(articleId);
@@ -1562,12 +1618,30 @@ async function readMagazineSchedulerAgent() {
     magazineSettings.writingReasoning,
     providerReasoning || defaultReasoning
   );
+  const model = magazineSettings.writingModel || settings.model || (useAntigravity ? "Gemini 3.5 Flash (Medium)" : "gpt-5.5");
+  const reasoning = configuredReasoning || providerReasoning || defaultReasoning;
+  let speed = "standard";
+  if (!useAntigravity) {
+    try {
+      const modelGroup = getCodexOptions().modelGroups?.find((group) => group.slug === model);
+      const preferredSpeed = magazineSettings.writingSpeed || settings.speed || "standard";
+      const speedOption = modelGroup?.speedOptions?.find((option) => option.id === preferredSpeed);
+      const supportedReasoningLevels = Array.isArray(speedOption?.supportedReasoningLevels)
+        ? speedOption.supportedReasoningLevels
+        : [];
+      if (speedOption && (!supportedReasoningLevels.length || supportedReasoningLevels.includes(reasoning))) {
+        speed = preferredSpeed;
+      }
+    } catch {
+      speed = "standard";
+    }
+  }
   return {
     provider,
-    model: settings.model || (useAntigravity ? "Gemini 3.5 Flash (Medium)" : "gpt-5.5"),
-    reasoning: configuredReasoning || providerReasoning || defaultReasoning,
+    model,
+    reasoning,
     approval: useAntigravity ? settings.approval || "turbo" : "never",
-    speed: settings.speed || "standard",
+    speed,
   };
 }
 
@@ -2111,6 +2185,11 @@ function buildMagazineArticleCountDecisionPrompt(context) {
             title: "기사 후보 각도",
             reason: "이 각도가 최근 기사와 어떻게 다르고 왜 지금 쓸 만한지",
             urgency: "low|medium|high",
+            storyFamily: "예상 storyFamily",
+            editorialAngle: "예상 editorialAngle",
+            primaryEvent: "primary event 한 문장",
+            newsFeedIds: ["컨텍스트에 실제 존재하는 nf_..."],
+            researchQueries: ["공식·외부 리서치 질의"],
           },
         ],
       },
@@ -2154,6 +2233,11 @@ function normalizeMagazineDecisionAngle(value) {
     title: title || reason,
     reason,
     urgency: ["low", "medium", "high"].includes(urgency) ? urgency : "medium",
+    storyFamily: scrubMagazineDecisionText(source.storyFamily || "", 160),
+    editorialAngle: scrubMagazineDecisionText(source.editorialAngle || "", 120),
+    primaryEvent: scrubMagazineDecisionText(source.primaryEvent || source.event || "", 300),
+    newsFeedIds: uniqueStrings(source.newsFeedIds || source.sourceIds || []).filter((id) => /^nf_[A-Za-z0-9]+$/.test(id)).slice(0, 8),
+    researchQueries: uniqueStrings(source.researchQueries || []).map((query) => truncateSchedulerText(query, 180)).slice(0, 5),
   };
 }
 
@@ -2263,6 +2347,7 @@ async function decideScheduledMagazineArticleCount({ scheduledAt = "", topicDisc
       provider: agent.provider,
       model: agent.model,
       reasoning: agent.reasoning,
+      speed: agent.speed,
       approval: agent.provider === MAGAZINE_ANTIGRAVITY_PROVIDER_ID ? agent.approval : "never",
       personaMode: "none",
       prompt: buildMagazineArticleCountDecisionPrompt({
@@ -2327,13 +2412,19 @@ function runMagazineGenerator(body = {}, action = "generateWithCodex") {
   const sandbox = safeGeneratorCliValue(body.sandbox || "", "", /^[A-Za-z-]+$/);
   const approval = safeGeneratorCliValue(body.approval || (useAntigravity ? "turbo" : "never"), useAntigravity ? "turbo" : "never", /^[A-Za-z-]+$/);
   const speed = safeGeneratorCliValue(body.speed || "standard", "standard", /^[A-Za-z-]+$/);
+  const harness = safeGeneratorCliValue(body.harness || "v2", "v2", /^(?:v2|legacy)$/);
   const extraPrompt = cleanText(body.prompt || body.extraPrompt || "");
+  const lockedTopic = body.lockedTopic && typeof body.lockedTopic === "object" && !Array.isArray(body.lockedTopic)
+    ? body.lockedTopic
+    : null;
   const project = safeGeneratorCliValue(body.project || "", "");
   const location = safeGeneratorCliValue(body.location || "", "");
   const args = [MAGAZINE_CODEX_GENERATOR, "--provider", provider, "--count", String(count), "--approval", approval];
   if (replace) args.push("--replace");
   if (model) args.push("--model", model);
   if (reasoning) args.push("--reasoning", reasoning);
+  if (!useAntigravity && speed) args.push("--speed", speed);
+  args.push("--harness", harness);
   if (sandbox) args.push("--sandbox", sandbox);
   if (project) args.push("--project", project);
   if (location) args.push("--location", location);
@@ -2346,6 +2437,7 @@ function runMagazineGenerator(body = {}, action = "generateWithCodex") {
         ...process.env,
         NO_COLOR: "1",
         MAGAZINE_CODEX_EXTRA_PROMPT: extraPrompt,
+        MAGAZINE_LOCKED_TOPIC_JSON: lockedTopic ? JSON.stringify(lockedTopic) : "",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -2690,13 +2782,26 @@ function fallbackMagazineCandidateAngleForSlot(cycle = {}, index = 0) {
     : null;
 }
 
-async function decideMagazineArticleSlotTopic({ cycle, index, slot } = {}) {
+export async function decideMagazineArticleSlotTopic({ cycle, index, slot } = {}) {
   const topicDiscoveryLane = normalizeMagazineTopicDiscoveryLane(slot?.topicDiscoveryLane);
   const fallbackAngle =
-    topicDiscoveryLane.id === "news-feed-primary" &&
-    cycle?.articleCountDecision?.topicDiscoveryLane?.id === "news-feed-primary"
+    topicDiscoveryLane.id === "news-feed-primary"
       ? fallbackMagazineCandidateAngleForSlot(cycle, index)
       : null;
+  if (fallbackAngle) {
+    return {
+      agent: cycle?.agent || null,
+      decision: {
+        policy: "magazine-slot-topic-reuse-v2",
+        targetCount: 1,
+        confidence: Number(cycle?.articleCountDecision?.confidence) || 0,
+        reason: "기사 수 산정 단계에서 선택한 후보 각도를 이 슬롯의 확정 preflight 소재로 재사용했습니다.",
+        candidateAngles: [fallbackAngle],
+      },
+      candidateAngle: fallbackAngle,
+      topicDiscoveryLane,
+    };
+  }
   const result = await decideScheduledMagazineArticleCount({
     scheduledAt: cycle?.scheduledAt || "",
     topicDiscoveryLane,
@@ -2847,6 +2952,7 @@ async function runScheduledMagazineCycle(trigger = "timer", options = {}) {
             ? `이번 기사 후보 각도: ${slot.candidateAngle.title} / ${slot.candidateAngle.reason}`
             : "",
         ].join("\n"),
+        lockedTopic: slot.candidateAngle,
       });
       cycle.generatedCount += 1;
       slot.status = "generated";
@@ -3020,19 +3126,20 @@ function applyMagazineSchedulerSettingsChange(previousSettings, nextSettings) {
 }
 
 async function magazineStatusSnapshot() {
-  const catalog = await listMagazineArticles();
+  const articles = await listMagazineArticleStatusRecords();
+  const readState = magazineReadStateSnapshot(articles, await readMagazineReadState());
   return {
     ok: true,
     storage: "files",
-    articleCount: catalog.articles.length,
-    latestArticle: catalog.readState?.latestArticleId
+    articleCount: articles.length,
+    latestArticle: readState.latestArticleId
       ? {
-          id: catalog.readState.latestArticleId,
-          title: catalog.readState.latestArticleTitle,
-          publishedAt: catalog.readState.latestArticleAt,
+          id: readState.latestArticleId,
+          title: readState.latestArticleTitle,
+          publishedAt: readState.latestArticleAt,
         }
       : null,
-    readState: catalog.readState,
+    readState,
     settings: publicMagazineSettingsSnapshot(),
     scheduler: publicMagazineSchedulerState(),
   };
@@ -3386,6 +3493,7 @@ async function handleMagazineComments(req, res) {
         provider: cleanText(body.provider || ""),
         model: cleanText(body.model || ""),
         reasoning: cleanText(body.reasoning || "high"),
+        speed: cleanText(body.speed || "standard"),
         approval: "never",
         personaMode: "none",
         prompt: buildMagazineCommentPrompt({

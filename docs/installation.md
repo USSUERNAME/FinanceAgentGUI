@@ -24,7 +24,7 @@ Recommended baseline:
 
 - Node.js 22 or newer
 - npm matching the installed Node.js runtime
-- Python 3.11 or newer for optional finance helper scripts
+- Python 3.11 or newer. The basic web shell can build without Python, but World Memory, Toss history/snapshot storage, investment simulators, database setup/doctor, and several finance helpers require it.
 - A Chromium-family browser for browser-login handoff flows: ChatGPT Atlas, Chrome, Edge, Chromium, or Brave
 - Antigravity CLI (`agy`) for Antigravity/Gemini provider features. This is a standalone CLI dependency, not an SDK package.
 
@@ -110,7 +110,7 @@ The server binds to `127.0.0.1` by default. Use `FINANCE_AGENT_GUI_HOST` and `FI
 
 ## Python Helper Install
 
-Python helpers are optional for screens that call finance scripts, world-memory checks, or portfolio backtests.
+Python is feature-scoped: the basic web shell does not execute it, but SQLite-backed finance features, World Memory, portfolio/backtest helpers, and local database diagnostics require it.
 
 From the repository root:
 
@@ -132,7 +132,33 @@ Avoid using the WSL venv for a GUI server that is being run from native Windows 
 
 If Python features fail, report the Python executable path, version, failing command, and missing package as a diagnostic issue. Do not silently switch to system packages.
 
-## World Memory Store
+## Local SQLite Stores
+
+FinanceAgentGUI ships a machine-readable registry, schema blueprints, owner
+scripts, and tests. It does not ship populated, sample, zero-byte, or empty seed
+databases. The complete install/update/repair contract is
+`docs/sqlite-stores.md`; the inventory is `config/sqlite-stores.json`.
+
+Read-only preflight from the repository root:
+
+```bash
+python scripts/sqlite_store_doctor.py
+python scripts/sqlite_store_setup.py plan --initialize-missing
+```
+
+Missing stores are created lazily by their features. For a complete local setup,
+stop the server, review the plan, then run:
+
+```bash
+python scripts/sqlite_store_setup.py apply --initialize-missing --confirm
+python scripts/sqlite_store_doctor.py --require-initialized --strict
+```
+
+Existing stores are backed up with SQLite's backup API under ignored
+`data/backups/sqlite/` before owner migrations. Runtime databases and backups
+must never be committed or included in a release ZIP.
+
+### World Memory Store
 
 World Memory ships as scripts, docs, and schema, not as a prebuilt database.
 
@@ -228,6 +254,10 @@ The following are local runtime data and should not be committed:
 - `data/arca-browser-profile/*`
 - `data/shared-memory/*` except `.gitkeep`
 - `data/world-memory/*` except `.gitkeep`
+- `data/tossinvest/*` except `.gitkeep`
+- `data/invest-simulator/*` except `.gitkeep`
+- `data/magazine/*` except `.gitkeep`
+- `data/backups/*`
 - `data/news-feed.json`
 - `data/news-feed-read-state.json`
 - `data/news-feed-view-state.json`
@@ -259,24 +289,77 @@ runtime-local and must not be committed or included in a release ZIP. The sync
 path uses the existing Toss Open API credentials and Python's standard
 `sqlite3` module; it does not add a Node native SQLite dependency.
 
+Investment simulators use a separate local SQLite store at
+`data/invest-simulator/simulator.sqlite3`. The schema contract is tracked in
+`config/invest-simulator.schema.sql` and is created lazily by
+`scripts/invest_simulator_store.py`, which uses Python's standard `sqlite3`
+module. Creating a simulator writes one `simulator_accounts` row and one
+append-only `simulator_ledger_events` `initial_cash` event; cash balances are
+derived by replaying ledger events, not by trusting a mutable frontend total.
+FX conversion appends `fx_exchange`, market buys append `stock_buy`, and market
+sells append `stock_sell`; filled orders also write matching `simulator_orders`
+and `simulator_trades` rows so positions can be rebuilt from local simulator
+history. Korean-stock orders settle in KRW, US-stock orders settle in USD, and
+Binance Spot USDT pairs settle against the existing USD cash balance under the
+simulator's explicit `USDT = USD` practice assumption. The store rejects
+mismatched settlement currencies and sell quantities above the current position
+even if a caller bypasses the UI. While a simulator is selected, the 거래현황 UI
+refreshes the simulator account snapshot and the applicable read-only Toss or
+Binance price/candle data so current price and daily-return values do not stay
+pinned to the fill price. Same-day buy lots use their actual fill cost
+as the daily-profit baseline, while carried positions use previous close.
+Renaming a simulator account updates the account row and appends an
+`account_renamed` event. The default first funding is
+KRW 10,000,000 and USD 0. This simulator database is runtime-local, separate
+from the Toss order-history ledger, and must not be committed or included in a
+release ZIP. Deleting a simulator archives the account and appends an
+`account_archived` ledger event instead of removing history rows. Local repair runs may point
+`FINANCE_AGENT_GUI_INVEST_SIMULATOR_DB_PATH` at a temporary database.
+The complete schema, provider-identity, fee, and replay contract is documented
+in `docs/invest-simulator.md`.
+
 The 거래현황 sidebar currency, main-section currency, table column, manual
-ordering, and 관심 목록 groups with their saved ticker lists are stored in
+ordering, and 관심 목록 groups with their saved instruments are stored in
 `config/transaction-status.user.json`; the shipped defaults live in
 `config/transaction-status.defaults.json`. The user file is runtime-local and
 must not be included in a release ZIP. 관심 목록 autocomplete uses the KRX KIND
 listed-company table for domestic stock-name to symbol lookup and the NYSE
 Listings Directory quotes filter for US listing candidates, then validates the
-final symbol with Toss `GET /api/v1/stocks` before saving.
+final stock symbol with Toss `GET /api/v1/stocks` before saving. Binance Spot
+autocomplete uses the public `exchangeInfo` catalog and saves provider-qualified
+metadata in `instruments[]`; legacy `symbols[]` remains alongside it for backward
+compatibility.
 
-The 거래현황 screens keep Toss live calls scoped to the visible work surface.
+Binance Spot market data does not require an API key. The local server uses the
+market-data-only host `https://data-api.binance.vision` for a catalog of currently
+`TRADING` USDT Spot pairs, current price and 24-hour price/volume statistics,
+candles, and the simulator's current-price execution reference. The public
+surface is exposed locally under `/api/market-data/*`, adds timeout/cache/rate-
+limit diagnostics, and never sends an API-key header. The first supported scope
+is Spot USDT pairs only. They retain native quote metadata as `USDT`, while UI
+valuation and simulator settlement use `USD` under `USDT = USD`. The simulator
+does not create a separate USDT balance or a USD/USDT exchange event. Exact
+account commission rates require authenticated Binance user data, so no-key
+simulator fills use fee `0` with the recorded assumption
+`zero-no-public-account-rate`. This connector is market-data-only and cannot
+read a Binance account or place a real Binance order.
+
+Before accepting a Binance simulator order, the local server re-resolves its
+provider-qualified instrument id and standard price. It rejects a stale catalog,
+a quote older than 60 seconds, a non-`TRADING` instrument, or an active provider
+timeout/rate-limit cooldown instead of trusting browser-supplied metadata. The
+HTTP order API also requires an idempotency key; the UI reuses that key for a
+retry of the same intent so a lost response cannot create a duplicate fill.
+
+The 거래현황 screens keep live calls scoped to the visible work surface.
 `내 투자` refreshes the selected account's holdings through
-`/api/tossinvest/investment-status`. `관심 목록` refreshes only the symbols in the
-currently selected watchlist folder through `/api/tossinvest/prices`; when it
-needs daily, weekly, monthly, or six-month return rates, it requests `1d`
-candles only for those same symbols, at a one-second interval while the
-watchlist surface is visible. If a listed instrument does not have candle
-history old enough for a period, that period is displayed as `-` instead of
-inventing a return.
+`/api/tossinvest/investment-status`. `관심 목록` partitions the instruments in the
+currently selected folder by provider: stocks use the scoped Toss price/candle
+routes, while Binance Spot pairs use batched `/api/market-data/quotes` and
+provider-qualified `/api/market-data/candles` calls. A locked Toss credential
+store does not block Binance-only rows in the same screen. If a listed
+instrument does not have candle history old enough for a period, that period is
+displayed as `-` instead of inventing a return.
 
 Deleting the saved Toss Securities API key store from Settings also deletes the
 local SQLite ledger, SQLite sidecar files, and obsolete pre-release generated
@@ -316,7 +399,7 @@ skipped.
 
 ## Quick Verification
 
-Run from `web`:
+Run frontend checks from `web`:
 
 ```bash
 npm run build
@@ -330,9 +413,19 @@ node --check server/arcaAuthApi.mjs
 node --check server/arcaApi.mjs
 node --check server/tossInvestApi.mjs
 node --check server/worldMemoryApi.mjs
-python scripts/tossinvest_ledger_store.py status
-python scripts/tossinvest_position_reconstruct.py rebuild
 ```
+
+Run storage, privacy, and Python checks from the repository root:
+
+```bash
+python scripts/sqlite_store_doctor.py
+python scripts/release_safety_check.py --strict
+python -m unittest discover -s tests -p 'test_*.py'
+```
+
+Do not use `tossinvest_position_reconstruct.py rebuild` as a health probe. It is
+a write operation that requires an initialized ledger, explicit target/impact,
+and post-run verification.
 
 Start the app and probe a local endpoint:
 
@@ -350,6 +443,8 @@ FinanceAgentGUI is meant to be repairable by a local coding agent after a user c
 
 1. Inspect the exact OS, Node version, npm version, Python version, browser path, and failing endpoint.
 2. Keep secrets redacted.
-3. Prefer small patches inside the app tree.
-4. Re-run `npm run build` or the narrowest relevant verification.
-5. Update `docs/compatibility.md` when the fix teaches a platform-specific lesson.
+3. For GitHub updates, follow `docs/update-and-release-safety.md`; preserve ignored runtime state and do not use destructive cleanup.
+4. Use `docs/sqlite-stores.md` for read-only diagnosis and backed-up migration. Never supply a seed DB.
+5. Prefer small patches inside the app tree.
+6. Re-run `npm run build` or the narrowest relevant verification.
+7. Update `docs/compatibility.md` when the fix teaches a platform-specific lesson.

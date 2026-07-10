@@ -42,6 +42,10 @@ The tracked design artifacts are:
 - `scripts/world_memory_harness.py`: verification harness for store health.
 - `tests/test_world_memory_cli.py` and `tests/test_world_memory_harness.py`: behavior checks.
 
+The cross-store registry and read-only verification entrypoint are
+`config/sqlite-stores.json` and `scripts/sqlite_store_doctor.py`. Update-time
+backups and owner-controlled migration are documented in `docs/sqlite-stores.md`.
+
 The schema file is documentation and repair guidance. The CLI remains the runtime
 owner because it also seeds system taxonomy and applies compatibility migrations.
 
@@ -76,6 +80,28 @@ lightweight retry check for 10 minutes later and keeps the collection attempt
 number stable. When a later probe succeeds, the scheduled collection continues
 automatically. For local diagnostics only, `WORLD_MEMORY_ASSUME_ONLINE=1` forces
 the probe to pass and `WORLD_MEMORY_ASSUME_ONLINE=0` forces the offline path.
+The probe treats any reachable non-5xx HTTP response, including 3xx/4xx, as
+evidence of internet connectivity; it is checking network reachability, not
+whether the probe URL is a valid content endpoint. If Vite hot reload or a server
+restart leaves an old connectivity-check promise in memory after `nextRetryAt`
+has already passed, the scheduler should clear that stale in-flight marker and
+resume the connectivity retry immediately.
+
+## Management model settings
+
+`PATCH /api/world-memory/settings` accepts `managementProvider`,
+`managementModel`, `managementReasoning`, and `managementSpeed`. The Settings
+page orders these as provider, model, model-specific reasoning, and speed when
+the selected model/reasoning combination actually exposes a controllable speed
+tier. Codex `priority` is passed to every model call as
+`-c service_tier="priority"`; unsupported or stale values fall back to
+`standard`. The selected model, reasoning, and speed apply to collection,
+report/change-suggestion refreshes,
+and the World Memory sidebar runtime. Antigravity entries that include their
+reasoning level in the model name do not show redundant reasoning or speed
+selectors because Antigravity CLI 1.1.1 exposes neither control separately.
+The model catalog and supported reasoning levels can be reloaded from the
+installed CLI without restarting the app.
 
 ## Initialization
 

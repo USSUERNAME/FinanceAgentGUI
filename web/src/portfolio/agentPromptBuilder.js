@@ -10,7 +10,7 @@ function fallbackPortfolioModeMeta(mode = "") {
     actionGuidance:
       id === "strategy-research"
         ? "전략 연구는 실제 투자금보다 비율, 가정, 데이터 출처, 비교 조건을 우선 확인해야 합니다."
-        : "실제 자산 데이터는 금액, 수량, 원금, 평가금액, 데이터 출처를 우선 확인해야 합니다.",
+        : "실제 자산 데이터는 금액, 수량, 원금, 평가금액, 데이터 출처를 우선 확인하고, 새 위젯은 사용자가 캔버스의 + 버튼에서 직접 선택합니다.",
   };
 }
 
@@ -28,63 +28,32 @@ function portfolioPromptCurrentDate() {
   return localDate.toISOString().slice(0, 10);
 }
 
-function portfolioPromptAssetHistoryActionExample({ canvasId = "", canvasMode = "asset-management" } = {}) {
-  return {
-    action: "create_widget",
-    actionId: "render_portfolio_artifact",
-    canvasId,
-    canvasMode,
-    classification: {
-      taskFamily: "asset_management",
-      operation: "create_widget",
-      analysisKind: "asset_cost_basis_history",
-      isMultiplePeriodComparison: false,
-      isMultipleAssetComparison: false,
-      comparisonAxis: "",
-      primaryOutput: "asset_history_chart",
-      requiresMarketData: false,
-      requiresBacktestExecution: false,
-      confidence: "high",
-    },
-    periodComparison: {
-      isMultiplePeriodComparison: false,
-      periods: [],
-      confidence: "",
-      note: "",
-    },
-    widget: {
-      title: "보유 자산 과거 내역",
-      kind: "보유 자산 과거 내역 차트",
-      visualType: "price-history",
-      summary: "토스 증권 Open API 동기화 스냅샷의 투자 원금 흐름을 표시합니다.",
-      dataset: [],
-      chartSpec: {
-        type: "price-history",
-        engine: "lightweight-charts",
-        chartType: "area",
-        role: "asset_cost_basis_history",
-        dataProvider: "토스 증권 Open API",
-        source: "tossinvest-position-reconstruction",
-        query: {
-          startDate: "",
-          startMode: "first_trade",
-          endDate: "",
-          endMode: "latest",
-          timeframe: "1d",
-          currency: "KRW",
-        },
-      },
-      scenarioId: "portfolio_scenario_root",
-      graphRole: "process_node",
-      outputRole: "asset_history",
-      badges: ["Lightweight Charts"],
-      dependsOn: [],
-      derivedFrom: [],
-      updatePolicy: "auto",
-      w: 3,
-      h: 3,
-    },
-  };
+const ASSET_MANAGEMENT_WIDGET_CREATION_REPLY =
+  "자산관리 캔버스의 위젯 구조는 전략 캔버스보다 단순해서 직접 만들기 어렵지 않습니다. 캔버스 빈 칸의 `+` 버튼을 눌러 원하는 위젯을 선택해 주세요.";
+
+function buildAssetManagementSidebarRoleInstructions({ canvas = null, currentDate = "", widgets = [] } = {}) {
+  return [
+    "[Asset Management Sidebar Role]",
+    canvas ? `현재 캔버스: ${canvas.name || "이름 없는 캔버스"} (${canvas.id || "canvas id 없음"})` : "",
+    "현재 캔버스 모드: asset-management (자산 관리)",
+    currentDate ? `현재 날짜: ${currentDate}` : "",
+    "자산관리 캔버스에서는 사이드바 에이전트가 새 위젯을 직접 생성하지 않습니다.",
+    "전략 캔버스와 달리 새 위젯의 생성 주체는 사용자이며, 캔버스 빈 칸의 `+` 버튼이 유일한 진입점입니다.",
+    "사용자가 위젯을 만들어 달라거나 추가해 달라고 요청해도 create_widget, create_widget_flow, create_portfolio_widget, render_portfolio_artifact 액션을 출력하지 마세요.",
+    `그 요청에는 다음 취지로 간결하게 답하세요: ${ASSET_MANAGEMENT_WIDGET_CREATION_REPLY}`,
+    "대신 현재 보유 데이터와 기존 위젯의 의미를 설명하고, 데이터 공백이나 연결 상태를 진단하며, 어떤 위젯을 `+` 선택기에서 고르면 되는지 안내할 수 있습니다.",
+    "사용자가 기존 위젯의 수정이나 삭제를 명시하고 widgetId 또는 widgetDisplayId로 대상을 특정한 경우에만 update_widget 또는 delete_widget 액션을 사용할 수 있습니다. 대상 없는 수정 요청을 새 위젯 생성으로 바꾸지 마세요.",
+    "위젯 생성을 대신하기 위한 마크다운·체크리스트·임시 표 위젯도 만들지 마세요.",
+    "현재 위젯:",
+    ...(widgets.length
+      ? widgets.slice(0, 5).map(
+          (widget) =>
+            `- ${widget.displayId || ""} (${widget.id || "id 없음"}): ${widget.title || "이름 없는 위젯"} / ${widget.visualType || "타입 없음"} / ${widget.status || "상태 없음"}`
+        )
+      : ["- 현재 위젯 없음"]),
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 const DEFAULT_USER_WIDGET_PROMPT_LIMIT = 1200;
@@ -131,6 +100,18 @@ export function buildPortfolioWidgetAgentPrompt(
   const isAssetMode = portfolioPromptIsAssetMode(modeMeta, assetCanvasModeId);
   const scenario = requestScenario && typeof requestScenario === "object" ? requestScenario : null;
   const currentDate = portfolioPromptCurrentDate();
+  if (isAssetMode) {
+    return [
+      buildAssetManagementSidebarRoleInstructions({
+        canvas: { id: canvasId, name: canvasName },
+        currentDate,
+        widgets: safeWidget.id || safeWidget.displayId ? [safeWidget] : [],
+      }),
+      "",
+      "[User Request]",
+      safePrompt || "새 위젯을 추가하고 싶습니다.",
+    ].join("\n");
+  }
   return [
     `포트폴리오 위젯 ${requestLabel} 요청입니다.`,
     "",
@@ -339,6 +320,9 @@ export function buildPortfolioChatActionInstructions(
   const isAssetMode = portfolioPromptIsAssetMode(modeMeta, assetCanvasModeId);
   const scenario = contextPacket?.scenario && typeof contextPacket.scenario === "object" ? contextPacket.scenario : null;
   const currentDate = portfolioPromptCurrentDate();
+  if (isAssetMode) {
+    return buildAssetManagementSidebarRoleInstructions({ canvas, currentDate, widgets });
+  }
   return [
     "[Portfolio Widget Action Contract]",
     canvas ? `현재 캔버스: ${canvas.name || "이름 없는 캔버스"} (${canvas.id || "canvas id 없음"})` : "",
@@ -454,9 +438,7 @@ export function buildPortfolioChatActionInstructions(
     "생성 action 예시:",
     "```portfolio_widget_action",
     JSON.stringify(
-      isAssetMode
-      ? portfolioPromptAssetHistoryActionExample({ canvasId, canvasMode: modeMeta.id })
-      : {
+      {
         action: "create_widget",
         actionId: "render_portfolio_artifact",
         canvasId,
