@@ -55,8 +55,10 @@ the prompt context should still receive a bounded single user-memory layer.
 The external layer treats World Memory as the durable baseline and News Feed as
 the bridge between formal World Memory updates.
 
-- `external_memory_briefing.md` is refreshed every 15 minutes while the local
-  server/context path is active.
+- `external_memory_briefing.md` is refreshed by a server-owned background worker
+  every 15 minutes while the local server is active. The worker keeps the API/UI
+  event loop responsive while the translation model runs; opening News Feed or
+  sending a chat message is not required to keep the schedule alive.
 - It is overwritten in place rather than accumulated as an endless digest log.
 - It uses the latest World Memory report as the narrative baseline and strips the
   `월드 메모리 변경 제안` section before entering prompt context.
@@ -79,8 +81,9 @@ the bridge between formal World Memory updates.
 - The same model response carries `alertLevel`, `severityKo`,
   `shouldCreateReport`, and `pushSummary`; do not run a second text-matching or
   model-only severity pass over the finished summary.
-- When the refreshed summary is `urgent` or `critical`, `/api/memory` triggers
-  the existing emergency-market-update procedure once for that summary: generate
+- When the refreshed summary is `urgent` or `critical`, the same background
+  maintenance cycle triggers the existing emergency-market-update procedure once
+  for that summary: generate
   the fast report, save it under `data/reports/`, queue the browser notification,
   and dedupe later polls. A reportable episode gets one `urgent` report at most;
   if the same episode escalates from `urgent` to `critical`, it may create one
@@ -109,8 +112,8 @@ The response also includes `contextMemory.marketSummary`, a display-safe view
 of the current translation-model market summary used by the News Feed screen.
 The visible summary text includes a trailing `심각성 평가` block, and the object
 also exposes the parsed `alertLevel`, `severityKo`, `shouldCreateReport`, and
-`pushSummary`, plus the latest `emergencyProcedure` result when `/api/memory`
-ran the automatic urgent/critical hook.
+`pushSummary`. `GET /api/memory` is a cached, non-blocking status read; the
+server-owned maintenance worker runs the automatic urgent/critical hook.
 
 Append a record:
 

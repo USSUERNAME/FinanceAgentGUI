@@ -16,6 +16,7 @@ import {
   codexSpeedOptionsFromModel,
   normalizeCodexSpeed,
 } from "./agentSpeed.mjs";
+import { antigravityPrintInvocation } from "./antigravityCliCompatibility.mjs";
 import { buildReportCatalogContextSection } from "./reportCatalog.mjs";
 import { buildSharedMemoryContextSection } from "./sharedMemoryStore.mjs";
 import { isWorldMemoryEnabled } from "./worldMemorySettings.mjs";
@@ -3552,20 +3553,27 @@ function antigravityCliReasoningLevel(model = "", preferredReasoning = "") {
   );
 }
 
-function antigravityCliArgs({ model, approval }) {
+function antigravityCliInvocation({ cliVersion, model, approval, prompt }) {
   const securityPreset = antigravitySecurityPreset(approval);
-  return [
-    ...securityPreset.cliArgs,
-    "--model",
+  return antigravityPrintInvocation({
+    cliVersion,
     model,
-    `--print-timeout=${ANTIGRAVITY_CLI_PRINT_TIMEOUT}`,
-    "-p",
-    "-",
-  ];
+    printTimeout: ANTIGRAVITY_CLI_PRINT_TIMEOUT,
+    prompt,
+    securityArgs: securityPreset.cliArgs,
+  });
 }
 
-function runAntigravityCliPrint({ prompt, model, approval, timeoutMs = CHAT_TIMEOUT_MS }) {
-  const path = findAntigravityCliPath();
+export function runAntigravityCliPrint({
+  prompt,
+  model,
+  approval,
+  timeoutMs = CHAT_TIMEOUT_MS,
+  cliPath = findAntigravityCliPath(),
+  cliVersion = "",
+  spawnProcess = spawn,
+}) {
+  const path = cliPath;
   if (!path) {
     return Promise.reject(
       new Error("Antigravity CLI(agy)를 찾지 못했습니다."),
@@ -3574,11 +3582,11 @@ function runAntigravityCliPrint({ prompt, model, approval, timeoutMs = CHAT_TIME
 
   const startedAt = Date.now();
   return new Promise((resolveGenerate, reject) => {
-    const args = antigravityCliArgs({ model, approval });
-    const child = spawn(path, args, {
+    const invocation = antigravityCliInvocation({ cliVersion, model, approval, prompt });
+    const child = spawnProcess(path, invocation.args, {
       cwd: WEB_ROOT,
       encoding: "utf8",
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: invocation.stdio,
       env: {
         ...process.env,
         NO_COLOR: "1",
@@ -3589,6 +3597,12 @@ function runAntigravityCliPrint({ prompt, model, approval, timeoutMs = CHAT_TIME
     let stdout = "";
     let stderr = "";
     let settled = false;
+    const rejectOnce = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    };
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -3602,12 +3616,8 @@ function runAntigravityCliPrint({ prompt, model, approval, timeoutMs = CHAT_TIME
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
-    child.on("error", (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(error);
-    });
+    child.stdin?.once("error", rejectOnce);
+    child.on("error", rejectOnce);
     child.on("close", (code) => {
       if (settled) return;
       settled = true;
@@ -3627,7 +3637,13 @@ function runAntigravityCliPrint({ prompt, model, approval, timeoutMs = CHAT_TIME
       });
     });
 
-    child.stdin.end(prompt, "utf8");
+    if (invocation.stdin !== null) {
+      try {
+        child.stdin.end(invocation.stdin, "utf8");
+      } catch (error) {
+        rejectOnce(error);
+      }
+    }
   });
 }
 
@@ -3652,6 +3668,7 @@ export async function runAntigravityGenerate({
       model: selectedModel,
       approval,
       timeoutMs,
+      cliVersion: status.version,
     });
   } catch (error) {
     throw new Error(
@@ -3731,6 +3748,7 @@ async function runAntigravityChat(payload = {}) {
       model,
       approval: securityPreset.id,
       timeoutMs: chatTimeoutMsForPayload(payload),
+      cliVersion: status.version,
     });
   } catch (error) {
     throw new Error(
@@ -3867,6 +3885,7 @@ function streamAntigravityChat(payload = {}, res) {
     model,
     approval: securityPreset.id,
     timeoutMs: chatTimeoutMsForPayload(payload),
+    cliVersion: status.version,
   })
     .then((result) => {
       writeStreamEvent(res, "message", {

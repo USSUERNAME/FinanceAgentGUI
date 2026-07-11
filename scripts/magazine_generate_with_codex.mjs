@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codexServiceTierArgs, normalizeCodexSpeed } from "../web/server/agentSpeed.mjs";
+import { antigravityPrintInvocation } from "../web/server/antigravityCliCompatibility.mjs";
 
 const SCRIPT_DIR = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const GUIBUILD_ROOT = resolve(SCRIPT_DIR, "..");
@@ -1672,6 +1673,18 @@ function antigravityPrintTimeout() {
   return String(process.env.ANTIGRAVITY_CLI_PRINT_TIMEOUT || "30m").trim() || "30m";
 }
 
+function antigravityCliVersion(command) {
+  const result = spawnSync(command, ["--version"], {
+    cwd: GUIBUILD_ROOT,
+    encoding: "utf8",
+    timeout: 5000,
+    maxBuffer: 64 * 1024,
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+  if (result.error || result.status !== 0) return "";
+  return String(result.stdout || result.stderr || "").trim();
+}
+
 async function runAntigravityPrompt({
   approval,
   model,
@@ -1680,20 +1693,19 @@ async function runAntigravityPrompt({
   timeoutMs,
 }) {
   const agy = findAntigravityCommand();
-  const args = [
-    ...antigravitySecurityArgs(approval),
-    "--model",
-    cleanAntigravityModel(model),
-    `--print-timeout=${antigravityPrintTimeout()}`,
-    "-p",
-    "-",
-  ];
+  const invocation = antigravityPrintInvocation({
+    cliVersion: antigravityCliVersion(agy),
+    model: cleanAntigravityModel(model),
+    printTimeout: antigravityPrintTimeout(),
+    prompt,
+    securityArgs: antigravitySecurityArgs(approval),
+  });
 
   return new Promise((resolvePrompt, reject) => {
-    const child = spawn(agy, args, {
+    const child = spawn(agy, invocation.args, {
       cwd: GUIBUILD_ROOT,
       env: { ...process.env, NO_COLOR: "1" },
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: invocation.stdio,
     });
     let stdout = "";
     let stderr = "";
@@ -1711,6 +1723,10 @@ async function runAntigravityPrompt({
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
       process.stderr.write(chunk);
+    });
+    child.stdin?.once("error", (error) => {
+      if (timer) clearTimeout(timer);
+      reject(error);
     });
     child.on("error", (error) => {
       if (timer) clearTimeout(timer);
@@ -1734,8 +1750,7 @@ async function runAntigravityPrompt({
       }
       resolvePrompt({ stdout, stderr });
     });
-
-    child.stdin.end(prompt);
+    if (invocation.stdin !== null) child.stdin.end(invocation.stdin);
   });
 }
 
