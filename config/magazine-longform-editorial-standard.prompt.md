@@ -21,8 +21,10 @@ brief under a magazine label.
 
 ## Argument Architecture
 
-- Open with a paradox, collision, scene, number, or proposition that contains
-  the article's central tension. Do not begin with a generic news recap.
+- Open with the clearest concrete fact, scene, number, or proposition that
+  contains the article's central tension. A paradox is optional, not a default
+  template. A direct factual opening is preferable when a contrived image or
+  collision would make the Korean less natural.
 - State or make legible a contestable thesis early. The thesis must do more than
   predict that an event will have effects.
 - Advance by conceptual turns: evidence, mechanism, counterevidence, history,
@@ -65,10 +67,11 @@ brief under a magazine label.
   The narrator addresses the reader with natural 존대말 rather than the plain
   declarative `-다/-이다/-한다` style. Quotations may preserve a speaker's own
   register when accuracy requires it.
-- The voice is knowledgeable but warm: an experienced magazine writer thinking
-  through a difficult subject beside the reader. It should not sound like an
-  academic paper, policy memo, securities report, lecture, or translated wire
-  story.
+- The voice is calm, knowledgeable, and clear. A restrained explanatory style
+  is acceptable when it makes a difficult financial mechanism easier to
+  follow. It must not use bureaucratic compression, lecture the reader, or read
+  like a translated wire story, but warmth, scene, wit, and conversational ease
+  are optional rather than publication gates.
 - Prefer the flexible cadence of natural Korean magazine prose. `-습니다` and
   `-입니다` provide the base, while occasional conversational turns can soften
   transitions when they genuinely fit. Do not force every sentence into the
@@ -80,15 +83,33 @@ brief under a magazine label.
   at every heading.
 - Prefer precise nouns and active verbs to abstract nominalizations. Explain
   specialist terms at first use without flattening the analysis.
+- Compose from a Korean fact-and-argument map, not by preserving the sentence
+  order or rhetorical images of English-language evidence. After research,
+  restate the confirmed facts, causal links, counterargument, uncertainty, and
+  conclusion in Korean semantic units; then draft the article anew from that
+  map. Do not translate or paraphrase source sentences one by one.
+- Prefer concrete human or institutional subjects with explicit actions. Do
+  not routinely make abstractions such as markets, indices, diplomacy, capital,
+  clocks, ledgers, prices, or rules speak, ask, defend, sign, wait, or decide.
+  Personification is acceptable only when it is rare, immediately intelligible,
+  and more precise than a literal sentence.
+- A Korean sentence should reveal its subject, action, and consequence without
+  requiring the reader to reconstruct an omitted English-style relation.
+  Avoid chains of abstract nouns, compressed paired clauses, and slogan-like
+  antithesis whose grammatical connection is clearer than its meaning.
+- Headlines and section headings should be understood on first reading. Prefer
+  a concrete actor, issue, or consequence over a compressed metaphor. Do not
+  omit the object of two parallel verbs merely to make the title symmetrical.
 - Allow restrained wit, irony, or a memorable analogy when it exposes the
-  mechanism. For ordinary economic, corporate, market, and policy subjects,
-  this poised wit and sense of ease are part of the default voice rather than an
-  afterthought. Never insert levity merely to imitate a magazine voice.
+  mechanism. It is never required. One literal, accurate paragraph is better
+  than a decorative metaphor, and repeated aphorisms are not a substitute for
+  a natural Korean magazine voice. Never insert levity merely to imitate a
+  magazine voice.
 - Wit comes from the material: a mismatch between an institution's stated goal
   and its incentive, a surprising denominator, an expensive workaround, or the
   absurdity of a market mechanism doing exactly what it was designed to do. Do
   not bolt jokes, cute metaphors, or punch lines onto paragraphs.
-- Give the prose room to breathe. Not every fact needs an immediate `therefore`.
+- The prose may give the reader room to breathe, but this is optional. Not every fact needs an immediate `therefore`.
   A concrete scene, a short aside, an unexpected comparison, or a deliberately
   short paragraph can let the reader register the irony before the analysis
   continues. This composure is the requested editorial ease; it is not filler.
@@ -122,7 +143,8 @@ The following is a material failure of the commission even when every sentence
 is factually correct:
 
 - a news brief expanded with generic implications;
-- a sequence of evenly sized sections that restate the same mechanism;
+- a sequence of sections that restates the same mechanism so extensively that
+  the article is padded or the argument no longer advances;
 - evidence presented without a contestable thesis;
 - a thesis asserted but not tested against meaningful counterevidence;
 - insufficient reporting to connect the event to history, incentives, or lived
@@ -130,9 +152,12 @@ is factually correct:
 - attribution to an internal storage or retrieval layer instead of the actual
   publication, institution, document, dataset, or speaker;
 - an ending that merely repeats the opening in more polished language.
-- a narrator that uses plain `-다/-한다` expository prose or remains so stiff
-  and impersonal that it reads like a formal report rather than a magazine
-  article.
-- prose that is technically polished but airless: every paragraph rushes from
-  fact to implication, leaving no scene, surprise, irony, or humane breathing
-  room appropriate to the subject.
+- a narrator that uses plain `-다/-한다` expository prose or bureaucratic
+  compression that obscures who acted, what changed, or who bears the cost.
+- prose that is pervasively shaped like translated conceptual English: abstract
+  subjects are repeatedly personified, semantic relations are omitted for
+  symmetry, noun phrases accumulate, and paragraphs end in manufactured
+  aphorisms even though each individual sentence is grammatically possible.
+- a headline or body that a fluent Korean reader must mentally translate back
+  into another language to infer who did what. This is a publication failure,
+  not a discretionary taste issue, when it recurs across the article.

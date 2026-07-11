@@ -412,6 +412,21 @@ test("Magazine v2 semantic review keeps editorial scaffolding out of reader-faci
   assert.match(prompt, /blocking 범위/);
 });
 
+test("Magazine v2 semantic review blocks pervasive unidiomatic Korean instead of treating it as optional polish", () => {
+  const prompt = buildEditorialReviewPrompt({
+    articleId: "sample",
+    metadata: {},
+    bodyText: "지수가 장부에 묻고 호가가 매일 서명합니다.",
+  });
+
+  assert.match(prompt, /영어식 추상명사 주어/);
+  assert.match(prompt, /역번역/);
+  assert.match(prompt, /pervasive-unidiomatic-korean/);
+  assert.match(prompt, /자연스러운 한국어 제목/);
+  assert.match(prompt, /명료한 설명형·분석형 한국어는 허용/);
+  assert.match(prompt, /보고서형 호흡.*advisory/);
+});
+
 test("Magazine v2 normalizes improvised research mode labels from actual evidence", () => {
   assert.equal(normalizeGeneratedResearchMode({
     researchMode: "news-feed-first-with-external-research",
