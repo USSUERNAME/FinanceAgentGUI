@@ -8,7 +8,7 @@ import { handleBinanceMarketDataEndpoint } from "./binanceMarketDataApi.mjs";
 import { handleEconomicCalendarEndpoint } from "./economicCalendarApi.mjs";
 import { handleEarningsEndpoint } from "./earningsApi.mjs";
 import { handleInvestSimulatorEndpoint } from "./investSimulatorApi.mjs";
-import { handleMemoryEndpoint } from "./memoryApi.mjs";
+import { handleMemoryEndpoint, startSharedMemoryMaintenanceScheduler } from "./memoryApi.mjs";
 import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mjs";
 import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
 import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
@@ -522,5 +522,6 @@ server.listen(port, host, () => {
     startNewsFeedCollector();
     startWorldMemoryCollector();
     startMagazineScheduler();
+    startSharedMemoryMaintenanceScheduler();
   }, 0);
 });

@@ -19,6 +19,7 @@ import {
   selectAntigravityModelForReasoning,
 } from "../src/agent/antigravityModelSelection.js";
 import { selectCodexTranslationModel } from "../src/agent/codexTranslationModelSelection.js";
+import { antigravityPrintInvocation } from "./antigravityCliCompatibility.mjs";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const GUIBUILD_ROOT = resolve(WEB_ROOT, "..");
@@ -341,6 +342,23 @@ function readAntigravityModels(path = findAntigravityCliPath()) {
   }
 }
 
+function readAntigravityVersion(path = findAntigravityCliPath()) {
+  if (!path) return "";
+  try {
+    const result = spawnSync(path, ["--version"], {
+      cwd: WEB_ROOT,
+      encoding: "utf8",
+      timeout: 5000,
+      maxBuffer: 64 * 1024,
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    if (result.status !== 0 || result.error) return "";
+    return String(result.stdout || result.stderr || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 function antigravityTranslationModelInfo(settings = readAgentSettings()) {
   const path = findAntigravityCliPath();
   if (!path) throw new Error("Antigravity CLI(agy)를 찾지 못했습니다.");
@@ -357,6 +375,7 @@ function antigravityTranslationModelInfo(settings = readAgentSettings()) {
     modelLabel: `Antigravity CLI · ${model}`,
     reasoning: ANTIGRAVITY_TRANSLATION_REASONING,
     path,
+    cliVersion: readAntigravityVersion(path),
   };
 }
 
@@ -418,12 +437,18 @@ export function runCodexJsonModel(prompt, schema, modelInfo, timeoutMs = EXTERNA
 export function runAntigravityJsonModel(prompt, modelInfo, timeoutMs = EXTERNAL_BRIEFING_MODEL_TIMEOUT_MS) {
   const path = modelInfo.path || findAntigravityCliPath();
   if (!path) throw new Error("Antigravity CLI(agy)를 찾지 못했습니다.");
+  const invocation = antigravityPrintInvocation({
+    cliVersion: modelInfo.cliVersion || readAntigravityVersion(path),
+    model: modelInfo.model,
+    printTimeout: "2m",
+    prompt,
+  });
   const result = spawnSync(
     path,
-    ["--model", modelInfo.model, "--print-timeout=2m", "-p", "-"],
+    invocation.args,
     {
       cwd: WEB_ROOT,
-      input: prompt,
+      input: invocation.stdin === null ? undefined : invocation.stdin,
       encoding: "utf8",
       timeout: timeoutMs,
       maxBuffer: 1024 * 1024,

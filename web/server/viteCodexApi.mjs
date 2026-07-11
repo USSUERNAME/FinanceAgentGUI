@@ -4,7 +4,7 @@ import { handleBinanceMarketDataEndpoint } from "./binanceMarketDataApi.mjs";
 import { handleInvestSimulatorEndpoint } from "./investSimulatorApi.mjs";
 import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mjs";
 import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
-import { handleMemoryEndpoint } from "./memoryApi.mjs";
+import { handleMemoryEndpoint, startSharedMemoryMaintenanceScheduler } from "./memoryApi.mjs";
 import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
@@ -39,6 +39,7 @@ export function codexApiPlugin() {
       startNewsFeedCollector();
       startWorldMemoryCollector();
       startMagazineScheduler();
+      startSharedMemoryMaintenanceScheduler();
 
       server.middlewares.use("/api/market-data/instruments/search", async (req, res) => {
         await handleBinanceMarketDataEndpoint("instrument-search", req, res);

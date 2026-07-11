@@ -309,6 +309,12 @@ Antigravity provider calls use the standalone `agy` CLI and its Google OAuth
 session. Install the CLI, then run `agy` in a terminal to complete the browser
 login flow before selecting Antigravity in the app.
 
+Antigravity CLI `agy` 1.1.1 and newer print mode requires the prompt as the
+value of `-p`/`--print`, while legacy releases use `-p -` plus stdin.
+FinanceAgentGUI detects the semantic CLI version and keeps both transports.
+An early CLI or stdin failure must be returned as a request-level error and
+must never terminate the local server.
+
 If `agy` is missing, unauthenticated, or unable to list models, Antigravity
 provider actions should fail with a clear readiness or generation error. Do not
 use an alternate authentication mechanism or another selected provider.

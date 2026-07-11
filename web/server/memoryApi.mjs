@@ -1,4 +1,5 @@
 import { readJsonBody, sendJson } from "./codexProbe.mjs";
+import { Worker } from "node:worker_threads";
 import {
   appendSharedMemoryRecord,
   buildSharedMemoryContextPacket,
@@ -6,6 +7,42 @@ import {
   sharedMemoryStatus,
 } from "./sharedMemoryStore.mjs";
 import { runEmergencyProcedureForMarketSummary } from "./notificationsApi.mjs";
+
+const SHARED_MEMORY_MAINTENANCE_INTERVAL_MS = 15 * 60 * 1000;
+const sharedMemoryMaintenanceRuntime = {
+  started: false,
+  timer: null,
+  worker: null,
+};
+
+function runSharedMemoryMaintenanceInBackground() {
+  if (sharedMemoryMaintenanceRuntime.worker) return false;
+  const worker = new Worker(new URL("./sharedMemoryMaintenanceWorker.mjs", import.meta.url), {
+    type: "module",
+  });
+  sharedMemoryMaintenanceRuntime.worker = worker;
+  const clearWorker = () => {
+    if (sharedMemoryMaintenanceRuntime.worker === worker) {
+      sharedMemoryMaintenanceRuntime.worker = null;
+    }
+  };
+  worker.once("error", clearWorker);
+  worker.once("exit", clearWorker);
+  return true;
+}
+
+export function startSharedMemoryMaintenanceScheduler() {
+  if (sharedMemoryMaintenanceRuntime.started) return false;
+  sharedMemoryMaintenanceRuntime.started = true;
+  const initialTimer = setTimeout(runSharedMemoryMaintenanceInBackground, 1_000);
+  initialTimer.unref?.();
+  sharedMemoryMaintenanceRuntime.timer = setInterval(
+    runSharedMemoryMaintenanceInBackground,
+    SHARED_MEMORY_MAINTENANCE_INTERVAL_MS,
+  );
+  sharedMemoryMaintenanceRuntime.timer.unref?.();
+  return true;
+}
 
 async function sharedMemoryStatusWithEmergencyProcedure(options = {}) {
   const { runEmergencyProcedure = true, ...statusOptions } = options;
