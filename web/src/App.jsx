@@ -1084,8 +1084,10 @@ function magazineClipboardProviderName(provider) {
   return provider === "antigravity-cli" ? "Antigravity" : "Codex";
 }
 
+const MAGAZINE_CLIPBOARD_ATTRIBUTION_URL = "https://arca.live/b/stock/175140301";
+
 function magazineClipboardAttributionText(provider) {
-  return `주식채널+ 에이전트의 Stock Channel Magazine+에서 ${magazineClipboardProviderName(provider)}로 생성됨`;
+  return `Stock Channel Magazine+에서 ${magazineClipboardProviderName(provider)}로 생성됨`;
 }
 
 function appendMagazineClipboardAttribution(node, provider) {
@@ -1096,7 +1098,11 @@ function appendMagazineClipboardAttribution(node, provider) {
   }
   const attribution = document.createElement("p");
   attribution.className = "magazine-copy-attribution";
-  attribution.textContent = magazineClipboardAttributionText(provider);
+  const link = document.createElement("a");
+  link.href = MAGAZINE_CLIPBOARD_ATTRIBUTION_URL;
+  link.target = "_blank";
+  link.textContent = "Stock Channel Magazine+";
+  attribution.append(link, `에서 ${magazineClipboardProviderName(provider)}로 생성됨`);
   node.appendChild(attribution);
 }
 

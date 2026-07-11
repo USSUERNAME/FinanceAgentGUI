@@ -79,11 +79,15 @@ The model owns these decisions.
 3. Read `config/magazine-longform-editorial-standard.prompt.md`, then research
    enough to build its thesis, evidence ladder, strongest counterargument,
    historical or institutional context, and affected-party consequences.
-4. Draft the body first with `metadata.title` empty.
-5. Save the article and audit metadata. The generator finalizes the title later.
-6. Submit the completed article to the v2 semantic editorial review while the
+4. Before drafting, convert the research into a Korean semantic map of confirmed
+   facts, actors, actions, causal links, counterargument, uncertainty, and
+   conclusion. Draft from this map rather than following source-language
+   sentences or rhetorical images.
+5. Draft the body first with `metadata.title` empty.
+6. Save the article and audit metadata. The generator finalizes the title later.
+7. Submit the completed article to the v2 semantic editorial review while the
    separate image worker obtains the hero asset.
-7. Run the quality
+8. Run the quality
    checker. Fix blocking publication-integrity issues. Treat advisory feedback as
    judgment, not an automatic rewrite order.
 
@@ -95,7 +99,16 @@ integrity failures are blocking: fabricated or unsupported material, clear
 internal-process leakage, materially duplicated primary events, broken article
 coherence, misleading quotation, reader-facing editorial scaffolding that tells
 the reader where the counterargument or mechanism begins, or a material failure to fulfill the longform
-commission. Character count alone never makes an issue blocking. A thin brief,
-an untested thesis, or repetitive sections may be blocking when the reviewer can
-identify the missing argumentative work in the actual article. Local style
-preferences, surface rhythm, wit, and optional refinements remain advisory.
+commission. Character count alone never makes an issue blocking. A thin brief
+or an untested thesis may be blocking when the reviewer can identify the missing
+argumentative work in the actual article. Repetition is blocking only when it
+amounts to unsupported padding or prevents the argument from advancing; an
+otherwise complete explanatory article receives advisory feedback for report-like
+cadence or consolidatable sections. Local style preferences, surface rhythm,
+warmth, scenes, wit, and optional refinements remain advisory.
+Pervasive translated-English structure is not a local preference: if abstract
+subjects are repeatedly personified, semantic relations are omitted for
+symmetry, noun phrases accumulate, or manufactured aphorisms make the article
+unidiomatic as a whole, the reviewer must return a blocking
+`pervasive-unidiomatic-korean` issue. Repair must rebuild the article from its
+fact-and-argument map rather than substitute words sentence by sentence.
