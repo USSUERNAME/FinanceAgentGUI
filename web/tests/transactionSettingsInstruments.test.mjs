@@ -83,6 +83,7 @@ test("transaction settings preserve canonical Binance Spot instrument metadata",
   assert.deepEqual(group.instruments[0], {
     instrumentId: "binance:spot:BTCUSDT",
     provider: "binance",
+    marketType: "spot",
     venue: "BINANCE_SPOT",
     assetClass: "crypto",
     symbol: "BTCUSDT",
@@ -95,6 +96,9 @@ test("transaction settings preserve canonical Binance Spot instrument metadata",
     market: "BINANCE_SPOT",
     name: "Bitcoin",
     englishName: "Bitcoin",
+    contractType: "",
+    underlyingType: "",
+    underlyingSubType: [],
     source: "binance-market-data",
   });
 });
@@ -120,6 +124,7 @@ test("Binance identity is provider-derived without inventing a TRADING status", 
   assert.deepEqual(settings.watchlistGroups[0].instruments[0], {
     instrumentId: "binance:spot:BTCUSDT",
     provider: "binance",
+    marketType: "spot",
     venue: "BINANCE_SPOT",
     assetClass: "crypto",
     symbol: "BTCUSDT",
@@ -132,8 +137,41 @@ test("Binance identity is provider-derived without inventing a TRADING status", 
     market: "BINANCE_SPOT",
     name: "BTCUSDT",
     englishName: "",
+    contractType: "",
+    underlyingType: "",
+    underlyingSubType: [],
     source: "binance-market-data",
   });
+});
+
+test("transaction settings preserve Binance USDⓈ-M TradFi metadata", () => {
+  const settings = normalizeTransactionSettings({
+    watchlistGroups: [{
+      id: "commodities",
+      name: "원자재",
+      instruments: [{
+        instrumentId: "binance:usdm:clusdt",
+        provider: "binance",
+        marketType: "usdm",
+        venue: "BINANCE_USDM_FUTURES",
+        assetClass: "commodity",
+        symbol: "CLUSDT",
+        baseAsset: "CL",
+        quoteAsset: "USDT",
+        contractType: "TRADIFI_PERPETUAL",
+        underlyingType: "COMMODITY",
+        underlyingSubType: ["TradFi"],
+      }],
+    }],
+  });
+  const [instrument] = settings.watchlistGroups[0].instruments;
+  assert.equal(instrument.instrumentId, "binance:usdm:CLUSDT");
+  assert.equal(instrument.marketType, "usdm");
+  assert.equal(instrument.venue, "BINANCE_USDM_FUTURES");
+  assert.equal(instrument.assetClass, "commodity");
+  assert.equal(instrument.contractType, "TRADIFI_PERPETUAL");
+  assert.equal(instrument.underlyingType, "COMMODITY");
+  assert.deepEqual(instrument.underlyingSubType, ["TradFi"]);
 });
 
 test("symbols-only legacy patches retain matching instrument metadata", () => {

@@ -189,10 +189,21 @@ function normalizeNewsFeedClipboardMetaRow(cloneNode) {
   }
 
   const label = document.createElement("strong");
-  label.textContent = [sourceName, itemTime].filter(Boolean).join(" ");
+  label.textContent = sourceName;
+  label.style.color = "#242424";
   label.style.fontWeight = "700";
   label.style.verticalAlign = "middle";
-  row.appendChild(label);
+  if (sourceName) row.appendChild(label);
+
+  if (itemTime) {
+    const time = document.createElement("span");
+    time.textContent = itemTime;
+    time.style.color = "#777777";
+    time.style.fontWeight = "700";
+    time.style.verticalAlign = "middle";
+    if (sourceName) row.appendChild(document.createTextNode(" "));
+    row.appendChild(time);
+  }
   meta.replaceWith(row);
 
   const body = cloneNode.querySelector(".news-feed-translation");
@@ -208,7 +219,9 @@ function newsFeedPlainTextFromNode(node) {
   holder.style.position = "fixed";
   holder.style.left = "-10000px";
   holder.style.top = "0";
-  holder.appendChild(node.cloneNode(true));
+  const cloneNode = node.cloneNode(true);
+  cloneNode.style.contentVisibility = "visible";
+  holder.appendChild(cloneNode);
   document.body.appendChild(holder);
   const text = holder.innerText.trim();
   holder.remove();
@@ -237,8 +250,69 @@ async function buildNewsFeedClipboardPayload(sourceNode, item) {
   return { html, plainText };
 }
 
-async function writeNewsFeedItemToClipboard(sourceNode, item) {
-  const payloadPromise = buildNewsFeedClipboardPayload(sourceNode, item);
+function buildMarketSummaryClipboardPayload(sourceNode, summaryText, summaryMeta) {
+  if (!sourceNode) throw new Error("복사할 시장 요약을 찾지 못했습니다.");
+
+  const cloneNode = document.createElement("section");
+  cloneNode.className = "news-feed-market-summary-copy";
+
+  const header = document.createElement("p");
+  header.style.margin = "0";
+  header.style.lineHeight = "1.35";
+
+  const sourceDot = sourceNode.querySelector(".news-feed-market-summary-severity-dot");
+  const dot = document.createElement("span");
+  dot.textContent = "●";
+  dot.style.color = sourceDot ? window.getComputedStyle(sourceDot).backgroundColor : "#777777";
+  dot.style.fontSize = "13px";
+  dot.style.verticalAlign = "middle";
+  header.appendChild(dot);
+  header.appendChild(document.createTextNode(" "));
+
+  const title = document.createElement("strong");
+  title.textContent = "시장 요약";
+  title.style.color = "#202020";
+  title.style.fontWeight = "800";
+  title.style.verticalAlign = "middle";
+  header.appendChild(title);
+
+  if (summaryMeta) {
+    const meta = document.createElement("span");
+    meta.textContent = summaryMeta;
+    meta.style.color = "#777777";
+    meta.style.fontSize = "11px";
+    meta.style.fontWeight = "660";
+    meta.style.verticalAlign = "middle";
+    header.appendChild(document.createTextNode(" "));
+    header.appendChild(meta);
+  }
+
+  const spacer = document.createElement("p");
+  spacer.innerHTML = "&nbsp;";
+  const body = document.createElement("p");
+  body.textContent = summaryText;
+  body.style.margin = "0";
+  body.style.color = "#262626";
+  body.style.fontSize = "16px";
+  body.style.fontWeight = "560";
+  body.style.lineHeight = "1.55";
+  body.style.whiteSpace = "pre-wrap";
+  cloneNode.append(header, spacer, body);
+
+  const plainText = newsFeedPlainTextFromNode(cloneNode);
+  const html = [
+    "<!doctype html>",
+    "<html>",
+    "<head><meta charset=\"utf-8\"></head>",
+    "<body>",
+    cloneNode.outerHTML,
+    "</body>",
+    "</html>",
+  ].join("");
+  return { html, plainText };
+}
+
+async function writeNewsFeedPayloadToClipboard(payloadPromise) {
   if (navigator.clipboard?.write && window.ClipboardItem) {
     try {
       await navigator.clipboard.write([
@@ -261,6 +335,16 @@ async function writeNewsFeedItemToClipboard(sourceNode, item) {
   const { plainText } = await payloadPromise;
   await navigator.clipboard.writeText(plainText);
   return { mode: "text" };
+}
+
+async function writeNewsFeedItemToClipboard(sourceNode, item) {
+  return writeNewsFeedPayloadToClipboard(buildNewsFeedClipboardPayload(sourceNode, item));
+}
+
+async function writeMarketSummaryToClipboard(sourceNode, summaryText, summaryMeta) {
+  return writeNewsFeedPayloadToClipboard(
+    Promise.resolve(buildMarketSummaryClipboardPayload(sourceNode, summaryText, summaryMeta))
+  );
 }
 
 export default function NewsFeedView({
@@ -302,6 +386,18 @@ export default function NewsFeedView({
     : collectionInFlight
       ? "백그라운드 수집 중"
       : "수동 수집";
+  const summaryCopyActive = copyState.itemId === "market-summary";
+  const summaryCopyStatus = summaryCopyActive ? copyState.status : "idle";
+  const summaryCopyLabel =
+    summaryCopyStatus === "copying"
+      ? "복사 중"
+      : summaryCopyStatus === "copied"
+        ? "복사됨"
+        : summaryCopyStatus === "text"
+          ? "텍스트 복사됨"
+          : summaryCopyStatus === "error"
+            ? "복사 실패"
+            : "복사";
 
   useEffect(() => {
     return () => {
@@ -323,6 +419,30 @@ export default function NewsFeedView({
       setCopyState({ itemId: item.id, status: result.mode === "text" ? "text" : "copied", error: result.warning || "" });
     } catch (error) {
       setCopyState({ itemId: item.id, status: "error", error: error.message || "복사 실패" });
+    } finally {
+      copyResetTimerRef.current = window.setTimeout(() => {
+        setCopyState({ itemId: "", status: "idle", error: "" });
+      }, 1600);
+    }
+  }
+
+  async function copyMarketSummary(event) {
+    if (copyState.status === "copying") return;
+    const itemId = "market-summary";
+    const sourceNode = event.currentTarget.closest(".news-feed-market-summary");
+    if (copyResetTimerRef.current) {
+      window.clearTimeout(copyResetTimerRef.current);
+    }
+    setCopyState({ itemId, status: "copying", error: "" });
+    try {
+      const result = await writeMarketSummaryToClipboard(
+        sourceNode,
+        marketSummaryText || marketSummaryFallback,
+        marketSummaryMeta || "15분마다 갱신"
+      );
+      setCopyState({ itemId, status: result.mode === "text" ? "text" : "copied", error: result.warning || "" });
+    } catch (error) {
+      setCopyState({ itemId, status: "error", error: error.message || "복사 실패" });
     } finally {
       copyResetTimerRef.current = window.setTimeout(() => {
         setCopyState({ itemId: "", status: "idle", error: "" });
@@ -433,6 +553,26 @@ export default function NewsFeedView({
                 <span>시장 요약</span>
               </button>
               {marketSummaryMeta ? <span>{marketSummaryMeta}</span> : <span>15분마다 갱신</span>}
+              <button
+                className={[
+                  "news-feed-copy-button",
+                  summaryCopyStatus !== "idle" ? `is-${summaryCopyStatus}` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                type="button"
+                onClick={copyMarketSummary}
+                disabled={summaryCopyStatus === "copying"}
+                aria-label="시장 요약 복사"
+                title={copyState.error && summaryCopyActive ? copyState.error : summaryCopyLabel}
+              >
+                {summaryCopyStatus === "copying" ? (
+                  <LoaderCircle size={14} strokeWidth={2.2} aria-hidden="true" />
+                ) : (
+                  <Copy size={14} strokeWidth={2.2} aria-hidden="true" />
+                )}
+                <span className="sr-only news-feed-copy-status">{summaryCopyLabel}</span>
+              </button>
             </div>
             {!marketSummaryCollapsed ? (
               <p id="news-feed-market-summary-body">{marketSummaryText || marketSummaryFallback}</p>

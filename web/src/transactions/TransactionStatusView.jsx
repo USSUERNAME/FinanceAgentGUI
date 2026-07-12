@@ -226,8 +226,8 @@ function normalizeTransactionInstrumentProvider(value = "toss") {
 
 function cleanTransactionInstrumentId(value) {
   const raw = String(value ?? "").trim().replace(/[^a-zA-Z0-9:._-]/g, "").slice(0, 128);
-  const binanceMatch = /^binance:spot:(.+)$/i.exec(raw);
-  if (binanceMatch) return `binance:spot:${cleanTransactionWatchlistSymbol(binanceMatch[1])}`;
+  const binanceMatch = /^binance:(spot|usdm):(.+)$/i.exec(raw);
+  if (binanceMatch) return `binance:${binanceMatch[1].toLowerCase()}:${cleanTransactionWatchlistSymbol(binanceMatch[2])}`;
   const tossMatch = /^toss:stock:(.+)$/i.exec(raw);
   if (tossMatch) return `toss:stock:${cleanTransactionWatchlistSymbol(tossMatch[1])}`;
   return raw;
@@ -241,8 +241,11 @@ function normalizeTransactionInstrument(source = {}) {
   const provider = requestedProvider === "binance" || /^binance:/i.test(String(item.instrumentId || ""))
     ? "binance"
     : "toss";
+  const marketType = String(item.marketType || "").trim().toLowerCase() === "usdm" || /USDM|FUTURES/i.test(String(item.venue || item.market || ""))
+    ? "usdm"
+    : "spot";
   const instrumentId = cleanTransactionInstrumentId(item.instrumentId) || (
-    provider === "binance" ? `binance:spot:${symbol}` : `toss:stock:${symbol}`
+    provider === "binance" ? `binance:${marketType}:${symbol}` : `toss:stock:${symbol}`
   );
   const assetClass = provider === "binance" ? "crypto" : "stock";
   const venue = String(item.venue || item.market || (provider === "binance" ? "BINANCE_SPOT" : "")).trim();
@@ -255,6 +258,7 @@ function normalizeTransactionInstrument(source = {}) {
     ...item,
     instrumentId,
     provider,
+    marketType: provider === "binance" ? marketType : "",
     venue,
     assetClass: String(item.assetClass || assetClass).trim().toLowerCase() || assetClass,
     symbol,
@@ -269,6 +273,11 @@ function normalizeTransactionInstrument(source = {}) {
     name: String(item.name || item.label || displaySymbol || symbol).trim(),
     englishName: String(item.englishName || "").trim(),
     source: String(item.source || (provider === "binance" ? "binance-public" : "toss-stocks")).trim(),
+    contractType: String(item.contractType || "").trim().toUpperCase(),
+    underlyingType: String(item.underlyingType || "").trim().toUpperCase(),
+    underlyingSubType: (Array.isArray(item.underlyingSubType) ? item.underlyingSubType : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
     currency: provider === "binance" ? "USD" : normalizeMoneyUnit(item.currency || item.settlementAsset || "KRW"),
   };
 }
@@ -288,7 +297,12 @@ function transactionEtfNameTranslationSource(source = {}) {
   return { ...item, ...source, symbol: item.symbol, provider: item.provider };
 }
 
-function collectTransactionEtfNameTranslationSources(liveItems = [], watchlistGroups = [], simulatorAccounts = []) {
+function collectTransactionEtfNameTranslationSources(
+  liveItems = [],
+  watchlistGroups = [],
+  simulatorAccounts = [],
+  discoveredItems = [],
+) {
   const candidates = new Map();
   const addSource = (source, { allowBinance = true } = {}) => {
     const candidate = transactionEtfNameTranslationSource(source);
@@ -305,6 +319,7 @@ function collectTransactionEtfNameTranslationSources(liveItems = [], watchlistGr
   for (const simulator of normalizeTransactionSimulatorAccounts(simulatorAccounts)) {
     for (const item of Array.isArray(simulator.items) ? simulator.items : []) addSource(item);
   }
+  for (const item of Array.isArray(discoveredItems) ? discoveredItems : []) addSource(item);
   return [...candidates.values()];
 }
 
@@ -359,17 +374,19 @@ async function resolveTransactionEtfNameTranslationCandidates(sources = [], sign
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body?.ok === false) throw new Error(body?.error || `HTTP ${response.status}`);
     for (const item of transactionMarketDataInstrumentOptionsFromPayload(body)) {
-      const sourceName = String(item.name || item.englishName || item.assetName || "").replace(/\s+/g, " ").trim();
-      if (!sourceName || sourceName === item.displaySymbol || sourceName.toUpperCase() === item.symbol) continue;
+      const sourceName = String(item.name || item.englishName || item.assetName || item.displaySymbol || item.symbol || "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!sourceName) continue;
       candidates.push({
         ...item,
         label: sourceName,
         name: sourceName,
         originalName: sourceName,
         englishName: sourceName,
-        market: item.market || "BINANCE_SPOT",
+        market: item.market || item.venue || "BINANCE_SPOT",
         marketCountry: "GLOBAL",
-        securityType: "CRYPTO_ASSET",
+        securityType: item.contractType || (item.assetClass === "commodity" ? "COMMODITY" : "CRYPTO_ASSET"),
         currency: "USD",
       });
     }
@@ -2588,7 +2605,7 @@ function transactionSimulatorBuyTradingEligibility({
   const instrument = normalizeTransactionInstrument(selectedSymbol);
   if (instrument?.provider === "binance" || instrument?.sessionPolicy === "24x7") {
     if (String(instrument.status || "").toUpperCase() !== "TRADING") {
-      return { ready: true, canTrade: false, label: "거래 불가", reason: "Binance Spot 거래 상태가 TRADING이 아닙니다." };
+      return { ready: true, canTrade: false, label: "거래 불가", reason: "Binance 상품 거래 상태가 TRADING이 아닙니다." };
     }
     const providerAvailability = transactionBinanceProviderAvailability(binanceStatus, binanceError);
     if (!providerAvailability.available) {
@@ -2602,7 +2619,9 @@ function transactionSimulatorBuyTradingEligibility({
     return {
       ready: true,
       canTrade: true,
-      label: "Binance Spot · 24시간 주문 가능",
+      label: instrument.marketType === "usdm"
+        ? "Binance USDⓈ-M 선물 · 24시간 주문 가능"
+        : "Binance Spot · 24시간 주문 가능",
       sessionKey: "24x7",
       sessionLabel: "24시간",
     };
@@ -8172,13 +8191,29 @@ export default function TransactionStatusView({
       payload?.items,
       normalizedWatchlistGroups,
       normalizedSimulatorAccounts,
+      [
+        ...watchlistRemoteSymbolOptions,
+        ...simulatorBuyRemoteSymbolOptions,
+        ...simulatorSymbolSearchOptions,
+      ],
     ),
-    [normalizedSimulatorAccounts, normalizedWatchlistGroups, payload?.items],
+    [
+      normalizedSimulatorAccounts,
+      normalizedWatchlistGroups,
+      payload?.items,
+      simulatorBuyRemoteSymbolOptions,
+      simulatorSymbolSearchOptions,
+      watchlistRemoteSymbolOptions,
+    ],
   );
   const etfNameTranslationSourceKey = useMemo(
     () => JSON.stringify(etfNameTranslationSources.map((item) => [
       item.provider,
       item.symbol,
+      item.instrumentId,
+      item.contractType,
+      item.underlyingType,
+      item.underlyingSubType,
     ])),
     [etfNameTranslationSources],
   );
@@ -9414,7 +9449,7 @@ export default function TransactionStatusView({
     }
     if (matchedInstrument.provider === "binance") {
       if (matchedInstrument.status !== "TRADING") {
-        setWatchlistSymbolError("현재 TRADING 상태인 Binance Spot 페어만 추가할 수 있습니다.");
+        setWatchlistSymbolError("현재 TRADING 상태인 Binance 상품만 추가할 수 있습니다.");
         return;
       }
     } else try {

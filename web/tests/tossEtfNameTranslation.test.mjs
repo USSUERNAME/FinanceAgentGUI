@@ -239,8 +239,58 @@ test("translation model output validation requires a Korean display name", () =>
   );
   assert.deepEqual(
     __tossEtfNameTranslationTestHooks.validateCandidate(item, { textKo: "뱅가드 S&P 500 ETF" }),
-    { ok: true, textKo: "뱅가드 S&P 500 ETF" },
+    { ok: true, textKo: "뱅가드 S&P 500 ETF", resolution: "translated", confidence: 1, evidenceFields: [] },
   );
+});
+
+test("Binance TradFi metadata is persisted, sent to the model, and confidence-gated", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "finance-agent-binance-name-test-"));
+  const path = join(directory, "translation-cache.json");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  decorateTossOverseasEtfNames({
+    ok: true,
+    items: [{
+      symbol: "CLUSDT",
+      name: "CL/USDT",
+      provider: "binance",
+      instrumentId: "binance:usdm:CLUSDT",
+      venue: "BINANCE_USDM_FUTURES",
+      marketType: "usdm",
+      assetClass: "commodity",
+      baseAsset: "CL",
+      quoteAsset: "USDT",
+      contractType: "TRADIFI_PERPETUAL",
+      underlyingType: "COMMODITY",
+      underlyingSubType: ["TradFi"],
+    }],
+  }, { path, startTranslation: false });
+  const entry = readTossEtfNameTranslationCache(path).entries.CLUSDT;
+  assert.equal(entry.instrumentId, "binance:usdm:CLUSDT");
+  assert.equal(entry.contractType, "TRADIFI_PERPETUAL");
+  assert.equal(entry.underlyingType, "COMMODITY");
+  assert.deepEqual(entry.underlyingSubType, ["TradFi"]);
+  const prompt = __tossEtfNameTranslationTestHooks.translationPrompt([entry]);
+  assert.match(prompt, /"baseAsset": "CL"/);
+  assert.match(prompt, /"underlyingType": "COMMODITY"/);
+  assert.match(prompt, /"contractType": "TRADIFI_PERPETUAL"/);
+  assert.equal(__tossEtfNameTranslationTestHooks.validateCandidate(entry, {
+    textKo: "WTI 원유",
+    resolution: "metadata_inference",
+    confidence: 0.6,
+    evidenceFields: ["baseAsset", "underlyingType", "contractType"],
+  }).ok, false);
+  assert.deepEqual(__tossEtfNameTranslationTestHooks.validateCandidate(entry, {
+    textKo: "WTI 원유",
+    resolution: "metadata_inference",
+    confidence: 0.86,
+    evidenceFields: ["baseAsset", "underlyingType", "contractType", "underlyingSubType"],
+  }), {
+    ok: true,
+    textKo: "WTI 원유",
+    resolution: "metadata_inference",
+    confidence: 0.86,
+    evidenceFields: ["baseAsset", "underlyingType", "contractType", "underlyingSubType"],
+  });
 });
 
 test("cache reader tolerates a missing file", () => {

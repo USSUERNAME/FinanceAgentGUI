@@ -59,6 +59,10 @@ const changeSuggestionMutationActions = new Set([
   "stateSync",
 ]);
 
+export function worldMemorySuggestionStatusForAction(action = "") {
+  return changeSuggestionMutationActions.has(String(action || "").trim()) ? "completed" : "watching";
+}
+
 const actionCatalog = [
   { id: "collectNow", label: "수동 수집", riskLevel: "network" },
   { id: "pause", label: "다음 수집 6시간 연기", riskLevel: "low" },
@@ -792,11 +796,15 @@ function normalizeHandledChangeSuggestionRecord(value) {
   const text = optionalCommandTextArg(source.text, 1400);
   const fingerprint = optionalCommandTextArg(source.fingerprint || normalizeWorldMemorySuggestionFingerprint(text), 1500);
   if (!text || !fingerprint) return null;
+  const action = optionalCommandTextArg(source.action || "", 80);
+  const rawStatus = optionalCommandTextArg(source.status || "", 40).toLowerCase();
+  const status = rawStatus === "watching" || rawStatus === "observing" ? "watching" : "completed";
   return {
     id: optionalCommandTextArg(source.id || `handled_${Date.now()}`, 80),
     text,
     fingerprint,
-    action: optionalCommandTextArg(source.action || "", 80),
+    status,
+    action,
     label: optionalCommandTextArg(source.label || "", 180),
     handledAt: optionalCommandTextArg(source.handledAt || source.at || nowIso(), 80),
     source: optionalCommandTextArg(source.source || "world-memory-report-item", 80),
@@ -822,13 +830,15 @@ function normalizeChangeSuggestionLedger(value = {}) {
   };
 }
 
-function rememberHandledChangeSuggestion(state, suggestion) {
-  const normalized = normalizeHandledChangeSuggestionRecord(suggestion);
+function rememberChangeSuggestionStatus(state, suggestion, status) {
+  const normalized = normalizeHandledChangeSuggestionRecord({ ...suggestion, status });
   if (!normalized) return state;
   const ledger = normalizeChangeSuggestionLedger(state.changeSuggestionLedger);
+  const existing = ledger.handled.find((item) => item.fingerprint === normalized.fingerprint);
+  const nextRecord = existing?.status === "completed" && normalized.status === "watching" ? existing : normalized;
   const nextHandled = [
-    normalized,
-    ...ledger.handled.filter((item) => item.fingerprint !== normalized.fingerprint),
+    nextRecord,
+    ...ledger.handled.filter((item) => item.fingerprint !== nextRecord.fingerprint),
   ].slice(0, WORLD_MEMORY_HANDLED_CHANGE_SUGGESTION_LIMIT);
   return {
     ...state,
@@ -880,6 +890,7 @@ function shouldHideHandledChangeSuggestion(suggestion, handledChangeSuggestions 
   return asArray(handledChangeSuggestions).some((item) => {
     const handled = normalizeHandledChangeSuggestionRecord(item);
     if (!handled) return false;
+    if (handled.status !== "completed") return false;
     return handled.fingerprint === fingerprint || handledTargetMatchesSuggestion(suggestion, handled);
   });
 }
@@ -909,22 +920,27 @@ function buildMemoryChangeSuggestionItems(
   const items = normalizeTextList(suggestions, 8)
     .map((text) => {
       const handled = handledRecordForSuggestion(text, handledRecords);
+      const status = handled?.status || "open";
       return {
         text,
-        handled: Boolean(handled),
-        status: handled ? "handled" : "open",
+        handled: status === "completed",
+        watching: status === "watching",
+        status,
         handledAt: handled?.handledAt || "",
         action: handled?.action || "",
       };
     })
-    .filter((item) => !(handledDisplayMode === "omit" && item.handled));
+    .filter((item) => !(handledDisplayMode === "omit" && item.status === "completed"));
   const existingFingerprints = new Set(items.map((item) => normalizeWorldMemorySuggestionFingerprint(item.text)));
-  const missingHandledItems = appendedHandledRecords
+  const persistentWatchingRecords = handledRecords.filter((item) => item.status === "watching");
+  const missingHandledItems = [...appendedHandledRecords, ...persistentWatchingRecords]
+    .filter((item, index, records) => records.findIndex((candidate) => candidate.fingerprint === item.fingerprint) === index)
     .filter((item) => !existingFingerprints.has(item.fingerprint))
     .map((item) => ({
       text: item.text,
-      handled: true,
-      status: "handled",
+      handled: item.status === "completed",
+      watching: item.status === "watching",
+      status: item.status,
       handledAt: item.handledAt,
       action: item.action,
     }));
@@ -951,10 +967,10 @@ export function filterWorldMemoryReportView(
   };
 }
 
-function formatHandledChangeSuggestionsForPrompt(handledChangeSuggestions = []) {
+function formatHandledChangeSuggestionsForPrompt(handledChangeSuggestions = [], status = "completed") {
   const rows = asArray(handledChangeSuggestions)
     .map((item) => normalizeHandledChangeSuggestionRecord(item))
-    .filter(Boolean)
+    .filter((item) => item?.status === status)
     .slice(0, 12)
     .map((item, index) => {
       const target = item.target || {};
@@ -1697,6 +1713,7 @@ function buildSituationReportPrompt({
     "보고서는 사용자가 메인 페이지에서 바로 읽는 HTML 기반 운영 보고서다. DB 경로, 명령어, 의존성 같은 기술 스탯은 쓰지 않는다.",
     "보고서 하단 제안 영역은 반드시 월드 메모리 변경 제안을 먼저 쓰고, 관찰 및 실행 제안을 그 다음에 쓴다.",
     "이미 처리/수용된 월드 메모리 변경 제안은 새 미처리 제안처럼 다시 쓰지 않는다. 동일 취지의 재표현도 피한다.",
+    "계속 관찰 중인 월드 메모리 변경 제안은 완료로 단정하거나 새 제안으로 재포장하지 말고 후속 검증 대상으로 유지한다.",
     "근거가 부족하면 부족하다고 말하고, 실제 행동 제안은 감시/확인/보류처럼 검증 가능한 수준으로 제안한다.",
     "마크다운이 아니라 JSON 객체 하나만 반환한다. 설명, 코드펜스, HTML 태그는 넣지 않는다.",
     "",
@@ -1740,7 +1757,10 @@ function buildSituationReportPrompt({
     harnessSummary || "harness 요약 없음",
     "",
     "이미 처리된 월드 메모리 변경 제안:",
-    formatHandledChangeSuggestionsForPrompt(handledChangeSuggestions),
+    formatHandledChangeSuggestionsForPrompt(handledChangeSuggestions, "completed"),
+    "",
+    "계속 관찰 중인 월드 메모리 변경 제안:",
+    formatHandledChangeSuggestionsForPrompt(handledChangeSuggestions, "watching"),
     "",
     "이번 FEED 스캔:",
     safeOutput(feedScan || "FEED 스캔 없음", MODEL_FEED_SCAN_LIMIT),
@@ -1837,11 +1857,22 @@ function reportMemoryChangeSuggestionItems(view) {
       .filter((item) => item && typeof item === "object" && item.text)
       .map((item) => ({
         text: String(item.text || "").trim(),
-        handled: Boolean(item.handled || item.status === "handled"),
+        status:
+          item.status === "watching" || item.status === "observing"
+            ? "watching"
+            : item.handled || item.status === "handled" || item.status === "completed"
+              ? "completed"
+              : "open",
       }))
       .filter((item) => item.text);
   }
-  return normalizeTextList(view?.memoryChangeSuggestions, 8).map((text) => ({ text, handled: false }));
+  return normalizeTextList(view?.memoryChangeSuggestions, 8).map((text) => ({ text, status: "open" }));
+}
+
+function reportMemoryChangeSuggestionLabel(item) {
+  if (item.status === "completed") return `[완료] ${item.text}`;
+  if (item.status === "watching") return `[관찰 중] ${item.text}`;
+  return item.text;
 }
 
 function reportPlainText(view) {
@@ -1856,7 +1887,7 @@ function reportPlainText(view) {
     ...view.highlights.map((item) => `- ${item.title}: ${item.body}`),
     "",
     "## 월드 메모리 변경 제안",
-    ...reportMemoryChangeSuggestionItems(view).map((item) => `- ${item.handled ? `<s>${item.text}</s>` : item.text}`),
+    ...reportMemoryChangeSuggestionItems(view).map((item) => `- ${reportMemoryChangeSuggestionLabel(item)}`),
     "",
     "## 포트폴리오/관찰 제안",
     ...view.portfolioSuggestions.map((item) => `- ${item}`),
@@ -1905,7 +1936,7 @@ function renderReportHtmlDocument(view) {
     <section>
       <h2>${escapeHtml(title)}</h2>
       <ul>${
-        items.map((item) => `<li>${item.handled ? `<s>${escapeHtml(item.text)}</s>` : escapeHtml(item.text)}</li>`).join("") ||
+        items.map((item) => `<li>${escapeHtml(reportMemoryChangeSuggestionLabel(item))}</li>`).join("") ||
         "<li>아직 제안 없음</li>"
       }</ul>
     </section>`;
@@ -2973,18 +3004,21 @@ async function runWorldMemoryAction(body = {}) {
     };
   }
   if (action === "refreshReport" || action === "report") {
-    if (acceptedChangeSuggestion) {
-      updateCollectorState((state) => rememberHandledChangeSuggestion(state, acceptedChangeSuggestion));
-    }
-    return refreshWorldMemoryReportSnapshot({
+    const result = await refreshWorldMemoryReportSnapshot({
       sourceAction: String(body.sourceAction || body.source_action || "").trim(),
       reason: String(body.reason || "").trim() || (action === "report" ? "manual-report-action" : ""),
       acceptedChangeSuggestion,
     });
+    if (result.ok && acceptedChangeSuggestion) {
+      const suggestionStatus = worldMemorySuggestionStatusForAction(acceptedChangeSuggestion.action || action);
+      updateCollectorState((state) => rememberChangeSuggestionStatus(state, acceptedChangeSuggestion, suggestionStatus));
+    }
+    return result;
   }
   const result = await runCommandFromBody(body);
-  if (result.ok && acceptedChangeSuggestion && changeSuggestionMutationActions.has(action)) {
-    updateCollectorState((state) => rememberHandledChangeSuggestion(state, acceptedChangeSuggestion));
+  if (result.ok && acceptedChangeSuggestion) {
+    const suggestionStatus = worldMemorySuggestionStatusForAction(acceptedChangeSuggestion.action || action);
+    updateCollectorState((state) => rememberChangeSuggestionStatus(state, acceptedChangeSuggestion, suggestionStatus));
   }
   return result;
 }

@@ -48,5 +48,5 @@ $OutLog = Join-Path $LogDir "service-5173.out.log"
 $ErrLog = Join-Path $LogDir "service-5173.err.log"
 
 Set-Location $WebDir
-& $NodeBin $ViteBin "--host" $HostName "--port" $Port 1>> $OutLog 2>> $ErrLog
+& $NodeBin $ViteBin "--host" $HostName "--port" $Port "--strictPort" 1>> $OutLog 2>> $ErrLog
 exit $LASTEXITCODE

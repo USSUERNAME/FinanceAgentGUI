@@ -139,7 +139,7 @@ function probeHttp(timeoutMs = 5000) {
   });
 }
 
-async function waitForProbe(timeoutMs = 12000) {
+async function waitForProbe(timeoutMs = 30000) {
   const started = Date.now();
   let lastProbe = { ok: false, error: "not probed" };
   while (Date.now() - started < timeoutMs) {
@@ -148,6 +148,18 @@ async function waitForProbe(timeoutMs = 12000) {
     await sleep(500);
   }
   return lastProbe;
+}
+
+async function waitForPortRelease(timeoutMs = 8000) {
+  const started = Date.now();
+  let owner = portOwnerText();
+  while (owner && Date.now() - started < timeoutMs) {
+    await sleep(200);
+    owner = portOwnerText();
+  }
+  if (owner) {
+    throw new Error(`Port ${port} did not become available after stopping the previous service.\n${owner}`);
+  }
 }
 
 function portOwnerText() {
@@ -211,6 +223,7 @@ function macPlist() {
     host,
     "--port",
     String(port),
+    "--strictPort",
   ];
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -257,7 +270,6 @@ const macHandler = {
     const config = this.write();
     this.bootout(config);
     run("launchctl", ["bootstrap", config.domain, config.plistPath]);
-    run("launchctl", ["kickstart", "-k", config.target], { allowFailure: true });
     console.log(`installed: ${config.plistPath}`);
   },
   start() {
@@ -271,12 +283,12 @@ const macHandler = {
     const config = macConfig();
     this.bootout(config);
   },
-  restart() {
+  async restart() {
     ensureProjectReady();
     const config = this.write();
     this.bootout(config);
+    await waitForPortRelease();
     run("launchctl", ["bootstrap", config.domain, config.plistPath]);
-    run("launchctl", ["kickstart", "-k", config.target], { allowFailure: true });
   },
   uninstall() {
     const config = macConfig();
@@ -308,7 +320,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=${systemdEscapeValue(webRoot)}
-ExecStart=${shellQuote(nodeBin)} ${shellQuote(viteBin)} --host ${shellQuote(host)} --port ${port}
+ExecStart=${shellQuote(nodeBin)} ${shellQuote(viteBin)} --host ${shellQuote(host)} --port ${port} --strictPort
 Restart=on-failure
 RestartSec=5
 Environment=FINANCE_AGENT_GUI_HOST=${host}
