@@ -284,19 +284,19 @@ function transactionEtfTranslationMarketCountry(item = {}) {
 
 function transactionEtfNameTranslationSource(source = {}) {
   const item = normalizeTransactionInstrument(source);
-  if (!item || item.provider === "binance" || item.assetClass === "crypto") return null;
+  if (!item) return null;
   return { ...item, ...source, symbol: item.symbol, provider: item.provider };
 }
 
 function collectTransactionEtfNameTranslationSources(liveItems = [], watchlistGroups = [], simulatorAccounts = []) {
   const candidates = new Map();
-  const addSource = (source) => {
+  const addSource = (source, { allowBinance = true } = {}) => {
     const candidate = transactionEtfNameTranslationSource(source);
-    if (!candidate) return;
+    if (!candidate || (!allowBinance && candidate.provider === "binance")) return;
     const key = `${candidate.provider}:${candidate.symbol}`;
     if (!candidates.has(key)) candidates.set(key, candidate);
   };
-  for (const item of Array.isArray(liveItems) ? liveItems : []) addSource(item);
+  for (const item of Array.isArray(liveItems) ? liveItems : []) addSource(item, { allowBinance: false });
   for (const group of normalizeTransactionWatchlistGroupsSetting(watchlistGroups, [])) {
     for (const instrument of normalizeTransactionWatchlistInstrumentsSetting(group.instruments, group.symbols)) {
       addSource(instrument);
@@ -339,6 +339,37 @@ async function resolveTransactionEtfNameTranslationCandidates(sources = [], sign
         englishName: sourceName,
         market,
         marketCountry: "US",
+        currency: "USD",
+      });
+    }
+  }
+  const binanceSources = sources.filter(
+    (item) => normalizeTransactionInstrumentProvider(item?.provider) === "binance"
+  );
+  for (let index = 0; index < binanceSources.length; index += 100) {
+    const chunk = binanceSources.slice(index, index + 100);
+    const instrumentIds = chunk
+      .map((item) => cleanTransactionInstrumentId(item?.instrumentId) || `binance:spot:${cleanTransactionWatchlistSymbol(item?.symbol)}`)
+      .filter(Boolean);
+    if (!instrumentIds.length) continue;
+    const response = await fetch(
+      `/api/market-data/instruments?instrumentIds=${encodeURIComponent(instrumentIds.join(","))}`,
+      { cache: "no-store", signal }
+    );
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body?.ok === false) throw new Error(body?.error || `HTTP ${response.status}`);
+    for (const item of transactionMarketDataInstrumentOptionsFromPayload(body)) {
+      const sourceName = String(item.name || item.englishName || item.assetName || "").replace(/\s+/g, " ").trim();
+      if (!sourceName || sourceName === item.displaySymbol || sourceName.toUpperCase() === item.symbol) continue;
+      candidates.push({
+        ...item,
+        label: sourceName,
+        name: sourceName,
+        originalName: sourceName,
+        englishName: sourceName,
+        market: item.market || "BINANCE_SPOT",
+        marketCountry: "GLOBAL",
+        securityType: "CRYPTO_ASSET",
         currency: "USD",
       });
     }
@@ -874,6 +905,38 @@ function displayName(item = {}) {
   return preferredName || item.displaySymbol || symbol || "-";
 }
 
+function displayNameFromInstrumentSources(...sources) {
+  let fallback = "";
+  for (const source of sources) {
+    const instrument = normalizeTransactionInstrument(source);
+    if (!instrument) continue;
+    const candidate = displayName(instrument);
+    if (!fallback) fallback = candidate;
+    const normalizedCandidate = String(candidate || "").replace(/[^A-Za-z0-9가-힣]/g, "").toUpperCase();
+    const normalizedSymbol = String(instrument.symbol || "").replace(/[^A-Za-z0-9가-힣]/g, "").toUpperCase();
+    const normalizedDisplay = String(instrument.displaySymbol || "").replace(/[^A-Za-z0-9가-힣]/g, "").toUpperCase();
+    if (normalizedCandidate && normalizedCandidate !== normalizedSymbol && normalizedCandidate !== normalizedDisplay) {
+      return candidate;
+    }
+  }
+  return fallback || "-";
+}
+
+function transactionInstrumentDescription(item = {}) {
+  const parts = [item?.name, item?.englishName, item?.market];
+  const seen = new Set();
+  return parts
+    .map((value) => String(value || "").replace(/\s+/g, " ").trim())
+    .filter((value) => {
+      if (!value) return false;
+      const key = value.toLocaleLowerCase("ko-KR");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(" · ");
+}
+
 function transactionNameTranslationPending(item = {}) {
   return ["pending", "translating"].includes(String(item.etfNameTranslationStatus || "").trim());
 }
@@ -901,8 +964,10 @@ function transactionWatchlistOptionAliases(option = {}) {
     option.quoteAsset,
     option.name,
     option.englishName,
+    option.assetName,
     option.label,
     option.market,
+    ...(Array.isArray(option.tags) ? option.tags : []),
   ]
     .map((value) => String(value || "").trim())
     .filter(Boolean);
@@ -2938,6 +3003,11 @@ function transactionSimulatorItemsWithPrices(items = [], priceMap = new Map()) {
 
     return {
       ...item,
+      name: displayName({ ...item, ...price }),
+      englishName: String(price.englishName || price.name || item.englishName || "").trim(),
+      assetName: String(price.assetName || item.assetName || "").trim(),
+      quoteAssetName: String(price.quoteAssetName || item.quoteAssetName || "").trim(),
+      tags: Array.isArray(price.tags) && price.tags.length ? price.tags : item.tags,
       currentPrice: livePrice,
       value,
       rawValue: value,
@@ -6047,13 +6117,20 @@ function watchlistRowsFromGroup(group, items, symbolOptions = [], priceMap = new
     const price = instrument.instrumentId
       ? priceMap.get(instrument.instrumentId) || null
       : priceMap.get(symbol) || null;
+    const displayItem = normalizeTransactionInstrument({
+      ...instrument,
+      ...option,
+      ...price,
+      ...(item || {}),
+      name: displayNameFromInstrumentSources(item, option, price, instrument),
+    });
     const row = {
       ...instrument,
       symbol,
       item,
       option,
       price,
-      name: displayName(item || option),
+      name: displayName(displayItem || item || option || price),
       lastPrice: price?.lastPrice ?? item?.currentPrice ?? null,
     };
     for (const column of transactionWatchlistReturnColumns) {
@@ -6707,7 +6784,7 @@ function TransactionSymbolSearchField({
               onClick={() => handleSelectOption(option)}
             >
               <strong>{option.displaySymbol || option.symbol}</strong>
-              <span>{[option.name, option.englishName, option.market].filter(Boolean).join(" · ")}</span>
+              <span>{transactionInstrumentDescription(option)}</span>
               <em className={`transaction-instrument-provider-badge is-${normalizeTransactionInstrumentProvider(option.provider)}`}>
                 {normalizeTransactionInstrumentProvider(option.provider) === "binance" ? "Binance" : "Toss"}
               </em>
@@ -7012,9 +7089,7 @@ function SimulatorBuyDialog({
   const hasSelectedSymbol = Boolean(selectedSymbolCode);
   const settlementUnit = hasSelectedSymbol ? transactionSimulatorSettlementUnit(selectedSymbol) : displayUnit;
   const settlementCurrencyLabel = transactionSimulatorCurrencyLabel(settlementUnit);
-  const selectedSymbolDescription = [selectedSymbol?.name, selectedSymbol?.englishName, selectedSymbol?.market]
-    .filter(Boolean)
-    .join(" · ");
+  const selectedSymbolDescription = transactionInstrumentDescription(selectedSymbol);
   const availableSettlementAmount = transactionSimulatorBuyAvailableAmount(simulator, settlementUnit);
   const availableOrderAmount = convertMoney(availableSettlementAmount, settlementUnit, displayUnit, usdKrwRate);
   const availableOrderText = availableOrderAmount === null ? "-" : formatMoney(availableOrderAmount, displayUnit);
@@ -7216,9 +7291,7 @@ function SimulatorSellDialog({
   const selectedSymbolCode = cleanTransactionWatchlistSymbol(selectedSymbol?.symbol);
   const settlementUnit = normalizeMoneyUnit(position.currency || position.displayCurrency || transactionSimulatorSettlementUnit(selectedSymbol));
   const settlementCurrencyLabel = transactionSimulatorCurrencyLabel(settlementUnit);
-  const selectedSymbolDescription = [selectedSymbol?.name, selectedSymbol?.englishName, selectedSymbol?.market]
-    .filter(Boolean)
-    .join(" · ");
+  const selectedSymbolDescription = transactionInstrumentDescription(selectedSymbol);
   const availableSettlementAmount = transactionSimulatorPositionSettlementValue(position);
   const availableOrderAmount = convertMoney(availableSettlementAmount, settlementUnit, displayUnit, usdKrwRate);
   const availableOrderText = availableOrderAmount === null ? "-" : formatMoney(availableOrderAmount, displayUnit);

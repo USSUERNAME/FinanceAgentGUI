@@ -62,6 +62,9 @@ function normalizeEntry(ticker, raw = {}) {
   return {
     ticker,
     sourceName,
+    provider: cleanText(raw.provider, 40).toLowerCase(),
+    assetClass: cleanText(raw.assetClass, 40).toLowerCase(),
+    instrumentId: cleanText(raw.instrumentId, 120),
     market: cleanText(raw.market, 20).toUpperCase(),
     securityType: cleanText(raw.securityType, 40).toUpperCase(),
     marketCountry: cleanText(raw.marketCountry, 20).toUpperCase(),
@@ -125,7 +128,10 @@ function isOverseasEnglishNameCandidate(item = {}) {
   const provider = cleanText(item.provider, 40).toLowerCase();
   const assetClass = cleanText(item.assetClass, 40).toLowerCase();
   if (!ticker || !sourceName || sourceName.toUpperCase() === ticker) return false;
-  if (provider === "binance" || assetClass === "crypto") return false;
+  const isBinanceAsset = provider === "binance" && assetClass === "crypto";
+  if (isBinanceAsset) {
+    return /[A-Za-z]/.test(sourceName) && !/[가-힣]/.test(sourceName);
+  }
   if (!TOSS_US_MARKETS.has(market)) return false;
   if (!TOSS_TRANSLATABLE_FUND_TYPES.has(securityType)) return false;
   return /[A-Za-z]/.test(sourceName) && !/[가-힣]/.test(sourceName);
@@ -141,10 +147,16 @@ export function mergeTossEtfNameCandidates(memory, items = [], now = new Date().
     const market = cleanText(item.market, 20).toUpperCase();
     const securityType = cleanText(item.securityType, 40).toUpperCase();
     const marketCountry = cleanText(item.marketCountry, 20).toUpperCase();
+    const provider = cleanText(item.provider, 40).toLowerCase();
+    const assetClass = cleanText(item.assetClass, 40).toLowerCase();
+    const instrumentId = cleanText(item.instrumentId, 120);
     const previous = next.entries[ticker];
     if (!previous) {
       next.entries[ticker] = normalizeEntry(ticker, {
         sourceName,
+        provider,
+        assetClass,
+        instrumentId,
         market,
         securityType,
         marketCountry,
@@ -160,6 +172,9 @@ export function mergeTossEtfNameCandidates(memory, items = [], now = new Date().
     const marketChanged = previous.market !== market;
     const securityTypeChanged = previous.securityType !== securityType;
     const marketCountryChanged = Boolean(marketCountry && previous.marketCountry !== marketCountry);
+    const providerChanged = Boolean(provider && previous.provider !== provider);
+    const assetClassChanged = Boolean(assetClass && previous.assetClass !== assetClass);
+    const instrumentIdChanged = Boolean(instrumentId && previous.instrumentId !== instrumentId);
     const previousLastSeenMs = Date.parse(previous.lastSeenAt || "");
     const currentSeenMs = Date.parse(now);
     const shouldRefreshLastSeen =
@@ -169,6 +184,9 @@ export function mergeTossEtfNameCandidates(memory, items = [], now = new Date().
     const updated = normalizeEntry(ticker, {
       ...previous,
       sourceName,
+      provider: provider || previous.provider,
+      assetClass: assetClass || previous.assetClass,
+      instrumentId: instrumentId || previous.instrumentId,
       market,
       securityType,
       marketCountry: marketCountry || previous.marketCountry,
@@ -188,6 +206,9 @@ export function mergeTossEtfNameCandidates(memory, items = [], now = new Date().
       marketChanged ||
       securityTypeChanged ||
       marketCountryChanged ||
+      providerChanged ||
+      assetClassChanged ||
+      instrumentIdChanged ||
       shouldRefreshLastSeen
     ) {
       next.entries[ticker] = updated;
@@ -295,10 +316,11 @@ function chooseTranslationModel() {
 
 function translationPrompt(items) {
   return [
-    "토스증권 미국 시장 종목의 영문 종목명을 한국어로 번역한다.",
+    "금융 앱에 표시할 영문 자산명을 한국어로 번역한다.",
     "출력은 JSON 객체 하나만 반환한다.",
     "한국 투자자가 자연스럽게 식별할 수 있는 한국어 종목명으로 옮긴다.",
-    "회사명과 운용사 브랜드, 지수명, 지역, 자산군, ETF·ETN, 레버리지·인버스 배수와 핵심 약어를 보존하고 없는 정보를 추가하지 않는다.",
+    "회사명과 운용사 브랜드, 지수명, 지역, 자산군, ETF·ETN, 레버리지·인버스 배수, Tokenized bStocks와 핵심 약어를 보존하고 없는 정보를 추가하지 않는다.",
+    "provider가 binance이면 코인·토큰·토큰화 주식 등 입력의 자산 유형을 그대로 보존하며 일반 주식으로 바꾸어 쓰지 않는다.",
     "모든 입력 항목에 대해 번역 결과를 반환한다.",
     "",
     "반환 형식:",
@@ -311,6 +333,8 @@ function translationPrompt(items) {
         englishName: item.sourceName,
         market: item.market,
         securityType: item.securityType,
+        provider: item.provider,
+        assetClass: item.assetClass,
       })),
     }, null, 2),
   ].join("\n");

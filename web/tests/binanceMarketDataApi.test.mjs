@@ -10,6 +10,7 @@ const {
   aggregateTenMinuteCandles,
   normalizeCandle,
   normalizeExchangeInfo,
+  normalizeProductMetadata,
   normalizeTicker,
   resetCaches,
   searchInstruments,
@@ -56,6 +57,21 @@ const exchangeInfoFixture = {
       quoteAsset: "USDT",
       isSpotTradingAllowed: true,
       filters: [],
+    },
+  ],
+};
+
+const productMetadataFixture = {
+  code: "000000",
+  success: true,
+  data: [
+    {
+      s: "MUBUSDT",
+      b: "MUB",
+      q: "USDT",
+      an: "Micron Technology (bStocks)",
+      qn: "TetherUS",
+      tags: ["bStocks"],
     },
   ],
 };
@@ -113,6 +129,9 @@ test("exchangeInfo keeps only TRADING USDT Spot instruments with canonical provi
     market: "BINANCE_SPOT",
     name: "BTC/USDT",
     englishName: "BTC/USDT",
+    assetName: "",
+    quoteAssetName: "",
+    tags: [],
     source: "Binance Spot public market data",
     currency: "USD",
     nativeQuoteAsset: "USDT",
@@ -130,6 +149,27 @@ test("local autocomplete matches ticker, display pair, and base asset", () => {
   assert.equal(searchInstruments(instruments, "BTC/USDT", 12)[0].instrumentId, "binance:spot:BTCUSDT");
   assert.equal(searchInstruments(instruments, "eth", 12)[0].displaySymbol, "ETH/USDT");
   assert.deepEqual(searchInstruments(instruments, "FDUSD", 12), []);
+});
+
+test("Binance product metadata adds readable names and searches tokenized assets by company name", () => {
+  const metadata = normalizeProductMetadata(productMetadataFixture);
+  const instruments = normalizeExchangeInfo({
+    symbols: [{
+      symbol: "MUBUSDT",
+      status: "TRADING",
+      baseAsset: "MUB",
+      quoteAsset: "USDT",
+      isSpotTradingAllowed: true,
+      orderTypes: ["LIMIT", "MARKET"],
+      filters: [],
+    }],
+  }, metadata);
+  assert.equal(instruments[0].name, "Micron Technology Tokenized bStocks");
+  assert.equal(instruments[0].assetName, "Micron Technology (bStocks)");
+  assert.equal(instruments[0].quoteAssetName, "TetherUS");
+  assert.deepEqual(instruments[0].tags, ["bStocks"]);
+  assert.equal(searchInstruments(instruments, "Micron Technology", 12)[0].symbol, "MUBUSDT");
+  assert.equal(searchInstruments(instruments, "tokenized", 12)[0].displaySymbol, "MUB/USDT");
 });
 
 test("ticker normalization exposes USDT as native quote while presenting USD", () => {
@@ -175,6 +215,9 @@ test("HTTP handlers expose search, quotes, candles, execution price, and provide
     calls.push({ pathname: url.pathname, search: url.search, headers: options.headers || {} });
     if (url.pathname.endsWith("/exchangeInfo")) {
       return jsonResponse(exchangeInfoFixture, { headers: { "x-mbx-used-weight-1m": "20" } });
+    }
+    if (url.pathname.endsWith("/get-products")) {
+      return jsonResponse(productMetadataFixture);
     }
     if (url.pathname.endsWith("/ticker/24hr")) {
       return jsonResponse({
@@ -227,10 +270,15 @@ test("HTTP handlers expose search, quotes, candles, execution price, and provide
 
 test("upstream rate limits return a structured retryable error", async () => {
   let upstreamCalls = 0;
-  setFetchImplementation(async () => jsonResponse(
-    (upstreamCalls += 1, { code: -1003, msg: "Too much request weight used" }),
-    { status: 429, headers: { "retry-after": "5", "x-mbx-used-weight-1m": "6000" } },
-  ));
+  setFetchImplementation(async (rawUrl) => {
+    const url = new URL(rawUrl);
+    if (url.pathname.endsWith("/get-products")) return jsonResponse(productMetadataFixture);
+    upstreamCalls += 1;
+    return jsonResponse(
+      { code: -1003, msg: "Too much request weight used" },
+      { status: 429, headers: { "retry-after": "5", "x-mbx-used-weight-1m": "6000" } },
+    );
+  });
   const response = await invoke("instrument-search", "/?query=BTC&provider=binance");
   assert.equal(response.statusCode, 503);
   assert.equal(response.body.ok, false);

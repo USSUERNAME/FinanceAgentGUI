@@ -104,7 +104,7 @@ test("cached US-market translations replace display names and preserve original 
   assert.equal(decorated.items[1].etfNameTranslationStatus, undefined);
 });
 
-test("watchlist and simulator candidates accept explicit overseas metadata and ignore Binance crypto", (t) => {
+test("watchlist and simulator candidates accept overseas funds and Binance assets", (t) => {
   const directory = mkdtempSync(join(tmpdir(), "finance-agent-toss-etf-test-"));
   const path = join(directory, "translation-cache.json");
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -144,7 +144,9 @@ test("watchlist and simulator candidates accept explicit overseas metadata and i
   }, { path, startTranslation: false });
 
   const cache = readTossEtfNameTranslationCache(path);
-  assert.deepEqual(Object.keys(cache.entries), ["QQQ", "LEVNOTE"]);
+  assert.deepEqual(Object.keys(cache.entries), ["QQQ", "LEVNOTE", "BTCUSDT"]);
+  assert.equal(cache.entries.BTCUSDT.sourceName, "Bitcoin");
+  assert.equal(cache.entries.BTCUSDT.status, "pending");
 });
 
 test("a changed source name requeues the ticker instead of keeping a stale translation", () => {

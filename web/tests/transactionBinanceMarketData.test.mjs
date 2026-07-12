@@ -90,7 +90,7 @@ test("Binance autocomplete and simulator filters expose accessible provider-awar
 test("Toss ticker-only names use stored English names without changing Binance pair labels", () => {
   const displayName = loadDisplayName();
 
-  assert.match(source, /name: displayName\(item \|\| option\)/);
+  assert.match(source, /name: displayNameFromInstrumentSources\(item, option, price, instrument\)/);
   assert.equal(displayName({
     provider: "toss",
     symbol: "QQQX",
