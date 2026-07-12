@@ -17931,6 +17931,20 @@ textarea:disabled {
   background: #f2f4f7;
 }
 
+.transaction-investment-row.is-selectable {
+  cursor: pointer;
+}
+
+.transaction-investment-row.is-selectable:hover td,
+.transaction-investment-row.is-selectable:focus-visible td {
+  background: #eaf2ff;
+}
+
+.transaction-investment-row.is-selectable:focus-visible {
+  outline: 2px solid #2878ff;
+  outline-offset: -2px;
+}
+
 .transaction-main-table.transaction-asset-daily-table {
   min-width: 0;
   table-layout: fixed;
