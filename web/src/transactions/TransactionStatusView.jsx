@@ -4450,6 +4450,7 @@ function InvestmentTable({
   usdKrwRate,
   selectedColumnIds,
   emptyLabel = "보유 종목이 없습니다.",
+  onSelectItem,
 }) {
   const displayUnit = normalizeMoneyUnit(unit);
   const visibleColumns = useMemo(() => visibleTransactionMainTableColumns(selectedColumnIds), [selectedColumnIds]);
@@ -4476,7 +4477,18 @@ function InvestmentTable({
             const rowKey = transactionItemSelectionKey(item);
             const rowContext = { item, itemUnit, displayUnit, usdKrwRate };
             return (
-              <tr key={`transaction-table-${rowKey}`}>
+              <tr
+                className={onSelectItem ? "transaction-investment-row is-selectable" : "transaction-investment-row"}
+                key={`transaction-table-${rowKey}`}
+                tabIndex={onSelectItem ? 0 : undefined}
+                aria-label={onSelectItem ? `${displayName(item)} 차트 보기` : undefined}
+                onClick={onSelectItem ? () => onSelectItem(rowKey) : undefined}
+                onKeyDown={onSelectItem ? (event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  onSelectItem(rowKey);
+                } : undefined}
+              >
                 {visibleColumns.map((column) => {
                   const toneClass = column.toneField ? valueTone(item[column.toneField]) : "";
                   const className = [column.align === "left" ? "is-left" : "", column.className || "", toneClass]
@@ -4800,6 +4812,17 @@ function TransactionInvestmentAssetDetail({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [minuteMenuOpen]);
+
+  useEffect(() => {
+    if (!onClose) return undefined;
+    function handleChartKeyDown(event) {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      if (minuteMenuOpen || document.querySelector('[aria-modal="true"]')) return;
+      onClose();
+    }
+    document.addEventListener("keydown", handleChartKeyDown);
+    return () => document.removeEventListener("keydown", handleChartKeyDown);
+  }, [minuteMenuOpen, onClose]);
 
   useEffect(() => {
     if (!symbol) {
@@ -5718,6 +5741,7 @@ function InvestmentMain({
   loading,
   error,
   statusBannerProps,
+  onSelectItem,
   onDisplayData,
   sidebarValueMode = "value",
 }) {
@@ -5847,6 +5871,7 @@ function InvestmentMain({
           usdKrwRate={usdKrwRate}
           selectedColumnIds={selectedTableColumnIds}
           emptyLabel={`${activeFilterLabel} 보유 종목이 없습니다.`}
+          onSelectItem={onSelectItem}
         />
       )}
     </section>
@@ -5904,6 +5929,7 @@ function SimulatorInvestmentMain({
   onSimulatorRenameDraftChange,
   onSimulatorRenameSubmit,
   onSimulatorRenameCancel,
+  onSelectItem,
   onDisplayData,
   sidebarValueMode = "value",
 }) {
@@ -6084,6 +6110,7 @@ function SimulatorInvestmentMain({
         usdKrwRate={usdKrwRate}
         selectedColumnIds={selectedTableColumnIds}
         emptyLabel={`${activeFilterLabel} 모의 보유 종목이 없습니다.`}
+        onSelectItem={onSelectItem}
       />
     </section>
   );
@@ -10629,6 +10656,7 @@ export default function TransactionStatusView({
                 unit={mainUnit}
                 usdKrwRate={usdKrwRate}
                 onUnitChange={handleMainUnitChange}
+                onClose={handleCloseInvestmentPosition}
                 statusBannerProps={statusBannerProps}
                 binanceStatus={binanceProviderStatus}
                 binanceError={binanceProviderError}
@@ -10666,6 +10694,7 @@ export default function TransactionStatusView({
                 onSimulatorRenameDraftChange={handleSimulatorRenameDraftChange}
                 onSimulatorRenameSubmit={handleSubmitSimulatorRename}
                 onSimulatorRenameCancel={handleCancelSimulatorRename}
+                onSelectItem={handleSelectInvestmentPosition}
                 onDisplayData={handleContextSurfaceData}
                 sidebarValueMode={valueMode}
               />
@@ -10681,6 +10710,7 @@ export default function TransactionStatusView({
                 loading={loading}
                 error={error}
                 statusBannerProps={statusBannerProps}
+                onSelectItem={handleSelectInvestmentPosition}
                 onDisplayData={handleContextSurfaceData}
                 sidebarValueMode={valueMode}
               />

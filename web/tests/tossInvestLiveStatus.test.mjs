@@ -1622,6 +1622,18 @@ test("transaction status view reads the live Toss API endpoint and does not expo
   assert.doesNotMatch(stylesSource, /transaction-side-total\.is-clickable:hover strong/);
   assert.doesNotMatch(stylesSource, /transaction-side-total\.is-clickable:focus-visible/);
   assert.match(source, /onClose \? \(\s*<button\s+className="transaction-asset-detail-close-button"/);
+  assert.match(source, /function handleChartKeyDown\(event\) \{\s*if \(event\.key !== "Escape" \|\| event\.defaultPrevented \|\| event\.isComposing\) return;/);
+  assert.match(source, /if \(minuteMenuOpen \|\| document\.querySelector\('\[aria-modal="true"\]'\)\) return;/);
+  assert.match(source, /document\.addEventListener\("keydown", handleChartKeyDown\);/);
+  assert.match(source, /document\.removeEventListener\("keydown", handleChartKeyDown\);/);
+  assert.match(source, /<TransactionInvestmentAssetDetail[\s\S]*?onClose=\{handleCloseInvestmentPosition\}/);
+  assert.match(source, /className=\{onSelectItem \? "transaction-investment-row is-selectable" : "transaction-investment-row"\}/);
+  assert.match(source, /aria-label=\{onSelectItem \? `\$\{displayName\(item\)\} 차트 보기` : undefined\}/);
+  assert.match(source, /onClick=\{onSelectItem \? \(\) => onSelectItem\(rowKey\) : undefined\}/);
+  assert.match(source, /if \(event\.key !== "Enter" && event\.key !== " "\) return;[\s\S]*?onSelectItem\(rowKey\);/);
+  assert.match(source, /<SimulatorInvestmentMain[\s\S]*?onSelectItem=\{handleSelectInvestmentPosition\}/);
+  assert.match(source, /<InvestmentMain[\s\S]*?onSelectItem=\{handleSelectInvestmentPosition\}/);
+  assert.match(stylesSource, /\.transaction-investment-row\.is-selectable:hover td,[\s\S]*?background:\s*#eaf2ff/);
   assert.match(stylesSource, /transaction-asset-detail-close-button/);
   assert.doesNotMatch(source, /전체 보유 종목 보기/);
   assert.match(source, /<strong>\{itemName\}<\/strong>\s*<span>\{item\?\.displaySymbol \|\| symbol\}<\/span>/);
