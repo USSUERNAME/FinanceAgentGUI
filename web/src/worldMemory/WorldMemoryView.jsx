@@ -5,6 +5,7 @@ import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check-big.js";
 import ChevronsRight from "lucide-react/dist/esm/icons/chevrons-right.js";
 import Circle from "lucide-react/dist/esm/icons/circle.js";
 import Database from "lucide-react/dist/esm/icons/database.js";
+import Eye from "lucide-react/dist/esm/icons/eye.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
 import Pause from "lucide-react/dist/esm/icons/pause.js";
 import Play from "lucide-react/dist/esm/icons/play.js";
@@ -14,6 +15,7 @@ import { MarkdownText } from "../utils/MarkdownText.jsx";
 import { formatDateTime } from "../utils/formatters.js";
 import { worldMemoryActionCatalog } from "./actionCatalog.js";
 import { worldMemoryActionText, worldMemoryStatusLabel } from "./statusHelpers.js";
+import { normalizeMemoryChangeSuggestionItem, worldMemorySuggestionCanAskAgent } from "./suggestionStatus.js";
 
 function worldMemorySignalToneClass(tone) {
   if (tone === "positive") return "is-positive";
@@ -47,32 +49,36 @@ function WorldMemoryAskButton({ agentIcon, label, disabled = false, onClick }) {
   );
 }
 
-function normalizeMemoryChangeSuggestionItem(item) {
-  if (item && typeof item === "object") {
-    return {
-      text: String(item.text || item.body || item.title || "").trim(),
-      handled: Boolean(item.handled || item.status === "handled"),
-      handledAt: String(item.handledAt || "").trim(),
-    };
+function WorldMemoryChangeSuggestionStatusIcon({ status }) {
+  if (status === "completed") {
+    return <CheckCircle2 className="world-memory-change-status-icon is-completed" size={16} strokeWidth={2.2} aria-label="완료" />;
   }
-  return { text: String(item || "").trim(), handled: false, handledAt: "" };
+  if (status === "watching") {
+    return (
+      <span className="world-memory-change-status-icon is-watching" role="img" aria-label="관찰 중">
+        <Eye size={11} strokeWidth={2.2} />
+      </span>
+    );
+  }
+  return <ChevronsRight className="world-memory-change-status-icon is-open" size={14} strokeWidth={2.2} aria-hidden="true" />;
 }
 
 function WorldMemoryChangeSuggestionRow({ item, index, agentIcon, agentAskLabel, disabled = false, onAskItem }) {
   const suggestion = normalizeMemoryChangeSuggestionItem(item);
-  const { text, handled } = suggestion;
+  const { text, status } = suggestion;
+  const askLabel = status === "watching" ? agentAskLabel.replace("질문하기", "후속 확인하기") : agentAskLabel;
   return (
-    <p className={`world-memory-change-suggestion-row${handled ? " is-handled" : ""}`}>
-      <ChevronsRight size={14} strokeWidth={2.2} />
+    <p className={`world-memory-change-suggestion-row is-${status}`}>
+      <WorldMemoryChangeSuggestionStatusIcon status={status} />
       <span className="world-memory-change-suggestion-content">
-        <span className="world-memory-change-suggestion-text">{handled ? <s>{text}</s> : text}</span>
-        {!handled ? (
+        <span className="world-memory-change-suggestion-text">{text}</span>
+        {worldMemorySuggestionCanAskAgent(suggestion) ? (
           <button
             className="board-codex-context-button world-memory-change-agent-button"
             type="button"
             disabled={disabled}
-            aria-label={`${agentAskLabel}: ${text}`}
-            title={agentAskLabel}
+            aria-label={`${askLabel}: ${text}`}
+            title={askLabel}
             onClick={() => onAskItem?.("memory-change", { text }, { index })}
           >
             <img className="agent-logo-image" src={agentIcon} alt="" />

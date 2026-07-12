@@ -202,7 +202,7 @@ function ChatBlock({
           <span>{action.riskLevel || "low"}</span>
           <button type="button" disabled={disabled} onClick={() => onExecuteWorldMemoryAction(action)}>
             {isRunning ? <LoaderCircle className="is-spinning" size={14} strokeWidth={2.2} /> : <Play size={14} strokeWidth={2.2} />}
-            <span>{isActive ? "확인 후 실행" : "처리된 제안"}</span>
+            <span>{isActive ? "확인 후 실행" : "실행 완료"}</span>
           </button>
         </div>
       </div>

@@ -5238,13 +5238,12 @@ function App() {
   }, [activeView]);
 
   useEffect(() => {
-    if (activeView !== "news-feed") return;
     void loadSharedMemoryStatus();
     const timer = window.setInterval(() => {
       void loadSharedMemoryStatus();
     }, MEMORY_MARKET_SUMMARY_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [activeView]);
+  }, []);
 
   useEffect(() => {
     if (activeView !== "magazine") return;

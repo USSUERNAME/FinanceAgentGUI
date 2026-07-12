@@ -96,8 +96,12 @@ npm run server:service:status
 npm run server:service:uninstall
 ```
 
-If port `5173` is already held by a terminal-started server, stop that server
-first and then run `npm run server:service:restart`.
+The durable service uses a strict port binding. It never falls forward to
+`5174` when `5173` is occupied. On macOS, restart also waits for the previous
+service process to release `5173` before launching its replacement, and the
+command waits for the HTTP endpoint to become ready. If a separate
+terminal-started server owns the port, stop that process first and then run
+`npm run server:service:restart`.
 
 For a production-style local build:
 

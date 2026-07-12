@@ -3,12 +3,17 @@ import { sendJson } from "./codexProbe.mjs";
 const BINANCE_MARKET_DATA_BASE_URL = String(
   process.env.BINANCE_MARKET_DATA_BASE_URL || "https://data-api.binance.vision"
 ).replace(/\/+$/, "");
+const BINANCE_USDM_MARKET_DATA_BASE_URL = String(
+  process.env.BINANCE_USDM_MARKET_DATA_BASE_URL || "https://fapi.binance.com"
+).replace(/\/+$/, "");
 const BINANCE_PRODUCT_METADATA_BASE_URL = String(
   process.env.BINANCE_PRODUCT_METADATA_BASE_URL || "https://www.binance.com"
 ).replace(/\/+$/, "");
 const BINANCE_SOURCE = "Binance Spot public market data";
+const BINANCE_USDM_SOURCE = "Binance USDⓈ-M Futures public market data";
 const BINANCE_PROVIDER = "binance";
 const BINANCE_VENUE = "BINANCE_SPOT";
+const BINANCE_USDM_VENUE = "BINANCE_USDM_FUTURES";
 // TRADING status gates simulator orders, so keep the catalog fresh enough to
 // notice halts without polling Binance on every local UI refresh.
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -93,13 +98,21 @@ function cleanBinanceSymbol(value) {
   return cleanText(value, 40).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 30);
 }
 
-function instrumentIdForSymbol(symbol) {
-  return `${BINANCE_PROVIDER}:spot:${cleanBinanceSymbol(symbol)}`;
+function cleanMarketType(value) {
+  return cleanText(value, 20).toLowerCase() === "usdm" ? "usdm" : "spot";
+}
+
+function instrumentIdForSymbol(symbol, marketType = "spot") {
+  return `${BINANCE_PROVIDER}:${cleanMarketType(marketType)}:${cleanBinanceSymbol(symbol)}`;
+}
+
+function instrumentPartsFromId(value) {
+  const match = cleanText(value, 80).match(/^binance:(spot|usdm):([A-Z0-9]{5,30})$/i);
+  return match ? { marketType: cleanMarketType(match[1]), symbol: cleanBinanceSymbol(match[2]) } : null;
 }
 
 function symbolFromInstrumentId(value) {
-  const match = cleanText(value, 80).match(/^binance:spot:([A-Z0-9]{5,30})$/i);
-  return match ? cleanBinanceSymbol(match[1]) : "";
+  return instrumentPartsFromId(value)?.symbol || "";
 }
 
 function normalizeSearchQuery(value) {
@@ -161,22 +174,40 @@ function normalizedFilters(filters = []) {
   return byType;
 }
 
-function normalizeInstrument(row = {}, productMetadata = null) {
+function normalizeInstrument(row = {}, productMetadata = null, options = {}) {
+  const marketType = cleanMarketType(options.marketType);
+  const isUsdm = marketType === "usdm";
   const symbol = cleanBinanceSymbol(row.symbol);
   const baseAsset = cleanBinanceSymbol(row.baseAsset);
   const quoteAsset = cleanBinanceSymbol(row.quoteAsset);
   const status = cleanText(row.status, 30).toUpperCase();
   if (!symbol || !baseAsset || quoteAsset !== "USDT" || status !== "TRADING") return null;
-  if (row.isSpotTradingAllowed === false) return null;
+  if (!isUsdm && row.isSpotTradingAllowed === false) return null;
+  const contractType = cleanText(row.contractType, 40).toUpperCase();
+  if (isUsdm && !contractType) return null;
   const displaySymbol = `${baseAsset}/${quoteAsset}`;
   const metadata = productMetadata && typeof productMetadata === "object" ? productMetadata : {};
   const assetName = cleanText(metadata.assetName, 180);
   const name = displayAssetName(metadata, displaySymbol);
+  const underlyingType = cleanText(row.underlyingType, 40).toUpperCase();
+  const underlyingSubType = (Array.isArray(row.underlyingSubType) ? row.underlyingSubType : [])
+    .map((value) => cleanText(value, 80))
+    .filter(Boolean);
+  const venue = isUsdm ? BINANCE_USDM_VENUE : BINANCE_VENUE;
+  const source = isUsdm ? BINANCE_USDM_SOURCE : BINANCE_SOURCE;
+  const assetClass = underlyingType === "COMMODITY"
+    ? "commodity"
+    : underlyingType === "EQUITY"
+      ? "equity"
+      : underlyingType === "INDEX"
+        ? "index"
+        : "crypto";
   return {
-    instrumentId: instrumentIdForSymbol(symbol),
+    instrumentId: instrumentIdForSymbol(symbol, marketType),
     provider: BINANCE_PROVIDER,
-    venue: BINANCE_VENUE,
-    assetClass: "crypto",
+    venue,
+    marketType,
+    assetClass,
     symbol,
     displaySymbol,
     baseAsset,
@@ -184,26 +215,31 @@ function normalizeInstrument(row = {}, productMetadata = null) {
     settlementAsset: "USD",
     status,
     sessionPolicy: "24x7",
-    market: BINANCE_VENUE,
+    market: venue,
     name,
     englishName: name,
     assetName,
     quoteAssetName: cleanText(metadata.quoteAssetName, 180),
     tags: (Array.isArray(metadata.tags) ? metadata.tags : []).map((value) => cleanText(value, 80)).filter(Boolean),
-    source: BINANCE_SOURCE,
+    source,
     currency: "USD",
     nativeQuoteAsset: quoteAsset,
     orderTypes: Array.isArray(row.orderTypes) ? row.orderTypes.map((value) => cleanText(value, 30)).filter(Boolean) : [],
     filters: normalizedFilters(row.filters),
+    contractType,
+    underlyingType,
+    underlyingSubType,
+    onboardDate: finiteNumber(row.onboardDate),
+    deliveryDate: finiteNumber(row.deliveryDate),
   };
 }
 
-function normalizeExchangeInfo(payload = {}, productMetadataBySymbol = new Map()) {
+function normalizeExchangeInfo(payload = {}, productMetadataBySymbol = new Map(), options = {}) {
   const instruments = [];
   const seen = new Set();
   for (const row of Array.isArray(payload.symbols) ? payload.symbols : []) {
     const symbol = cleanBinanceSymbol(row?.symbol);
-    const instrument = normalizeInstrument(row, productMetadataBySymbol.get(symbol));
+    const instrument = normalizeInstrument(row, productMetadataBySymbol.get(symbol), options);
     if (!instrument || seen.has(instrument.instrumentId)) continue;
     seen.add(instrument.instrumentId);
     instruments.push(instrument);
@@ -283,7 +319,7 @@ async function parseResponseBody(response) {
   }
 }
 
-async function fetchBinanceJson(pathname, searchParams = {}) {
+async function fetchBinanceJson(pathname, searchParams = {}, options = {}) {
   const now = Date.now();
   if (providerRuntime.retryUntilMs > now) {
     const retryAfterSeconds = Math.max(1, Math.ceil((providerRuntime.retryUntilMs - now) / 1000));
@@ -300,7 +336,10 @@ async function fetchBinanceJson(pathname, searchParams = {}) {
       }
     );
   }
-  const url = new URL(`${BINANCE_MARKET_DATA_BASE_URL}${pathname}`);
+  const baseUrl = options.marketType === "usdm"
+    ? BINANCE_USDM_MARKET_DATA_BASE_URL
+    : BINANCE_MARKET_DATA_BASE_URL;
+  const url = new URL(`${baseUrl}${pathname}`);
   for (const [key, value] of Object.entries(searchParams)) {
     if (value === undefined || value === null || value === "") continue;
     url.searchParams.set(key, String(value));
@@ -402,14 +441,18 @@ async function loadInstrumentCatalog({ force = false } = {}) {
     let pendingCatalogPromise = null;
     pendingCatalogPromise = Promise.all([
       fetchBinanceJson("/api/v3/exchangeInfo"),
+      fetchBinanceJson("/fapi/v1/exchangeInfo", {}, { marketType: "usdm" }).catch(() => ({ symbols: [] })),
       loadProductMetadata().catch(() => new Map()),
     ])
-      .then(([payload, productMetadataBySymbol]) => {
-        const instruments = normalizeExchangeInfo(payload, productMetadataBySymbol);
+      .then(([spotPayload, usdmPayload, productMetadataBySymbol]) => {
+        const instruments = [
+          ...normalizeExchangeInfo(spotPayload, productMetadataBySymbol, { marketType: "spot" }),
+          ...normalizeExchangeInfo(usdmPayload, new Map(), { marketType: "usdm" }),
+        ];
         if (!instruments.length) {
           throw new BinanceMarketDataError(
             "BINANCE_EMPTY_CATALOG",
-            "Binance TRADING USDT Spot 상품 목록이 비어 있습니다."
+            "Binance TRADING USDT 상품 목록이 비어 있습니다."
           );
         }
         const fetchedAt = Date.now();
@@ -501,7 +544,7 @@ async function resolveInstruments(instrumentIds) {
   const byId = new Map(catalog.instruments.map((instrument) => [instrument.instrumentId, instrument]));
   const missing = ids.filter((id) => !byId.has(id));
   if (missing.length) {
-    throw new BinanceMarketDataError("INSTRUMENT_NOT_FOUND", `TRADING USDT Spot 상품이 아닙니다: ${missing[0]}`, {
+    throw new BinanceMarketDataError("INSTRUMENT_NOT_FOUND", `TRADING USDT 상품이 아닙니다: ${missing[0]}`, {
       statusCode: 404,
       retryable: false,
     });
@@ -515,8 +558,9 @@ function normalizeTicker(row = {}, instrument = null) {
   return {
     instrumentId: instrument?.instrumentId || instrumentIdForSymbol(symbol),
     provider: BINANCE_PROVIDER,
-    venue: BINANCE_VENUE,
-    assetClass: "crypto",
+    venue: instrument?.venue || BINANCE_VENUE,
+    marketType: instrument?.marketType || "spot",
+    assetClass: instrument?.assetClass || "crypto",
     symbol,
     displaySymbol: instrument?.displaySymbol || symbol,
     baseAsset: instrument?.baseAsset || "",
@@ -526,6 +570,9 @@ function normalizeTicker(row = {}, instrument = null) {
     assetName: instrument?.assetName || "",
     quoteAssetName: instrument?.quoteAssetName || "",
     tags: Array.isArray(instrument?.tags) ? instrument.tags : [],
+    contractType: instrument?.contractType || "",
+    underlyingType: instrument?.underlyingType || "",
+    underlyingSubType: Array.isArray(instrument?.underlyingSubType) ? instrument.underlyingSubType : [],
     lastPrice: finiteNumber(row.lastPrice),
     currency: "USD",
     nativeQuoteAsset: "USDT",
@@ -534,45 +581,54 @@ function normalizeTicker(row = {}, instrument = null) {
     quoteVolume: finiteNumber(row.quoteVolume),
     timestamp: timestampMs === null ? "" : new Date(timestampMs).toISOString(),
     timestampMs,
-    source: BINANCE_SOURCE,
+    source: instrument?.source || BINANCE_SOURCE,
   };
 }
 
 async function getQuotes(instruments) {
   const now = Date.now();
-  const resultBySymbol = new Map();
+  const resultByInstrumentId = new Map();
   const missing = [];
   for (const instrument of instruments) {
-    const cached = quoteCache.get(instrument.symbol);
+    const cached = quoteCache.get(instrument.instrumentId);
     if (cached && now - cached.fetchedAt < QUOTE_CACHE_TTL_MS) {
-      resultBySymbol.set(instrument.symbol, cached.quote);
+      resultByInstrumentId.set(instrument.instrumentId, cached.quote);
     } else {
       missing.push(instrument);
     }
   }
-  for (let index = 0; index < missing.length; index += MAX_TICKER_BATCH_SIZE) {
-    const batch = missing.slice(index, index + MAX_TICKER_BATCH_SIZE);
-    const params = batch.length === 1
-      ? { symbol: batch[0].symbol }
-      : { symbols: JSON.stringify(batch.map((instrument) => instrument.symbol)) };
-    const payload = await fetchBinanceJson("/api/v3/ticker/24hr", params);
-    const rows = Array.isArray(payload) ? payload : [payload];
-    const instrumentBySymbol = new Map(batch.map((instrument) => [instrument.symbol, instrument]));
-    for (const row of rows) {
-      const instrument = instrumentBySymbol.get(cleanBinanceSymbol(row?.symbol));
-      if (!instrument) continue;
-      const quote = normalizeTicker(row, instrument);
-      if (!Number.isFinite(quote.lastPrice) || quote.lastPrice <= 0) {
-        throw new BinanceMarketDataError(
-          "BINANCE_INVALID_QUOTE",
-          `Binance ${instrument.displaySymbol} 현재가가 유효하지 않습니다.`
-        );
+  for (const marketType of ["spot", "usdm"]) {
+    const marketMissing = missing.filter((instrument) => cleanMarketType(instrument.marketType) === marketType);
+    for (let index = 0; index < marketMissing.length; index += MAX_TICKER_BATCH_SIZE) {
+      const batch = marketMissing.slice(index, index + MAX_TICKER_BATCH_SIZE);
+      const params = batch.length === 1
+        ? { symbol: batch[0].symbol }
+        : marketType === "usdm"
+          ? {}
+          : { symbols: JSON.stringify(batch.map((instrument) => instrument.symbol)) };
+      const payload = await fetchBinanceJson(
+        marketType === "usdm" ? "/fapi/v1/ticker/24hr" : "/api/v3/ticker/24hr",
+        params,
+        { marketType },
+      );
+      const rows = Array.isArray(payload) ? payload : [payload];
+      const instrumentBySymbol = new Map(batch.map((instrument) => [instrument.symbol, instrument]));
+      for (const row of rows) {
+        const instrument = instrumentBySymbol.get(cleanBinanceSymbol(row?.symbol));
+        if (!instrument) continue;
+        const quote = normalizeTicker(row, instrument);
+        if (!Number.isFinite(quote.lastPrice) || quote.lastPrice <= 0) {
+          throw new BinanceMarketDataError(
+            "BINANCE_INVALID_QUOTE",
+            `Binance ${instrument.displaySymbol} 현재가가 유효하지 않습니다.`
+          );
+        }
+        quoteCache.set(instrument.instrumentId, { fetchedAt: Date.now(), quote });
+        resultByInstrumentId.set(instrument.instrumentId, quote);
       }
-      quoteCache.set(instrument.symbol, { fetchedAt: Date.now(), quote });
-      resultBySymbol.set(instrument.symbol, quote);
     }
   }
-  const result = instruments.map((instrument) => resultBySymbol.get(instrument.symbol)).filter(Boolean);
+  const result = instruments.map((instrument) => resultByInstrumentId.get(instrument.instrumentId)).filter(Boolean);
   if (result.length !== instruments.length) {
     throw new BinanceMarketDataError("BINANCE_INCOMPLETE_QUOTES", "Binance 시세 응답에 요청한 상품 일부가 없습니다.");
   }
@@ -728,12 +784,13 @@ async function getCandles(instrument, { interval = "1d", limit = 300, before = n
   if (cached && Date.now() - cached.fetchedAt < CANDLE_CACHE_TTL_MS) return cached.payload;
   const upstreamInterval = normalizedInterval === "10m" ? "5m" : normalizedInterval;
   const upstreamLimit = normalizedInterval === "10m" ? Math.min(1000, cleanCount * 2) : cleanCount;
-  const payload = await fetchBinanceJson("/api/v3/klines", {
+  const marketType = cleanMarketType(instrument.marketType);
+  const payload = await fetchBinanceJson(marketType === "usdm" ? "/fapi/v1/klines" : "/api/v3/klines", {
     symbol: instrument.symbol,
     interval: upstreamInterval,
     limit: upstreamLimit,
     endTime: beforeMs,
-  });
+  }, { marketType });
   let candles = (Array.isArray(payload) ? payload : []).map(normalizeCandle).filter(Boolean);
   if (normalizedInterval === "10m") candles = aggregateTenMinuteCandles(candles).slice(-cleanCount);
   const nextBefore = candles.length ? new Date(Math.max(0, candles[0].openTime - 1)).toISOString() : "";

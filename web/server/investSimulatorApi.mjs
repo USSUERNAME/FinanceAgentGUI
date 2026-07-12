@@ -100,7 +100,7 @@ function cleanOrderText(value) {
 
 function isBinanceOrderPayload(payload = {}) {
   return cleanOrderText(payload?.provider).toLowerCase() === "binance" ||
-    /^binance:spot:/i.test(cleanOrderText(payload?.instrumentId));
+    /^binance:(spot|usdm):/i.test(cleanOrderText(payload?.instrumentId));
 }
 
 export function requireOrderIdempotencyKey(payload = {}) {
@@ -140,8 +140,8 @@ export async function prepareInvestSimulatorOrderPayload(
     ...instrument,
     instrumentId: instrument.instrumentId,
     provider: "binance",
-    venue: "BINANCE_SPOT",
-    assetClass: "crypto",
+    venue: instrument.venue || "BINANCE_SPOT",
+    assetClass: instrument.assetClass || "crypto",
     symbol: instrument.symbol,
     displaySymbol: instrument.displaySymbol,
     baseAsset: instrument.baseAsset,
@@ -152,7 +152,7 @@ export async function prepareInvestSimulatorOrderPayload(
     currency: "USD",
     status: "TRADING",
     sessionPolicy: "24x7",
-    market: "BINANCE_SPOT",
+    market: instrument.market || instrument.venue || "BINANCE_SPOT",
     marketCountry: "GLOBAL",
     price,
     executionPrice: price,

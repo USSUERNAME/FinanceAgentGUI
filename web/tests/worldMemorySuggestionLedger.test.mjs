@@ -9,7 +9,9 @@ import {
   normalizeWorldMemorySuggestionFingerprint,
   recoverWorldMemoryCollectorStateFromArtifacts,
   shouldClearWorldMemoryConnectivityInFlight,
+  worldMemorySuggestionStatusForAction,
 } from "../server/worldMemoryApi.mjs";
+import { normalizeMemoryChangeSuggestionItem, worldMemorySuggestionCanAskAgent } from "../src/worldMemory/suggestionStatus.js";
 
 const acceptedText =
   "AI 물리 인프라 비즈니스 안에서는 `AI 전력망 병목과 데이터센터 접속 지연`을 상위 watch state로 유지하고, `PJM 운영 비상·피크 전력가격 관찰축`은 하위 관찰축으로 연결한다. 기존 `PJM 전력 공급 비상과 AI 전력망 병목 검증`은 중복 가능성이 있어 이후 supersede 또는 storyLink 정리를 검토한다.";
@@ -48,7 +50,61 @@ test("world memory report view marks exactly handled change suggestions", () => 
 
   assert.deepEqual(filtered.memoryChangeSuggestions, [acceptedText, other]);
   assert.equal(filtered.memoryChangeSuggestionItems[0].handled, true);
+  assert.equal(filtered.memoryChangeSuggestionItems[0].status, "completed");
   assert.equal(filtered.memoryChangeSuggestionItems[1].handled, false);
+  assert.equal(filtered.memoryChangeSuggestionItems[1].status, "open");
+});
+
+test("world memory suggestion actions separate watching from completed", () => {
+  assert.equal(worldMemorySuggestionStatusForAction("semanticSearch"), "watching");
+  assert.equal(worldMemorySuggestionStatusForAction("storyFamilyReview"), "watching");
+  assert.equal(worldMemorySuggestionStatusForAction("briefStoryBackfill"), "completed");
+  assert.equal(worldMemorySuggestionStatusForAction("stateAdd"), "completed");
+});
+
+test("completed suggestions remove Codex follow-up while watching suggestions keep it", () => {
+  assert.equal(normalizeMemoryChangeSuggestionItem({ text: "관찰", status: "watching" }).status, "watching");
+  assert.equal(worldMemorySuggestionCanAskAgent({ text: "관찰", status: "watching" }), true);
+  assert.equal(worldMemorySuggestionCanAskAgent({ text: "완료", status: "completed" }), false);
+  assert.equal(worldMemorySuggestionCanAskAgent({ text: "과거 완료", status: "handled" }), false);
+});
+
+test("world memory report view keeps read-only investigation suggestions watching", () => {
+  const watchingChangeSuggestions = [
+    {
+      text: acceptedText,
+      fingerprint: normalizeWorldMemorySuggestionFingerprint(acceptedText),
+      status: "watching",
+      action: "semanticSearch",
+    },
+  ];
+  const filtered = filterWorldMemoryReportView(reportViewWithSuggestions([acceptedText]), {
+    handledChangeSuggestions: watchingChangeSuggestions,
+  });
+
+  assert.equal(filtered.memoryChangeSuggestionItems[0].handled, false);
+  assert.equal(filtered.memoryChangeSuggestionItems[0].watching, true);
+  assert.equal(filtered.memoryChangeSuggestionItems[0].status, "watching");
+});
+
+test("world memory report view carries watching suggestions across report regeneration", () => {
+  const watchingChangeSuggestions = [
+    {
+      text: acceptedText,
+      fingerprint: normalizeWorldMemorySuggestionFingerprint(acceptedText),
+      status: "watching",
+      action: "semanticSearch",
+    },
+  ];
+  const other = "`호르무즈 통항 규칙·보험료 검증 꼬리위험` state는 유지한다.";
+  const filtered = filterWorldMemoryReportView(reportViewWithSuggestions([other]), {
+    handledChangeSuggestions: watchingChangeSuggestions,
+    handledDisplayMode: "omit",
+  });
+
+  assert.deepEqual(filtered.memoryChangeSuggestions, [acceptedText, other]);
+  assert.equal(filtered.memoryChangeSuggestionItems[0].status, "watching");
+  assert.equal(filtered.memoryChangeSuggestionItems[1].status, "open");
 });
 
 test("world memory report view marks close restatements for the same accepted target", () => {

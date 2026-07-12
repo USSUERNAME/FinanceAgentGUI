@@ -1,7 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { newsFeedSidebarHealthState } from "../src/news/newsFeedStatus.js";
+
+test("app loads the News Feed market summary before the News Feed page is opened", () => {
+  const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const startupPollingEffect = appSource.match(
+    /useEffect\(\(\) => \{\s*void loadSharedMemoryStatus\(\);[\s\S]*?MEMORY_MARKET_SUMMARY_POLL_INTERVAL_MS\);[\s\S]*?\}, \[\]\);/,
+  );
+
+  assert.ok(startupPollingEffect, "shared memory market summary should be loaded by an app-start effect");
+  assert.doesNotMatch(startupPollingEffect[0], /activeView/);
+});
 
 test("news feed sidebar dot follows market summary alert level", () => {
   const health = newsFeedSidebarHealthState(

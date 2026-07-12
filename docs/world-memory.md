@@ -65,6 +65,24 @@ report generation:
 - A report-only refresh can update `report.generatedAt` without changing
   `collector.lastSuccessfulAt`.
 
+## Change Suggestion States
+
+`data/world-memory/collector-state.json` keeps accepted report suggestions in
+`changeSuggestionLedger.handled` for backward compatibility, but each record now
+has an explicit status:
+
+- `watching`: a read-only investigation such as `semanticSearch` completed, but
+  no World Memory structure was changed. The report keeps the suggestion visible
+  with an orange eye marker and continues to offer the local agent follow-up.
+- `completed`: an approved mutation such as `briefStoryBackfill`, `stateAdd`, or
+  `storyLink` completed. The report uses a green check marker and removes the
+  local-agent action button from that row.
+
+Legacy ledger records without a status are interpreted as `completed`. Completed
+rows are never rendered with strike-through text. Watching rows remain visible
+across report regeneration until a later mutation promotes the same suggestion
+to `completed`.
+
 ## Collector Recovery And Connectivity
 
 The collector treats `collector-state.json` as rebuildable runtime state. If the

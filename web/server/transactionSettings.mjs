@@ -104,10 +104,10 @@ function normalizeTransactionSidebarManualOrder(value, fallback = fallbackSettin
   const nextKeys = [];
   for (const item of value) {
     const raw = String(item || "").trim();
-    const binanceMatch = /^binance:spot:([a-zA-Z0-9._-]+)$/i.exec(raw);
+    const binanceMatch = /^binance:(spot|usdm):([a-zA-Z0-9._-]+)$/i.exec(raw);
     const tossMatch = /^toss:stock:([a-zA-Z0-9._-]+)$/i.exec(raw);
     const key = binanceMatch
-      ? `binance:spot:${binanceMatch[1].toUpperCase()}`
+      ? `binance:${binanceMatch[1].toLowerCase()}:${binanceMatch[2].toUpperCase()}`
       : tossMatch
         ? `toss:stock:${tossMatch[1].toUpperCase()}`
         : raw.includes(":")
@@ -188,12 +188,16 @@ function normalizeTransactionWatchlistInstrument(value) {
   let status = cleanWatchlistUpperCode(value.status ?? value.instrumentStatus);
   let sessionPolicy = cleanWatchlistLowerCode(value.sessionPolicy ?? value.session_policy);
   let source = cleanWatchlistInstrumentText(value.source, 80);
+  const requestedMarketType = cleanWatchlistLowerCode(value.marketType, 20);
+  const marketType = requestedMarketType === "usdm" || /USDM|FUTURES/.test(`${venue} ${market}`)
+    ? "usdm"
+    : "spot";
 
   if (provider === "binance") {
-    instrumentId = `binance:spot:${symbol}`;
-    venue = "BINANCE_SPOT";
-    market = "BINANCE_SPOT";
-    assetClass = "crypto";
+    instrumentId = `binance:${marketType}:${symbol}`;
+    venue = marketType === "usdm" ? "BINANCE_USDM_FUTURES" : "BINANCE_SPOT";
+    market = venue;
+    assetClass = assetClass || "crypto";
     if (quoteAsset === "USDT") settlementAsset = "USD";
     sessionPolicy = "24x7";
     source = source || "binance-market-data";
@@ -206,6 +210,7 @@ function normalizeTransactionWatchlistInstrument(value) {
   return {
     instrumentId,
     provider,
+    marketType: provider === "binance" ? marketType : "",
     venue,
     assetClass,
     symbol,
@@ -218,6 +223,12 @@ function normalizeTransactionWatchlistInstrument(value) {
     market,
     name: cleanWatchlistInstrumentText(value.name ?? value.symbolName, 120) || symbol,
     englishName: cleanWatchlistInstrumentText(value.englishName, 120),
+    contractType: cleanWatchlistUpperCode(value.contractType, 60),
+    underlyingType: cleanWatchlistUpperCode(value.underlyingType, 60),
+    underlyingSubType: (Array.isArray(value.underlyingSubType) ? value.underlyingSubType : [])
+      .map((item) => cleanWatchlistInstrumentText(item, 80))
+      .filter(Boolean)
+      .slice(0, 12),
     source,
   };
 }

@@ -21,9 +21,9 @@ function loadDisplayName() {
 }
 
 test("Binance canonical instrument ids preserve the uppercase exchange symbol", () => {
-  assert.match(source, /return `binance:spot:\$\{cleanTransactionWatchlistSymbol\(binanceMatch\[1\]\)\}`/);
+  assert.match(source, /return `binance:\$\{binanceMatch\[1\]\.toLowerCase\(\)\}:\$\{cleanTransactionWatchlistSymbol\(binanceMatch\[2\]\)\}`/);
   assert.doesNotMatch(source, /trim\(\)\.toLowerCase\(\)\.replace\(\/\[\^a-z0-9/);
-  assert.match(source, /provider === "binance" \? `binance:spot:\$\{symbol\}`/);
+  assert.match(source, /provider === "binance" \? `binance:\$\{marketType\}:\$\{symbol\}`/);
 });
 
 test("Binance public market data keeps provider metadata and uses provider-specific routes", () => {
@@ -57,7 +57,8 @@ test("Binance return percent and daily anchor retain Binance native semantics", 
 });
 
 test("Binance simulator orders are 24x7 USD fills with an explicit zero-fee assumption", () => {
-  assert.match(source, /label: "Binance Spot · 24시간 주문 가능"/);
+  assert.match(source, /"Binance Spot · 24시간 주문 가능"/);
+  assert.match(source, /"Binance USDⓈ-M 선물 · 24시간 주문 가능"/);
   assert.match(source, /feeAssumption: "zero-no-public-account-rate"/);
   assert.match(source, /marketCountry: instrument\.provider === "binance" \? "GLOBAL"/);
   assert.match(source, /transactionBinanceProviderAvailability\(binanceProviderStatus, binanceProviderError\)/);

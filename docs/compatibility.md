@@ -271,7 +271,11 @@ Common repair checks:
 - If install succeeds but the page is down, run `npm run server:service:status`
   and inspect `logs/service-5173.err.log`.
 - If port `5173` is already occupied by a terminal-started server, stop the old
-  process and run `npm run server:service:restart`.
+  process and run `npm run server:service:restart`. The service uses strict
+  port binding and must report the conflict instead of silently moving to
+  `5174`; on macOS, restart waits for the previous service process to release
+  `5173` before starting its replacement, then waits for the HTTP endpoint to
+  become ready.
 - If Node was installed through a version manager and the service cannot find
   it, set `NODE_BIN` to the absolute Node executable path and reinstall the
   service.

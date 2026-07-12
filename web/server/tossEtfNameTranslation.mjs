@@ -65,6 +65,16 @@ function normalizeEntry(ticker, raw = {}) {
     provider: cleanText(raw.provider, 40).toLowerCase(),
     assetClass: cleanText(raw.assetClass, 40).toLowerCase(),
     instrumentId: cleanText(raw.instrumentId, 120),
+    venue: cleanText(raw.venue, 60).toUpperCase(),
+    marketType: cleanText(raw.marketType, 40).toLowerCase(),
+    baseAsset: cleanText(raw.baseAsset, 40).toUpperCase(),
+    quoteAsset: cleanText(raw.quoteAsset, 40).toUpperCase(),
+    contractType: cleanText(raw.contractType, 60).toUpperCase(),
+    underlyingType: cleanText(raw.underlyingType, 60).toUpperCase(),
+    underlyingSubType: (Array.isArray(raw.underlyingSubType) ? raw.underlyingSubType : [])
+      .map((value) => cleanText(value, 80))
+      .filter(Boolean)
+      .slice(0, 12),
     market: cleanText(raw.market, 20).toUpperCase(),
     securityType: cleanText(raw.securityType, 40).toUpperCase(),
     marketCountry: cleanText(raw.marketCountry, 20).toUpperCase(),
@@ -75,6 +85,14 @@ function normalizeEntry(ticker, raw = {}) {
     translatedAt: cleanText(raw.translatedAt, 80),
     model: cleanText(raw.model, 160),
     reasoning: cleanText(raw.reasoning, 80),
+    resolution: cleanText(raw.resolution, 40).toLowerCase(),
+    confidence: Number.isFinite(Number(raw.confidence))
+      ? Math.max(0, Math.min(1, Number(raw.confidence)))
+      : null,
+    evidenceFields: (Array.isArray(raw.evidenceFields) ? raw.evidenceFields : [])
+      .map((value) => cleanText(value, 60))
+      .filter(Boolean)
+      .slice(0, 12),
     attempts: Number.isFinite(Number(raw.attempts)) ? Math.max(0, Number(raw.attempts)) : 0,
     lastAttemptAt: cleanText(raw.lastAttemptAt, 80),
     retryAfter: cleanText(raw.retryAfter, 80),
@@ -128,7 +146,7 @@ function isOverseasEnglishNameCandidate(item = {}) {
   const provider = cleanText(item.provider, 40).toLowerCase();
   const assetClass = cleanText(item.assetClass, 40).toLowerCase();
   if (!ticker || !sourceName || sourceName.toUpperCase() === ticker) return false;
-  const isBinanceAsset = provider === "binance" && assetClass === "crypto";
+  const isBinanceAsset = provider === "binance";
   if (isBinanceAsset) {
     return /[A-Za-z]/.test(sourceName) && !/[가-힣]/.test(sourceName);
   }
@@ -150,6 +168,16 @@ export function mergeTossEtfNameCandidates(memory, items = [], now = new Date().
     const provider = cleanText(item.provider, 40).toLowerCase();
     const assetClass = cleanText(item.assetClass, 40).toLowerCase();
     const instrumentId = cleanText(item.instrumentId, 120);
+    const venue = cleanText(item.venue, 60).toUpperCase();
+    const marketType = cleanText(item.marketType, 40).toLowerCase();
+    const baseAsset = cleanText(item.baseAsset, 40).toUpperCase();
+    const quoteAsset = cleanText(item.quoteAsset || item.nativeQuoteAsset, 40).toUpperCase();
+    const contractType = cleanText(item.contractType, 60).toUpperCase();
+    const underlyingType = cleanText(item.underlyingType, 60).toUpperCase();
+    const underlyingSubType = (Array.isArray(item.underlyingSubType) ? item.underlyingSubType : [])
+      .map((value) => cleanText(value, 80))
+      .filter(Boolean)
+      .slice(0, 12);
     const previous = next.entries[ticker];
     if (!previous) {
       next.entries[ticker] = normalizeEntry(ticker, {
@@ -157,6 +185,13 @@ export function mergeTossEtfNameCandidates(memory, items = [], now = new Date().
         provider,
         assetClass,
         instrumentId,
+        venue,
+        marketType,
+        baseAsset,
+        quoteAsset,
+        contractType,
+        underlyingType,
+        underlyingSubType,
         market,
         securityType,
         marketCountry,
@@ -175,6 +210,15 @@ export function mergeTossEtfNameCandidates(memory, items = [], now = new Date().
     const providerChanged = Boolean(provider && previous.provider !== provider);
     const assetClassChanged = Boolean(assetClass && previous.assetClass !== assetClass);
     const instrumentIdChanged = Boolean(instrumentId && previous.instrumentId !== instrumentId);
+    const metadataChanged = [
+      [previous.venue, venue],
+      [previous.marketType, marketType],
+      [previous.baseAsset, baseAsset],
+      [previous.quoteAsset, quoteAsset],
+      [previous.contractType, contractType],
+      [previous.underlyingType, underlyingType],
+      [JSON.stringify(previous.underlyingSubType || []), JSON.stringify(underlyingSubType)],
+    ].some(([before, after]) => Boolean(after && before !== after));
     const previousLastSeenMs = Date.parse(previous.lastSeenAt || "");
     const currentSeenMs = Date.parse(now);
     const shouldRefreshLastSeen =
@@ -187,15 +231,25 @@ export function mergeTossEtfNameCandidates(memory, items = [], now = new Date().
       provider: provider || previous.provider,
       assetClass: assetClass || previous.assetClass,
       instrumentId: instrumentId || previous.instrumentId,
+      venue: venue || previous.venue,
+      marketType: marketType || previous.marketType,
+      baseAsset: baseAsset || previous.baseAsset,
+      quoteAsset: quoteAsset || previous.quoteAsset,
+      contractType: contractType || previous.contractType,
+      underlyingType: underlyingType || previous.underlyingType,
+      underlyingSubType: underlyingSubType.length ? underlyingSubType : previous.underlyingSubType,
       market,
       securityType,
       marketCountry: marketCountry || previous.marketCountry,
       lastSeenAt: shouldRefreshLastSeen ? now : previous.lastSeenAt,
-      ...(sourceChanged
+      ...(sourceChanged || metadataChanged
         ? {
             status: "pending",
             textKo: "",
             translatedAt: "",
+            resolution: "",
+            confidence: null,
+            evidenceFields: [],
             retryAfter: "",
             error: "",
           }
@@ -209,6 +263,7 @@ export function mergeTossEtfNameCandidates(memory, items = [], now = new Date().
       providerChanged ||
       assetClassChanged ||
       instrumentIdChanged ||
+      metadataChanged ||
       shouldRefreshLastSeen
     ) {
       next.entries[ticker] = updated;
@@ -273,6 +328,9 @@ export function applyTossEtfNameTranslations(items = [], memory = emptyCache()) 
       etfNameTranslationStatus: entry.status,
       etfNameTranslationModel: entry.model || "",
       etfNameTranslationError: entry.error || "",
+      etfNameTranslationResolution: entry.resolution || "",
+      etfNameTranslationConfidence: entry.confidence,
+      etfNameTranslationEvidenceFields: entry.evidenceFields || [],
     };
   });
 }
@@ -316,15 +374,19 @@ function chooseTranslationModel() {
 
 function translationPrompt(items) {
   return [
-    "금융 앱에 표시할 영문 자산명을 한국어로 번역한다.",
+    "금융 앱에 표시할 자산명을 한국어로 해결한다.",
     "출력은 JSON 객체 하나만 반환한다.",
     "한국 투자자가 자연스럽게 식별할 수 있는 한국어 종목명으로 옮긴다.",
     "회사명과 운용사 브랜드, 지수명, 지역, 자산군, ETF·ETN, 레버리지·인버스 배수, Tokenized bStocks와 핵심 약어를 보존하고 없는 정보를 추가하지 않는다.",
-    "provider가 binance이면 코인·토큰·토큰화 주식 등 입력의 자산 유형을 그대로 보존하며 일반 주식으로 바꾸어 쓰지 않는다.",
+    "provider가 binance이면 ticker만 보지 말고 baseAsset, quoteAsset, venue, marketType, contractType, underlyingType, underlyingSubType를 모두 근거로 사용한다.",
+    "englishName이 CL/USDT 같은 표시용 페어에 불과하면 메타데이터를 조합해 실제 기초자산명을 추론해 본다.",
+    "입력 정보에서 합리적으로 특정할 수 없으면 resolution을 insufficient로 반환하고 textKo는 빈 문자열로 둔다. 지어내지 않는다.",
+    "단순 영문명 번역은 resolution=translated, 메타데이터로 종목명을 복원하면 resolution=metadata_inference로 표시한다.",
+    "metadata_inference는 confidence가 0.65 이상일 때만 사용하고, evidenceFields에 실제 사용한 입력 필드명을 넣는다.",
     "모든 입력 항목에 대해 번역 결과를 반환한다.",
     "",
     "반환 형식:",
-    '{"translations":[{"id":"입력 ticker","textKo":"한국어 종목명"}]}',
+    '{"translations":[{"id":"입력 ticker","textKo":"한국어 종목명 또는 빈 문자열","resolution":"translated|metadata_inference|insufficient","confidence":0.0,"evidenceFields":["fieldName"]}]}',
     "",
     "입력 JSON:",
     JSON.stringify({
@@ -335,6 +397,14 @@ function translationPrompt(items) {
         securityType: item.securityType,
         provider: item.provider,
         assetClass: item.assetClass,
+        instrumentId: item.instrumentId,
+        venue: item.venue,
+        marketType: item.marketType,
+        baseAsset: item.baseAsset,
+        quoteAsset: item.quoteAsset,
+        contractType: item.contractType,
+        underlyingType: item.underlyingType,
+        underlyingSubType: item.underlyingSubType,
       })),
     }, null, 2),
   ].join("\n");
@@ -371,8 +441,11 @@ function runCodexBatch(items, modelInfo) {
             properties: {
               id: { type: "string" },
               textKo: { type: "string" },
+              resolution: { type: "string", enum: ["translated", "metadata_inference", "insufficient"] },
+              confidence: { type: "number", minimum: 0, maximum: 1 },
+              evidenceFields: { type: "array", items: { type: "string" }, maxItems: 12 },
             },
-            required: ["id", "textKo"],
+            required: ["id", "textKo", "resolution", "confidence", "evidenceFields"],
           },
         },
       },
@@ -471,13 +544,32 @@ async function translateItems(items) {
 }
 
 function validateCandidate(item, translation) {
+  const resolution = cleanText(translation?.resolution || "translated", 40).toLowerCase();
+  const confidence = Number.isFinite(Number(translation?.confidence))
+    ? Math.max(0, Math.min(1, Number(translation.confidence)))
+    : resolution === "translated" ? 1 : 0;
+  const allowedEvidenceFields = new Set([
+    "ticker", "englishName", "market", "securityType", "provider", "assetClass",
+    "instrumentId", "venue", "marketType", "baseAsset", "quoteAsset", "contractType",
+    "underlyingType", "underlyingSubType",
+  ]);
+  const evidenceFields = (Array.isArray(translation?.evidenceFields) ? translation.evidenceFields : [])
+    .map((value) => cleanText(value, 60))
+    .filter((value) => allowedEvidenceFields.has(value));
+  if (resolution === "insufficient") return { ok: false, error: "메타데이터로 종목명을 특정하지 못했습니다." };
+  if (!["translated", "metadata_inference"].includes(resolution)) {
+    return { ok: false, error: "종목명 해결 방식이 잘못되었습니다." };
+  }
+  if (resolution === "metadata_inference" && (confidence < 0.65 || !evidenceFields.length)) {
+    return { ok: false, error: "메타데이터 추론의 신뢰도 또는 근거가 부족합니다." };
+  }
   const textKo = cleanText(translation?.textKo, 240);
   if (!textKo) return { ok: false, error: "한국어 종목명이 비어 있습니다." };
   if (!/[가-힣]/.test(textKo)) return { ok: false, error: "한국어 종목명에 한글이 없습니다." };
   if (textKo.toLocaleLowerCase("ko-KR") === item.sourceName.toLocaleLowerCase("en-US")) {
     return { ok: false, error: "한국어 종목명이 원문과 같습니다." };
   }
-  return { ok: true, textKo };
+  return { ok: true, textKo, resolution, confidence, evidenceFields };
 }
 
 function pendingItems(memory, nowMs = Date.now()) {
@@ -537,6 +629,9 @@ function startPendingTranslations(path = cachePath()) {
           translatedAt: candidate.ok ? translatedAt : "",
           model: translated.model || current.model,
           reasoning: translated.reasoning || current.reasoning,
+          resolution: candidate.ok ? candidate.resolution : "",
+          confidence: candidate.ok ? candidate.confidence : null,
+          evidenceFields: candidate.ok ? candidate.evidenceFields : [],
           retryAfter: candidate.ok ? "" : new Date(Date.now() + RETRY_DELAY_MS).toISOString(),
           error: candidate.ok ? "" : candidate.error,
         });
@@ -619,5 +714,6 @@ export async function handleTossEtfNameTranslationEndpoint(req, res) {
 export const __tossEtfNameTranslationTestHooks = {
   cacheStats,
   pendingItems,
+  translationPrompt,
   validateCandidate,
 };

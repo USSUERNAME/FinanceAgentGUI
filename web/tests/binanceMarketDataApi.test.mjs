@@ -61,6 +61,24 @@ const exchangeInfoFixture = {
   ],
 };
 
+const usdmExchangeInfoFixture = {
+  symbols: [
+    {
+      symbol: "CLUSDT",
+      pair: "CLUSDT",
+      contractType: "TRADIFI_PERPETUAL",
+      status: "TRADING",
+      baseAsset: "CL",
+      quoteAsset: "USDT",
+      marginAsset: "USDT",
+      underlyingType: "COMMODITY",
+      underlyingSubType: ["TradFi"],
+      orderTypes: ["LIMIT", "MARKET"],
+      filters: [{ filterType: "PRICE_FILTER", minPrice: "0.01000", tickSize: "0.01000" }],
+    },
+  ],
+};
+
 const productMetadataFixture = {
   code: "000000",
   success: true,
@@ -118,6 +136,7 @@ test("exchangeInfo keeps only TRADING USDT Spot instruments with canonical provi
     instrumentId: "binance:spot:BTCUSDT",
     provider: "binance",
     venue: "BINANCE_SPOT",
+    marketType: "spot",
     assetClass: "crypto",
     symbol: "BTCUSDT",
     displaySymbol: "BTC/USDT",
@@ -141,7 +160,22 @@ test("exchangeInfo keeps only TRADING USDT Spot instruments with canonical provi
       LOT_SIZE: { minQty: "0.00001000", stepSize: "0.00001000" },
       MIN_NOTIONAL: { minNotional: "5.00000000", applyToMarket: true },
     },
+    contractType: "",
+    underlyingType: "",
+    underlyingSubType: [],
+    onboardDate: null,
+    deliveryDate: null,
   });
+});
+
+test("USDⓈ-M exchangeInfo preserves CLUSDT contract metadata for model-assisted naming", () => {
+  const [instrument] = normalizeExchangeInfo(usdmExchangeInfoFixture, new Map(), { marketType: "usdm" });
+  assert.equal(instrument.instrumentId, "binance:usdm:CLUSDT");
+  assert.equal(instrument.venue, "BINANCE_USDM_FUTURES");
+  assert.equal(instrument.assetClass, "commodity");
+  assert.equal(instrument.contractType, "TRADIFI_PERPETUAL");
+  assert.equal(instrument.underlyingType, "COMMODITY");
+  assert.deepEqual(instrument.underlyingSubType, ["TradFi"]);
 });
 
 test("local autocomplete matches ticker, display pair, and base asset", () => {
@@ -213,6 +247,7 @@ test("HTTP handlers expose search, quotes, candles, execution price, and provide
   setFetchImplementation(async (rawUrl, options = {}) => {
     const url = new URL(rawUrl);
     calls.push({ pathname: url.pathname, search: url.search, headers: options.headers || {} });
+    if (url.pathname === "/fapi/v1/exchangeInfo") return jsonResponse({ symbols: [] });
     if (url.pathname.endsWith("/exchangeInfo")) {
       return jsonResponse(exchangeInfoFixture, { headers: { "x-mbx-used-weight-1m": "20" } });
     }
@@ -262,9 +297,47 @@ test("HTTP handlers expose search, quotes, candles, execution price, and provide
   assert.equal(status.body.result.quoteCurrencyPolicy, "USDT_AS_USD");
   assert.equal(status.body.result.usedWeight1m, 20);
 
-  assert.equal(calls.filter((call) => call.pathname.endsWith("/exchangeInfo")).length, 1);
+  assert.equal(calls.filter((call) => call.pathname === "/api/v3/exchangeInfo").length, 1);
+  assert.equal(calls.filter((call) => call.pathname === "/fapi/v1/exchangeInfo").length, 1);
   assert.equal(calls.filter((call) => call.pathname.endsWith("/ticker/24hr")).length, 1);
   assert.equal(calls.filter((call) => call.pathname.endsWith("/klines")).length, 1);
+  assert.equal(calls.some((call) => Object.keys(call.headers).some((key) => key.toLowerCase() === "x-mbx-apikey")), false);
+});
+
+test("CLUSDT search, quote, and candles use public USDⓈ-M routes without an API key", async () => {
+  const calls = [];
+  setFetchImplementation(async (rawUrl, options = {}) => {
+    const url = new URL(rawUrl);
+    calls.push({ pathname: url.pathname, headers: options.headers || {} });
+    if (url.pathname === "/api/v3/exchangeInfo") return jsonResponse({ symbols: [] });
+    if (url.pathname === "/fapi/v1/exchangeInfo") return jsonResponse(usdmExchangeInfoFixture);
+    if (url.pathname.endsWith("/get-products")) return jsonResponse({ data: [] });
+    if (url.pathname === "/fapi/v1/ticker/24hr") {
+      return jsonResponse({
+        symbol: "CLUSDT",
+        lastPrice: "73.59",
+        priceChangePercent: "2.86",
+        volume: "4264391.41",
+        quoteVolume: "312150502.27",
+        closeTime: Date.now(),
+      });
+    }
+    if (url.pathname === "/fapi/v1/klines") {
+      const start = Date.UTC(2026, 6, 12, 14, 0, 0);
+      return jsonResponse([[start, "73.50", "73.60", "73.40", "73.59", "100", start + 59_999, "7359", 20]]);
+    }
+    return jsonResponse({ msg: "not found" }, { status: 404 });
+  });
+  const search = await invoke("instrument-search", "/?query=CLUSDT&provider=binance&limit=12");
+  assert.equal(search.body.result[0].instrumentId, "binance:usdm:CLUSDT");
+  assert.equal(search.body.result[0].contractType, "TRADIFI_PERPETUAL");
+  assert.equal(search.body.result[0].underlyingType, "COMMODITY");
+  const quotes = await invoke("quotes", "/?instrumentIds=binance%3Ausdm%3ACLUSDT");
+  assert.equal(quotes.body.result[0].lastPrice, 73.59);
+  const candles = await invoke("candles", "/?instrumentId=binance%3Ausdm%3ACLUSDT&interval=1m&limit=2");
+  assert.equal(candles.body.result.candles[0].close, 73.59);
+  assert.equal(calls.some((call) => call.pathname === "/fapi/v1/ticker/24hr"), true);
+  assert.equal(calls.some((call) => call.pathname === "/fapi/v1/klines"), true);
   assert.equal(calls.some((call) => Object.keys(call.headers).some((key) => key.toLowerCase() === "x-mbx-apikey")), false);
 });
 
@@ -290,7 +363,7 @@ test("upstream rate limits return a structured retryable error", async () => {
   const cooldownResponse = await invoke("instrument-search", "/?query=ETH&provider=binance");
   assert.equal(cooldownResponse.statusCode, 503);
   assert.equal(cooldownResponse.body.code, "BINANCE_RATE_LIMITED");
-  assert.equal(upstreamCalls, 1);
+  assert.equal(upstreamCalls, 2);
 });
 
 test("catalog watchdog releases a stuck shared request so the next request can recover", async () => {
@@ -299,6 +372,7 @@ test("catalog watchdog releases a stuck shared request so the next request can r
   setCatalogLoadTimeoutMs(20);
   setFetchImplementation(async (rawUrl) => {
     const url = new URL(rawUrl);
+    if (url.pathname === "/fapi/v1/exchangeInfo") return jsonResponse({ symbols: [] });
     if (!url.pathname.endsWith("/exchangeInfo")) return jsonResponse({}, { status: 404 });
     exchangeInfoCalls += 1;
     if (exchangeInfoShouldHang) return new Promise(() => {});
@@ -328,6 +402,7 @@ test("execution price fails closed when exchangeInfo refresh falls back to a sta
   try {
     setFetchImplementation(async (rawUrl) => {
       const url = new URL(rawUrl);
+      if (url.pathname === "/fapi/v1/exchangeInfo") return jsonResponse({ symbols: [] });
       if (url.pathname.endsWith("/exchangeInfo")) {
         exchangeCalls += 1;
         if (exchangeCalls > 1) throw new Error("exchangeInfo unavailable");
@@ -357,6 +432,7 @@ test("execution price rejects stale and invalid ticker values", async () => {
   let tickerPayload = { symbol: "BTCUSDT", lastPrice: "100", closeTime: now - 61_000 };
   setFetchImplementation(async (rawUrl) => {
     const url = new URL(rawUrl);
+    if (url.pathname === "/fapi/v1/exchangeInfo") return jsonResponse({ symbols: [] });
     if (url.pathname.endsWith("/exchangeInfo")) return jsonResponse(exchangeInfoFixture);
     if (url.pathname.endsWith("/ticker/24hr")) return jsonResponse(tickerPayload);
     return jsonResponse({}, { status: 404 });
