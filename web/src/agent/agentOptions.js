@@ -83,17 +83,17 @@ export const personaModeOptions = [
   {
     id: "none",
     label: "사용하지 않음",
-    detail: "일반 채팅도 기본 업무 응답으로 유지합니다.",
+    detail: "일반 채팅과 Earning Calendar 분석을 기본 업무 응답으로 유지합니다.",
   },
   {
     id: "choi-hayoung",
     label: "최하영",
-    detail: "일반 채팅에서 CFA식 시장·종목 분석 캐릭터 톤을 적용합니다.",
+    detail: "일반 채팅에는 최하영 톤을, Earning Calendar 분석에는 하영·명희 통합 정본을 적용합니다.",
   },
   {
     id: "won-myunghee",
     label: "원명희",
-    detail: "일반 채팅에서 CFP식 장기 재무설계 캐릭터 톤을 적용합니다.",
+    detail: "일반 채팅에는 원명희 톤을, Earning Calendar 분석에는 하영·명희 통합 정본을 적용합니다.",
   },
 ];
 

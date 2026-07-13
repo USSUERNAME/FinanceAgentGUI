@@ -38,6 +38,7 @@ export function AgentSidebar({
   onNewChat,
   onPromptChange,
   onRemoveChatAttachment,
+  onSaveAnswerToReports,
   onSelectApproval,
   onSelectModel,
   onSelectReasoning,
@@ -115,6 +116,7 @@ export function AgentSidebar({
               runningWorldMemoryAgentActionId={runningWorldMemoryAgentActionId}
               worldMemoryActionBusy={worldMemoryActionBusy}
               onExecuteWorldMemoryAction={onExecuteWorldMemoryAction}
+              onSaveAnswerToReports={onSaveAnswerToReports}
               key={message.id}
             />
           ))}

@@ -5497,6 +5497,36 @@ function App() {
     return payload;
   }
 
+  async function saveChatAnswerToReports({ message, answerText } = {}) {
+    const content = String(answerText || "").trim();
+    if (!content) throw new Error("보고서에 저장할 답변이 없습니다.");
+    const response = await fetch("/api/reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        action: "save_chat_answer",
+        artifact: {
+          content,
+          format: "markdown",
+        },
+        source: {
+          surface: "agent-chat-answer-action",
+          screen: activeView,
+          provider: agentProvider,
+          providerLabel: message?.providerLabel || agentProviderLabel,
+          messageId: message?.id || "",
+        },
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    setReportRefreshSignal((current) => current + 1);
+    return payload;
+  }
+
   async function sendPrompt(rawOptions = {}) {
     const options = rawOptions && typeof rawOptions === "object" && !("nativeEvent" in rawOptions) ? rawOptions : {};
     const overridePromptText = typeof options.promptText === "string" ? options.promptText : "";
@@ -6150,11 +6180,13 @@ function App() {
           reasoning: selectedReasoning?.id,
           speed: selectedSpeed?.id,
           approval: selectedApproval?.id,
+          personaMode,
           screen: "earning-calendar",
           includeWorldMemoryContext: false,
           includeWorldMemorySearchContext: worldMemoryEnabled,
           includeNewsFeedContext: false,
           includeNewsFeedSearchContext: true,
+          requireWebSearch: true,
           boardContext: null,
           calendarContext: earningCalendarContext,
           attachments: [],
@@ -6623,6 +6655,7 @@ function App() {
           onNewChat={startNewChat}
           onPromptChange={(nextPrompt) => setPromptForScope(activeChatScope, nextPrompt)}
           onRemoveChatAttachment={removeChatAttachment}
+          onSaveAnswerToReports={saveChatAnswerToReports}
           onSelectApproval={(nextApproval) => updateAgentSelection({ approval: nextApproval })}
           onSelectModel={(nextModel) => updateAgentSelection({ model: nextModel })}
           onSelectReasoning={(nextReasoning) => updateAgentSelection({ reasoning: nextReasoning })}
@@ -7293,6 +7326,7 @@ function App() {
           onNewChat={startNewChat}
           onPromptChange={(nextPrompt) => setPromptForScope(activeChatScope, nextPrompt)}
           onRemoveChatAttachment={removeChatAttachment}
+          onSaveAnswerToReports={saveChatAnswerToReports}
           onSelectApproval={(nextApproval) => updateProviderSelection(sidebarAgentRuntime.provider, { approval: nextApproval })}
           onSelectModel={(nextModel) => updateProviderSelection(sidebarAgentRuntime.provider, { model: nextModel })}
           onSelectReasoning={(nextReasoning) => updateProviderSelection(sidebarAgentRuntime.provider, { reasoning: nextReasoning })}

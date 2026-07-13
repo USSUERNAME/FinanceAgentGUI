@@ -1,9 +1,12 @@
 import React from "react";
 import AlertTriangle from "lucide-react/dist/esm/icons/alert-triangle.js";
+import Check from "lucide-react/dist/esm/icons/check.js";
 import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check-big.js";
 import Circle from "lucide-react/dist/esm/icons/circle.js";
+import Copy from "lucide-react/dist/esm/icons/copy.js";
 import Database from "lucide-react/dist/esm/icons/database.js";
 import FileText from "lucide-react/dist/esm/icons/file-text.js";
+import Folder from "lucide-react/dist/esm/icons/folder.js";
 import ImageIcon from "lucide-react/dist/esm/icons/image.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
 import Play from "lucide-react/dist/esm/icons/play.js";
@@ -13,6 +16,10 @@ import { ArticleContextAttachment } from "../arca/ArticleContextAttachment.jsx";
 import { MarkdownText, renderMarkdownInline } from "../utils/MarkdownText.jsx";
 import { formatFileSize } from "../utils/formatters.js";
 import { attachmentKind, attachmentLabel } from "./attachments.js";
+import { writeChatAnswerToClipboard } from "./chatAnswerActions.js";
+import { messageToHistoryText } from "./chatProtocol.js";
+
+const CHAT_ACTION_SUCCESS_MS = 2800;
 
 export function ChatAttachmentList({ attachments = [], onRemove, placement = "composer" }) {
   if (!attachments.length) return null;
@@ -219,7 +226,63 @@ export function ChatMessage({
   runningWorldMemoryAgentActionId = "",
   worldMemoryActionBusy = false,
   onExecuteWorldMemoryAction,
+  onSaveAnswerToReports,
 }) {
+  const answerText = messageToHistoryText(message).trim();
+  const answerIsStreaming = (message.blocks || []).some(
+    (block) => block.type === "status" && block.tone === "working",
+  );
+  const [copyState, setCopyState] = React.useState("idle");
+  const [reportState, setReportState] = React.useState("idle");
+  const [actionAnnouncement, setActionAnnouncement] = React.useState("");
+  const resetTimersRef = React.useRef([]);
+
+  React.useEffect(
+    () => () => {
+      resetTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    },
+    [],
+  );
+
+  function resetActionLater(setState) {
+    const timer = window.setTimeout(() => setState("idle"), CHAT_ACTION_SUCCESS_MS);
+    resetTimersRef.current.push(timer);
+  }
+
+  async function copyAnswer() {
+    if (!answerText || copyState === "working") return;
+    setCopyState("working");
+    try {
+      await writeChatAnswerToClipboard(answerText);
+      setCopyState("success");
+      setActionAnnouncement("답변을 클립보드에 복사했습니다.");
+    } catch (error) {
+      setCopyState("error");
+      setActionAnnouncement(error.message || "답변 복사에 실패했습니다.");
+    }
+    resetActionLater(setCopyState);
+  }
+
+  async function saveAnswerToReports() {
+    if (!answerText || !onSaveAnswerToReports || reportState === "working") return;
+    setReportState("working");
+    try {
+      const result = await onSaveAnswerToReports({ message, answerText });
+      setReportState("success");
+      setActionAnnouncement(
+        `'${result?.saved?.title || result?.titleGeneration?.title || "에이전트 답변"}' 보고서를 저장했습니다.`,
+      );
+    } catch (error) {
+      setReportState("error");
+      setActionAnnouncement(error.message || "보고서 저장에 실패했습니다.");
+    }
+    resetActionLater(setReportState);
+  }
+
+  const showAnswerActions = Boolean(answerText) && !answerIsStreaming;
+  const CopyIcon = copyState === "success" ? Check : Copy;
+  const ReportIcon = reportState === "success" ? Check : reportState === "working" ? LoaderCircle : Folder;
+
   if (message.role === "user") {
     const hasContext = Boolean(message.article || message.attachments?.length);
     return (
@@ -256,6 +319,41 @@ export function ChatMessage({
             />
           ))}
         </div>
+        {showAnswerActions ? (
+          <div className="chat-answer-actions" aria-label="답변 작업">
+            <button
+              className={copyState === "success" ? "chat-answer-action is-success" : "chat-answer-action"}
+              type="button"
+              aria-label={copyState === "success" ? "답변 복사 완료" : "답변 복사"}
+              title={copyState === "success" ? "복사됨" : copyState === "error" ? "복사 실패" : "답변 복사"}
+              disabled={copyState === "working"}
+              onClick={() => void copyAnswer()}
+            >
+              <CopyIcon size={14} strokeWidth={2} />
+            </button>
+            <button
+              className={reportState === "success" ? "chat-answer-action is-success" : "chat-answer-action"}
+              type="button"
+              aria-label={reportState === "success" ? "보고서 저장 완료" : "답변을 보고서에 저장"}
+              title={
+                reportState === "success"
+                  ? "보고서에 저장됨"
+                  : reportState === "error"
+                    ? "보고서 저장 실패"
+                    : "답변을 보고서에 저장"
+              }
+              disabled={reportState === "working" || !onSaveAnswerToReports}
+              onClick={() => void saveAnswerToReports()}
+            >
+              <ReportIcon
+                className={reportState === "working" ? "is-spinning" : undefined}
+                size={14}
+                strokeWidth={2}
+              />
+            </button>
+            <span className="sr-only" role="status" aria-live="polite">{actionAnnouncement}</span>
+          </div>
+        ) : null}
       </div>
     </article>
   );

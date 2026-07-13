@@ -9,11 +9,17 @@ import {
 import { runEmergencyProcedureForMarketSummary } from "./notificationsApi.mjs";
 
 const SHARED_MEMORY_MAINTENANCE_INTERVAL_MS = 15 * 60 * 1000;
-const sharedMemoryMaintenanceRuntime = {
-  started: false,
-  timer: null,
-  worker: null,
-};
+const SHARED_MEMORY_MAINTENANCE_RUNTIME_KEY = Symbol.for(
+  "financeAgentGui.sharedMemoryMaintenanceRuntime.v1",
+);
+const sharedMemoryMaintenanceRuntime =
+  globalThis[SHARED_MEMORY_MAINTENANCE_RUNTIME_KEY] ||
+  (globalThis[SHARED_MEMORY_MAINTENANCE_RUNTIME_KEY] = {
+    started: false,
+    initialTimer: null,
+    intervalTimer: null,
+    worker: null,
+  });
 
 function runSharedMemoryMaintenanceInBackground() {
   if (sharedMemoryMaintenanceRuntime.worker) return false;
@@ -31,17 +37,41 @@ function runSharedMemoryMaintenanceInBackground() {
   return true;
 }
 
-export function startSharedMemoryMaintenanceScheduler() {
+export function startSharedMemoryMaintenanceScheduler({
+  initialDelayMs = 1_000,
+  intervalMs = SHARED_MEMORY_MAINTENANCE_INTERVAL_MS,
+} = {}) {
   if (sharedMemoryMaintenanceRuntime.started) return false;
   sharedMemoryMaintenanceRuntime.started = true;
-  const initialTimer = setTimeout(runSharedMemoryMaintenanceInBackground, 1_000);
-  initialTimer.unref?.();
-  sharedMemoryMaintenanceRuntime.timer = setInterval(
+  sharedMemoryMaintenanceRuntime.initialTimer = setTimeout(() => {
+    sharedMemoryMaintenanceRuntime.initialTimer = null;
+    runSharedMemoryMaintenanceInBackground();
+  }, initialDelayMs);
+  sharedMemoryMaintenanceRuntime.initialTimer.unref?.();
+  sharedMemoryMaintenanceRuntime.intervalTimer = setInterval(
     runSharedMemoryMaintenanceInBackground,
-    SHARED_MEMORY_MAINTENANCE_INTERVAL_MS,
+    intervalMs,
   );
-  sharedMemoryMaintenanceRuntime.timer.unref?.();
+  sharedMemoryMaintenanceRuntime.intervalTimer.unref?.();
   return true;
+}
+
+export function stopSharedMemoryMaintenanceScheduler({ terminateWorker = false } = {}) {
+  const wasStarted = sharedMemoryMaintenanceRuntime.started;
+  if (sharedMemoryMaintenanceRuntime.initialTimer) {
+    clearTimeout(sharedMemoryMaintenanceRuntime.initialTimer);
+    sharedMemoryMaintenanceRuntime.initialTimer = null;
+  }
+  if (sharedMemoryMaintenanceRuntime.intervalTimer) {
+    clearInterval(sharedMemoryMaintenanceRuntime.intervalTimer);
+    sharedMemoryMaintenanceRuntime.intervalTimer = null;
+  }
+  if (terminateWorker && sharedMemoryMaintenanceRuntime.worker) {
+    sharedMemoryMaintenanceRuntime.worker.terminate();
+    sharedMemoryMaintenanceRuntime.worker = null;
+  }
+  sharedMemoryMaintenanceRuntime.started = false;
+  return wasStarted;
 }
 
 async function sharedMemoryStatusWithEmergencyProcedure(options = {}) {
