@@ -1525,7 +1525,7 @@ function PersonaModeSection({
     <section className="settings-section settings-persona-section" aria-labelledby="persona-mode-settings-title">
       <div className="settings-section-header">
         <h2 id="persona-mode-settings-title">페르소나 모드</h2>
-        <span>일반 채팅</span>
+        <span>일반 채팅 · 실적 분석</span>
       </div>
 
       <div className="settings-persona-control">

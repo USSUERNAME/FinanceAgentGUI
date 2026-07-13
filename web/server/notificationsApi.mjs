@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readJsonBody, sendJson } from "./codexProbe.mjs";
@@ -10,11 +10,16 @@ import {
   runAntigravityJsonModel,
   runCodexJsonModel,
 } from "./sharedMemoryStore.mjs";
+import { acquireRuntimeFileLease } from "./runtimeFileLease.mjs";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const GUIBUILD_ROOT = resolve(WEB_ROOT, "..");
-const NOTIFICATION_DIR = join(GUIBUILD_ROOT, "data", "notifications");
+const NOTIFICATION_DIR = resolve(
+  process.env.FINANCE_AGENT_GUI_NOTIFICATION_DIR || join(GUIBUILD_ROOT, "data", "notifications"),
+);
 const NOTIFICATION_STORE_PATH = join(NOTIFICATION_DIR, "stock-channel-notifications.json");
+const NOTIFICATION_STORE_LOCK_PATH = join(NOTIFICATION_DIR, "stock-channel-notifications.lock");
+const MARKET_SUMMARY_EMERGENCY_LOCK_PATH = join(NOTIFICATION_DIR, "market-summary-emergency.lock");
 const EXTERNAL_MEMORY_BRIEFING_PATH = join(GUIBUILD_ROOT, "data", "shared-memory", "external_memory_briefing.md");
 const APP_NAME = "주식채널+";
 const MAX_RECORDS = 80;
@@ -90,7 +95,37 @@ function readStore() {
 
 function writeStore(store) {
   ensureNotificationDir();
-  writeFileSync(NOTIFICATION_STORE_PATH, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+  const temporaryPath = `${NOTIFICATION_STORE_PATH}.tmp-${process.pid}-${randomUUID()}`;
+  try {
+    writeFileSync(temporaryPath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+    renameSync(temporaryPath, NOTIFICATION_STORE_PATH);
+  } finally {
+    rmSync(temporaryPath, { force: true });
+  }
+}
+
+function waitBriefly(milliseconds = 5) {
+  const buffer = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
+}
+
+function mutateStore(mutator) {
+  const deadline = Date.now() + 2_000;
+  let lease = null;
+  while (Date.now() < deadline) {
+    lease = acquireRuntimeFileLease(NOTIFICATION_STORE_LOCK_PATH, { staleAfterMs: 30_000 });
+    if (lease.acquired) break;
+    waitBriefly();
+  }
+  if (!lease?.acquired) throw new Error("notification store is busy");
+  try {
+    const currentStore = readStore();
+    const nextStore = mutator(currentStore);
+    writeStore(nextStore);
+    return nextStore;
+  } finally {
+    lease.release();
+  }
 }
 
 function cleanText(value, maxLength = MAX_SUMMARY_LENGTH) {
@@ -348,8 +383,14 @@ async function buildFastEmergencyReport(payload = {}) {
     modelInfo.provider === "antigravity-cli"
       ? runAntigravityJsonModel(prompt, modelInfo, EMERGENCY_REPORT_MODEL_TIMEOUT_MS)
       : runCodexJsonModel(prompt, fastReportSchema(), modelInfo, EMERGENCY_REPORT_MODEL_TIMEOUT_MS);
-  const report = normalizeFastReportCandidate(raw);
-  if (!report.ok) throw new Error(`fast report validation failed: ${report.error}`);
+  const candidate = normalizeFastReportCandidate(raw);
+  if (!candidate.ok) throw new Error(`fast report validation failed: ${candidate.error}`);
+  const report = {
+    ...candidate,
+    // Severity belongs to the already-evaluated market summary. The prose model
+    // may not promote red to purple or demote purple while drafting the report.
+    severity: REPORT_ALERT_LEVELS.has(requestedLevel) ? requestedLevel : "urgent",
+  };
   const saved = await writeGeneratedReportFile({
     action: "save_report_artifact",
     title: report.reportTitle,
@@ -411,25 +452,28 @@ function marketSummaryEmergencyKey(marketSummary = {}, detection = {}) {
 }
 
 function updateMarketSummaryProcedureState(nextState = {}) {
-  const store = readStore();
-  const emergencyProcedures = {
-    ...defaultStore().emergencyProcedures,
-    ...(store.emergencyProcedures || {}),
-    marketSummary: {
-      ...defaultStore().emergencyProcedures.marketSummary,
-      ...(store.emergencyProcedures?.marketSummary || {}),
-      ...nextState,
-    },
-  };
-  const nextStore = {
+  const nextStore = mutateStore((store) => ({
     ...store,
-    emergencyProcedures,
-  };
-  writeStore(nextStore);
+    emergencyProcedures: {
+      ...defaultStore().emergencyProcedures,
+      ...(store.emergencyProcedures || {}),
+      marketSummary: {
+        ...defaultStore().emergencyProcedures.marketSummary,
+        ...(store.emergencyProcedures?.marketSummary || {}),
+        ...nextState,
+      },
+    },
+  }));
   return nextStore.emergencyProcedures.marketSummary;
 }
 
-export async function runEmergencyProcedureForMarketSummary(marketSummary = {}) {
+export async function runEmergencyProcedureForMarketSummary(
+  marketSummary = {},
+  {
+    buildReport = buildFastEmergencyReport,
+    emergencyLockPath = MARKET_SUMMARY_EMERGENCY_LOCK_PATH,
+  } = {},
+) {
   const contextSummary = cleanText(marketSummary.text || marketSummary.contextSummary || marketSummary.marketSummary || "", MAX_REPORT_INPUT_LENGTH);
   const detection = normalizeMarketSummaryDetection({
     ...marketSummary,
@@ -489,9 +533,50 @@ export async function runEmergencyProcedureForMarketSummary(marketSummary = {}) 
     };
   }
 
+  const lease = acquireRuntimeFileLease(emergencyLockPath);
+  if (!lease.acquired) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "already-running-market-summary-emergency",
+      key,
+      detection,
+    };
+  }
+
   marketSummaryEmergencyInFlightKeys.add(key);
   try {
-    const result = await buildFastEmergencyReport({
+    // The filesystem lease is shared by Vite reloads and worker threads. Re-read
+    // after claiming it so only the winner can observe an uncovered episode.
+    const lockedStore = readStore();
+    const lockedProcedure =
+      lockedStore.emergencyProcedures?.marketSummary || defaultStore().emergencyProcedures.marketSummary;
+    const lockedCoveredRank = reportAlertRank(lockedProcedure.activeAlertLevel);
+    if (lockedCoveredRank > 0 && currentRank <= lockedCoveredRank) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: "severity-already-covered",
+        key,
+        detection,
+        activeAlertLevel: lockedProcedure.activeAlertLevel || "",
+        reportId: lockedProcedure.lastReportId || "",
+        notificationId: lockedProcedure.lastNotificationId || "",
+      };
+    }
+    if (lockedProcedure.lastRunKey === key) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: "already-ran-for-summary",
+        key,
+        detection,
+        reportId: lockedProcedure.lastReportId || "",
+        notificationId: lockedProcedure.lastNotificationId || "",
+      };
+    }
+
+    const result = await buildReport({
       contextSummary,
       level: detection.alertLevel,
       source: MARKET_SUMMARY_EMERGENCY_SOURCE,
@@ -502,7 +587,7 @@ export async function runEmergencyProcedureForMarketSummary(marketSummary = {}) 
       lastReportId: result.saved?.report?.id || "",
       lastNotificationId: result.notification?.id || "",
       activeAlertLevel: detection.alertLevel,
-      activeStartedAt: procedure.activeStartedAt || result.generatedAt || new Date().toISOString(),
+      activeStartedAt: lockedProcedure.activeStartedAt || result.generatedAt || new Date().toISOString(),
       lastResolvedAt: "",
       lastError: "",
     });
@@ -530,6 +615,7 @@ export async function runEmergencyProcedureForMarketSummary(marketSummary = {}) 
     };
   } finally {
     marketSummaryEmergencyInFlightKeys.delete(key);
+    lease.release();
   }
 }
 
@@ -617,17 +703,14 @@ async function pushNotification(payload) {
   record.id = notificationIdFor(record);
 
   const delivery = browserNotificationDelivery(record);
-  const store = readStore();
   const nextRecord = {
     ...record,
     delivery,
   };
-  const records = [...store.records.filter((item) => item.id !== record.id), nextRecord].slice(-MAX_RECORDS);
-  const nextStore = {
+  const nextStore = mutateStore((store) => ({
     ...store,
-    records,
-  };
-  writeStore(nextStore);
+    records: [...store.records.filter((item) => item.id !== record.id), nextRecord].slice(-MAX_RECORDS),
+  }));
   return {
     ok: delivery.ok || delivery.skipped === true,
     record: nextRecord,
@@ -636,15 +719,13 @@ async function pushNotification(payload) {
 }
 
 function markReportsOpened() {
-  const store = readStore();
-  const nextStore = {
+  const nextStore = mutateStore((store) => ({
     ...store,
     readState: {
       ...(store.readState || {}),
       reportsOpenedAt: new Date().toISOString(),
     },
-  };
-  writeStore(nextStore);
+  }));
   return publicSnapshot(nextStore);
 }
 

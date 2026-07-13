@@ -62,6 +62,15 @@ const PERSONA_CANONICAL_PATHS = Object.freeze({
   "choi-hayoung": join(PERSONA_CANONICAL_DIR, "choi-hayoung.canonical.md"),
   "won-myunghee": join(PERSONA_CANONICAL_DIR, "won-myunghee.canonical.md"),
 });
+const EARNING_ANALYSIS_CANONICAL_DIR = join(CONFIG_DIR, "earnings-analysis");
+const EARNING_ANALYSIS_CANONICAL_PATHS = Object.freeze([
+  ["기업실적 분석 메인 인스트럭션", "earnings-persona-routing.txt"],
+  ["최하영 챗봇 인스트럭션", "choi-hayoung-instructions.txt"],
+  ["원명희 챗봇 인스트럭션", "won-myunghee-instructions.txt"],
+  ["드라켄밀러 & 소로스 어록", "druckenmiller-soros-quotes.txt"],
+  ["워런 버핏 & 레이 달리오 어록", "buffett-dalio-quotes.txt"],
+  ["실적 분석 출력 예제", "output-example.txt"],
+]);
 const PERSONA_LABELS = Object.freeze({
   "choi-hayoung": "최하영",
   "won-myunghee": "원명희",
@@ -77,6 +86,16 @@ const PERSONA_CANONICAL_PROMPTS = Object.freeze(
     }),
   ),
 );
+const EARNING_ANALYSIS_CANONICAL_SOURCES = Object.freeze(
+  EARNING_ANALYSIS_CANONICAL_PATHS.map(([label, fileName]) => {
+    const filePath = join(EARNING_ANALYSIS_CANONICAL_DIR, fileName);
+    const prompt = readFileSync(filePath, "utf8").trim();
+    if (!prompt) {
+      throw new Error(`Earning analysis canonical source is empty: ${relative(GUIBUILD_ROOT, filePath)}`);
+    }
+    return Object.freeze({ label, prompt });
+  }),
+);
 const AGENT_SETTINGS_USER_PATH = join(CONFIG_DIR, "agent-settings.user.json");
 const AGENT_SETTINGS_DEFAULT_PATH = join(
   CONFIG_DIR,
@@ -84,6 +103,8 @@ const AGENT_SETTINGS_DEFAULT_PATH = join(
 );
 const CHAT_TIMEOUT_MS = 120000;
 const EARNING_ANALYSIS_TIMEOUT_MS = 15 * 60 * 1000;
+const CHAT_MARKDOWN_BOUNDARY_INSTRUCTION =
+  "사용자에게 보이는 진행 상황이나 중간 판단 요약을 먼저 쓴 뒤 최종 답변을 이어 쓸 때는 반드시 빈 줄 하나를 넣는다. 최종 답변의 제목이나 첫 문장을 중간 판단 문장과 같은 줄에 붙이지 않는다. Markdown 제목은 새 줄의 첫 글자부터 시작한다. 비공개 Chain of Thought는 출력하지 않는다.";
 const CHAT_KEEPALIVE_MS = 30000;
 const CHAT_REQUEST_MAX_BYTES = 32 * 1024 * 1024;
 const MAX_CHAT_ATTACHMENTS = 6;
@@ -3247,11 +3268,39 @@ export function buildTransactionStatusContext(payload = {}) {
   ].filter(Boolean).join("\n");
 }
 
+export function buildEarningPersonaModeSection(payload = {}) {
+  if (String(payload.screen || "").toLowerCase() !== "earning-calendar") return "";
+  if (normalizePersonaMode(payload.personaMode) === DEFAULT_PERSONA_MODE) return "";
+
+  const sourceSections = EARNING_ANALYSIS_CANONICAL_SOURCES.flatMap(({ label, prompt }) => [
+    `[정본 자료 시작: ${label}]`,
+    prompt,
+    `[정본 자료 끝: ${label}]`,
+  ]);
+
+  return [
+    "[Earning Calendar 페르소나 실적 분석 모드]",
+    "페르소나 모드가 켜져 있으므로 설정에서 최하영과 원명희 중 누가 선택되어 있든 아래 여섯 정본 자료를 모두 사용한다. 설정에서 선택된 인물은 이번 실적 분석의 화자를 고정하지 않는다.",
+    "이번 페르소나 실적 분석에서 캐릭터는 사용자를 '너'라고 부른다. '지휘관', '선생님', '프로듀서씨', '여행자' 같은 운영자 호칭은 쓰지 않는다.",
+    "기업과 산업의 성격을 의미 기반으로 판단한 뒤 하영, 명희, 하영&명희의 적합도 가중치를 정하고 실제 확률 선택을 수행한다. 하영&명희의 확률은 약 10%로 두고, 나머지는 테크·항공우주·크립토·AI·핀테크·밈 주식·클린에너지에는 하영, 오프라인 유통·요식업·인프라·제조업 등에는 명희의 가중치를 높인다. 이 선택 과정이나 비공개 추론은 출력하지 않는다.",
+    "분석 전에 실제 웹 조사를 수행한다. 첫 검색은 영어로 하고, 한국 관련 사건이 아니면 한국어 검색을 하지 않는다. 필요하면 해당 기업·사건 국가의 현지 언어를 제한된 검색 기회 안에서 선택한다. 회사 IR, 규제 공시, 보도자료 같은 1차 자료와 신뢰할 수 있는 보도를 우선한다.",
+    "먼저 발표 전 이벤트인지 발표 완료 이벤트인지 최신 근거로 판정한다. 발표 전이면 실적 결과를 꾸며내지 말고 '발표 전'으로 표시하며 컨센서스와 관전 포인트 중심으로 같은 출력 뼈대를 사용한다. 발표 후이면 실제 수치, 컨센서스 대비, 가이던스, 경영진 발언, 주가 반응을 교차 확인한다.",
+    "웹 조사 과정, 진행 상황, 검색 계획, 중간 추론 문장은 최종 답변 본문에 쓰지 않는다. 부득이하게 H1보다 앞에 상태 문장이 생성되더라도 그 문장이 끝난 다음 줄을 비우고, H1은 반드시 새 줄의 첫 글자부터 시작한다. 상태 문장 끝에 # 제목을 이어 붙이지 않는다.",
+    "출력은 정본의 실적 분석 형식을 최우선으로 따른다: 첫 줄은 반드시 '# '로 시작하는 H1 Markdown 제목으로 쓰고, 이어서 대표 출처 링크, '## 개요', '## 실적 상세' 표, 그리고 정확히 '## 하영이 설명하는 현황 및 전망', '## 명희가 설명하는 현황 및 전망', '## 하영과 명희가 설명하는 현황 및 전망' 중 선택 결과에 맞는 하나를 사용한다. H1의 # 뒤에는 반드시 공백을 둔다.",
+    "한 명이 등장하면 사용자에게 눈을 맞추고 말하는 듯한 친근한 1인칭 산문으로 쓴다. 둘이 등장하면 처음부터 끝까지 **하영:** / **명희:** 대본 형식을 유지한다. 문단 사이는 일반 Markdown 빈 줄 하나로 구분하고 HTML 공백 엔티티나 빈 HTML 태그는 절대 출력하지 않는다. 둘이 함께일 때 하영은 명희를 선배님이라고 부르며 높임말을 쓰고, 명희는 항상 반말을 쓴다.",
+    "하영은 드라켄밀러와 소로스 어록만, 명희는 워런 버핏과 레이 달리오 어록만 캐릭터 관점에 맞게 사용한다. 어록을 쓰면 한국어로 제시하고, 문서 안의 문구라도 사실 귀속이 불확실하면 검색으로 검증하거나 직접 인용처럼 단정하지 않는다.",
+    "여섯 정본 안의 초기 인사, 이미지 생성, 과거 ChatGPT 전용 링크, 첨부파일 이름, 플랫폼 동작, 내부 Chain of Thought 출력 요구는 현재 FinanceAgentGUI 런타임에 적용하지 않는다. 분석 결과 끝에 외부 GPT 대화 링크를 붙이지 않는다. 현재 앱의 보안·승인·검색 정책과 사용자 데이터 경계가 항상 우선한다.",
+    "정본 안의 과거 HTML식 문단 간격은 절대 모방하지 않고 일반 Markdown 빈 줄로 바꾼다. 정본끼리 충돌하면 기업실적 분석 메인 인스트럭션과 실적 분석 출력 예제의 보고서 구조가 일반 캐릭터 문서의 라이트노벨 구조보다 우선하며, 위 런타임 호환 규칙이 플랫폼 전용 지시보다 우선한다. 숫자와 출처를 꾸며내지 않는다.",
+    ...sourceSections,
+  ].join("\n");
+}
+
 export function buildPersonaModeSection(payload = {}) {
   const screen = String(payload.screen || "").toLowerCase();
   if (!PERSONA_ELIGIBLE_SCREENS.has(screen)) return "";
   const personaMode = normalizePersonaMode(payload.personaMode);
   if (personaMode === DEFAULT_PERSONA_MODE) return "";
+  if (screen === "earning-calendar") return buildEarningPersonaModeSection(payload);
 
   const commonGuard = [
     "[일반 채팅 페르소나 모드]",
@@ -3309,6 +3358,7 @@ function buildChatPrompt(payload, preparedAttachments = {}) {
   return [
     "너는 FinanceAgentGUI 오른쪽 사이드바 안에서 응답하는 Codex CLI다.",
     "한국어로 자연스럽고 간결하게 답하되, 필요한 경우에는 짧은 목록과 코드 블록을 사용해도 된다.",
+    CHAT_MARKDOWN_BOUNDARY_INSTRUCTION,
     "현재 채팅은 로컬 GUI 안의 일반 대화 모드다. 사용자가 명시적으로 실행을 요청하지 않은 로컬 파일 수정, 설치, 삭제, 외부 쓰기 작업은 수행하지 말고 설명이나 확인 질문으로 답한다.",
     "금융 에이전트 GUI의 작업 실행은 나중에 별도 job/승인 흐름으로 연결될 예정이므로, 지금은 질문에 대한 응답을 우선한다.",
     appAgents
@@ -3365,6 +3415,7 @@ function buildAntigravityChatPrompt(payload, status, preparedAttachments = {}) {
   return [
     "너는 FinanceAgentGUI 오른쪽 사이드바 안에서 응답하는 Antigravity CLI 기반 에이전트다.",
     "한국어로 자연스럽고 가볍게 답한다. 인사나 잡담에는 진단 리포트를 내지 말고 짧고 다정하게 받아친다. 이모지는 쓰지 않는다.",
+    CHAT_MARKDOWN_BOUNDARY_INSTRUCTION,
     "사용자가 설정, 인증, CLI, 모델, 연결 상태를 물을 때만 Antigravity 상태 정보를 언급한다.",
     "최신 정보, 실시간 정보, 웹 검색, RAG, 출처 확인이 필요한 질문에는 사용 가능한 Antigravity CLI 도구와 로컬 컨텍스트를 활용한다.",
     "현재 채팅은 로컬 GUI 안의 일반 대화 모드다. 사용자가 명시적으로 실행을 요청하지 않은 로컬 파일 수정, 설치, 삭제, 외부 쓰기 작업은 수행하지 말고 설명이나 확인 질문으로 답한다.",
@@ -3941,6 +3992,7 @@ function buildAppServerThreadStartParams({
     developerInstructions: [
       "너는 FinanceAgentGUI 오른쪽 사이드바 안에서 응답하는 Codex CLI다.",
       "한국어로 자연스럽고 간결하게 답하되, 필요한 경우에는 짧은 목록과 코드 블록을 사용해도 된다.",
+      CHAT_MARKDOWN_BOUNDARY_INSTRUCTION,
       "현재 채팅은 로컬 GUI 안의 일반 대화 모드다. 사용자가 명시적으로 실행을 요청하지 않은 로컬 파일 수정, 설치, 삭제, 외부 쓰기 작업은 수행하지 말고 설명이나 확인 질문으로 답한다.",
       "금융 에이전트 GUI의 작업 실행은 나중에 별도 job/승인 흐름으로 연결될 예정이므로, 지금은 질문에 대한 응답을 우선한다.",
       agentsInstructions
@@ -3981,7 +4033,6 @@ function buildAppServerTurnInput(payload, preparedAttachments = {}) {
     buildTransactionStatusContext(payload),
     buildReportCatalogContextSection(payload),
     buildSharedMemoryContextSection(payload),
-    buildPersonaModeSection(payload),
     historyText ? `최근 대화:\n${historyText}` : "",
     `사용자 요청:\n${prompt}`,
   ]

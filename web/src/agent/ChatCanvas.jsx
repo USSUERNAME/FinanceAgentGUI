@@ -33,6 +33,7 @@ export function ChatCanvas({
   onNewChat,
   onPromptChange,
   onRemoveChatAttachment,
+  onSaveAnswerToReports,
   onSelectApproval,
   onSelectModel,
   onSelectReasoning,
@@ -197,6 +198,7 @@ export function ChatCanvas({
                 runningWorldMemoryAgentActionId={runningWorldMemoryAgentActionId}
                 worldMemoryActionBusy={worldMemoryActionBusy}
                 onExecuteWorldMemoryAction={onExecuteWorldMemoryAction}
+                onSaveAnswerToReports={onSaveAnswerToReports}
                 key={message.id}
               />
             ))}

@@ -1,5 +1,6 @@
 import React from "react";
 import Terminal from "lucide-react/dist/esm/icons/terminal.js";
+import { isMarkdownThematicBreak, normalizeMarkdownDisplayText } from "./markdownTextUtils.js";
 
 export function renderMarkdownInline(text, keyPrefix = "inline") {
   const source = String(text || "");
@@ -118,7 +119,7 @@ function normalizeMarkdownTableRow(cells, columnCount) {
 }
 
 export function MarkdownText({ text, splitSingleLineParagraphs = false }) {
-  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  const lines = normalizeMarkdownDisplayText(text).split("\n");
   const blocks = [];
   let paragraph = [];
   let list = null;
@@ -252,6 +253,13 @@ export function MarkdownText({ text, splitSingleLineParagraphs = false }) {
       continue;
     }
 
+    if (isMarkdownThematicBreak(line)) {
+      flushParagraph();
+      flushList();
+      blocks.push(<hr className="markdown-thematic-break" key={`hr-${blocks.length}`} />);
+      continue;
+    }
+
     const table = parseTableAt(lineIndex);
     if (table) {
       flushParagraph();
@@ -265,9 +273,10 @@ export function MarkdownText({ text, splitSingleLineParagraphs = false }) {
     if (heading) {
       flushParagraph();
       flushList();
-      const Tag = `h${heading[1].length + 2}`;
+      const headingLevel = heading[1].length;
+      const Tag = `h${headingLevel}`;
       blocks.push(
-        <Tag className="markdown-heading" key={`h-${blocks.length}`}>
+        <Tag className={`markdown-heading markdown-heading-h${headingLevel}`} key={`h-${blocks.length}`}>
           {renderMarkdownInline(heading[2], `h-${blocks.length}`)}
         </Tag>
       );

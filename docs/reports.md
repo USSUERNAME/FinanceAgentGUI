@@ -18,6 +18,7 @@ FinanceAgentGUI uses a file-based report system. The local app does not need a r
 - Report deletion uses `DELETE /api/reports?id=<report-id>` after explicit UI confirmation.
 - The endpoint scans configured report folders, reads supported files, and returns normalized report metadata plus display sections.
 - `POST /api/reports` accepts a validated `save_report_artifact` payload and writes a Markdown file under `data/reports/`.
+- Completed agent-chat answers can use the `save_chat_answer` action on the same endpoint. If the answer already contains a Markdown H1, the server preserves that first H1 exactly as the report title and does not prepend a duplicate heading. Only answers without an H1 ask the configured low-cost translation model for a short Korean title; that title is prepended to the preserved Markdown answer before persistence.
 - Delete requests accept only the opaque report id from the list response; file paths are not a UI/API input.
 - Supported extensions are `.md`, `.markdown`, `.txt`, `.html`, and `.json`.
 - `FINANCE_AGENT_GUI_REPORT_DIRS` can add extra local report folders. Separate paths with the host platform path delimiter.
@@ -54,6 +55,11 @@ FinanceAgentGUI uses a file-based report system. The local app does not need a r
 ## UI Contract
 
 - The Reports page reads from `/api/reports`.
+- Every completed assistant answer exposes a compact copy action and a report-folder action through the shared chat-message renderer. Pending/streaming answers do not expose these actions.
+- Copy writes only the answer body, excluding provider metadata and transient status cards. It removes HTML spacing entities and normalizes Markdown headings, rules, and existing paragraph boundaries to one blank line between blocks. Structured clipboard output converts Markdown thematic breaks such as `---` to HTML `<hr>` while the plain-text fallback preserves `---`; copied report HTML keeps the rendered `<hr>` as well. Report save uses the same answer body and refreshes the Reports list after persistence.
+- Action icons are quiet gray controls, gain a light gray hover surface, and temporarily become a check icon after success.
+- Across every agent-chat surface, a visible progress or intermediate-judgment summary must be followed by one blank line before the final answer. Markdown headings must start at the beginning of a new line; the shared renderer repairs this boundary defensively when a provider streams both segments together.
+- The shared answer/report Markdown renderer converts thematic-break syntax such as `---` into a semantic HTML `<hr>` on both chat answers and saved report bodies.
 - The Reports reader is implemented in `web/src/reports/ReportsView.jsx` and is lazy-loaded by `App.jsx`.
 - Search is client-side over title, category, summary, tags, and parsed section text.
 - Report generation guidance should stay in the sidebar-agent context, not as a visible Reports-page catalog or report-type picker.
