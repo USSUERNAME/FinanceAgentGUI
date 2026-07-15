@@ -79,7 +79,7 @@ function WorldMemoryChangeSuggestionRow({ item, index, agentIcon, agentAskLabel,
             disabled={disabled}
             aria-label={`${askLabel}: ${text}`}
             title={askLabel}
-            onClick={() => onAskItem?.("memory-change", { text }, { index })}
+            onClick={() => onAskItem?.("memory-change", suggestion, { index })}
           >
             <img className="agent-logo-image" src={agentIcon} alt="" />
           </button>

@@ -749,6 +749,11 @@ export function normalizeWorldMemorySuggestionFingerprint(value = "") {
     .trim();
 }
 
+function normalizeWorldMemorySuggestionContinuityId(value = "") {
+  const normalized = String(value || "").trim();
+  return /^[a-zA-Z0-9_-]{1,80}$/.test(normalized) ? normalized : "";
+}
+
 function normalizeChangeSuggestionTarget(value = {}) {
   const source = value && typeof value === "object" ? value : {};
   const rawEventIds = Array.isArray(source.eventIds)
@@ -782,6 +787,9 @@ function normalizeAcceptedChangeSuggestion(value, { action = "", params = {} } =
   return {
     text,
     fingerprint: normalizeWorldMemorySuggestionFingerprint(text),
+    continuityId: normalizeWorldMemorySuggestionContinuityId(
+      raw.continuityId || raw.continuity_id || item.continuityId || item.continuity_id
+    ),
     source: optionalCommandTextArg(raw.source || "world-memory-report-item", 80),
     section: optionalCommandTextArg(raw.section || "memory-change", 80),
     sectionLabel: optionalCommandTextArg(raw.sectionLabel || "월드 메모리 변경 제안", 120),
@@ -799,8 +807,13 @@ function normalizeHandledChangeSuggestionRecord(value) {
   const action = optionalCommandTextArg(source.action || "", 80);
   const rawStatus = optionalCommandTextArg(source.status || "", 40).toLowerCase();
   const status = rawStatus === "watching" || rawStatus === "observing" ? "watching" : "completed";
+  const continuityId = normalizeWorldMemorySuggestionContinuityId(
+    source.continuityId || source.continuity_id || source.id
+  );
+  const recordId = continuityId || `handled_${Date.now()}`;
   return {
-    id: optionalCommandTextArg(source.id || `handled_${Date.now()}`, 80),
+    id: recordId,
+    continuityId: recordId,
     text,
     fingerprint,
     status,
@@ -823,8 +836,9 @@ function normalizeChangeSuggestionLedger(value = {}) {
   return {
     version: 1,
     handled: handled.filter((item) => {
-      if (seen.has(item.fingerprint)) return false;
-      seen.add(item.fingerprint);
+      const recordKey = item.continuityId || item.fingerprint;
+      if (seen.has(recordKey)) return false;
+      seen.add(recordKey);
       return true;
     }).slice(0, WORLD_MEMORY_HANDLED_CHANGE_SUGGESTION_LIMIT),
   };
@@ -834,11 +848,21 @@ function rememberChangeSuggestionStatus(state, suggestion, status) {
   const normalized = normalizeHandledChangeSuggestionRecord({ ...suggestion, status });
   if (!normalized) return state;
   const ledger = normalizeChangeSuggestionLedger(state.changeSuggestionLedger);
-  const existing = ledger.handled.find((item) => item.fingerprint === normalized.fingerprint);
-  const nextRecord = existing?.status === "completed" && normalized.status === "watching" ? existing : normalized;
+  const existing = ledger.handled.find((item) =>
+    item.continuityId === normalized.continuityId || item.fingerprint === normalized.fingerprint
+  );
+  const nextRecord = existing?.status === "completed" && normalized.status === "watching"
+    ? existing
+    : {
+        ...normalized,
+        id: existing?.id || normalized.id,
+        continuityId: existing?.continuityId || normalized.continuityId,
+      };
   const nextHandled = [
     nextRecord,
-    ...ledger.handled.filter((item) => item.fingerprint !== nextRecord.fingerprint),
+    ...ledger.handled.filter((item) =>
+      item.continuityId !== nextRecord.continuityId && item.fingerprint !== nextRecord.fingerprint
+    ),
   ].slice(0, WORLD_MEMORY_HANDLED_CHANGE_SUGGESTION_LIMIT);
   return {
     ...state,
@@ -884,24 +908,112 @@ function handledTargetMatchesSuggestion(suggestion, handled) {
   return overlap >= Math.min(6, Math.ceil(handledTokens.size * 0.45));
 }
 
+function normalizeGeneratedMemoryChangeSuggestionItem(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const text = optionalCommandTextArg(value.text || value.suggestion || value.body || value.title, 1400);
+    if (!text) return null;
+    return {
+      text,
+      continuityId: normalizeWorldMemorySuggestionContinuityId(
+        value.continuityId || value.continuity_id || value.continuesSuggestionId || value.continues_suggestion_id
+      ),
+    };
+  }
+  const text = optionalCommandTextArg(value, 1400);
+  return text ? { text, continuityId: "" } : null;
+}
+
+export function normalizeWorldMemoryGeneratedSuggestionItems(value, allowedContinuityIds = []) {
+  const allowed = new Set(
+    asArray(allowedContinuityIds)
+      .map((item) => normalizeWorldMemorySuggestionContinuityId(item))
+      .filter(Boolean)
+  );
+  const normalized = asArray(value)
+    .map((item) => normalizeGeneratedMemoryChangeSuggestionItem(item))
+    .filter(Boolean)
+    .map((item) => ({
+      ...item,
+      continuityId: item.continuityId && allowed.has(item.continuityId) ? item.continuityId : "",
+    }))
+    .slice(0, 8);
+  const lastIndexByContinuityId = new Map();
+  normalized.forEach((item, index) => {
+    if (item.continuityId) lastIndexByContinuityId.set(item.continuityId, index);
+  });
+  return normalized.filter((item, index) =>
+    !item.continuityId || lastIndexByContinuityId.get(item.continuityId) === index
+  );
+}
+
+export function validateWorldMemorySuggestionContinuityOutput(value, handledChangeSuggestions = []) {
+  const watchingRecords = asArray(handledChangeSuggestions)
+    .map((item) => normalizeHandledChangeSuggestionRecord(item))
+    .filter((item) => item?.status === "watching");
+  if (!watchingRecords.length) return { ok: true, issues: [] };
+
+  const allowedContinuityIds = new Set(watchingRecords.map((item) => item.continuityId));
+  const issues = [];
+  asArray(value).forEach((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      issues.push(`memoryChangeSuggestions[${index}] must be an object with text and continuityId`);
+      return;
+    }
+    const hasContinuityDecision =
+      Object.prototype.hasOwnProperty.call(item, "continuityId") ||
+      Object.prototype.hasOwnProperty.call(item, "continuity_id");
+    if (!hasContinuityDecision) {
+      issues.push(`memoryChangeSuggestions[${index}] is missing continuityId`);
+      return;
+    }
+    const rawContinuityId = String(item.continuityId ?? item.continuity_id ?? "").trim();
+    if (rawContinuityId && !allowedContinuityIds.has(rawContinuityId)) {
+      issues.push(`memoryChangeSuggestions[${index}] references an unknown continuityId`);
+    }
+  });
+  return { ok: issues.length === 0, issues };
+}
+
+function suggestionText(value) {
+  return value && typeof value === "object" ? String(value.text || "").trim() : String(value || "").trim();
+}
+
+function suggestionContinuityId(value) {
+  return value && typeof value === "object"
+    ? normalizeWorldMemorySuggestionContinuityId(value.continuityId || value.continuity_id)
+    : "";
+}
+
 function shouldHideHandledChangeSuggestion(suggestion, handledChangeSuggestions = []) {
-  const fingerprint = normalizeWorldMemorySuggestionFingerprint(suggestion);
+  const text = suggestionText(suggestion);
+  const continuityId = suggestionContinuityId(suggestion);
+  const fingerprint = normalizeWorldMemorySuggestionFingerprint(text);
   if (!fingerprint) return false;
   return asArray(handledChangeSuggestions).some((item) => {
     const handled = normalizeHandledChangeSuggestionRecord(item);
     if (!handled) return false;
     if (handled.status !== "completed") return false;
-    return handled.fingerprint === fingerprint || handledTargetMatchesSuggestion(suggestion, handled);
+    return (
+      (continuityId && handled.continuityId === continuityId) ||
+      handled.fingerprint === fingerprint ||
+      handledTargetMatchesSuggestion(text, handled)
+    );
   });
 }
 
 function handledRecordForSuggestion(suggestion, handledChangeSuggestions = []) {
-  const fingerprint = normalizeWorldMemorySuggestionFingerprint(suggestion);
+  const text = suggestionText(suggestion);
+  const continuityId = suggestionContinuityId(suggestion);
+  const fingerprint = normalizeWorldMemorySuggestionFingerprint(text);
   if (!fingerprint) return null;
   for (const item of asArray(handledChangeSuggestions)) {
     const handled = normalizeHandledChangeSuggestionRecord(item);
     if (!handled) continue;
-    if (handled.fingerprint === fingerprint || handledTargetMatchesSuggestion(suggestion, handled)) return handled;
+    if (
+      (continuityId && handled.continuityId === continuityId) ||
+      handled.fingerprint === fingerprint ||
+      handledTargetMatchesSuggestion(text, handled)
+    ) return handled;
   }
   return null;
 }
@@ -917,12 +1029,14 @@ function buildMemoryChangeSuggestionItems(
   const appendedHandledRecords = asArray(appendHandledChangeSuggestions)
     .map((item) => normalizeHandledChangeSuggestionRecord(item))
     .filter(Boolean);
-  const items = normalizeTextList(suggestions, 8)
-    .map((text) => {
-      const handled = handledRecordForSuggestion(text, handledRecords);
+  const allowedContinuityIds = handledRecords.map((item) => item.continuityId);
+  const items = normalizeWorldMemoryGeneratedSuggestionItems(suggestions, allowedContinuityIds)
+    .map((suggestion) => {
+      const handled = handledRecordForSuggestion(suggestion, handledRecords);
       const status = handled?.status || "open";
       return {
-        text,
+        text: suggestion.text,
+        continuityId: handled?.continuityId || suggestion.continuityId || "",
         handled: status === "completed",
         watching: status === "watching",
         status,
@@ -932,12 +1046,15 @@ function buildMemoryChangeSuggestionItems(
     })
     .filter((item) => !(handledDisplayMode === "omit" && item.status === "completed"));
   const existingFingerprints = new Set(items.map((item) => normalizeWorldMemorySuggestionFingerprint(item.text)));
+  const existingContinuityIds = new Set(items.map((item) => item.continuityId).filter(Boolean));
   const persistentWatchingRecords = handledRecords.filter((item) => item.status === "watching");
   const missingHandledItems = [...appendedHandledRecords, ...persistentWatchingRecords]
     .filter((item, index, records) => records.findIndex((candidate) => candidate.fingerprint === item.fingerprint) === index)
+    .filter((item) => !existingContinuityIds.has(item.continuityId))
     .filter((item) => !existingFingerprints.has(item.fingerprint))
     .map((item) => ({
       text: item.text,
+      continuityId: item.continuityId,
       handled: item.status === "completed",
       watching: item.status === "watching",
       status: item.status,
@@ -956,7 +1073,10 @@ export function filterWorldMemoryReportView(
   } = {}
 ) {
   const view = reportView && typeof reportView === "object" && !Array.isArray(reportView) ? reportView : fallbackReportView("");
-  const memoryChangeSuggestionItems = buildMemoryChangeSuggestionItems(view.memoryChangeSuggestions, handledChangeSuggestions, {
+  const generatedSuggestionItems = Array.isArray(view.memoryChangeSuggestionItems) && view.memoryChangeSuggestionItems.length
+    ? view.memoryChangeSuggestionItems
+    : view.memoryChangeSuggestions;
+  const memoryChangeSuggestionItems = buildMemoryChangeSuggestionItems(generatedSuggestionItems, handledChangeSuggestions, {
     handledDisplayMode,
     appendHandledChangeSuggestions,
   });
@@ -981,7 +1101,7 @@ function formatHandledChangeSuggestionsForPrompt(handledChangeSuggestions = [], 
         target.relatedStory ? `related=${target.relatedStory}` : "",
         target.relation ? `relation=${target.relation}` : "",
       ].filter(Boolean);
-      return `${index + 1}. ${item.text}${item.action ? ` / action=${item.action}` : ""}${targetBits.length ? ` / ${targetBits.join(", ")}` : ""}`;
+      return `${index + 1}. continuityId=${item.continuityId} / ${item.text}${item.action ? ` / action=${item.action}` : ""}${targetBits.length ? ` / ${targetBits.join(", ")}` : ""}`;
     });
   return rows.length ? rows.join("\n") : "없음";
 }
@@ -1714,6 +1834,8 @@ function buildSituationReportPrompt({
     "보고서 하단 제안 영역은 반드시 월드 메모리 변경 제안을 먼저 쓰고, 관찰 및 실행 제안을 그 다음에 쓴다.",
     "이미 처리/수용된 월드 메모리 변경 제안은 새 미처리 제안처럼 다시 쓰지 않는다. 동일 취지의 재표현도 피한다.",
     "계속 관찰 중인 월드 메모리 변경 제안은 완료로 단정하거나 새 제안으로 재포장하지 말고 후속 검증 대상으로 유지한다.",
+    "각 변경 제안을 아래 계속 관찰 목록과 의미 기준으로 분류한다. 같은 문제의 수치·시점·표현만 갱신한 후속 제안이면 해당 continuityId를 정확히 재사용하고, 별개 문제면 continuityId를 빈 문자열로 둔다.",
+    "문자열 포함 여부나 단어 겹침만으로 분류하지 말고, 제안의 대상·의도·요구되는 후속 행동이 같은지 판단한다. 같은 continuityId는 결과 배열에 한 번만 쓰고 최신 문장만 남긴다.",
     "근거가 부족하면 부족하다고 말하고, 실제 행동 제안은 감시/확인/보류처럼 검증 가능한 수준으로 제안한다.",
     "마크다운이 아니라 JSON 객체 하나만 반환한다. 설명, 코드펜스, HTML 태그는 넣지 않는다.",
     "",
@@ -1733,7 +1855,12 @@ function buildSituationReportPrompt({
         highlights: [
           { title: "핵심 변화", body: "근거와 의미", tag: "macro", importance: "high" }
         ],
-        memoryChangeSuggestions: ["월드 메모리 story/state/taxonomy 변경 제안"],
+        memoryChangeSuggestions: [
+          {
+            text: "월드 메모리 story/state/taxonomy 변경 제안",
+            continuityId: "같은 관찰 제안의 후속이면 제공된 continuityId, 새 제안이면 빈 문자열",
+          },
+        ],
         portfolioSuggestions: ["검증 가능한 관찰/비중/헤지 제안"],
         nextChecks: ["다음 회차에서 확인할 데이터"],
       },
@@ -1828,8 +1955,15 @@ function fallbackReportView(text = "") {
   };
 }
 
-function normalizeReportView(payload, fallbackText = "") {
+function normalizeReportView(payload, fallbackText = "", handledChangeSuggestions = []) {
   const raw = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+  const allowedContinuityIds = asArray(handledChangeSuggestions)
+    .map((item) => normalizeHandledChangeSuggestionRecord(item)?.continuityId)
+    .filter(Boolean);
+  const memoryChangeSuggestionItems = normalizeWorldMemoryGeneratedSuggestionItems(
+    raw.memoryChangeSuggestions || raw.memory_change_suggestions,
+    allowedContinuityIds
+  );
   const view = {
     ...fallbackReportView(fallbackText),
     title: String(raw.title || "").trim() || "World Memory 시장 상황 인식",
@@ -1840,7 +1974,8 @@ function normalizeReportView(payload, fallbackText = "") {
     signalRadar: normalizeSignalRadar(raw.signalRadar || raw.signal_radar),
     highlights: normalizeHighlights(raw.highlights),
     portfolioSuggestions: normalizeTextList(raw.portfolioSuggestions || raw.portfolio_suggestions),
-    memoryChangeSuggestions: normalizeTextList(raw.memoryChangeSuggestions || raw.memory_change_suggestions),
+    memoryChangeSuggestions: memoryChangeSuggestionItems.map((item) => item.text),
+    memoryChangeSuggestionItems,
     nextChecks: normalizeTextList(raw.nextChecks || raw.next_checks),
   };
   if (!view.signalRadar.length) view.signalRadar = fallbackReportView(fallbackText).signalRadar;
@@ -1857,6 +1992,7 @@ function reportMemoryChangeSuggestionItems(view) {
       .filter((item) => item && typeof item === "object" && item.text)
       .map((item) => ({
         text: String(item.text || "").trim(),
+        continuityId: normalizeWorldMemorySuggestionContinuityId(item.continuityId || item.continuity_id),
         status:
           item.status === "watching" || item.status === "observing"
             ? "watching"
@@ -1866,7 +2002,7 @@ function reportMemoryChangeSuggestionItems(view) {
       }))
       .filter((item) => item.text);
   }
-  return normalizeTextList(view?.memoryChangeSuggestions, 8).map((text) => ({ text, status: "open" }));
+  return normalizeTextList(view?.memoryChangeSuggestions, 8).map((text) => ({ text, continuityId: "", status: "open" }));
 }
 
 function reportMemoryChangeSuggestionLabel(item) {
@@ -2089,7 +2225,14 @@ async function runSituationReportGeneration({
   } catch {
     parsed = null;
   }
-  const view = normalizeReportView(parsed, result.answer);
+  const continuityHarness = validateWorldMemorySuggestionContinuityOutput(
+    parsed?.memoryChangeSuggestions || parsed?.memory_change_suggestions,
+    handledChangeSuggestions
+  );
+  if (!continuityHarness.ok) {
+    throw new Error(`월드 메모리 변경 제안 연속성 분류 하네스 실패: ${continuityHarness.issues.join("; ")}`);
+  }
+  const view = normalizeReportView(parsed, result.answer, handledChangeSuggestions);
   return {
     view,
     text: reportPlainText(view),

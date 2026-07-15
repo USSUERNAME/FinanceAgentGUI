@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { __tossInvestTestHooks, handleTossInvestEndpoint } from "../server/tossInvestApi.mjs";
+import { resolveUsRegularSessionBasis } from "../src/transactions/watchlistReturnBasis.js";
 
 const {
   buildLiveInvestmentStatusPayload,
@@ -35,6 +36,62 @@ function createMockResponseSink() {
     },
   };
 }
+
+test("US watchlist daily return always uses the latest completed regular-session close", () => {
+  const today = {
+    regularMarket: { endTime: "2026-07-15T05:00:00.000+09:00" },
+    afterMarket: { endTime: "2026-07-15T08:50:00.000+09:00" },
+  };
+  const previousBusinessDay = {
+    regularMarket: { endTime: "2026-07-14T05:00:00.000+09:00" },
+    afterMarket: { endTime: "2026-07-14T08:50:00.000+09:00" },
+  };
+
+  for (const [sessionKey, priceTimestamp] of [
+    ["dayMarket", "2026-07-14T14:43:34.000+09:00"],
+    ["preMarket", "2026-07-14T18:00:00.000+09:00"],
+    ["regularMarket", "2026-07-14T23:00:00.000+09:00"],
+  ]) {
+    const basis = resolveUsRegularSessionBasis({ today, previousBusinessDay, sessionKey, priceTimestamp });
+    assert.equal(basis.boundary, previousBusinessDay.regularMarket.endTime);
+    assert.equal(basis.source, "토스 1분봉 미국 전 영업일 정규장 기준가");
+  }
+
+  const afterMarketBasis = resolveUsRegularSessionBasis({
+    today,
+    previousBusinessDay,
+    sessionKey: "afterMarket",
+    priceTimestamp: "2026-07-15T05:30:00.000+09:00",
+  });
+  assert.equal(afterMarketBasis.boundary, today.regularMarket.endTime);
+  assert.equal(afterMarketBasis.source, "토스 1분봉 미국 정규장 마감 기준가");
+
+  const postMarketBasis = resolveUsRegularSessionBasis({
+    today,
+    previousBusinessDay,
+    priceTimestamp: "2026-07-15T08:55:00.000+09:00",
+  });
+  assert.equal(postMarketBasis.boundary, today.regularMarket.endTime);
+
+  const weekendBasis = resolveUsRegularSessionBasis({
+    today: {
+      date: "2026-07-19",
+      regularMarket: null,
+    },
+    previousBusinessDay: {
+      date: "2026-07-17",
+      regularMarket: { endTime: "2026-07-18T05:00:00.000+09:00" },
+    },
+    priceTimestamp: "2026-07-19T12:00:00.000+09:00",
+  });
+  assert.equal(weekendBasis.boundary, "2026-07-18T05:00:00.000+09:00");
+  assert.equal(weekendBasis.source, "토스 1분봉 미국 전 영업일 정규장 기준가");
+
+  const qqqCurrentPrice = 714.94;
+  const qqqPreviousRegularClose = 711.72;
+  const qqqReturnPercent = ((qqqCurrentPrice - qqqPreviousRegularClose) / qqqPreviousRegularClose) * 100;
+  assert.ok(Math.abs(qqqReturnPercent - 0.452425) < 0.000001);
+});
 
 async function callTossInvestEndpoint(kind, url) {
   const res = createMockResponseSink();
@@ -1463,8 +1520,8 @@ test("transaction status view reads the live Toss API endpoint and does not expo
   assert.match(source, /fetchTransactionWatchlistDailyBasis/);
   assert.match(source, /function transactionWatchlistStockOptionsFromPayload[\s\S]*return rows;/);
   assert.match(source, /transactionWatchlistUsDailyBasisBoundary/);
-  assert.match(source, /session\?\.key === "afterMarket"/);
-  assert.match(source, /previousBusinessDay, "afterMarket", "endTime"/);
+  assert.match(source, /resolveUsRegularSessionBasis/);
+  assert.doesNotMatch(source, /previousBusinessDay, "afterMarket", "endTime"/);
   assert.match(source, /transactionWatchlistReturnPercent\(priceRow\.lastPrice, previousClose\)/);
   assert.match(source, /new URLSearchParams\(\{\s*symbol: cleanSymbol,\s*interval: "1d",\s*count: String\(transactionWatchlistCandlePageSize\),\s*adjusted: "true"/);
   assert.match(source, /transactionWatchlistCandlePageSize = 200/);
@@ -1637,7 +1694,7 @@ test("transaction status view reads the live Toss API endpoint and does not expo
   assert.match(stylesSource, /transaction-asset-detail-close-button/);
   assert.doesNotMatch(source, /전체 보유 종목 보기/);
   assert.match(source, /<strong>\{itemName\}<\/strong>\s*<span>\{item\?\.displaySymbol \|\| symbol\}<\/span>/);
-  assert.match(source, /isCryptoInstrument \? "· 24시간 전보다" : "· 지난 정규장보다"/);
+  assert.match(source, /isCryptoInstrument \? "· 지난 미국 정규장 마감보다" : "· 지난 정규장보다"/);
   assert.match(source, /dailyPriceChangeLabel/);
   assert.match(source, /const secondaryPriceUnit = displayUnit === "USD" \? "KRW" : "USD";/);
   assert.match(source, /formatConvertedMoney\(effectiveCurrentPrice, itemUnit, displayUnit, usdKrwRate\)/);

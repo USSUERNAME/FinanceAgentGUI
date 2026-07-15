@@ -1052,24 +1052,76 @@ async function runAntigravityTranslationBatch(items, modelInfo) {
   return parseJsonPayload(result.answer);
 }
 
-async function translateItems(items, batchSize) {
+async function translateBatch(items, modelInfo) {
   if (!items.length) return { translations: [], model: "", reasoning: "" };
-  const modelInfo = chooseTranslationModel();
-  const translations = [];
-
-  for (let index = 0; index < items.length; index += batchSize) {
-    const batch = items.slice(index, index + batchSize);
-    const payload =
-      modelInfo.provider === ANTIGRAVITY_PROVIDER_ID
-        ? await runAntigravityTranslationBatch(batch, modelInfo)
-        : await runCodexTranslationBatch(batch, modelInfo);
-    translations.push(...toArray(payload.translations));
-  }
-
+  const payload =
+    modelInfo.provider === ANTIGRAVITY_PROVIDER_ID
+      ? await runAntigravityTranslationBatch(items, modelInfo)
+      : await runCodexTranslationBatch(items, modelInfo);
   return {
-    translations,
+    translations: toArray(payload.translations),
     model: modelInfo.modelLabel || modelInfo.model,
     reasoning: modelInfo.reasoning,
+  };
+}
+
+export function applyNewsFeedTranslationBatch(store, pendingItems, translated) {
+  const translationById = new Map(
+    toArray(translated?.translations).map((item) => [String(item?.id || ""), item])
+  );
+  const pendingIds = new Set(toArray(pendingItems).map((item) => String(item?.id || "")));
+  let translatedCount = 0;
+  let retryCount = 0;
+
+  const items = toArray(store?.items).map((item) => {
+    if (!pendingIds.has(String(item?.id || ""))) return item;
+    const translation = translationById.get(String(item.id));
+    if (!translation) {
+      retryCount += 1;
+      return {
+        ...item,
+        translatedTitle: "",
+        translatedText: "",
+        translatedAt: "",
+        translationStatus: "pending",
+        translationError: "번역 응답에 이 항목이 없어 재시도 대기열에 유지합니다.",
+        translationModel: translated?.model || "",
+        translationReasoning: translated?.reasoning || "",
+      };
+    }
+
+    const candidate = normalizeNewsFeedTranslationCandidate(item, translation);
+    if (!candidate.ok) {
+      retryCount += 1;
+      return {
+        ...item,
+        translatedTitle: "",
+        translatedText: "",
+        translatedAt: "",
+        translationStatus: "pending",
+        translationError: candidate.error,
+        translationModel: translated?.model || "",
+        translationReasoning: translated?.reasoning || "",
+      };
+    }
+
+    translatedCount += 1;
+    return {
+      ...item,
+      translatedTitle: "",
+      translatedText: candidate.bodyKo,
+      translatedAt: nowIso(),
+      translationStatus: "translated",
+      translationError: "",
+      translationModel: translated?.model || "",
+      translationReasoning: translated?.reasoning || "",
+    };
+  });
+
+  return {
+    store: { ...store, items },
+    translatedCount,
+    retryCount,
   };
 }
 
@@ -1122,9 +1174,19 @@ function trimStoreItems(store, config) {
 }
 
 function pendingTranslationItems(store) {
-  return store.items
+  return selectPendingNewsFeedTranslationBatch(store.items, Number.POSITIVE_INFINITY);
+}
+
+export function selectPendingNewsFeedTranslationBatch(items, batchSize) {
+  const limit = Number.isFinite(Number(batchSize))
+    ? Math.max(1, Math.floor(Number(batchSize)))
+    : Number.POSITIVE_INFINITY;
+  return toArray(items)
     .filter((item) => item.translationStatus === "pending")
-    .sort((a, b) => String(b.publishedAt || b.fetchedAt).localeCompare(String(a.publishedAt || a.fetchedAt)));
+    .sort((a, b) =>
+      String(b.publishedAt || b.fetchedAt).localeCompare(String(a.publishedAt || a.fetchedAt))
+    )
+    .slice(0, limit);
 }
 
 function startPendingNewsFeedTranslation(batchSize) {
@@ -1132,90 +1194,52 @@ function startPendingNewsFeedTranslation(batchSize) {
   if (runtime.translationInFlight) return runtime.translationInFlight;
 
   runtime.translationInFlight = (async () => {
+    let translatedTotal = 0;
+    let modelInfo = null;
+
     while (true) {
       let store = readStore();
       const pendingItems = pendingTranslationItems(store);
       if (!pendingItems.length) break;
+      const batch = selectPendingNewsFeedTranslationBatch(store.items, batchSize);
 
       store.collector = {
         ...store.collector,
-        lastAction: `${pendingItems.length}개 항목 번역 중`,
-        lastTranslatedCount: 0,
+        lastAction: `${translatedTotal}개 번역 저장 완료 · ${pendingItems.length}개 대기 · ${batch.length}개 처리 중`,
+        lastTranslatedCount: translatedTotal,
       };
       store = writeStore(store);
 
       try {
-        const translated = await translateItems(pendingItems, batchSize);
-        const translationById = new Map(translated.translations.map((item) => [String(item.id), item]));
-        const pendingIds = new Set(pendingItems.map((item) => item.id));
-        let translatedCount = 0;
-        let retryCount = 0;
-
+        modelInfo ||= chooseTranslationModel();
+        const translated = await translateBatch(batch, modelInfo);
         store = readStore();
-        store.items = store.items.map((item) => {
-          if (!pendingIds.has(item.id)) return item;
-          const translation = translationById.get(item.id);
-          if (!translation) {
-            retryCount += 1;
-            return {
-              ...item,
-              translatedTitle: "",
-              translatedText: "",
-              translatedAt: "",
-              translationStatus: "pending",
-              translationError: "번역 응답에 이 항목이 없어 재시도 대기열에 유지합니다.",
-              translationModel: translated.model,
-              translationReasoning: translated.reasoning,
-            };
-          }
-
-          const candidate = normalizeNewsFeedTranslationCandidate(item, translation);
-          if (!candidate.ok) {
-            retryCount += 1;
-            return {
-              ...item,
-              translatedTitle: "",
-              translatedText: "",
-              translatedAt: "",
-              translationStatus: "pending",
-              translationError: candidate.error,
-              translationModel: translated.model,
-              translationReasoning: translated.reasoning,
-            };
-          }
-
-          translatedCount += 1;
-          return {
-            ...item,
-            translatedTitle: "",
-            translatedText: candidate.bodyKo,
-            translatedAt: nowIso(),
-            translationStatus: "translated",
-            translationError: "",
-            translationModel: translated.model,
-            translationReasoning: translated.reasoning,
-          };
-        });
+        const applied = applyNewsFeedTranslationBatch(store, batch, translated);
+        store = applied.store;
+        translatedTotal += applied.translatedCount;
         store.collector = {
           ...store.collector,
           status: store.collector.status === "error" ? "error" : "ok",
-          lastAction: retryCount
-            ? `${translatedCount}개 항목 번역 완료, ${retryCount}개 항목 재시도 대기`
-            : `${translatedCount}개 항목 번역 완료`,
-          lastTranslatedCount: translatedCount,
+          lastAction: applied.retryCount
+            ? `${translatedTotal}개 번역 저장 완료 · ${applied.retryCount}개 재시도 대기`
+            : `${translatedTotal}개 번역 저장 완료`,
+          lastTranslatedCount: translatedTotal,
           translationModel: translated.model,
           translationReasoning: translated.reasoning,
-          translationLastError: retryCount ? `${retryCount}개 항목 번역 검증 보류` : "",
+          translationLastError: applied.retryCount
+            ? `${applied.retryCount}개 항목 번역 검증 보류`
+            : "",
           lastPollFinishedAt: nowIso(),
         };
         store = writeStore(store);
-        if (retryCount) break;
+        if (applied.retryCount) break;
       } catch (error) {
         store = readStore();
         store.collector = {
           ...store.collector,
           status: store.collector.status === "error" ? "error" : "ok",
-          lastAction: `${pendingItems.length}개 항목 번역 보류 · 원문 표시 유지`,
+          lastAction: `${translatedTotal}개 번역 저장 완료 · ${batch.length}개 번역 보류 · 원문 표시 유지`,
+          lastTranslatedCount: translatedTotal,
           lastPollFinishedAt: nowIso(),
           translationLastError: error.message,
         };

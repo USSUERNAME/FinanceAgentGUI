@@ -5497,6 +5497,33 @@ function App() {
     return payload;
   }
 
+  async function recoverMissingReportArtifact({ promptText = "", answerText = "" } = {}) {
+    const response = await fetch("/api/reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        action: "recover_missing_report_artifact",
+        prompt: promptText,
+        answer: answerText,
+        source: {
+          surface: "reports-sidebar-agent-fallback",
+          screen: "reports",
+          provider: agentProvider,
+          providerLabel: agentProviderLabel,
+        },
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    if (payload.recovered && payload.saved) {
+      setReportRefreshSignal((current) => current + 1);
+    }
+    return payload;
+  }
+
   async function saveChatAnswerToReports({ message, answerText } = {}) {
     const content = String(answerText || "").trim();
     if (!content) throw new Error("보고서에 저장할 답변이 없습니다.");
@@ -5855,8 +5882,8 @@ function App() {
         let reportArtifactSaveResult = null;
         if (screenForMessage === "reports") {
           const reportArtifactAction = parseReportArtifactAction(completedAnswer);
+          let reportArtifactSaveError = "";
           if (reportArtifactAction) {
-            let reportArtifactSaveError = "";
             try {
               reportArtifactSaveResult = await saveReportArtifactAction(reportArtifactAction, {
                 screen: screenForMessage,
@@ -5883,6 +5910,72 @@ function App() {
               },
               chatScope
             );
+          } else {
+            try {
+              updateAssistantMessage(
+                assistantId,
+                {
+                  status: {
+                    type: "status",
+                    tone: "working",
+                    title: "보고서 저장 여부 확인 중",
+                    body: "저장 액션이 누락되어 요청 의도와 완성도를 의미 기반으로 다시 확인하고 있습니다.",
+                  },
+                  text: visibleAssistantText(completedAnswer),
+                },
+                chatScope
+              );
+              const recovery = await recoverMissingReportArtifact({
+                promptText: promptTextForAgent,
+                answerText: visibleAssistantText(completedAnswer),
+              });
+              if (recovery.recovered && recovery.saved) {
+                reportArtifactSaveResult = recovery;
+                updateAssistantMessage(
+                  assistantId,
+                  {
+                    status: latestStatus,
+                    text: visibleAssistantText(completedAnswer),
+                    extraBlocks: [
+                      {
+                        type: "status",
+                        tone: "done",
+                        title: "보고서 저장됨",
+                        body: `'${recovery.saved.title}' 보고서가 글 목록에 추가되었습니다.`,
+                      },
+                    ],
+                  },
+                  chatScope
+                );
+              } else {
+                updateAssistantMessage(
+                  assistantId,
+                  {
+                    status: latestStatus,
+                    text: visibleAssistantText(completedAnswer),
+                  },
+                  chatScope
+                );
+              }
+            } catch (error) {
+              reportArtifactSaveError = error.message || "보고서 저장 의도 재확인에 실패했습니다.";
+              updateAssistantMessage(
+                assistantId,
+                {
+                  status: latestStatus,
+                  text: visibleAssistantText(completedAnswer),
+                  extraBlocks: [
+                    {
+                      type: "status",
+                      tone: "error",
+                      title: "보고서 저장 확인 실패",
+                      body: reportArtifactSaveError,
+                    },
+                  ],
+                },
+                chatScope
+              );
+            }
           }
         }
         if (screenForMessage === "world-memory") {

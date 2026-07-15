@@ -28,6 +28,7 @@ import {
 } from "lightweight-charts";
 import { PortfolioTossApiStatus } from "../portfolio/PortfolioWorkspaceHeader.jsx";
 import { buildTransactionStatusContextPacket } from "./contextPacketBuilder.js";
+import { resolveUsRegularSessionBasis } from "./watchlistReturnBasis.js";
 
 const sortOptions = [
   { id: "profitRateDesc", label: "총 수익률 높은 순" },
@@ -155,7 +156,7 @@ const transactionInvestmentDetailIntervalIds = new Set([
   ...transactionInvestmentTimeframeTabs.map((timeframe) => timeframe.id),
 ]);
 const transactionWatchlistReturnColumns = [
-  { key: "daily", label: "일간 / 24시간 수익률", valueField: "dailyReturnPercent", hasField: "hasDailyReturn" },
+  { key: "daily", label: "일간 수익률", valueField: "dailyReturnPercent", hasField: "hasDailyReturn" },
   { key: "weekly", label: "주간 수익률", valueField: "weeklyReturnPercent", hasField: "hasWeeklyReturn" },
   { key: "monthly", label: "월간 수익률", valueField: "monthlyReturnPercent", hasField: "hasMonthlyReturn" },
   { key: "sixMonth", label: "6개월 수익률", valueField: "sixMonthReturnPercent", hasField: "hasSixMonthReturn" },
@@ -1117,8 +1118,11 @@ function transactionWatchlistPriceRowsFromPayload(payload = {}) {
           : String(rawTimestamp || "").trim(),
         volume: optionalNumericAmount(item?.volume ?? item?.baseVolume),
         quoteVolume: optionalNumericAmount(item?.quoteVolume),
+        rolling24HourReturnPercent: instrument?.provider === "binance"
+          ? optionalNumericAmount(item?.priceChangePercent)
+          : null,
         dailyReturnPercent: instrument?.provider === "binance"
-          ? optionalNumericAmount(item?.priceChangePercent ?? item?.dailyReturnPercent)
+          ? null
           : optionalRatePercent(
               item?.dailyReturnPercent ??
                 item?.dayReturnPercent ??
@@ -1736,15 +1740,20 @@ function previousCloseForWatchlistPrice(priceRow = {}, candleRows = []) {
 function transactionWatchlistReturnsForPrice(priceRow = {}, candleRows = [], dailyBasis = null) {
   const rows = transactionWatchlistCandleRowsFromPayload(candleRows);
   const anchorDate = transactionWatchlistPriceDate(priceRow) || rows.at(-1)?.date || transactionWatchlistLocalDateString();
+  const isBinance = normalizeTransactionInstrument(priceRow)?.provider === "binance";
   const dailyBasisClose = optionalNumericAmount(dailyBasis?.close);
   const previousClose = dailyBasisClose && dailyBasisClose > 0
     ? dailyBasisClose
-    : previousCloseForWatchlistPrice(priceRow, rows);
+    : isBinance
+      ? null
+      : previousCloseForWatchlistPrice(priceRow, rows);
   const hasDailyBasis = dailyBasisClose && dailyBasisClose > 0;
   let dailyReturnPercent = hasDailyBasis
     ? transactionWatchlistReturnPercent(priceRow.lastPrice, previousClose)
-    : priceRow.dailyReturnPercent;
-  if (!Number.isFinite(dailyReturnPercent)) {
+    : isBinance
+      ? null
+      : priceRow.dailyReturnPercent;
+  if (!isBinance && !Number.isFinite(dailyReturnPercent)) {
     dailyReturnPercent = transactionWatchlistReturnPercent(priceRow.lastPrice, previousClose);
   }
   const returns = {
@@ -1967,10 +1976,6 @@ function transactionWatchlistKoreanDailyBasisBoundary(calendarPayload = {}) {
   return boundary || afterStart || regularEnd || "";
 }
 
-function transactionWatchlistUsSessionValue(day = {}, key = "", field = "") {
-  return String(day?.[key]?.[field] || "").trim();
-}
-
 function transactionWatchlistUsDailyBasisBoundary(calendarPayload = {}, priceRow = {}) {
   const result = transactionSimulatorCalendarResult(calendarPayload);
   const today = result?.today && typeof result.today === "object" ? result.today : null;
@@ -1981,45 +1986,13 @@ function transactionWatchlistUsDailyBasisBoundary(calendarPayload = {}, priceRow
   if (!today && !previousBusinessDay) return null;
   const priceDate = transactionWatchlistPriceDateObject(priceRow);
   const session = transactionSimulatorCurrentMarketSession(calendarPayload, "USD", priceDate);
-  const dayMarketStart = Date.parse(transactionWatchlistUsSessionValue(today, "dayMarket", "startTime"));
-  const afterMarketEnd = Date.parse(transactionWatchlistUsSessionValue(today, "afterMarket", "endTime"));
-  const priceTime = priceDate.getTime();
-  let rawBoundary = "";
-  let source = "토스 1분봉 미국 일간 기준가";
-
-  if (session?.key === "afterMarket") {
-    rawBoundary = transactionWatchlistUsSessionValue(today, "regularMarket", "endTime");
-    source = "토스 1분봉 미국 정규장 마감 기준가";
-  } else if (["dayMarket", "preMarket", "regularMarket"].includes(session?.key)) {
-    rawBoundary =
-      transactionWatchlistUsSessionValue(previousBusinessDay, "afterMarket", "endTime") ||
-      transactionWatchlistUsSessionValue(previousBusinessDay, "regularMarket", "endTime");
-    source = transactionWatchlistUsSessionValue(previousBusinessDay, "afterMarket", "endTime")
-      ? "토스 1분봉 미국 전 영업일 애프터장 기준가"
-      : "토스 1분봉 미국 전 영업일 정규장 기준가";
-  } else if (Number.isFinite(afterMarketEnd) && priceTime >= afterMarketEnd) {
-    rawBoundary =
-      transactionWatchlistUsSessionValue(today, "afterMarket", "endTime") ||
-      transactionWatchlistUsSessionValue(today, "regularMarket", "endTime");
-    source = transactionWatchlistUsSessionValue(today, "afterMarket", "endTime")
-      ? "토스 1분봉 미국 애프터장 마감 기준가"
-      : "토스 1분봉 미국 정규장 마감 기준가";
-  } else if (Number.isFinite(dayMarketStart) && priceTime < dayMarketStart) {
-    rawBoundary =
-      transactionWatchlistUsSessionValue(previousBusinessDay, "afterMarket", "endTime") ||
-      transactionWatchlistUsSessionValue(previousBusinessDay, "regularMarket", "endTime");
-    source = transactionWatchlistUsSessionValue(previousBusinessDay, "afterMarket", "endTime")
-      ? "토스 1분봉 미국 전 영업일 애프터장 기준가"
-      : "토스 1분봉 미국 전 영업일 정규장 기준가";
-  } else {
-    rawBoundary =
-      transactionWatchlistUsSessionValue(previousBusinessDay, "afterMarket", "endTime") ||
-      transactionWatchlistUsSessionValue(previousBusinessDay, "regularMarket", "endTime") ||
-      transactionWatchlistUsSessionValue(today, "regularMarket", "endTime");
-  }
-
-  const boundary = transactionWatchlistAddMinutes(rawBoundary, 1) || rawBoundary;
-  return boundary ? { boundary, source, sessionKey: session?.key || "" } : null;
+  const basis = resolveUsRegularSessionBasis({
+    today: today || {},
+    previousBusinessDay: previousBusinessDay || {},
+    sessionKey: session?.key || "",
+    priceTimestamp: priceDate.toISOString(),
+  });
+  return basis ? { ...basis, sessionKey: session?.key || "" } : null;
 }
 
 async function fetchTransactionWatchlistMinuteBasisClose({ symbol, boundary, cacheKey, source, signal }) {
@@ -2087,6 +2060,57 @@ async function fetchTransactionWatchlistUsDailyBasis(priceRow = {}, signal) {
     source: basis.source,
     signal,
   });
+}
+
+async function fetchTransactionBinanceDailyBasis(priceRow = {}, signal, calendarPayload) {
+  const instrument = normalizeTransactionInstrument(priceRow);
+  const priceDate = transactionWatchlistPriceDate(priceRow);
+  if (instrument?.provider !== "binance" || !instrument.instrumentId || !priceDate) return null;
+  const calendar = calendarPayload === undefined
+    ? await fetchTransactionWatchlistMarketCalendar("us", priceDate, signal)
+    : calendarPayload;
+  const basis = transactionWatchlistUsDailyBasisBoundary(calendar, priceRow);
+  if (!basis?.boundary) return null;
+
+  const cacheKey = `binance-us:${instrument.instrumentId}:${priceDate}:${basis.boundary}`;
+  const cached = transactionWatchlistKoreanDailyBasisCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAtMs <= transactionWatchlistKoreanDailyBasisCacheTtlMs) {
+    return cached.payload;
+  }
+
+  const boundaryMs = Date.parse(basis.boundary);
+  if (!Number.isFinite(boundaryMs)) return cached?.payload || null;
+  const params = new URLSearchParams({
+    instrumentId: instrument.instrumentId,
+    interval: "1m",
+    limit: "3",
+    before: new Date(boundaryMs + 59_999).toISOString(),
+  });
+  try {
+    const response = await fetch(`/api/market-data/candles?${params.toString()}`, {
+      cache: "no-store",
+      signal,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body?.ok === false) return cached?.payload || null;
+    const rows = transactionInvestmentCandleRowsFromPayload(body, "1m");
+    const boundaryRow = rows.find((row) => Date.parse(row.timestamp) === boundaryMs);
+    const previousRow = rows.filter((row) => Date.parse(row.timestamp) < boundaryMs).at(-1);
+    const close = optionalNumericAmount(boundaryRow?.open ?? previousRow?.close);
+    if (close === null || close <= 0) return cached?.payload || null;
+    const payload = {
+      symbol: instrument.symbol,
+      instrumentId: instrument.instrumentId,
+      close,
+      timestamp: boundaryRow?.timestamp || previousRow?.timestamp || basis.boundary,
+      source: "Binance 1분봉 미국 정규장 마감 기준가",
+    };
+    transactionWatchlistKoreanDailyBasisCache.set(cacheKey, { payload, fetchedAtMs: Date.now() });
+    return payload;
+  } catch (fetchError) {
+    if (fetchError.name === "AbortError") throw fetchError;
+    return cached?.payload || null;
+  }
 }
 
 async function fetchTransactionWatchlistDailyBasis(priceRow = {}, signal) {
@@ -2161,32 +2185,43 @@ async function fetchTransactionBinanceWatchlistPrices(instruments = [], signal) 
     currency: "USD",
     nativeQuoteAsset: String(row.nativeQuoteAsset || row.quoteAsset || "USDT").toUpperCase(),
   }));
-  const candlePayloads = await Promise.all(normalizedInstruments.map(async (instrument) => {
-    const params = new URLSearchParams({
-      instrumentId: instrument.instrumentId,
-      interval: "1d",
-      limit: String(transactionWatchlistCandlePageSize),
-    });
-    try {
-      const candleResponse = await fetch(`/api/market-data/candles?${params.toString()}`, {
-        cache: "no-store",
-        signal,
+  const calendarDate = transactionWatchlistPriceDate(priceRows[0]);
+  const calendarPromise = calendarDate
+    ? fetchTransactionWatchlistMarketCalendar("us", calendarDate, signal)
+    : Promise.resolve(null);
+  const candlePayloadsPromise = Promise.all(normalizedInstruments.map(async (instrument) => {
+      const params = new URLSearchParams({
+        instrumentId: instrument.instrumentId,
+        interval: "1d",
+        limit: String(transactionWatchlistCandlePageSize),
       });
-      const candleBody = await candleResponse.json().catch(() => ({}));
-      if (!candleResponse.ok || candleBody?.ok === false) {
+      try {
+        const candleResponse = await fetch(`/api/market-data/candles?${params.toString()}`, {
+          cache: "no-store",
+          signal,
+        });
+        const candleBody = await candleResponse.json().catch(() => ({}));
+        if (!candleResponse.ok || candleBody?.ok === false) {
+          return { symbol: instrument.symbol, instrumentId: instrument.instrumentId, candles: [] };
+        }
+        return {
+          symbol: instrument.symbol,
+          instrumentId: instrument.instrumentId,
+          candles: transactionWatchlistUniqueCandleRows(transactionWatchlistCandleRowsFromPayload(candleBody)),
+        };
+      } catch (fetchError) {
+        if (fetchError.name === "AbortError") throw fetchError;
         return { symbol: instrument.symbol, instrumentId: instrument.instrumentId, candles: [] };
       }
-      return {
-        symbol: instrument.symbol,
-        instrumentId: instrument.instrumentId,
-        candles: transactionWatchlistUniqueCandleRows(transactionWatchlistCandleRowsFromPayload(candleBody)),
-      };
-    } catch (fetchError) {
-      if (fetchError.name === "AbortError") throw fetchError;
-      return { symbol: instrument.symbol, instrumentId: instrument.instrumentId, candles: [] };
-    }
-  }));
-  const priceMap = transactionWatchlistPriceMap(priceRows, candlePayloads, []);
+    }));
+  const [candlePayloads, calendar] = await Promise.all([
+    candlePayloadsPromise,
+    calendarPromise,
+  ]);
+  const dailyBasisPayloads = await Promise.all(
+    priceRows.map((row) => fetchTransactionBinanceDailyBasis(row, signal, calendar))
+  );
+  const priceMap = transactionWatchlistPriceMap(priceRows, candlePayloads, dailyBasisPayloads);
   for (const row of priceRows) {
     const price = priceMap.get(row.symbol);
     if (price) priceMap.set(row.instrumentId, price);
@@ -3307,10 +3342,6 @@ function itemIsCrypto(item = {}) {
 }
 
 function transactionPerformancePeriodPrefix(items = []) {
-  const hasCrypto = items.some(itemIsCrypto);
-  const hasStocks = items.some((item) => !itemIsCrypto(item));
-  if (hasCrypto && hasStocks) return "일간/24시간";
-  if (hasCrypto) return "24시간";
   return "일간";
 }
 
@@ -5577,7 +5608,7 @@ function TransactionInvestmentAssetDetail({
             <strong>{primaryPriceLabel}</strong>
             <b>{secondaryPriceLabel}</b>
             <span className="transaction-asset-price-comparison">
-              {isCryptoInstrument ? "· 24시간 전보다" : "· 지난 정규장보다"}
+              {isCryptoInstrument ? "· 지난 미국 정규장 마감보다" : "· 지난 정규장보다"}
             </span>
             <span className={`transaction-asset-price-change ${valueTone(dailyReturnPercent)}`.trim()}>
               {dailyPriceChangeLabel} ({formatSignedPercent(dailyReturnPercent)})
@@ -5772,9 +5803,7 @@ function InvestmentMain({
   const domesticCount = items.filter(itemIsDomesticStock).length;
   const cryptoCount = items.filter(itemIsCrypto).length;
   const stockCount = overseasCount + domesticCount;
-  const periodProfitLabel = cryptoCount > 0
-    ? stockCount > 0 ? "일간·24시간 수익" : "24시간 수익"
-    : "일간 수익";
+  const periodProfitLabel = "일간 수익";
   const filteredItems = useMemo(() => {
     if (activeFilter === "overseas") return items.filter(itemIsOverseasStock);
     if (activeFilter === "domestic") return items.filter(itemIsDomesticStock);
@@ -5969,9 +5998,7 @@ function SimulatorInvestmentMain({
   const domesticCount = items.filter(itemIsDomesticStock).length;
   const cryptoCount = items.filter(itemIsCrypto).length;
   const simulatorStockCount = overseasCount + domesticCount;
-  const simulatorPeriodProfitLabel = cryptoCount > 0
-    ? simulatorStockCount > 0 ? "일간·24시간 수익" : "24시간 수익"
-    : "일간 수익";
+  const simulatorPeriodProfitLabel = "일간 수익";
   const filteredItems = useMemo(() => {
     if (activeFilter === "overseas") return items.filter(itemIsOverseasStock);
     if (activeFilter === "domestic") return items.filter(itemIsDomesticStock);
@@ -6535,9 +6562,7 @@ function WatchlistMain({
   const averageReturnLabel = hasMixedPeriods
     ? `주식 ${stockAverageReturn.hasValue ? formatSignedPercent(stockAverageReturn.value) : "-"} · 암호자산 ${cryptoAverageReturn.hasValue ? formatSignedPercent(cryptoAverageReturn.value) : "-"}`
     : averageDailyReturn.hasValue ? formatSignedPercent(averageDailyReturn.value) : "-";
-  const averageReturnCaption = hasMixedPeriods
-    ? "일간 / 24시간 평균"
-    : rows.some((row) => row.provider === "binance") ? "24시간 평균 수익" : "일간 평균 수익";
+  const averageReturnCaption = "일간 평균 수익";
   const shouldShowBlockingError = Boolean(error && !payload);
   const SymbolOrderIcon = symbolOrderEditing ? Save : PencilLine;
   const displayData = useMemo(() => ({

@@ -9,11 +9,12 @@ export function normalizeMemoryChangeSuggestionItem(item) {
           : "open";
     return {
       text: String(item.text || item.body || item.title || "").trim(),
+      continuityId: String(item.continuityId || item.continuity_id || "").trim(),
       status,
       handledAt: String(item.handledAt || "").trim(),
     };
   }
-  return { text: String(item || "").trim(), status: "open", handledAt: "" };
+  return { text: String(item || "").trim(), continuityId: "", status: "open", handledAt: "" };
 }
 
 export function worldMemorySuggestionCanAskAgent(item) {

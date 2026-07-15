@@ -83,6 +83,17 @@ rows are never rendered with strike-through text. Watching rows remain visible
 across report regeneration until a later mutation promotes the same suggestion
 to `completed`.
 
+Each ledger record also owns a stable `continuityId`. During report generation,
+the model classifies every proposed change against the active `watching` records:
+an update to the same target, intent, and follow-up action must reuse the supplied
+ID even when counts, timestamps, or wording changed; a genuinely separate issue
+uses an explicit empty ID. When watching records exist, legacy string rows or
+object rows that omit this decision fail the report-generation harness. The
+server accepts only IDs already present in the ledger and
+coalesces repeated output for one ID to the latest sentence. This structured
+LLM-classification harness keeps follow-up observations in one visible row
+without relying on keyword or regex similarity.
+
 ## Collector Recovery And Connectivity
 
 The collector treats `collector-state.json` as rebuildable runtime state. If the
