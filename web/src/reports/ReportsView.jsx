@@ -14,6 +14,7 @@ function reportSearchText(report = {}) {
     report.title,
     report.category,
     report.summary,
+    report.preamble,
     report.author,
     ...(report.tags || []),
     ...(report.sections || []).flatMap((section) => [section.heading, section.body]),
@@ -233,6 +234,9 @@ function insertReportClipboardBlockquoteBreaks(node) {
 }
 
 function insertReportClipboardBreaks(node) {
+  node.querySelectorAll(".report-document-header h1").forEach((heading) => {
+    heading.insertAdjacentElement("afterend", document.createElement("br"));
+  });
   node.querySelectorAll(".report-document-body h2, .report-document-body .markdown-heading").forEach((heading) => {
     heading.insertAdjacentElement("beforebegin", createReportClipboardHeadingSpacer({ trailingNbsp: true, withLineBreak: true }));
     heading.insertAdjacentElement("afterend", createReportClipboardHeadingSpacer());
@@ -265,7 +269,17 @@ function reportPlainTextFromNode(node) {
   holder.style.left = "-10000px";
   holder.style.top = "0";
   holder.style.whiteSpace = "pre-wrap";
-  holder.appendChild(node.cloneNode(true));
+  const plainTextNode = node.cloneNode(true);
+  plainTextNode.querySelectorAll("ul, ol").forEach((list) => {
+    const start = list.matches("ol") ? Number(list.getAttribute("start")) || 1 : 1;
+    list.style.listStyle = "none";
+    list.style.paddingLeft = "0";
+    Array.from(list.children).forEach((item, index) => {
+      if (!item.matches("li")) return;
+      item.insertBefore(document.createTextNode(list.matches("ol") ? `${start + index}. ` : "• "), item.firstChild);
+    });
+  });
+  holder.appendChild(plainTextNode);
   document.body.appendChild(holder);
   const text = holder.innerText
     .replace(/\n{3,}/g, "\n\n")
@@ -1012,6 +1026,11 @@ export default function ReportsView({
             </div>
 
             <div className="report-document-body">
+              {activeReport.preamble ? (
+                <div className="report-document-preamble">
+                  <MarkdownText text={activeReport.preamble} />
+                </div>
+              ) : null}
               {activeReport.sections.map((section, index) => (
                 <ReportSection key={`${section.heading}-${index}`} section={section} />
               ))}

@@ -28,8 +28,41 @@ test("chat answer HTML clipboard payload converts thematic breaks to hr", () => 
   const html = formatChatAnswerClipboardHtml("# 제목\n\n본문\n\n---\n\n결론");
   assert.match(html, /<hr>/);
   assert.doesNotMatch(html, />---</);
-  assert.match(html, /# 제목/);
+  assert.match(html, /<h1>제목<\/h1><br>/);
   assert.match(html, /결론/);
+});
+
+test("chat report copy preserves H1 spacing, source links, and semantic lists", () => {
+  const html = formatChatAnswerClipboardHtml(
+    [
+      "# 어닝 분석",
+      "",
+      "- [공식 출처](https://example.com/official)",
+      "- [교차 검증](https://example.com/check)",
+      "",
+      "## 개요",
+      "",
+      "- 기업명: Example Corp.",
+      "- 결과: **어닝 비트**",
+    ].join("\n"),
+  );
+
+  assert.match(html, /<h1>어닝 분석<\/h1><br>/);
+  assert.equal((html.match(/<ul>/g) || []).length, 2);
+  assert.equal((html.match(/<li>/g) || []).length, 4);
+  assert.match(html, /<a href="https:\/\/example\.com\/official">공식 출처<\/a>/);
+  assert.match(html, /<strong>어닝 비트<\/strong>/);
+  assert.doesNotMatch(html, /white-space:pre-wrap/);
+});
+
+test("chat report copy keeps Markdown tables as semantic HTML tables", () => {
+  const html = formatChatAnswerClipboardHtml(
+    "| 항목 | 값 |\n|---|---:|\n| EPS | **$6.14** |\n| NII | $25.62B |",
+  );
+  assert.match(html, /<table>/);
+  assert.equal((html.match(/<th>/g) || []).length, 2);
+  assert.equal((html.match(/<tr>/g) || []).length, 3);
+  assert.match(html, /<strong>\$6\.14<\/strong>/);
 });
 
 test("chat answer copy writes only the trimmed answer body", async () => {

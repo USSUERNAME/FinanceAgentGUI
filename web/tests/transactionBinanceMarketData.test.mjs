@@ -46,11 +46,18 @@ test("provider-qualified rows never fall back to another provider's same-symbol 
   assert.match(source, /const source = item && typeof item === "object" \? item : \{\}/);
 });
 
-test("Binance return percent and daily anchor retain Binance native semantics", () => {
+test("Binance daily return uses the completed US regular-session close instead of rolling 24 hours", () => {
   assert.match(
     source,
-    /instrument\?\.provider === "binance"\s*\? optionalNumericAmount\(item\?\.priceChangePercent \?\? item\?\.dailyReturnPercent\)/
+    /rolling24HourReturnPercent: instrument\?\.provider === "binance"\s*\? optionalNumericAmount\(item\?\.priceChangePercent\)/
   );
+  assert.match(source, /dailyReturnPercent: instrument\?\.provider === "binance"\s*\? null/);
+  assert.match(source, /fetchTransactionBinanceDailyBasis/);
+  assert.match(source, /fetchTransactionWatchlistMarketCalendar\("us", calendarDate, signal\)/);
+  assert.match(source, /source: "Binance 1분봉 미국 정규장 마감 기준가"/);
+  assert.match(source, /isBinance\s*\? null\s*:\s*previousCloseForWatchlistPrice/);
+  assert.match(source, /\{ key: "daily", label: "일간 수익률"/);
+  assert.doesNotMatch(source, /일간 \/ 24시간 수익률/);
   assert.match(source, /normalizeTransactionInstrument\(row\)\?\.provider === "binance"/);
   assert.match(source, /new Date\(parsed\)\.toISOString\(\)\.slice\(0, 10\)/);
   assert.match(source, /requestedDisplayUnit === itemUnit \|\| convertMoney\(1, itemUnit, requestedDisplayUnit, usdKrwRate\) !== null/);

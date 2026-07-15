@@ -33,6 +33,7 @@ function worldMemoryAskItemForContext(section, item = {}, extra = {}) {
       index: extra.index ?? item.index ?? "",
       text: compactWorldMemoryText(text, 1400),
       suggestion: compactWorldMemoryText(text, 520),
+      continuityId: compactWorldMemoryText(item.continuityId || item.continuity_id || "", 80),
       source: "report.view.memoryChangeSuggestions",
       decisionState: "pending-user-decision",
     };

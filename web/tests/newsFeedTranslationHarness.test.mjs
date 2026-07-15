@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  applyNewsFeedTranslationBatch,
   mergeNewsFeedItemsPreservingLatest,
   normalizeNewsFeedTranslationCandidate,
   parseFeedXml,
+  selectPendingNewsFeedTranslationBatch,
 } from "../server/newsFeedApi.mjs";
 
 test("news feed translation harness accepts Korean body without translating RSS title", () => {
@@ -165,4 +167,106 @@ test("news feed refresh merge preserves translations written during collection",
   assert.equal(merged.find((item) => item.id === "nf_same").translationStatus, "translated");
   assert.equal(merged.find((item) => item.id === "nf_same").translatedText, "주가가 상승했다.");
   assert.equal(merged.find((item) => item.id === "nf_new").translationStatus, "pending");
+});
+
+test("news feed translation commits each completed batch without touching the remaining queue", () => {
+  const first = {
+    id: "nf_first",
+    originalText: "Stocks moved higher after the inflation report.",
+    translatedText: "",
+    translatedAt: "",
+    translationStatus: "pending",
+  };
+  const second = {
+    id: "nf_second",
+    originalText: "Bond yields fell during the session.",
+    translatedText: "",
+    translatedAt: "",
+    translationStatus: "pending",
+  };
+  const untouched = {
+    id: "nf_later",
+    originalText: "Oil prices were unchanged.",
+    translatedText: "",
+    translatedAt: "",
+    translationStatus: "pending",
+  };
+
+  const applied = applyNewsFeedTranslationBatch(
+    { collector: {}, items: [first, second, untouched] },
+    [first, second],
+    {
+      translations: [
+        { id: "nf_first", bodyKo: "물가 보고서 발표 후 주가가 상승했다." },
+        { id: "nf_second", bodyKo: "장중 채권 금리가 하락했다." },
+      ],
+      model: "gpt-5.6-luna",
+      reasoning: "low",
+    },
+  );
+
+  assert.equal(applied.translatedCount, 2);
+  assert.equal(applied.retryCount, 0);
+  assert.equal(applied.store.items[0].translationStatus, "translated");
+  assert.equal(applied.store.items[1].translationStatus, "translated");
+  assert.equal(applied.store.items[2].translationStatus, "pending");
+  assert.equal(applied.store.items[2].translatedText, "");
+});
+
+test("news feed translation keeps only a missing batch result pending", () => {
+  const first = {
+    id: "nf_first",
+    originalText: "Stocks moved higher after the inflation report.",
+    translatedText: "",
+    translatedAt: "",
+    translationStatus: "pending",
+  };
+  const second = {
+    id: "nf_second",
+    originalText: "Bond yields fell during the session.",
+    translatedText: "",
+    translatedAt: "",
+    translationStatus: "pending",
+  };
+
+  const applied = applyNewsFeedTranslationBatch(
+    { collector: {}, items: [first, second] },
+    [first, second],
+    {
+      translations: [{ id: "nf_first", bodyKo: "물가 보고서 발표 후 주가가 상승했다." }],
+      model: "gpt-5.6-luna",
+      reasoning: "low",
+    },
+  );
+
+  assert.equal(applied.translatedCount, 1);
+  assert.equal(applied.retryCount, 1);
+  assert.equal(applied.store.items[0].translationStatus, "translated");
+  assert.equal(applied.store.items[1].translationStatus, "pending");
+  assert.match(applied.store.items[1].translationError, /재시도 대기열/);
+});
+
+test("news feed translation fills a batch from the newest pending items while skipping translated rows", () => {
+  const item = (id, publishedAt, translationStatus = "pending") => ({
+    id,
+    publishedAt,
+    fetchedAt: publishedAt,
+    translationStatus,
+  });
+  const items = [
+    item("nf_oldest", "2026-07-15T08:00:00.000Z"),
+    item("nf_newest", "2026-07-15T12:00:00.000Z"),
+    item("nf_already_done", "2026-07-15T11:30:00.000Z", "translated"),
+    item("nf_second", "2026-07-15T11:00:00.000Z"),
+    item("nf_also_done", "2026-07-15T10:30:00.000Z", "translated"),
+    item("nf_third", "2026-07-15T10:00:00.000Z"),
+    item("nf_older", "2026-07-15T09:00:00.000Z"),
+  ];
+
+  const batch = selectPendingNewsFeedTranslationBatch(items, 3);
+
+  assert.deepEqual(
+    batch.map((entry) => entry.id),
+    ["nf_newest", "nf_second", "nf_third"],
+  );
 });

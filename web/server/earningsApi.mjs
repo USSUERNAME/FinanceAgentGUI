@@ -17,6 +17,7 @@ const CACHE_TTL_MS = 15 * 60 * 1000;
 const EARNINGS_FETCH_TIMEOUT_MS = 45000;
 const FINALIZED_CACHE_AFTER_HOURS = 24;
 const FINALIZED_CACHE_AFTER_MS = FINALIZED_CACHE_AFTER_HOURS * 60 * 60 * 1000;
+const FETCH_CHUNK_DAYS = 1;
 const MAX_EVENTS_PER_DAY = 6;
 const MIN_DISPLAY_MARKET_CAP_USD = 1_000_000_000;
 const EXCLUDE_OVERSEAS_OTC = false;
@@ -115,7 +116,7 @@ function todayDateKeyInKorea() {
 
 function emptyEarningsStore() {
   return {
-    version: 1,
+    version: 2,
     source: "yfinance",
     timezone: "Asia/Seoul",
     retentionDays: RETENTION_DAYS,
@@ -123,6 +124,7 @@ function emptyEarningsStore() {
     lastFetch: null,
     cachePolicy: {
       finalizedAfterHours: FINALIZED_CACHE_AFTER_HOURS,
+      persistObservedEvents: true,
     },
     cachedFinalizedRanges: [],
     events: [],
@@ -134,14 +136,17 @@ function readEarningsStore() {
 
   try {
     const parsed = JSON.parse(readFileSync(EARNINGS_STORE_PATH, "utf8"));
+    const parsedVersion = Number(parsed?.version) || 1;
     return {
       ...emptyEarningsStore(),
       ...parsed,
+      version: 2,
       cachePolicy: {
         finalizedAfterHours: FINALIZED_CACHE_AFTER_HOURS,
+        persistObservedEvents: true,
         ...(parsed.cachePolicy || {}),
       },
-      cachedFinalizedRanges: Array.isArray(parsed.cachedFinalizedRanges)
+      cachedFinalizedRanges: parsedVersion >= 2 && Array.isArray(parsed.cachedFinalizedRanges)
         ? parsed.cachedFinalizedRanges.filter((range) => parseDateKey(range?.startDate) && parseDateKey(range?.endDate))
         : [],
       events: Array.isArray(parsed.events) ? parsed.events : [],
@@ -161,8 +166,7 @@ function writeEarningsStore(store) {
 function eventCacheKey(event) {
   return [
     String(event?.symbol || "").trim().toUpperCase(),
-    String(event?.eventStartUtc || event?.announcementDate || event?.dateKey || "").trim(),
-    String(event?.eventName || "").trim(),
+    String(event?.announcementDate || event?.dateKey || "").trim(),
   ].join("|");
 }
 
@@ -250,15 +254,27 @@ function mergeStoredEarnings(existingEvents, fetchedEvents, retentionStartDate) 
   return sortEarningsEvents([...merged.values()]);
 }
 
-function buildFinalizedStoreEvents(existingEvents, fetchedEvents, retentionStartDate, nowMs = Date.now(), cachedAt = new Date().toISOString()) {
-  const existingFinalizedEvents = existingEvents.filter((event) => isFinalizedEarningsEvent(event, nowMs));
-  const fetchedFinalizedEvents = fetchedEvents
-    .filter((event) => isFinalizedEarningsEvent(event, nowMs))
-    .map((event) => ({
+function buildStoredEarningsEvents(
+  existingEvents,
+  fetchedEvents,
+  retentionStartDate,
+  nowMs = Date.now(),
+  observedAt = new Date().toISOString()
+) {
+  const existingByKey = new Map(existingEvents.map((event) => [eventCacheKey(event), event]));
+  const observedEvents = fetchedEvents.map((event) => {
+    const previous = existingByKey.get(eventCacheKey(event));
+    const finalizedAt = isFinalizedEarningsEvent(event, nowMs)
+      ? previous?.cachedFinalizedAt || observedAt
+      : previous?.cachedFinalizedAt;
+    return {
       ...event,
-      cachedFinalizedAt: event.cachedFinalizedAt || cachedAt,
-    }));
-  return mergeStoredEarnings(existingFinalizedEvents, fetchedFinalizedEvents, retentionStartDate);
+      cachedObservedAt: previous?.cachedObservedAt || observedAt,
+      cachedLastSeenAt: observedAt,
+      ...(finalizedAt ? { cachedFinalizedAt: finalizedAt } : {}),
+    };
+  });
+  return mergeStoredEarnings(existingEvents, observedEvents, retentionStartDate);
 }
 
 function mergeCachedFinalizedRanges(existingRanges, nextRange) {
@@ -348,7 +364,9 @@ function earningsStoreResponse({
     warnings: [
       ...(Array.isArray(fetchPayload?.warnings) ? fetchPayload.warnings : []),
       ...(fetchPayload?.truncated
-        ? [`yfinance earnings fetch reached the ${fetchPayload.requestedLimit || MAX_LIMIT} row limit before source exhaustion.`]
+        ? [
+            `yfinance earnings fetch reached the ${fetchPayload.requestedLimit || MAX_LIMIT} row per-chunk safety limit for ${fetchPayload.truncatedChunks?.length || 1} date chunk(s).`,
+          ]
         : []),
       ...(warning ? [warning] : []),
     ],
@@ -360,7 +378,10 @@ function earningsStoreResponse({
       updatedAt: store.updatedAt || "",
       eventCount: store.events.length,
       lastFetch: store.lastFetch,
-      cachePolicy: store.cachePolicy || { finalizedAfterHours: FINALIZED_CACHE_AFTER_HOURS },
+      cachePolicy: store.cachePolicy || {
+        finalizedAfterHours: FINALIZED_CACHE_AFTER_HOURS,
+        persistObservedEvents: true,
+      },
       cachedFinalizedRanges: store.cachedFinalizedRanges || [],
     },
     displayPolicy: {
@@ -378,7 +399,7 @@ import argparse
 import json
 import math
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 for stream in (sys.stdout, sys.stderr):
@@ -495,35 +516,40 @@ def is_overseas_otc_symbol(symbol):
     return len(code) == 5 and code.isalpha() and code.endswith(("F", "Y"))
 
 try:
-    calendars = yf.Calendars(start=args.start, end=args.end)
     frames = []
     page_limit = max(1, min(args.limit, 100))
     fetched_page_count = 0
+    truncated_chunks = []
+    chunk_start = FETCH_START_DATE
 
-    for offset in range(0, args.limit, page_limit):
-        page = calendars.get_earnings_calendar(
-            start=args.start,
-            end=args.end,
-            limit=page_limit,
-            offset=offset,
-            filter_most_active=False,
-            force=args.force,
-        )
-        if page is None or page.empty:
-            break
-        if "Event Start Date" in page:
-            page_dates = pd.to_datetime(page["Event Start Date"], utc=True, errors="coerce")
-            valid_page_dates = [item.date() for item in page_dates.dropna()]
-        else:
-            valid_page_dates = []
-        if valid_page_dates and min(valid_page_dates) >= FETCH_END_DATE:
-            break
-        frames.append(page)
-        fetched_page_count += 1
-        if valid_page_dates and max(valid_page_dates) >= FETCH_END_DATE:
-            break
-        if len(page) < page_limit:
-            break
+    while chunk_start < FETCH_END_DATE:
+        chunk_end = min(chunk_start + timedelta(days=${FETCH_CHUNK_DAYS}), FETCH_END_DATE)
+        chunk_start_text = chunk_start.isoformat()
+        chunk_end_text = chunk_end.isoformat()
+        calendars = yf.Calendars(start=chunk_start_text, end=chunk_end_text)
+        chunk_truncated = False
+
+        for offset in range(0, args.limit, page_limit):
+            page = calendars.get_earnings_calendar(
+                start=chunk_start_text,
+                end=chunk_end_text,
+                limit=page_limit,
+                offset=offset,
+                filter_most_active=False,
+                force=args.force,
+            )
+            if page is None or page.empty:
+                break
+            frames.append(page)
+            fetched_page_count += 1
+            if len(page) < page_limit:
+                break
+            if offset + page_limit >= args.limit:
+                chunk_truncated = True
+
+        if chunk_truncated:
+            truncated_chunks.append({"startDate": chunk_start_text, "endDate": chunk_end_text})
+        chunk_start = chunk_end
 
     df = pd.concat(frames) if frames else None
 except Exception as exc:
@@ -549,6 +575,7 @@ if df is None or df.empty:
         "pageLimit": args.limit,
         "requestedLimit": args.limit,
         "truncated": False,
+        "truncatedChunks": [],
     }, ensure_ascii=False))
     sys.exit(0)
 
@@ -633,7 +660,9 @@ print(json.dumps({
     "fetchedPageCount": fetched_page_count,
     "pageLimit": page_limit,
     "requestedLimit": args.limit,
-    "truncated": len(records) >= args.limit,
+    "fetchChunkDays": ${FETCH_CHUNK_DAYS},
+    "truncated": bool(truncated_chunks),
+    "truncatedChunks": truncated_chunks,
 }, ensure_ascii=False))
 `;
 
@@ -814,7 +843,7 @@ export async function handleEarningsEndpoint(endpoint, req, res) {
   if (payload.ok) {
     const fetchedEvents = Array.isArray(payload.events) ? payload.events : [];
     const cachedAt = new Date().toISOString();
-    const finalizedEventsForStore = buildFinalizedStoreEvents(
+    const storedEvents = buildStoredEarningsEvents(
       storedBeforeFetch.events,
       fetchedEvents,
       retentionStartDate,
@@ -823,12 +852,12 @@ export async function handleEarningsEndpoint(endpoint, req, res) {
     );
     const nextCachedFinalizedRanges = mergeCachedFinalizedRanges(
       storedBeforeFetch.cachedFinalizedRanges,
-      requestIsFullyFinalized
+      requestIsFullyFinalized && !payload.truncated
         ? {
             startDate,
             endDate,
             cachedAt,
-            eventCount: filterEarningsEvents(finalizedEventsForStore, startDate, endDate).length,
+            eventCount: filterEarningsEvents(storedEvents, startDate, endDate).length,
           }
         : null
     );
@@ -848,17 +877,21 @@ export async function handleEarningsEndpoint(endpoint, req, res) {
         fetchedRowCount: fetchedEvents.length,
         fetchedPageCount: payload.fetchedPageCount ?? null,
         sourceTruncated: Boolean(payload.truncated),
-        finalizedCachedCount: finalizedEventsForStore.length,
+        fetchChunkDays: payload.fetchChunkDays ?? FETCH_CHUNK_DAYS,
+        truncatedChunks: Array.isArray(payload.truncatedChunks) ? payload.truncatedChunks : [],
+        finalizedCachedCount: storedEvents.filter((event) => isFinalizedEarningsEvent(event, nowMs)).length,
+        observedCachedCount: storedEvents.length,
       },
       cachePolicy: {
         finalizedAfterHours: FINALIZED_CACHE_AFTER_HOURS,
+        persistObservedEvents: true,
       },
       cachedFinalizedRanges: nextCachedFinalizedRanges,
-      events: finalizedEventsForStore,
+      events: storedEvents,
     };
     writeEarningsStore(nextStore);
 
-    const responseEvents = mergeStoredEarnings(finalizedEventsForStore, fetchedEvents, retentionStartDate);
+    const responseEvents = mergeStoredEarnings(storedEvents, fetchedEvents, retentionStartDate);
     response = {
       ...earningsStoreResponse({
         store: nextStore,
@@ -876,7 +909,8 @@ export async function handleEarningsEndpoint(endpoint, req, res) {
         hit: false,
         ttlSeconds: Math.round(CACHE_TTL_MS / 1000),
         finalizedAfterHours: FINALIZED_CACHE_AFTER_HOURS,
-        persistentFinalizedEventCount: finalizedEventsForStore.length,
+        persistentEventCount: storedEvents.length,
+        persistentFinalizedEventCount: storedEvents.filter((event) => isFinalizedEarningsEvent(event, nowMs)).length,
       },
     };
 
@@ -941,6 +975,7 @@ export async function handleEarningsEndpoint(endpoint, req, res) {
       lastFetch: null,
       cachePolicy: {
         finalizedAfterHours: FINALIZED_CACHE_AFTER_HOURS,
+        persistObservedEvents: true,
       },
       cachedFinalizedRanges: [],
     },
@@ -952,3 +987,11 @@ export async function handleEarningsEndpoint(endpoint, req, res) {
 
   sendJson(res, response, 502);
 }
+
+export const __earningsApiTestHooks = Object.freeze({
+  buildStoredEarningsEvents,
+  eventCacheKey,
+  filterEarningsEvents,
+  isFinalizedEarningsEvent,
+  mergeStoredEarnings,
+});

@@ -6,12 +6,15 @@ import {
   completeWorldMemoryReportRefreshCollectorState,
   filterWorldMemoryReportView,
   isConnectivityHttpStatus,
+  normalizeWorldMemoryGeneratedSuggestionItems,
   normalizeWorldMemorySuggestionFingerprint,
   recoverWorldMemoryCollectorStateFromArtifacts,
   shouldClearWorldMemoryConnectivityInFlight,
+  validateWorldMemorySuggestionContinuityOutput,
   worldMemorySuggestionStatusForAction,
 } from "../server/worldMemoryApi.mjs";
 import { normalizeMemoryChangeSuggestionItem, worldMemorySuggestionCanAskAgent } from "../src/worldMemory/suggestionStatus.js";
+import { buildWorldMemoryAskRequest } from "../src/worldMemory/askRequest.js";
 
 const acceptedText =
   "AI 물리 인프라 비즈니스 안에서는 `AI 전력망 병목과 데이터센터 접속 지연`을 상위 watch state로 유지하고, `PJM 운영 비상·피크 전력가격 관찰축`은 하위 관찰축으로 연결한다. 기존 `PJM 전력 공급 비상과 AI 전력망 병목 검증`은 중복 가능성이 있어 이후 supersede 또는 storyLink 정리를 검토한다.";
@@ -69,6 +72,16 @@ test("completed suggestions remove Codex follow-up while watching suggestions ke
   assert.equal(worldMemorySuggestionCanAskAgent({ text: "과거 완료", status: "handled" }), false);
 });
 
+test("world memory follow-up request preserves suggestion continuity id", () => {
+  const request = buildWorldMemoryAskRequest("memory-change", {
+    text: "orphan brief 후속 검증",
+    continuityId: "handled_orphan_brief_followup",
+    status: "watching",
+  });
+
+  assert.equal(request.focusContext.item.continuityId, "handled_orphan_brief_followup");
+});
+
 test("world memory report view keeps read-only investigation suggestions watching", () => {
   const watchingChangeSuggestions = [
     {
@@ -105,6 +118,66 @@ test("world memory report view carries watching suggestions across report regene
   assert.deepEqual(filtered.memoryChangeSuggestions, [acceptedText, other]);
   assert.equal(filtered.memoryChangeSuggestionItems[0].status, "watching");
   assert.equal(filtered.memoryChangeSuggestionItems[1].status, "open");
+});
+
+test("world memory suggestion continuity keeps only the latest LLM-classified follow-up", () => {
+  const watchingId = "handled_orphan_brief_followup";
+  const watchingText =
+    "메타데이터가 있으나 story가 없는 brief가 112건으로 전체 brief의 25.57%에 달해 경고 기준을 소폭 초과했다.";
+  const refreshedText =
+    "계속 관찰 중인 orphan brief 정리를 유지한다. 최신 집계는 story가 없는 brief 126건, 전체 brief의 25.51%다.";
+  const filtered = filterWorldMemoryReportView(
+    {
+      ...reportViewWithSuggestions([watchingText, refreshedText]),
+      memoryChangeSuggestionItems: [
+        { text: watchingText, continuityId: watchingId },
+        { text: refreshedText, continuityId: watchingId },
+      ],
+    },
+    {
+      handledChangeSuggestions: [
+        {
+          id: watchingId,
+          continuityId: watchingId,
+          text: watchingText,
+          status: "watching",
+          action: "list",
+        },
+      ],
+    }
+  );
+
+  assert.deepEqual(filtered.memoryChangeSuggestions, [refreshedText]);
+  assert.equal(filtered.memoryChangeSuggestionItems[0].continuityId, watchingId);
+  assert.equal(filtered.memoryChangeSuggestionItems[0].status, "watching");
+});
+
+test("world memory suggestion continuity harness rejects invented ids", () => {
+  const allowedId = "handled_known";
+  const normalized = normalizeWorldMemoryGeneratedSuggestionItems(
+    [
+      { text: "기존 관찰의 최신 문장", continuityId: allowedId },
+      { text: "모델이 만든 잘못된 ID", continuityId: "handled_invented" },
+    ],
+    [allowedId]
+  );
+
+  assert.equal(normalized[0].continuityId, allowedId);
+  assert.equal(normalized[1].continuityId, "");
+});
+
+test("world memory suggestion continuity harness requires an explicit LLM decision", () => {
+  const watching = [{ id: "handled_known", text: "기존 관찰", status: "watching" }];
+  const legacy = validateWorldMemorySuggestionContinuityOutput(["문자열 형식의 새 제안"], watching);
+  const missing = validateWorldMemorySuggestionContinuityOutput([{ text: "판정을 생략한 제안" }], watching);
+  const explicitNew = validateWorldMemorySuggestionContinuityOutput(
+    [{ text: "별개 제안", continuityId: "" }],
+    watching
+  );
+
+  assert.equal(legacy.ok, false);
+  assert.equal(missing.ok, false);
+  assert.equal(explicitNew.ok, true);
 });
 
 test("world memory report view marks close restatements for the same accepted target", () => {

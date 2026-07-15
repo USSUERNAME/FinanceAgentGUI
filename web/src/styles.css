@@ -2800,6 +2800,15 @@ button {
   padding-top: 8px;
 }
 
+.report-document-preamble {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  color: #3e4846;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
 .report-document-body section {
   display: grid;
   gap: 9px;
