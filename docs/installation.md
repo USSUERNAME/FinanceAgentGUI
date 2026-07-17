@@ -86,6 +86,12 @@ under `logs/`:
 - `logs/service-5173.out.log`
 - `logs/service-5173.err.log`
 
+On macOS, the LaunchAgent uses a UTF-8 Node bootstrap before changing into the
+app directory. This allows the durable service to restart when the cloned app
+path contains Korean or other non-ASCII folder names. If macOS refuses to
+reopen stale service logs with `EX_CONFIG`, the service wrapper preserves the
+old files with a timestamped suffix and retries once with fresh log files.
+
 Useful commands from `web`:
 
 ```bash

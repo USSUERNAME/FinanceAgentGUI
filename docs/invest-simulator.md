@@ -14,7 +14,9 @@ migrations, use `scripts/sqlite_store_doctor.py` and the workflow in
 ## Instrument identity
 
 Orders, trades, instrument ledger events, and reconstructed positions preserve a
-provider-qualified identity. The canonical Binance Spot example is:
+provider-qualified identity. Market type is part of that identity: Spot uses
+`binance:spot:*`, while USDⓈ-M futures use `binance:usdm:*`. The canonical
+Binance Spot example is:
 
 ```json
 {
@@ -39,6 +41,9 @@ provider-qualified identity. The canonical Binance Spot example is:
 Provider metadata takes precedence over legacy symbol heuristics. In particular,
 `BTCUSDT` with provider `binance` is a 24x7 crypto instrument and must not be
 classified as a US equity merely because the symbol starts with a letter.
+Likewise, a Binance TradFi perpetual such as `binance:usdm:NVDAUSDT` must retain
+its `BINANCE_USDM_FUTURES` venue and equity/commodity/index asset class; it must
+not be rewritten as a Spot crypto instrument.
 
 Binance Spot `USDT` quote values settle against the simulator's existing `USD`
 cash balance at `USDT = USD`. The simulator does not create a separate USDT
@@ -71,6 +76,15 @@ database with additive `ALTER TABLE ADD COLUMN` operations. Existing rows and
 payload JSON are not rewritten. When an added version 2 column is blank, replay
 may recover the corresponding provider metadata from the old row's raw payload;
 it must not invent a `TRADING` status that the saved payload did not contain.
+
+Schema version 3 preserves Binance `spot` versus `usdm` market type throughout
+orders, trades, events, and reconstructed positions. During the version 2 to 3
+migration, rows whose saved execution source proves they came from Binance
+USDⓈ-M futures but whose identity was incorrectly rewritten to `binance:spot:*`
+are repaired to `binance:usdm:*`. Because the old writer destroyed the exact
+TradFi subtype, migrated rows use the neutral `tradfi` asset class until current
+market-data metadata enriches them; new orders retain their exact asset class.
+Run this migration only through the backed-up workflow in `docs/sqlite-stores.md`.
 
 Ledger history remains append-only. The `(simulator_id, idempotency_key)` unique
 index continues to prevent duplicate events, and positions are rebuilt from

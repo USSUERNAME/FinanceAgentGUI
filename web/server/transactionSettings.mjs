@@ -197,7 +197,7 @@ function normalizeTransactionWatchlistInstrument(value) {
     instrumentId = `binance:${marketType}:${symbol}`;
     venue = marketType === "usdm" ? "BINANCE_USDM_FUTURES" : "BINANCE_SPOT";
     market = venue;
-    assetClass = assetClass || "crypto";
+    assetClass = assetClass || (marketType === "usdm" ? "tradfi" : "crypto");
     if (quoteAsset === "USDT") settlementAsset = "USD";
     sessionPolicy = "24x7";
     source = source || "binance-market-data";

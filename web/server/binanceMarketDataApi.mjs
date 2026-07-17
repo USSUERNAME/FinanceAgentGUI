@@ -808,9 +808,18 @@ async function getCandles(instrument, { interval = "1d", limit = 300, before = n
   return normalized;
 }
 
-function responseMeta(fetchedAt = Date.now()) {
+function responseSourceForInstruments(instruments = []) {
+  const sources = [...new Set(
+    (Array.isArray(instruments) ? instruments : [instruments])
+      .map((instrument) => cleanText(instrument?.source, 120))
+      .filter(Boolean)
+  )];
+  return sources.length === 1 ? sources[0] : "Binance public market data";
+}
+
+function responseMeta(fetchedAt = Date.now(), source = BINANCE_SOURCE) {
   return {
-    source: BINANCE_SOURCE,
+    source: cleanText(source, 120) || BINANCE_SOURCE,
     fetchedAt: new Date(fetchedAt || Date.now()).toISOString(),
   };
 }
@@ -911,7 +920,7 @@ export async function handleBinanceMarketDataEndpoint(kind, req, res) {
         ok: true,
         result: instrumentIds.length ? instruments : instruments[0],
         stale: catalog.stale,
-        ...responseMeta(catalog.fetchedAt),
+        ...responseMeta(catalog.fetchedAt, responseSourceForInstruments(instruments)),
       });
       return;
     }
@@ -920,7 +929,7 @@ export async function handleBinanceMarketDataEndpoint(kind, req, res) {
       const instrumentIds = cleanText(url.searchParams.get("instrumentIds"), 8000).split(",");
       const { instruments } = await resolveInstruments(instrumentIds);
       const result = await getQuotes(instruments);
-      sendJson(res, { ok: true, result, ...responseMeta() });
+      sendJson(res, { ok: true, result, ...responseMeta(undefined, responseSourceForInstruments(instruments)) });
       return;
     }
 
@@ -932,7 +941,7 @@ export async function handleBinanceMarketDataEndpoint(kind, req, res) {
         limit: url.searchParams.get("limit"),
         before: url.searchParams.get("before"),
       });
-      sendJson(res, { ok: true, result, ...result, ...responseMeta() });
+      sendJson(res, { ok: true, result, ...result, ...responseMeta(undefined, instruments[0].source) });
       return;
     }
 
@@ -951,7 +960,7 @@ export async function handleBinanceMarketDataEndpoint(kind, req, res) {
           feePolicy: execution.feePolicy,
           catalogFetchedAt: execution.catalogFetchedAt,
         },
-        ...responseMeta(),
+        ...responseMeta(undefined, execution.instrument.source),
       });
       return;
     }

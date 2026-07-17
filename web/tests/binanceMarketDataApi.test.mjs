@@ -334,8 +334,10 @@ test("CLUSDT search, quote, and candles use public USDⓈ-M routes without an AP
   assert.equal(search.body.result[0].underlyingType, "COMMODITY");
   const quotes = await invoke("quotes", "/?instrumentIds=binance%3Ausdm%3ACLUSDT");
   assert.equal(quotes.body.result[0].lastPrice, 73.59);
+  assert.equal(quotes.body.source, "Binance USDⓈ-M Futures public market data");
   const candles = await invoke("candles", "/?instrumentId=binance%3Ausdm%3ACLUSDT&interval=1m&limit=2");
   assert.equal(candles.body.result.candles[0].close, 73.59);
+  assert.equal(candles.body.source, "Binance USDⓈ-M Futures public market data");
   assert.equal(calls.some((call) => call.pathname === "/fapi/v1/ticker/24hr"), true);
   assert.equal(calls.some((call) => call.pathname === "/fapi/v1/klines"), true);
   assert.equal(calls.some((call) => Object.keys(call.headers).some((key) => key.toLowerCase() === "x-mbx-apikey")), false);

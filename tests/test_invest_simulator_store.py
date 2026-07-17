@@ -69,6 +69,24 @@ def binance_instrument_payload(**overrides):
     return payload
 
 
+def binance_usdm_instrument_payload(**overrides):
+    payload = binance_instrument_payload(
+        instrumentId="binance:usdm:NVDAUSDT",
+        venue="BINANCE_USDM_FUTURES",
+        marketType="usdm",
+        assetClass="equity",
+        symbol="NVDAUSDT",
+        displaySymbol="NVDA/USDT",
+        baseAsset="NVDA",
+        market="BINANCE_USDM_FUTURES",
+        name="NVIDIA perpetual",
+        englishName="NVIDIA perpetual",
+        source="Binance USDⓈ-M Futures public market data",
+    )
+    payload.update(overrides)
+    return payload
+
+
 class InvestSimulatorStoreTest(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -77,7 +95,7 @@ class InvestSimulatorStoreTest(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_v1_database_migrates_additively_to_v2(self):
+    def test_v1_database_migrates_additively_to_v3(self):
         conn = sqlite3.connect(STORE.DB_PATH)
         conn.executescript(V1_SCHEMA)
         conn.execute(
@@ -102,13 +120,117 @@ class InvestSimulatorStoreTest(unittest.TestCase):
 
         migrated = STORE.connect(create=False)
         try:
-            self.assertEqual(migrated.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(migrated.execute("PRAGMA user_version").fetchone()[0], 3)
             for table_name in ("simulator_ledger_events", "simulator_orders", "simulator_trades"):
                 columns = {row["name"] for row in migrated.execute(f"PRAGMA table_info({table_name})")}
                 self.assertTrue(set(STORE.INSTRUMENT_COLUMN_DEFINITIONS).issubset(columns))
             self.assertIn("symbol", {row["name"] for row in migrated.execute("PRAGMA table_info(simulator_ledger_events)")})
             self.assertEqual(migrated.execute("SELECT COUNT(*) FROM simulator_accounts").fetchone()[0], 1)
             self.assertEqual(migrated.execute("SELECT COUNT(*) FROM simulator_ledger_events").fetchone()[0], 1)
+        finally:
+            migrated.close()
+
+    def test_v2_database_repairs_legacy_usdm_rows_without_losing_history(self):
+        conn = sqlite3.connect(STORE.DB_PATH)
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA user_version = 2")
+        conn.execute(
+            "INSERT INTO simulator_accounts VALUES (?, ?, ?, ?, ?, ?, NULL)",
+            ("legacy-usdm", "USDM legacy", "KRW", "active", "2026-07-17T00:00:00Z", "2026-07-17T00:00:00Z"),
+        )
+        corrupted = binance_usdm_instrument_payload(
+            instrumentId="binance:spot:NVDAUSDT",
+            marketType="spot",
+            venue="BINANCE_SPOT",
+            market="BINANCE_SPOT",
+            assetClass="crypto",
+            quantity="0.5",
+            price="200",
+            grossAmount="100",
+            feeAmount="0",
+            feeCurrency="USD",
+        )
+        raw_json = json.dumps(corrupted, ensure_ascii=False)
+        conn.execute(
+            """
+            INSERT INTO simulator_ledger_events (
+              id, simulator_id, instrument_id, provider, venue, asset_class, symbol,
+              base_asset, quote_asset, settlement_asset, instrument_status, session_policy,
+              event_type, occurred_at, payload_json, idempotency_key, source, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "evt_usdm", "legacy-usdm", "binance:spot:NVDAUSDT", "binance", "BINANCE_SPOT", "crypto",
+                "NVDAUSDT", "NVDA", "USDT", "USD", "TRADING", "24x7", "stock_buy",
+                "2026-07-17T00:00:00Z", raw_json, "buy:legacy-usdm:nvda", "gui", "2026-07-17T00:00:00Z",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO simulator_orders (
+              id, simulator_id, instrument_id, provider, venue, asset_class,
+              base_asset, quote_asset, settlement_asset, instrument_status, session_policy,
+              side, symbol, market, quantity, currency, status, created_at, updated_at, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "ord_usdm", "legacy-usdm", "binance:spot:NVDAUSDT", "binance", "BINANCE_SPOT", "crypto",
+                "NVDA", "USDT", "USD", "TRADING", "24x7", "buy", "NVDAUSDT", "BINANCE_SPOT",
+                "0.5", "USD", "filled", "2026-07-17T00:00:00Z", "2026-07-17T00:00:00Z", raw_json,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO simulator_trades (
+              id, simulator_id, order_id, instrument_id, provider, venue, asset_class,
+              base_asset, quote_asset, settlement_asset, instrument_status, session_policy,
+              symbol, side, quantity, price, currency, fee_amount, fee_currency,
+              executed_at, ledger_event_id, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "trd_usdm", "legacy-usdm", "ord_usdm", "binance:spot:NVDAUSDT", "binance",
+                "BINANCE_SPOT", "crypto", "NVDA", "USDT", "USD", "TRADING", "24x7", "NVDAUSDT",
+                "buy", "0.5", "200", "USD", "0", "USD", "2026-07-17T00:00:00Z", "evt_usdm", raw_json,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO simulator_snapshots (
+              id, simulator_id, snapshot_at, cash_krw, cash_usd, positions_json,
+              valuation_json, source_event_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "snap_usdm", "legacy-usdm", "2026-07-17T00:00:00Z", "0", "0",
+                json.dumps([corrupted], ensure_ascii=False), "{}", "evt_usdm", "2026-07-17T00:00:00Z",
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = STORE.connect(create=False)
+        try:
+            self.assertEqual(migrated.execute("PRAGMA user_version").fetchone()[0], 3)
+            for table_name, json_column in (
+                ("simulator_ledger_events", "payload_json"),
+                ("simulator_orders", "raw_json"),
+                ("simulator_trades", "raw_json"),
+            ):
+                row = migrated.execute(
+                    f"SELECT instrument_id, venue, asset_class, {json_column} FROM {table_name}"
+                ).fetchone()
+                self.assertEqual(row["instrument_id"], "binance:usdm:NVDAUSDT")
+                self.assertEqual(row["venue"], "BINANCE_USDM_FUTURES")
+                self.assertEqual(row["asset_class"], "tradfi")
+                saved = json.loads(row[json_column])
+                self.assertEqual(saved["marketType"], "usdm")
+                self.assertEqual(saved["assetClass"], "tradfi")
+            snapshot = json.loads(
+                migrated.execute("SELECT positions_json FROM simulator_snapshots").fetchone()["positions_json"]
+            )
+            self.assertEqual(snapshot[0]["instrumentId"], "binance:usdm:NVDAUSDT")
+            self.assertEqual(STORE.positions_from_trades(migrated, "legacy-usdm")[0]["marketType"], "usdm")
         finally:
             migrated.close()
 
@@ -170,14 +292,14 @@ class InvestSimulatorStoreTest(unittest.TestCase):
 
     def test_newer_database_version_is_not_downgraded(self):
         conn = sqlite3.connect(STORE.DB_PATH)
-        conn.execute("PRAGMA user_version = 3")
+        conn.execute("PRAGMA user_version = 4")
         conn.close()
 
         with self.assertRaisesRegex(RuntimeError, "newer than supported"):
             STORE.connect(create=False)
         check = sqlite3.connect(STORE.DB_PATH)
         try:
-            self.assertEqual(check.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(check.execute("PRAGMA user_version").fetchone()[0], 4)
         finally:
             check.close()
 
@@ -251,6 +373,29 @@ class InvestSimulatorStoreTest(unittest.TestCase):
             self.assertEqual(sell_trade["raw"]["feeAssumption"], "zero-no-public-account-rate")
             self.assertEqual(sell_snapshot["items"][0]["quantity"], 0.05)
             self.assertEqual(sell_snapshot["items"][0]["instrumentId"], "binance:spot:BTCUSDT")
+        finally:
+            conn.close()
+
+    def test_binance_usdm_trade_preserves_market_type_venue_and_asset_class(self):
+        conn = STORE.connect(create=True)
+        try:
+            STORE.create_account(conn, {"id": "tradfi", "initialKrw": 0, "initialUsd": 1000})
+            snapshot, filled, order, trade = STORE.buy_stock(
+                conn,
+                binance_usdm_instrument_payload(
+                    simulatorId="tradfi",
+                    price="200",
+                    quantity="0.5",
+                    settlementAmount="100",
+                    idempotencyKey="buy:tradfi:nvda:1",
+                ),
+            )
+            self.assertTrue(filled)
+            for record in (order, trade, snapshot["items"][0]):
+                self.assertEqual(record["instrumentId"], "binance:usdm:NVDAUSDT")
+                self.assertEqual(record["marketType"], "usdm")
+                self.assertEqual(record["venue"], "BINANCE_USDM_FUTURES")
+                self.assertEqual(record["assetClass"], "equity")
         finally:
             conn.close()
 

@@ -73,26 +73,32 @@ has an explicit status:
 
 - `watching`: a read-only investigation such as `semanticSearch` completed, but
   no World Memory structure was changed. The report keeps the suggestion visible
-  with an orange eye marker and continues to offer the local agent follow-up.
+  with an orange eye marker until the next report/update selection and continues
+  to offer the local agent follow-up.
 - `completed`: an approved mutation such as `briefStoryBackfill`, `stateAdd`, or
   `storyLink` completed. The report uses a green check marker and removes the
   local-agent action button from that row.
 
 Legacy ledger records without a status are interpreted as `completed`. Completed
-rows are never rendered with strike-through text. Watching rows remain visible
-across report regeneration until a later mutation promotes the same suggestion
-to `completed`.
+rows are never rendered with strike-through text. Watching rows are temporary
+feedback that a read-only follow-up ran without a material structure change.
+During the next report or collection update, the model evaluates them under the
+same importance, timeliness, and follow-up-value criteria as every other change
+suggestion. A watching row remains visible only when the model selects it again;
+an omitted row disappears from the report and expires from the watching ledger.
 
 Each ledger record also owns a stable `continuityId`. During report generation,
-the model classifies every proposed change against the active `watching` records:
-an update to the same target, intent, and follow-up action must reuse the supplied
-ID even when counts, timestamps, or wording changed; a genuinely separate issue
-uses an explicit empty ID. When watching records exist, legacy string rows or
-object rows that omit this decision fail the report-generation harness. The
-server accepts only IDs already present in the ledger and
-coalesces repeated output for one ID to the latest sentence. This structured
-LLM-classification harness keeps follow-up observations in one visible row
-without relying on keyword or regex similarity.
+the model first decides whether each previous watching item still deserves a
+place; prior watching status never guarantees reselection. It then classifies
+every proposed change against those records: a reselected update to the same
+target, intent, and follow-up action must reuse the supplied ID even when counts,
+timestamps, or wording changed; a genuinely separate issue uses an explicit
+empty ID. When watching records exist, legacy string rows or object rows that
+omit this decision fail the report-generation harness. The server accepts only
+IDs already present in the ledger and coalesces repeated output for one ID to the
+latest sentence. This structured LLM-classification harness keeps genuinely
+continued observations in one visible row without relying on keyword or regex
+similarity.
 
 ## Collector Recovery And Connectivity
 

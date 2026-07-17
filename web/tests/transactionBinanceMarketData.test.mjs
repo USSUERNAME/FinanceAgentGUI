@@ -81,6 +81,9 @@ test("Binance simulator orders are 24x7 USD fills with an explicit zero-fee assu
   assert.match(source, /if \(hasUsdItems && !hasKrwItems\) return "USD"/);
   assert.match(source, /transactionAvailableDisplayUnit/);
   assert.match(source, /if \(itemUnits\.size === 1\) return \[\.\.\.itemUnits\]\[0\]/);
+  assert.match(source, /marketType === "usdm" \? "tradfi" : "crypto"/);
+  assert.match(source, /instrument\?\.provider === "binance" && instrument\?\.marketType === "spot"/);
+  assert.match(source, /assetClass: price\.assetClass \|\| item\.assetClass/);
 });
 
 test("Binance autocomplete and simulator filters expose accessible provider-aware controls", () => {

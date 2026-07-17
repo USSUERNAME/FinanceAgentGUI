@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -207,24 +207,80 @@ function macConfig() {
   return { launchAgentsDir, plistPath, domain, target };
 }
 
-function macPlist() {
+export function isMacLaunchConfigFailure(value) {
+  return /last exit code\s*=\s*78(?::\s*EX_CONFIG)?/i.test(String(value || ""));
+}
+
+export function preservedServiceLogPath(logPath, timestamp = Date.now()) {
+  const stamp = new Date(timestamp).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  return `${logPath}.pre-ex-config-${stamp}`;
+}
+
+function bootoutMacService(config) {
+  run("launchctl", ["bootout", config.target], { allowFailure: true });
+  run("launchctl", ["bootout", config.domain, config.plistPath], { allowFailure: true });
+}
+
+async function recoverMacLogOpenFailure(config) {
+  await sleep(750);
+  const print = run("launchctl", ["print", config.target], { allowFailure: true });
+  if (!isMacLaunchConfigFailure(outputText(print))) return false;
+
+  bootoutMacService(config);
+  const timestamp = Date.now();
+  const preserved = [];
+  for (const logPath of [outLog, errLog]) {
+    if (!existsSync(logPath)) continue;
+    const preservedPath = preservedServiceLogPath(logPath, timestamp);
+    renameSync(logPath, preservedPath);
+    preserved.push(preservedPath);
+  }
+  if (!preserved.length) return false;
+
+  console.log("macOS launchd EX_CONFIG detected; preserved stale service logs:");
+  for (const preservedPath of preserved) console.log(`- ${preservedPath}`);
+  run("launchctl", ["bootstrap", config.domain, config.plistPath]);
+  return true;
+}
+
+const MAC_VITE_BOOTSTRAP = [
+  'const { pathToFileURL } = require("node:url");',
+  "const root = process.argv[1];",
+  "const entry = process.argv[2];",
+  "const host = process.argv[3];",
+  "const port = process.argv[4];",
+  "process.chdir(root);",
+  'process.argv = [process.execPath, entry, "--host", host, "--port", port, "--strictPort"];',
+  "import(pathToFileURL(entry).href).catch((error) => {",
+  "  console.error(error);",
+  "  process.exitCode = 1;",
+  "});",
+].join(" ");
+
+export function macLaunchArguments() {
   const pathValue = process.env.PATH || "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin";
-  const args = [
+  return [
     "/usr/bin/env",
     "-i",
     `FINANCE_AGENT_GUI_HOST=${host}`,
     `FINANCE_AGENT_GUI_PORT=${port}`,
     `HOME=${homedir()}`,
     `PATH=${pathValue}`,
+    `LANG=${process.env.LANG || "en_US.UTF-8"}`,
+    `LC_CTYPE=${process.env.LC_CTYPE || "UTF-8"}`,
     "NODE_ENV=development",
     nodeBin,
+    "-e",
+    MAC_VITE_BOOTSTRAP,
+    webRoot,
     viteBin,
-    "--host",
     host,
-    "--port",
     String(port),
-    "--strictPort",
   ];
+}
+
+export function macPlist() {
+  const args = macLaunchArguments();
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -235,8 +291,6 @@ function macPlist() {
   <array>
 ${args.map((arg) => `    <string>${xmlEscape(arg)}</string>`).join("\n")}
   </array>
-  <key>WorkingDirectory</key>
-  <string>${xmlEscape(webRoot)}</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -262,22 +316,23 @@ const macHandler = {
     return config;
   },
   bootout(config) {
-    run("launchctl", ["bootout", config.target], { allowFailure: true });
-    run("launchctl", ["bootout", config.domain, config.plistPath], { allowFailure: true });
+    bootoutMacService(config);
   },
-  install() {
+  async install() {
     ensureProjectReady();
     const config = this.write();
     this.bootout(config);
     run("launchctl", ["bootstrap", config.domain, config.plistPath]);
+    await recoverMacLogOpenFailure(config);
     console.log(`installed: ${config.plistPath}`);
   },
-  start() {
+  async start() {
     ensureProjectReady();
     const config = macConfig();
     if (!existsSync(config.plistPath)) this.write();
     run("launchctl", ["bootstrap", config.domain, config.plistPath], { allowFailure: true });
     run("launchctl", ["kickstart", "-k", config.target], { allowFailure: true });
+    await recoverMacLogOpenFailure(config);
   },
   stop() {
     const config = macConfig();
@@ -289,6 +344,7 @@ const macHandler = {
     this.bootout(config);
     await waitForPortRelease();
     run("launchctl", ["bootstrap", config.domain, config.plistPath]);
+    await recoverMacLogOpenFailure(config);
   },
   uninstall() {
     const config = macConfig();
@@ -466,12 +522,12 @@ async function main() {
   switch (command) {
     case "install":
       await handler.install();
-      await waitForProbe();
+      if (!(await waitForProbe()).ok) throw new Error(`Service did not become ready at ${baseUrl}`);
       await handler.status();
       return;
     case "start":
       await handler.start();
-      await waitForProbe();
+      if (!(await waitForProbe()).ok) throw new Error(`Service did not become ready at ${baseUrl}`);
       await handler.status();
       return;
     case "stop":
@@ -481,7 +537,7 @@ async function main() {
       return;
     case "restart":
       await handler.restart();
-      await waitForProbe();
+      if (!(await waitForProbe()).ok) throw new Error(`Service did not become ready at ${baseUrl}`);
       await handler.status();
       return;
     case "status":
@@ -498,6 +554,8 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  fail(error.message);
-});
+if (resolve(process.argv[1] || "") === scriptPath) {
+  main().catch((error) => {
+    fail(error.message);
+  });
+}

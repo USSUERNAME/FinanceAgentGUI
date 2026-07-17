@@ -14,9 +14,12 @@ GUIBUILD_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = GUIBUILD_ROOT / "data" / "invest-simulator"
 DEFAULT_DB_PATH = DATA_DIR / "simulator.sqlite3"
 DB_PATH = Path(os.environ.get("FINANCE_AGENT_GUI_INVEST_SIMULATOR_DB_PATH", DEFAULT_DB_PATH))
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 INITIAL_KRW = Decimal("10000000")
 INITIAL_USD = Decimal("0")
+BINANCE_SPOT_VENUE = "BINANCE_SPOT"
+BINANCE_USDM_VENUE = "BINANCE_USDM_FUTURES"
+BINANCE_USDM_SOURCE = "Binance USDⓈ-M Futures public market data"
 
 INSTRUMENT_COLUMN_DEFINITIONS = {
     "instrument_id": "TEXT NOT NULL DEFAULT ''",
@@ -140,16 +143,36 @@ def normalize_instrument_metadata(payload):
     status = clean_instrument_status(source.get("status") or source.get("instrumentStatus"))
     session_policy = clean_session_policy(source.get("sessionPolicy") or source.get("session_policy"))
     instrument_id = clean_instrument_id(source.get("instrumentId") or source.get("instrument_id"))
+    requested_market_type = clean_text(source.get("marketType"), limit=20).lower()
+    instrument_parts = instrument_id.lower().split(":", 2)
+    instrument_market_type = (
+        instrument_parts[1]
+        if len(instrument_parts) == 3 and instrument_parts[0] == "binance" and instrument_parts[1] in {"spot", "usdm"}
+        else ""
+    )
+    market_type = (
+        "usdm"
+        if requested_market_type == "usdm"
+        or instrument_market_type == "usdm"
+        or "USDM" in venue
+        or "FUTURES" in venue
+        or "USDM" in market
+        or "FUTURES" in market
+        else "spot"
+    )
 
-    if not provider and instrument_id.lower().startswith("binance:spot:"):
+    if not provider and instrument_id.lower().startswith(("binance:spot:", "binance:usdm:")):
         provider = "binance"
 
     if provider == "binance":
-        venue = "BINANCE_SPOT"
-        market = "BINANCE_SPOT"
-        asset_class = "crypto"
+        venue = BINANCE_USDM_VENUE if market_type == "usdm" else BINANCE_SPOT_VENUE
+        market = venue
+        if market_type == "spot":
+            asset_class = "crypto"
+        elif not asset_class:
+            asset_class = "tradfi"
         if symbol:
-            instrument_id = f"binance:spot:{symbol}"
+            instrument_id = f"binance:{market_type}:{symbol}"
         if quote_asset == "USDT":
             settlement_asset = "USD"
         session_policy = "24x7"
@@ -159,10 +182,11 @@ def normalize_instrument_metadata(payload):
         display_symbol = f"{base_asset}/{quote_asset}" if base_asset and quote_asset else symbol
     source_name = clean_text(source.get("source"), limit=80)
     if not source_name and provider == "binance":
-        source_name = "binance-market-data"
+        source_name = BINANCE_USDM_SOURCE if market_type == "usdm" else "binance-market-data"
     return {
         "instrumentId": instrument_id,
         "provider": provider,
+        "marketType": market_type if provider == "binance" else "",
         "venue": venue,
         "assetClass": asset_class,
         "symbol": symbol,
@@ -178,6 +202,124 @@ def normalize_instrument_metadata(payload):
         "englishName": clean_text(source.get("englishName"), limit=120),
         "source": source_name,
     }
+
+
+def is_legacy_binance_usdm_payload(payload):
+    if not isinstance(payload, dict):
+        return False
+    provider = clean_provider(payload.get("provider"))
+    instrument_id = clean_instrument_id(payload.get("instrumentId") or payload.get("instrument_id")).lower()
+    if provider != "binance" and not instrument_id.startswith("binance:"):
+        return False
+    source_values = (
+        clean_text(payload.get("source"), limit=120),
+        clean_text(payload.get("priceSource"), limit=120),
+    )
+    return instrument_id.startswith("binance:spot:") and BINANCE_USDM_SOURCE in source_values
+
+
+def repair_legacy_binance_usdm_payload(payload, symbol=""):
+    source = dict(payload) if isinstance(payload, dict) else {}
+    clean_row_symbol = clean_symbol(symbol or source.get("symbol"))
+    if not clean_row_symbol:
+        return source
+    asset_class = clean_asset_class(source.get("assetClass") or source.get("asset_class"))
+    if not asset_class or asset_class == "crypto":
+        asset_class = "tradfi"
+    return {
+        **source,
+        "instrumentId": f"binance:usdm:{clean_row_symbol}",
+        "provider": "binance",
+        "marketType": "usdm",
+        "venue": BINANCE_USDM_VENUE,
+        "market": BINANCE_USDM_VENUE,
+        "assetClass": asset_class,
+        "symbol": clean_row_symbol,
+        "sessionPolicy": "24x7",
+    }
+
+
+def repair_legacy_binance_usdm_value(value):
+    if isinstance(value, list):
+        repaired = []
+        changed = False
+        for item in value:
+            repaired_item, item_changed = repair_legacy_binance_usdm_value(item)
+            repaired.append(repaired_item)
+            changed = changed or item_changed
+        return repaired, changed
+    if not isinstance(value, dict):
+        return value, False
+    nested = {}
+    changed = False
+    for key, item in value.items():
+        repaired_item, item_changed = repair_legacy_binance_usdm_value(item)
+        nested[key] = repaired_item
+        changed = changed or item_changed
+    if is_legacy_binance_usdm_payload(nested):
+        nested = repair_legacy_binance_usdm_payload(nested)
+        changed = True
+    return nested, changed
+
+
+def migrate_legacy_binance_usdm_identity(conn):
+    repaired_rows = 0
+    for table_name, json_column in (
+        ("simulator_ledger_events", "payload_json"),
+        ("simulator_orders", "raw_json"),
+        ("simulator_trades", "raw_json"),
+    ):
+        rows = conn.execute(
+            f"SELECT id, symbol, instrument_id, provider, {json_column} FROM {table_name}"
+        ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(row[json_column] or "{}")
+            except json.JSONDecodeError:
+                continue
+            if not is_legacy_binance_usdm_payload(payload):
+                continue
+            repaired_payload = repair_legacy_binance_usdm_payload(payload, row["symbol"])
+            metadata = normalize_instrument_metadata(repaired_payload)
+            assignments = [
+                "instrument_id = ?",
+                "provider = ?",
+                "venue = ?",
+                "asset_class = ?",
+                "base_asset = ?",
+                "quote_asset = ?",
+                "settlement_asset = ?",
+                "instrument_status = ?",
+                "session_policy = ?",
+            ]
+            values = list(instrument_db_values(metadata))
+            if table_name == "simulator_orders":
+                assignments.append("market = ?")
+                values.append(metadata["market"])
+            assignments.append(f"{json_column} = ?")
+            values.append(json.dumps(repaired_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+            values.append(row["id"])
+            conn.execute(
+                f"UPDATE {table_name} SET {', '.join(assignments)} WHERE id = ?",
+                values,
+            )
+            repaired_rows += 1
+
+    snapshot_rows = conn.execute("SELECT id, positions_json FROM simulator_snapshots").fetchall()
+    for row in snapshot_rows:
+        try:
+            positions = json.loads(row["positions_json"] or "[]")
+        except json.JSONDecodeError:
+            continue
+        repaired_positions, changed = repair_legacy_binance_usdm_value(positions)
+        if not changed:
+            continue
+        conn.execute(
+            "UPDATE simulator_snapshots SET positions_json = ? WHERE id = ?",
+            (json.dumps(repaired_positions, ensure_ascii=False, sort_keys=True, separators=(",", ":")), row["id"]),
+        )
+        repaired_rows += 1
+    return repaired_rows
 
 
 def decimal_value(value, fallback=Decimal("0")):
@@ -389,6 +531,8 @@ def init_db(conn):
               ON simulator_trades (simulator_id, instrument_id, executed_at DESC)
             """
         )
+        if current_schema_version < 3:
+            migrate_legacy_binance_usdm_identity(conn)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
@@ -496,6 +640,7 @@ def public_instrument_metadata(metadata):
     return {
         "instrumentId": metadata.get("instrumentId", ""),
         "provider": metadata.get("provider", ""),
+        "marketType": metadata.get("marketType", ""),
         "venue": metadata.get("venue", ""),
         "assetClass": metadata.get("assetClass", ""),
         "symbol": metadata.get("symbol", ""),
@@ -1039,7 +1184,7 @@ def buy_stock(conn, payload):
     if instrument["provider"] and not instrument["instrumentId"]:
         raise ValueError("instrumentId is required when provider is set")
     if instrument["provider"] == "binance" and instrument["status"] != "TRADING":
-        raise ValueError("Binance Spot instrument status must be TRADING")
+        raise ValueError("Binance instrument status must be TRADING")
     market = instrument["market"]
     market_country_value = (
         market_country(symbol, market, instrument["provider"], instrument["assetClass"])
@@ -1229,7 +1374,7 @@ def sell_stock(conn, payload):
     if instrument["provider"] and not instrument["instrumentId"]:
         raise ValueError("instrumentId is required when provider is set")
     if instrument["provider"] == "binance" and instrument["status"] != "TRADING":
-        raise ValueError("Binance Spot instrument status must be TRADING")
+        raise ValueError("Binance instrument status must be TRADING")
     market = instrument["market"]
     market_country_value = (
         market_country(symbol, market, instrument["provider"], instrument["assetClass"])

@@ -134,9 +134,10 @@ function buildNotificationUrl(config) {
   return new URL("/u/notification", config.baseUrl);
 }
 
-function likelyLoginPage(response, html) {
+export function isArcaLoginPage(response, html) {
   const finalUrl = String(response?.url || "");
-  return /\/u\/login\b/.test(finalUrl) || /name=["']password["']|login-form|로그인/i.test(String(html || ""));
+  const source = String(html || "");
+  return /\/u\/login(?:[/?#]|$)/i.test(finalUrl) || /name=["']password["']|login-form/i.test(source);
 }
 
 function firstPositiveIntegerFromSelectors(root, selectors) {
@@ -692,7 +693,7 @@ async function readNotifications() {
     };
   }
 
-  if (likelyLoginPage(response, html)) {
+  if (isArcaLoginPage(response, html)) {
     return {
       ok: true,
       config,

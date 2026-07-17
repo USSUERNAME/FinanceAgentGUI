@@ -127,4 +127,4 @@ CREATE TABLE IF NOT EXISTS simulator_snapshots (
 CREATE INDEX IF NOT EXISTS idx_simulator_snapshots_account_time
   ON simulator_snapshots (simulator_id, snapshot_at DESC);
 
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;

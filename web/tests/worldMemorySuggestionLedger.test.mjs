@@ -8,6 +8,7 @@ import {
   isConnectivityHttpStatus,
   normalizeWorldMemoryGeneratedSuggestionItems,
   normalizeWorldMemorySuggestionFingerprint,
+  reconcileWorldMemoryChangeSuggestionLedger,
   recoverWorldMemoryCollectorStateFromArtifacts,
   shouldClearWorldMemoryConnectivityInFlight,
   validateWorldMemorySuggestionContinuityOutput,
@@ -100,7 +101,7 @@ test("world memory report view keeps read-only investigation suggestions watchin
   assert.equal(filtered.memoryChangeSuggestionItems[0].status, "watching");
 });
 
-test("world memory report view carries watching suggestions across report regeneration", () => {
+test("world memory report view drops watching suggestions not reselected during regeneration", () => {
   const watchingChangeSuggestions = [
     {
       text: acceptedText,
@@ -115,9 +116,60 @@ test("world memory report view carries watching suggestions across report regene
     handledDisplayMode: "omit",
   });
 
-  assert.deepEqual(filtered.memoryChangeSuggestions, [acceptedText, other]);
-  assert.equal(filtered.memoryChangeSuggestionItems[0].status, "watching");
-  assert.equal(filtered.memoryChangeSuggestionItems[1].status, "open");
+  assert.deepEqual(filtered.memoryChangeSuggestions, [other]);
+  assert.equal(filtered.memoryChangeSuggestionItems[0].status, "open");
+});
+
+test("world memory report refresh expires watching ledger rows omitted by the model", () => {
+  const watchingId = "handled_expiring_watch";
+  const completedId = "handled_completed_change";
+  const state = {
+    changeSuggestionLedger: {
+      version: 1,
+      handled: [
+        { id: watchingId, continuityId: watchingId, text: acceptedText, status: "watching" },
+        { id: completedId, continuityId: completedId, text: "완료된 제안", status: "completed" },
+      ],
+    },
+  };
+  const reportView = filterWorldMemoryReportView(reportViewWithSuggestions(["새로운 일반 제안"]), {
+    handledChangeSuggestions: state.changeSuggestionLedger.handled,
+    handledDisplayMode: "omit",
+  });
+  const reconciled = reconcileWorldMemoryChangeSuggestionLedger(state, reportView);
+
+  assert.deepEqual(
+    reconciled.changeSuggestionLedger.handled.map((item) => item.continuityId),
+    [completedId]
+  );
+});
+
+test("world memory report refresh keeps a watching ledger row reselected by the model", () => {
+  const watchingId = "handled_reselected_watch";
+  const state = {
+    changeSuggestionLedger: {
+      version: 1,
+      handled: [
+        { id: watchingId, continuityId: watchingId, text: acceptedText, status: "watching" },
+      ],
+    },
+  };
+  const reportView = filterWorldMemoryReportView(
+    {
+      ...reportViewWithSuggestions(["새 근거로 재선정된 관찰 제안"]),
+      memoryChangeSuggestionItems: [
+        { text: "새 근거로 재선정된 관찰 제안", continuityId: watchingId },
+      ],
+    },
+    { handledChangeSuggestions: state.changeSuggestionLedger.handled }
+  );
+  const reconciled = reconcileWorldMemoryChangeSuggestionLedger(state, reportView);
+
+  assert.equal(reportView.memoryChangeSuggestionItems[0].status, "watching");
+  assert.deepEqual(
+    reconciled.changeSuggestionLedger.handled.map((item) => item.continuityId),
+    [watchingId]
+  );
 });
 
 test("world memory suggestion continuity keeps only the latest LLM-classified follow-up", () => {

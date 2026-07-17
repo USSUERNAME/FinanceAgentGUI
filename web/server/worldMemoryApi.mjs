@@ -1047,8 +1047,7 @@ function buildMemoryChangeSuggestionItems(
     .filter((item) => !(handledDisplayMode === "omit" && item.status === "completed"));
   const existingFingerprints = new Set(items.map((item) => normalizeWorldMemorySuggestionFingerprint(item.text)));
   const existingContinuityIds = new Set(items.map((item) => item.continuityId).filter(Boolean));
-  const persistentWatchingRecords = handledRecords.filter((item) => item.status === "watching");
-  const missingHandledItems = [...appendedHandledRecords, ...persistentWatchingRecords]
+  const missingHandledItems = appendedHandledRecords
     .filter((item, index, records) => records.findIndex((candidate) => candidate.fingerprint === item.fingerprint) === index)
     .filter((item) => !existingContinuityIds.has(item.continuityId))
     .filter((item) => !existingFingerprints.has(item.fingerprint))
@@ -1062,6 +1061,25 @@ function buildMemoryChangeSuggestionItems(
       action: item.action,
     }));
   return [...missingHandledItems, ...items];
+}
+
+export function reconcileWorldMemoryChangeSuggestionLedger(state, reportView) {
+  const ledger = normalizeChangeSuggestionLedger(state?.changeSuggestionLedger);
+  const selectedWatchingIds = new Set(
+    asArray(reportView?.memoryChangeSuggestionItems)
+      .filter((item) => item?.status === "watching")
+      .map((item) => normalizeWorldMemorySuggestionContinuityId(item.continuityId || item.continuity_id))
+      .filter(Boolean)
+  );
+  return {
+    ...state,
+    changeSuggestionLedger: {
+      version: 1,
+      handled: ledger.handled.filter((item) =>
+        item.status === "completed" || selectedWatchingIds.has(item.continuityId)
+      ),
+    },
+  };
 }
 
 export function filterWorldMemoryReportView(
@@ -1833,8 +1851,9 @@ function buildSituationReportPrompt({
     "보고서는 사용자가 메인 페이지에서 바로 읽는 HTML 기반 운영 보고서다. DB 경로, 명령어, 의존성 같은 기술 스탯은 쓰지 않는다.",
     "보고서 하단 제안 영역은 반드시 월드 메모리 변경 제안을 먼저 쓰고, 관찰 및 실행 제안을 그 다음에 쓴다.",
     "이미 처리/수용된 월드 메모리 변경 제안은 새 미처리 제안처럼 다시 쓰지 않는다. 동일 취지의 재표현도 피한다.",
-    "계속 관찰 중인 월드 메모리 변경 제안은 완료로 단정하거나 새 제안으로 재포장하지 말고 후속 검증 대상으로 유지한다.",
-    "각 변경 제안을 아래 계속 관찰 목록과 의미 기준으로 분류한다. 같은 문제의 수치·시점·표현만 갱신한 후속 제안이면 해당 continuityId를 정확히 재사용하고, 별개 문제면 continuityId를 빈 문자열로 둔다.",
+    "직전 처리에서 실질적인 변경 없이 관찰 표시만 된 제안도 이번 보고서의 새 근거를 기준으로 일반 제안과 같이 다시 선별한다.",
+    "이전에 관찰 표시됐다는 이유만으로 계속 유지하지 말고, 중요성·시의성·후속 행동 가치가 다른 제안과 동일한 기준을 통과할 때만 반환한다. 이번 목록에서 제외해도 된다.",
+    "각 변경 제안을 아래 이전 관찰 목록과 의미 기준으로 분류한다. 재선정한 제안이 같은 문제의 수치·시점·표현만 갱신한 후속이면 해당 continuityId를 정확히 재사용하고, 별개 문제면 continuityId를 빈 문자열로 둔다.",
     "문자열 포함 여부나 단어 겹침만으로 분류하지 말고, 제안의 대상·의도·요구되는 후속 행동이 같은지 판단한다. 같은 continuityId는 결과 배열에 한 번만 쓰고 최신 문장만 남긴다.",
     "근거가 부족하면 부족하다고 말하고, 실제 행동 제안은 감시/확인/보류처럼 검증 가능한 수준으로 제안한다.",
     "마크다운이 아니라 JSON 객체 하나만 반환한다. 설명, 코드펜스, HTML 태그는 넣지 않는다.",
@@ -1858,7 +1877,7 @@ function buildSituationReportPrompt({
         memoryChangeSuggestions: [
           {
             text: "월드 메모리 story/state/taxonomy 변경 제안",
-            continuityId: "같은 관찰 제안의 후속이면 제공된 continuityId, 새 제안이면 빈 문자열",
+            continuityId: "이번에도 재선정한 같은 관찰 제안의 후속이면 제공된 continuityId, 새 제안이면 빈 문자열",
           },
         ],
         portfolioSuggestions: ["검증 가능한 관찰/비중/헤지 제안"],
@@ -1886,7 +1905,7 @@ function buildSituationReportPrompt({
     "이미 처리된 월드 메모리 변경 제안:",
     formatHandledChangeSuggestionsForPrompt(handledChangeSuggestions, "completed"),
     "",
-    "계속 관찰 중인 월드 메모리 변경 제안:",
+    "이전 처리에서 관찰 표시된 월드 메모리 변경 제안(재선정 보장 없음):",
     formatHandledChangeSuggestionsForPrompt(handledChangeSuggestions, "watching"),
     "",
     "이번 FEED 스캔:",
@@ -2368,9 +2387,10 @@ async function refreshWorldMemoryReportSnapshot({
         model: generatedReport.model,
         reasoning: generatedReport.reasoning,
       };
+      const reconciledState = reconcileWorldMemoryChangeSuggestionLedger(state, reportView);
       return appendHistory(
         {
-          ...state,
+          ...reconciledState,
           report,
           collector: completeWorldMemoryReportRefreshCollectorState(state.collector, finishedAt),
         },
@@ -2640,9 +2660,10 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
           model: generatedReport.model,
           reasoning: generatedReport.reasoning,
         };
+        const reconciledState = reconcileWorldMemoryChangeSuggestionLedger(state, reportView);
         return appendHistory(
           {
-            ...state,
+            ...reconciledState,
             report,
             collector: completeWorldMemoryCollectionCollectorState(state.collector, {
               collectionSuccessfulAt,

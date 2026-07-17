@@ -50,7 +50,7 @@
         "scripts/invest_simulator_store.py",
         "init"
       ],
-      "schemaVersion": 2,
+      "schemaVersion": 3,
       "lazy": true,
       "rebuildable": false,
       "dataClass": "authoritative-user-state"

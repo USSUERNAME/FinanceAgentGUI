@@ -248,7 +248,9 @@ function normalizeTransactionInstrument(source = {}) {
   const instrumentId = cleanTransactionInstrumentId(item.instrumentId) || (
     provider === "binance" ? `binance:${marketType}:${symbol}` : `toss:stock:${symbol}`
   );
-  const assetClass = provider === "binance" ? "crypto" : "stock";
+  const assetClass = provider === "binance"
+    ? marketType === "usdm" ? "tradfi" : "crypto"
+    : "stock";
   const venue = String(item.venue || item.market || (provider === "binance" ? "BINANCE_SPOT" : "")).trim();
   const displaySymbol = String(item.displaySymbol || (
     provider === "binance" && item.baseAsset && item.quoteAsset
@@ -3057,6 +3059,12 @@ function transactionSimulatorItemsWithPrices(items = [], priceMap = new Map()) {
 
     return {
       ...item,
+      instrumentId: price.instrumentId || item.instrumentId,
+      provider: price.provider || item.provider,
+      marketType: price.marketType || item.marketType,
+      venue: price.venue || item.venue,
+      market: price.market || item.market,
+      assetClass: price.assetClass || item.assetClass,
       name: displayName({ ...item, ...price }),
       englishName: String(price.englishName || price.name || item.englishName || "").trim(),
       assetName: String(price.assetName || item.assetName || "").trim(),
@@ -3338,7 +3346,10 @@ function itemIsDomesticStock(item = {}) {
 }
 
 function itemIsCrypto(item = {}) {
-  return normalizeTransactionInstrument(item)?.provider === "binance" || String(item?.assetClass || "").toLowerCase() === "crypto";
+  const instrument = normalizeTransactionInstrument(item);
+  return String(instrument?.assetClass || item?.assetClass || "").toLowerCase() === "crypto" || (
+    instrument?.provider === "binance" && instrument?.marketType === "spot"
+  );
 }
 
 function transactionPerformancePeriodPrefix(items = []) {

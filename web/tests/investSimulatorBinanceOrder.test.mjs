@@ -31,6 +31,32 @@ function fakeExecution() {
   };
 }
 
+function fakeUsdmExecution() {
+  return {
+    instrument: {
+      instrumentId: "binance:usdm:NVDAUSDT",
+      provider: "binance",
+      venue: "BINANCE_USDM_FUTURES",
+      marketType: "usdm",
+      assetClass: "equity",
+      symbol: "NVDAUSDT",
+      displaySymbol: "NVDA/USDT",
+      baseAsset: "NVDA",
+      quoteAsset: "USDT",
+      nativeQuoteAsset: "USDT",
+      settlementAsset: "USD",
+      status: "TRADING",
+      sessionPolicy: "24x7",
+      market: "BINANCE_USDM_FUTURES",
+    },
+    quote: {
+      timestamp: "2026-07-17T12:00:00.000Z",
+      source: "Binance USDⓈ-M Futures public market data",
+    },
+    executionPrice: 205,
+  };
+}
+
 test("Binance simulator buy replaces client price and metadata with authoritative execution data", async () => {
   const calls = [];
   const prepared = await prepareInvestSimulatorOrderPayload(
@@ -81,6 +107,31 @@ test("Binance simulator sell keeps requested quantity while replacing the execut
   );
   assert.equal(prepared.price, 50_000);
   assert.equal(prepared.quantity, 0.003);
+});
+
+test("Binance USDⓈ-M simulator orders preserve the authoritative futures identity", async () => {
+  const calls = [];
+  const prepared = await prepareInvestSimulatorOrderPayload(
+    {
+      simulatorId: "sim-1",
+      provider: "binance",
+      instrumentId: "binance:usdm:NVDAUSDT",
+      symbol: "NVDAUSDT",
+      settlementAmount: 100,
+    },
+    "buy",
+    async (instrumentId) => {
+      calls.push(instrumentId);
+      return fakeUsdmExecution();
+    },
+  );
+
+  assert.deepEqual(calls, ["binance:usdm:NVDAUSDT"]);
+  assert.equal(prepared.instrumentId, "binance:usdm:NVDAUSDT");
+  assert.equal(prepared.marketType, "usdm");
+  assert.equal(prepared.venue, "BINANCE_USDM_FUTURES");
+  assert.equal(prepared.assetClass, "equity");
+  assert.equal(prepared.priceSource, "Binance USDⓈ-M Futures public market data");
 });
 
 test("non-Binance simulator orders keep the existing order payload", async () => {

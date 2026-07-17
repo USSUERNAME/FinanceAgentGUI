@@ -270,6 +270,15 @@ Common repair checks:
 
 - If install succeeds but the page is down, run `npm run server:service:status`
   and inspect `logs/service-5173.err.log`.
+- On macOS, the generated LaunchAgent intentionally starts from an ASCII Node
+  bootstrap instead of assigning the app folder as launchd's
+  `WorkingDirectory`. This keeps app folders with Korean or other non-ASCII
+  names restart-safe. The bootstrap clears inherited variables, restores an
+  explicit UTF-8 locale, changes directory inside Node, and then loads Vite.
+  If launchd reports `EX_CONFIG` because existing service log files can no
+  longer be reopened after a system restart, `start` and `restart` preserve
+  those files with a `.pre-ex-config-<timestamp>` suffix and retry once with
+  fresh `logs/service-5173.*` files.
 - If port `5173` is already occupied by a terminal-started server, stop the old
   process and run `npm run server:service:restart`. The service uses strict
   port binding and must report the conflict instead of silently moving to
