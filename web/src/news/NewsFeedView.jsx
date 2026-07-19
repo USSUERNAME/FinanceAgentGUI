@@ -10,6 +10,7 @@ import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
 
 import { formatDateTime } from "../utils/formatters.js";
 import { FeedSourceLabel } from "./FeedSourceLabel.jsx";
+import { newsFeedClipboardSourceUrl } from "./newsFeedClipboard.js";
 import { newsFeedFeeds, newsFeedHealthState, newsFeedStatusLabel } from "./newsFeedStatus.js";
 
 function formatNewsFeedCount(value) {
@@ -153,7 +154,7 @@ async function inlineNewsFeedClipboardImages(sourceNode, cloneNode) {
 }
 
 function addNewsFeedClipboardUrl(cloneNode, sourceUrl) {
-  const url = String(sourceUrl || "").trim();
+  const url = newsFeedClipboardSourceUrl(sourceUrl);
   if (!url) return;
   const body = cloneNode.querySelector(".news-feed-translation");
   if (!body) return;
@@ -582,12 +583,10 @@ export default function NewsFeedView({
 
         <div className="news-feed-list" aria-label="수집된 News Feed 항목">
           {items.map((item) => {
-            const bodyText =
-              item.translatedText ||
-              item.translatedTitle ||
-              item.originalText ||
-              item.title ||
-              "내용 없음";
+            const titleOnly = item.itemContentMode === "title-only";
+            const bodyText = titleOnly
+              ? item.translatedTitle || item.title || "내용 없음"
+              : item.translatedText || item.translatedTitle || item.originalText || item.title || "내용 없음";
             const originalTitle = String(item.title || "").trim();
             const originalBody = String(item.originalText || "").trim();
             const showOriginalTitle = originalTitle && originalTitle !== originalBody;

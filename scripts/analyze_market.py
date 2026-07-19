@@ -4,13 +4,13 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
-import html
 import io
 import re
 import sys
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -21,15 +21,11 @@ KST = ZoneInfo("Asia/Seoul")
 UTC = dt.timezone.utc
 TRANSLATE_API_URL = "https://translate.googleapis.com/translate_a/single"
 
-CSV_FEEDS = [
-    "https://rss.app/feeds/_8HzGbLlZYpznFQ9I.csv",
-    "https://rss.app/feeds/_hc8HiU0HyBWHfWoM.csv",
-]
-
-TELEGRAM_FEEDS = [
-    "https://t.me/s/WalterBloomberg",
-    "https://t.me/s/FinancialJuice",
-    "https://t.me/s/firstsquaw",
+RSS_FEEDS: list[tuple[str, str, int]] = [
+    ("First Squawk", "https://rss.app/feeds/d68ow40E3dkwaEvN.xml", -540),
+    ("unusual_whales", "https://rss.app/feeds/nikLNBATmLDuprRz.xml", -540),
+    ("FinancialJuice", "https://rss.app/feeds/5VaycMAa8SwPhOAP.xml", 0),
+    ("*Walter Bloomberg", "https://rss.app/feeds/YcRRdWN5eSO3o2LP.xml", 0),
 ]
 
 FRED_GRAPH_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
@@ -215,7 +211,10 @@ def _parse_datetime(value: str) -> dt.datetime | None:
     try:
         parsed = dt.datetime.fromisoformat(text)
     except ValueError:
-        return None
+        try:
+            parsed = parsedate_to_datetime(text)
+        except (TypeError, ValueError):
+            return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
@@ -315,118 +314,44 @@ def _display_news_title(item: NewsItem, limit: int, news_language: str, show_ori
     return f"{localized_short} (원문: {original})"
 
 
-def _source_from_link(link: str) -> str:
-    if not link:
-        return "Unknown"
-    host = urlparse(link).netloc.lower()
-    if "bloomberg" in host:
-        return "Bloomberg"
-    if "wsj" in host:
-        return "WSJ"
-    if "ft.com" in host:
-        return "FT"
-    if "reuters" in host:
-        return "Reuters"
-    if "t.me" in host:
-        return "Telegram"
-    if "x.com" in host or "twitter.com" in host:
-        return "X"
-    if host.startswith("www."):
-        host = host[4:]
-    return host or "Unknown"
-
-
-def _telegram_source_name(feed_url: str) -> str:
-    parts = [p for p in feed_url.rstrip("/").split("/") if p]
-    return parts[-1] if parts else "telegram"
-
-
 def _fetch_url_text(url: str, timeout: int) -> str:
     headers = {
         "User-Agent": "market-analysis-bot/1.0",
-        "Accept": "text/html,application/json,text/plain,*/*",
+        "Accept": "application/rss+xml,application/xml,text/xml,*/*",
     }
     resp = requests.get(url, headers=headers, timeout=timeout)
     resp.raise_for_status()
     return resp.text
 
 
-def fetch_csv_feed(url: str, timeout: int) -> list[NewsItem]:
+def fetch_rss_feed(
+    source_name: str,
+    url: str,
+    timeout: int,
+    published_at_offset_minutes: int = 0,
+) -> list[NewsItem]:
     rows: list[NewsItem] = []
     raw = _fetch_url_text(url, timeout=timeout)
-    reader = csv.DictReader(io.StringIO(raw))
-    for row in reader:
-        title = (row.get("Title") or "").strip()
-        link = (row.get("Link") or "").strip()
-        author = (row.get("Author") or "").strip()
-        raw_dt = (row.get("Date") or "").strip()
-        published_at = _parse_datetime(raw_dt)
+    root = ElementTree.fromstring(raw)
+    for item in root.findall("./channel/item"):
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or item.findtext("guid") or "").strip()
+        published_at = _parse_datetime(item.findtext("pubDate") or item.findtext("date") or "")
         if not title or published_at is None:
             continue
-        source = author or _source_from_link(link)
+        published_at += dt.timedelta(minutes=published_at_offset_minutes)
         rows.append(
             NewsItem(
                 title=title,
                 link=link,
-                source=source,
-                published_at=published_at,
-                feed_type="csv",
-                channel=url,
-            )
-        )
-    return rows
-
-
-def fetch_telegram_feed(url: str, timeout: int, max_messages: int = 80) -> list[NewsItem]:
-    rows: list[NewsItem] = []
-    raw = _fetch_url_text(url, timeout=timeout)
-
-    chunks = raw.split('<div class="tgme_widget_message_wrap')
-    if len(chunks) <= 1:
-        return rows
-
-    source_name = _telegram_source_name(url)
-
-    for chunk in chunks[1:]:
-        block = '<div class="tgme_widget_message_wrap' + chunk
-
-        tm = re.search(r'<time datetime="([^"]+)"', block)
-        lk = re.search(r'<a class="tgme_widget_message_date" href="([^"]+)"', block)
-        tx = re.search(
-            r'<div class="tgme_widget_message_text js-message_text" dir="auto">(.*?)</div>',
-            block,
-            flags=re.S,
-        )
-        if not tm or not tx:
-            continue
-
-        published_at = _parse_datetime(tm.group(1))
-        if published_at is None:
-            continue
-
-        message_html = tx.group(1)
-        message_html = re.sub(r"<br\s*/?>", "\n", message_html)
-        message_html = re.sub(r"<a [^>]+>(.*?)</a>", r"\1", message_html, flags=re.S)
-        message_text = re.sub(r"<[^>]+>", " ", message_html)
-        message_text = html.unescape(message_text)
-        message_text = re.sub(r"\s+", " ", message_text).strip()
-        if not message_text:
-            continue
-
-        link = lk.group(1).strip() if lk else ""
-        rows.append(
-            NewsItem(
-                title=message_text,
-                link=link,
                 source=source_name,
                 published_at=published_at,
-                feed_type="telegram",
+                feed_type="rss",
                 channel=url,
             )
         )
-
     rows.sort(key=lambda x: x.published_at, reverse=True)
-    return rows[:max_messages]
+    return rows
 
 
 def dedupe_news(items: list[NewsItem]) -> list[NewsItem]:
@@ -492,7 +417,7 @@ def score_news(item: NewsItem, now_utc: dt.datetime) -> float:
     link_low = item.link.lower()
     if "bloomberg.com" in link_low or "wsj.com" in link_low or "ft.com" in link_low:
         source_bonus += 1.2
-    if item.feed_type == "telegram":
+    if item.feed_type == "rss":
         source_bonus += 0.6
 
     relevance_bonus = min(4.0, float(item.relevance) * 0.8)
@@ -506,17 +431,18 @@ def fetch_news(timeout: int, max_items: int) -> tuple[list[NewsItem], list[str]]
     all_items: list[NewsItem] = []
     errors: list[str] = []
 
-    for feed in CSV_FEEDS:
+    for source_name, feed_url, published_at_offset_minutes in RSS_FEEDS:
         try:
-            all_items.extend(fetch_csv_feed(feed, timeout=timeout))
+            all_items.extend(
+                fetch_rss_feed(
+                    source_name,
+                    feed_url,
+                    timeout=timeout,
+                    published_at_offset_minutes=published_at_offset_minutes,
+                )
+            )
         except Exception as exc:
-            errors.append(f"CSV 피드 조회 실패: {feed} ({exc})")
-
-    for feed in TELEGRAM_FEEDS:
-        try:
-            all_items.extend(fetch_telegram_feed(feed, timeout=timeout))
-        except Exception as exc:
-            errors.append(f"텔레그램 피드 조회 실패: {feed} ({exc})")
+            errors.append(f"RSS 피드 조회 실패: {source_name} | {feed_url} ({exc})")
 
     deduped = dedupe_news(all_items)
     now_utc = dt.datetime.now(tz=UTC)

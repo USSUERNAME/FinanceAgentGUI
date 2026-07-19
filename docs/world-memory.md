@@ -113,7 +113,22 @@ connectivity probe. If the probe fails, the collector enters `offline_wait`
 rather than running FEED scans or model calls. In this state it schedules a
 lightweight retry check for 10 minutes later and keeps the collection attempt
 number stable. When a later probe succeeds, the scheduled collection continues
-automatically. For local diagnostics only, `WORLD_MEMORY_ASSUME_ONLINE=1` forces
+automatically. The FEED scan fetches First Squawk, unusual_whales,
+FinancialJuice, and *Walter Bloomberg as four independent RSS XML sources. A
+failure in one source is reported with that source name and URL while the other
+three sources continue through normalization, deduplication, and scoring. No
+Telegram fallback is used. These are the same four RSS.app sources shipped in
+the News Feed defaults; the separate Trump's Truth News Feed source is not part
+of the World Memory breaking-news scan. RSS.app currently serializes First
+Squawk and unusual_whales local publication times with a misleading `GMT`
+suffix, so both collection paths apply a source-specific `-540` minute offset.
+FinancialJuice and *Walter Bloomberg remain unshifted because their timestamps
+are already valid UTC. In News Feed, all four X/Twitter-backed RSS.app sources
+use `itemContentMode: "title-only"`: collection and translation use the RSS
+title only, and the repeated description with account/date attribution is not
+stored as the visible original body. Trump's Truth retains body translation.
+For local diagnostics only,
+`WORLD_MEMORY_ASSUME_ONLINE=1` forces
 the probe to pass and `WORLD_MEMORY_ASSUME_ONLINE=0` forces the offline path.
 The probe treats any reachable non-5xx HTTP response, including 3xx/4xx, as
 evidence of internet connectivity; it is checking network reachability, not

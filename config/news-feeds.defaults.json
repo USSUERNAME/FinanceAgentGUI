@@ -7,26 +7,32 @@
     {
       "id": "financialjuice",
       "title": "FinancialJuice",
-      "url": "https://nitter.net/financialjuice/rss",
+      "url": "https://rss.app/feeds/5VaycMAa8SwPhOAP.xml",
+      "itemContentMode": "title-only",
       "enabled": true
     },
     {
       "id": "walter-bloomberg",
       "title": "*Walter Bloomberg",
-      "url": "https://nitter.net/DeItaone/rss",
-      "enabled": false
+      "url": "https://rss.app/feeds/YcRRdWN5eSO3o2LP.xml",
+      "itemContentMode": "title-only",
+      "enabled": true
     },
     {
       "id": "first-squawk",
       "title": "First Squawk",
-      "url": "https://nitter.net/FirstSquawk/rss",
-      "enabled": false
+      "url": "https://rss.app/feeds/d68ow40E3dkwaEvN.xml",
+      "itemContentMode": "title-only",
+      "publishedAtOffsetMinutes": -540,
+      "enabled": true
     },
     {
       "id": "unusual-whales",
-      "title": "Unusual Whales",
-      "url": "https://nitter.net/unusual_whales/rss",
-      "enabled": false
+      "title": "unusual_whales",
+      "url": "https://rss.app/feeds/nikLNBATmLDuprRz.xml",
+      "itemContentMode": "title-only",
+      "publishedAtOffsetMinutes": -540,
+      "enabled": true
     }
   ]
 }

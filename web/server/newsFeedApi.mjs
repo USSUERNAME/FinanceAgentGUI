@@ -42,7 +42,7 @@ const DEFAULT_MAX_ITEMS_PER_FEED = 500;
 const TRANSLATION_TIMEOUT_MS = 60000;
 const FETCH_TIMEOUT_MS = 20000;
 const FEED_FETCH_STAGGER_WINDOW_MS = 60000;
-const TRANSLATION_BODY_MAX_CHARS = 1200;
+const TRANSLATION_TEXT_MAX_CHARS = 1200;
 const ANTIGRAVITY_PROVIDER_ID = "antigravity-cli";
 const UNICODE_REPLACEMENT_CHARACTER = "\uFFFD";
 const UNTRANSLATED_COPY_LATIN_WORDS = 2;
@@ -80,26 +80,32 @@ const fallbackConfig = {
     {
       id: "financialjuice",
       title: "FinancialJuice",
-      url: "https://nitter.net/financialjuice/rss",
+      url: "https://rss.app/feeds/5VaycMAa8SwPhOAP.xml",
+      itemContentMode: "title-only",
       enabled: true,
     },
     {
       id: "walter-bloomberg",
       title: "*Walter Bloomberg",
-      url: "https://nitter.net/DeItaone/rss",
-      enabled: false,
+      url: "https://rss.app/feeds/YcRRdWN5eSO3o2LP.xml",
+      itemContentMode: "title-only",
+      enabled: true,
     },
     {
       id: "first-squawk",
       title: "First Squawk",
-      url: "https://nitter.net/FirstSquawk/rss",
-      enabled: false,
+      url: "https://rss.app/feeds/d68ow40E3dkwaEvN.xml",
+      itemContentMode: "title-only",
+      publishedAtOffsetMinutes: -540,
+      enabled: true,
     },
     {
       id: "unusual-whales",
-      title: "Unusual Whales",
-      url: "https://nitter.net/unusual_whales/rss",
-      enabled: false,
+      title: "unusual_whales",
+      url: "https://rss.app/feeds/nikLNBATmLDuprRz.xml",
+      itemContentMode: "title-only",
+      publishedAtOffsetMinutes: -540,
+      enabled: true,
     },
   ],
 };
@@ -205,6 +211,19 @@ function parseDateIso(value) {
   return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
+function normalizePublishedAtOffsetMinutes(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(-840, Math.min(840, Math.round(numeric)));
+}
+
+function offsetDateIso(value, offsetMinutes = 0) {
+  const sourceIso = parseDateIso(value);
+  if (!sourceIso) return "";
+  const offset = normalizePublishedAtOffsetMinutes(offsetMinutes);
+  return new Date(new Date(sourceIso).getTime() + offset * 60 * 1000).toISOString();
+}
+
 function atomLinkValue(link) {
   const links = toArray(link);
   const preferred = links.find((item) => item?.rel === "alternate") || links[0];
@@ -233,6 +252,10 @@ function newsFeedItemIdentityKeys(item = {}) {
   ].filter(Boolean);
 }
 
+function normalizeItemContentMode(value) {
+  return value === "title-only" ? "title-only" : "body";
+}
+
 export function mergeNewsFeedItemsPreservingLatest(latestItems = [], refreshItems = []) {
   const merged = [];
   const seen = new Set();
@@ -253,7 +276,14 @@ export function mergeNewsFeedItemsPreservingLatest(latestItems = [], refreshItem
 function normalizeRssItem(feed, item, channelTitle) {
   const title = cleanText(item.title);
   const body = cleanText(item.description || item["content:encoded"] || item.summary || item.content);
-  const publishedAt = parseDateIso(item.pubDate || item.published || item.updated || item["dc:date"]);
+  const itemContentMode = normalizeItemContentMode(feed.itemContentMode);
+  const sourcePublishedAt = parseDateIso(
+    item.pubDate || item.published || item.updated || item["dc:date"]
+  );
+  const publishedAtOffsetMinutes = normalizePublishedAtOffsetMinutes(
+    feed.publishedAtOffsetMinutes
+  );
+  const publishedAt = offsetDateIso(sourcePublishedAt, publishedAtOffsetMinutes);
   const fingerprint = itemFingerprint(feed, item);
   if (!title && !body) return null;
   return {
@@ -263,10 +293,15 @@ function normalizeRssItem(feed, item, channelTitle) {
     feedTitle: feed.title || channelTitle || feed.id,
     sourceUrl: newsFeedItemSourceUrl(item),
     title,
-    originalText: body,
+    originalText: itemContentMode === "title-only" ? "" : body,
     translatedTitle: "",
     translatedText: "",
+    itemContentMode,
+    translationSourceField: itemContentMode === "title-only" ? "title" : "body",
+    feedSourceUrl: feed.url,
+    sourcePublishedAt,
     publishedAt,
+    publishedAtOffsetMinutes,
     fetchedAt: nowIso(),
     translatedAt: "",
     translationStatus: "pending",
@@ -326,6 +361,13 @@ function normalizeNewsFeedConfig(config = {}) {
         id,
         title: String(feed.title || id).trim() || id,
         url: String(feed.url || "").trim(),
+        itemContentMode: normalizeItemContentMode(feed.itemContentMode),
+        publishedAtOffsetMinutes: normalizePublishedAtOffsetMinutes(
+          feed.publishedAtOffsetMinutes
+        ),
+        publishedAtOffsetMigrationFetchedAfter: parseDateIso(
+          feed.publishedAtOffsetMigrationFetchedAfter
+        ),
         enabled: feed.enabled !== false,
       };
     })
@@ -369,6 +411,19 @@ function mergeNewsFeedConfig(defaultConfig, userConfig) {
     const next = { ...previous };
     if (rawFeed.title !== undefined) next.title = String(rawFeed.title || id).trim() || id;
     if (rawFeed.url !== undefined) next.url = String(rawFeed.url || "").trim();
+    if (rawFeed.itemContentMode !== undefined) {
+      next.itemContentMode = normalizeItemContentMode(rawFeed.itemContentMode);
+    }
+    if (rawFeed.publishedAtOffsetMinutes !== undefined) {
+      next.publishedAtOffsetMinutes = normalizePublishedAtOffsetMinutes(
+        rawFeed.publishedAtOffsetMinutes
+      );
+    }
+    if (rawFeed.publishedAtOffsetMigrationFetchedAfter !== undefined) {
+      next.publishedAtOffsetMigrationFetchedAfter = parseDateIso(
+        rawFeed.publishedAtOffsetMigrationFetchedAfter
+      );
+    }
     if (rawFeed.enabled !== undefined) next.enabled = rawFeed.enabled !== false;
     feedMap.set(id, next);
     if (!order.includes(id)) order.push(id);
@@ -378,6 +433,115 @@ function mergeNewsFeedConfig(defaultConfig, userConfig) {
     ...merged,
     feeds: order.map((id) => feedMap.get(id)).filter(Boolean),
   });
+}
+
+export function applyNewsFeedPublishedAtOffsets(store = {}, config = {}) {
+  const feedById = new Map(
+    toArray(config.feeds).map((feed) => [String(feed?.id || ""), feed])
+  );
+
+  const items = toArray(store.items).map((item) => {
+    const feed = feedById.get(String(item?.feedId || "")) || {};
+    const configuredOffset = normalizePublishedAtOffsetMinutes(
+      feed.publishedAtOffsetMinutes
+    );
+    const currentFeedUrl = String(feed.url || "").trim();
+    const storedFeedUrl = String(item?.feedSourceUrl || "").trim();
+    const migrationFetchedAfter = timestampMs(
+      feed.publishedAtOffsetMigrationFetchedAfter
+    );
+    const itemFetchedAt = timestampMs(item?.fetchedAt);
+    const inferredCurrentSource = Boolean(
+      !storedFeedUrl &&
+        migrationFetchedAfter &&
+        itemFetchedAt >= migrationFetchedAfter
+    );
+    const belongsToCurrentSource = Boolean(
+      configuredOffset === 0 ||
+        (storedFeedUrl && storedFeedUrl === currentFeedUrl) ||
+        inferredCurrentSource
+    );
+    const desiredOffset = belongsToCurrentSource ? configuredOffset : 0;
+    const hasAppliedOffset = Object.hasOwn(item || {}, "publishedAtOffsetMinutes");
+    const previousOffset = hasAppliedOffset
+      ? normalizePublishedAtOffsetMinutes(item.publishedAtOffsetMinutes)
+      : 0;
+    const sourcePublishedAt = parseDateIso(
+      item.sourcePublishedAt ||
+        (hasAppliedOffset
+          ? offsetDateIso(item.publishedAt, -previousOffset)
+          : item.publishedAt)
+    );
+    if (!sourcePublishedAt) return item;
+
+    const publishedAt = offsetDateIso(sourcePublishedAt, desiredOffset);
+    if (
+      item.sourcePublishedAt === sourcePublishedAt &&
+      item.publishedAt === publishedAt &&
+      previousOffset === desiredOffset &&
+      (!inferredCurrentSource || storedFeedUrl === currentFeedUrl)
+    ) {
+      return item;
+    }
+    return {
+      ...item,
+      ...(inferredCurrentSource ? { feedSourceUrl: currentFeedUrl } : {}),
+      sourcePublishedAt,
+      publishedAt,
+      publishedAtOffsetMinutes: desiredOffset,
+    };
+  });
+
+  return { ...store, items };
+}
+
+function translationSourceFieldForItem(item = {}) {
+  return normalizeItemContentMode(item.itemContentMode) === "title-only" ? "title" : "body";
+}
+
+function translationSourceText(item = {}) {
+  return compactTranslationText(
+    translationSourceFieldForItem(item) === "title" ? item.title : item.originalText
+  );
+}
+
+export function applyNewsFeedContentModes(store = {}, config = {}) {
+  const feedById = new Map(
+    toArray(config.feeds).map((feed) => [String(feed?.id || ""), feed])
+  );
+  const items = toArray(store.items).map((item) => {
+    const feed = feedById.get(String(item?.feedId || ""));
+    if (!feed) return item;
+    const desiredMode = normalizeItemContentMode(feed.itemContentMode);
+    const currentMode = normalizeItemContentMode(item.itemContentMode);
+    const sourceField = desiredMode === "title-only" ? "title" : "body";
+
+    if (desiredMode === currentMode && item.translationSourceField === sourceField) {
+      return item;
+    }
+
+    if (desiredMode === "title-only") {
+      return {
+        ...item,
+        originalText: "",
+        translatedTitle: "",
+        translatedText: "",
+        translatedAt: "",
+        translationStatus: item.title ? "pending" : "translated",
+        translationError: "",
+        itemContentMode: desiredMode,
+        translationSourceField: sourceField,
+      };
+    }
+
+    return {
+      ...item,
+      itemContentMode: desiredMode,
+      translationSourceField: sourceField,
+    };
+  });
+
+  return { ...store, items };
 }
 
 function readNewsFeedConfig() {
@@ -414,6 +578,8 @@ function publicSettingsSnapshot() {
         id: feed.id,
         title: feed.title,
         enabled: feed.enabled,
+        publishedAtOffsetMinutes: feed.publishedAtOffsetMinutes,
+        itemContentMode: feed.itemContentMode,
         lastFetchStatus: feed.enabled ? status.lastFetchStatus || "idle" : "disabled",
         lastFetchedAt: status.lastFetchedAt || "",
         lastError: feed.enabled ? status.lastError || "" : "",
@@ -739,6 +905,8 @@ function publicSnapshot({ limit = 80, offset = 0, readState = null, viewState = 
       id: feed.id,
       title: feed.title,
       enabled: feed.enabled,
+      publishedAtOffsetMinutes: feed.publishedAtOffsetMinutes,
+      itemContentMode: feed.itemContentMode,
     })),
     itemCount,
     latestItemId: latestItem?.id || "",
@@ -853,21 +1021,23 @@ function translationPrompt(items) {
   };
   const input = items.map((item) => ({
     id: item.id,
-    body: truncateForTranslation(item.originalText, TRANSLATION_BODY_MAX_CHARS),
+    sourceField: translationSourceFieldForItem(item),
+    text: truncateForTranslation(translationSourceText(item), TRANSLATION_TEXT_MAX_CHARS),
   }));
 
   return [
-    "금융 뉴스 RSS 항목의 본문을 한국어로 번역한다.",
-    "RSS title은 번역 대상이 아니다. title을 입력에 포함하지 않고, title 번역을 만들거나 반환하지 않는다.",
+    "금융 뉴스 RSS 항목의 지정된 텍스트를 한국어로 번역한다.",
+    "sourceField가 title이면 트윗 제목만, body이면 본문만 번역한다.",
     "출력은 JSON 객체 하나만 반환한다. 링크, URL, 출처 링크 문구는 절대 넣지 않는다.",
     "원문 의미를 보존하고, 시장/기업/중앙은행 용어는 한국 투자자가 읽기 자연스럽게 옮긴다.",
-    "요약하지 말고 번역한다. 본문이 비어 있으면 bodyKo는 빈 문자열로 둔다.",
+    "요약하거나 작성자·계정·게시일을 덧붙이지 말고 입력 text만 번역한다.",
+    "입력 text가 비어 있으면 textKo는 빈 문자열로 둔다.",
     "모든 입력 id에 대해 translations 항목을 정확히 하나씩 반환한다.",
-    "입력 body가 있으면 bodyKo를 비우지 않는다.",
+    "입력 text가 있으면 textKo를 비우지 않는다.",
     "영문 원문 문장을 그대로 복사하지 말고 반드시 한국어 문장으로 번역한다.",
     "",
     "반환 형식:",
-    '{"translations":[{"id":"입력 id","bodyKo":"한국어 본문"}]}',
+    '{"translations":[{"id":"입력 id","textKo":"한국어 번역"}]}',
     "",
     "입력 JSON:",
     JSON.stringify({ items: input }, null, 2),
@@ -914,24 +1084,24 @@ function hasKoreanText(value) {
 }
 
 export function normalizeNewsFeedTranslationCandidate(item = {}, translation = {}) {
-  const sourceBody = compactTranslationText(item.originalText);
-  let bodyKo = compactTranslationText(translation?.bodyKo);
+  const sourceText = translationSourceText(item);
+  const textKo = compactTranslationText(translation?.textKo);
 
   const issues = [];
-  if (sourceBody && !bodyKo) issues.push("bodyKo가 비어 있습니다");
-  if (bodyKo && hasUnicodeReplacementCharacter(bodyKo)) {
-    issues.push("bodyKo에 유니코드 대체 문자가 포함되어 있습니다");
+  if (sourceText && !textKo) issues.push("textKo가 비어 있습니다");
+  if (textKo && hasUnicodeReplacementCharacter(textKo)) {
+    issues.push("textKo에 유니코드 대체 문자가 포함되어 있습니다");
   }
-  if (sourceBody && bodyKo && likelyNeedsKoreanTranslation(sourceBody) && !hasKoreanText(bodyKo)) {
-    issues.push("bodyKo에 한국어가 없습니다");
+  if (sourceText && textKo && likelyNeedsKoreanTranslation(sourceText) && !hasKoreanText(textKo)) {
+    issues.push("textKo에 한국어가 없습니다");
   }
-  if (sourceBody && bodyKo && likelyNeedsKoreanTranslation(sourceBody) && sameTranslationText(sourceBody, bodyKo)) {
-    issues.push("bodyKo가 영문 원문과 같습니다");
+  if (sourceText && textKo && likelyNeedsKoreanTranslation(sourceText) && sameTranslationText(sourceText, textKo)) {
+    issues.push("textKo가 영문 원문과 같습니다");
   }
 
   return {
     ok: issues.length === 0,
-    bodyKo,
+    textKo,
     error: issues.length ? `번역 검증 보류: ${issues.join(", ")}` : "",
   };
 }
@@ -952,9 +1122,9 @@ function runCodexTranslationBatch(items, modelInfo) {
             additionalProperties: false,
             properties: {
               id: { type: "string" },
-              bodyKo: { type: "string" },
+              textKo: { type: "string" },
             },
-            required: ["id", "bodyKo"],
+            required: ["id", "textKo"],
           },
         },
       },
@@ -1106,10 +1276,11 @@ export function applyNewsFeedTranslationBatch(store, pendingItems, translated) {
     }
 
     translatedCount += 1;
+    const sourceField = translationSourceFieldForItem(item);
     return {
       ...item,
-      translatedTitle: "",
-      translatedText: candidate.bodyKo,
+      translatedTitle: sourceField === "title" ? candidate.textKo : "",
+      translatedText: sourceField === "body" ? candidate.textKo : "",
       translatedAt: nowIso(),
       translationStatus: "translated",
       translationError: "",
@@ -1272,7 +1443,10 @@ async function refreshNewsFeeds(reason = "manual") {
     const feedPlan = staggeredFeedPlan(enabledFeeds);
     const staggerWindowSeconds =
       feedPlan.length > 1 ? Math.round(FEED_FETCH_STAGGER_WINDOW_MS / 1000) : 0;
-    let store = readStore();
+    let store = applyNewsFeedContentModes(
+      applyNewsFeedPublishedAtOffsets(readStore(), config),
+      config
+    );
     const existingFingerprints = new Set(store.items.map((item) => item.sourceFingerprint).filter(Boolean));
     const newItems = [];
     const issues = [];
