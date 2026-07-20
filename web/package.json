@@ -1,6 +1,6 @@
 {
   "name": "finance-agent-gui-web",
-  "version": "0.7.9",
+  "version": "0.7.10",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,7 +16,8 @@
     "server:service:uninstall": "node ../scripts/local-server-service.mjs uninstall",
     "db:doctor": "python ../scripts/sqlite_store_doctor.py",
     "db:setup:plan": "python ../scripts/sqlite_store_setup.py plan --initialize-missing",
-    "release:safety": "python ../scripts/release_safety_check.py --strict"
+    "release:safety": "python ../scripts/release_safety_check.py --strict",
+    "llm:observation:audit": "node ../scripts/llm_observation_audit.mjs"
   },
   "dependencies": {
     "echarts": "^6.1.0",

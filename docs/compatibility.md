@@ -22,6 +22,52 @@ FinanceAgentGUI is a local app plus repairable source code. It should work out o
 
 Windows support for starting a fresh browser handoff is present, but recovering an already-open handoff browser after GUI server restart is still a known improvement area.
 
+## Conditional astop Observation On macOS
+
+FinanceAgentGUI can use an existing local `astop` installation as the observation
+plane for embedded agent work. This integration is macOS-only and never installs,
+starts, stops, or repairs astop automatically.
+
+- shipped policy: `config/astop-observer.defaults.json`
+- ignored local capability cache: `config/astop-observer.user.json`
+- default server: `http://127.0.0.1:9723`, overridden by `ASTOP_SERVER`
+- optional CLI override: `ASTOP_CLI_PATH`
+- default recheck interval: 72 hours
+
+The local cache keeps `installed` and `serverHealthy` separate. A confirmed CLI
+uses `installed: true`; a confirmed missing command uses `false`; an incomplete
+or failed probe uses `null`. General embedded-agent context uses astop when both
+installation and server health are `true` and `enabled` is not `false`.
+
+Token-consuming LLM processes have a stricter boundary. If `installed` is
+`true`, every Codex CLI and Antigravity CLI generation process must pass through
+`web/server/llmProcessObserver.mjs`, regardless of the general `enabled` flag.
+The launcher holds the process before model execution, registers the exact PID,
+connects a terminal wait, then releases it. It verifies and acknowledges the
+terminal event and removes the temporary watch. If the installed astop server is
+unhealthy or registration fails, the LLM does not start. This is a fail-closed
+observation failure, not a provider failure or a reason to spend tokens through
+an unobserved retry.
+
+On an unsupported platform, or when installation is `false` or `null`, the same
+LLM command runs through its original direct path with no astop procedure. astop
+is not installed or repaired automatically and is not a product prerequisite.
+The tracked inventory is `config/llm-processes.json`; run
+`npm run llm:observation:audit` from `web/` after adding or changing an LLM path.
+
+The app refreshes an expired cache at server startup or the next agent-related
+request. A manual diagnostic refresh is available through
+`GET /api/codex/settings?refreshObserver=1`. A missing or indeterminate
+installation uses the normal job runner and wait path. A confirmed installation
+with an unhealthy observer blocks only token-consuming LLM starts until astop is
+healthy again; it does not block non-LLM app features.
+
+Embedded Codex chat remains filesystem read-only. When the cached astop status is
+healthy and active, the app enables network access for that agent turn so the
+loopback observer API can be reached. It does not grant workspace-write or
+danger-full-access merely to make astop work. When astop is inactive, the original
+read-only, network-restricted sandbox remains in effect.
+
 ## Windows Runtime Policy
 
 Windows should be documented and supported in this order:

@@ -579,6 +579,7 @@ function normalizeTicker(row = {}, instrument = null) {
     priceChangePercent: finiteNumber(row.priceChangePercent),
     volume: finiteNumber(row.volume),
     quoteVolume: finiteNumber(row.quoteVolume),
+    tradeCount: finiteNumber(row.count),
     timestamp: timestampMs === null ? "" : new Date(timestampMs).toISOString(),
     timestampMs,
     source: instrument?.source || BINANCE_SOURCE,

@@ -11,6 +11,7 @@ stored locally and excluded from Git.
 
 - Install and run: [docs/installation.md](docs/installation.md)
 - Compatibility and repair notes: [docs/compatibility.md](docs/compatibility.md)
+- LLM process observation contract: [docs/llm-observation.md](docs/llm-observation.md)
 - Local SQLite install/update/repair: [docs/sqlite-stores.md](docs/sqlite-stores.md)
 - GitHub update and release privacy: [docs/update-and-release-safety.md](docs/update-and-release-safety.md)
 - Runtime agent instructions: [AGENTS.md](AGENTS.md)

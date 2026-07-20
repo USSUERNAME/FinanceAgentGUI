@@ -17,6 +17,13 @@ test("news feed clipboard also normalizes www.x.com", () => {
   );
 });
 
+test("news feed clipboard rewrites Wall St Engine item URLs to nitter.net", () => {
+  assert.equal(
+    newsFeedClipboardSourceUrl("https://x.com/wallstengine/status/2079161533012328453"),
+    "https://nitter.net/wallstengine/status/2079161533012328453",
+  );
+});
+
 test("news feed clipboard leaves non-X and invalid URLs unchanged", () => {
   assert.equal(
     newsFeedClipboardSourceUrl("https://example.com/news/market-update"),

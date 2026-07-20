@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "observer": "astop",
+  "policy": "required-when-installed",
+  "failClosedWhenInstalledObserverUnavailable": true,
+  "directExecutionWhen": ["unsupported-platform", "not-installed", "installation-indeterminate"],
+  "auditLog": "logs/llm-observation.jsonl",
+  "processes": [
+    {
+      "id": "agent-chat",
+      "providers": ["codex-cli", "antigravity-cli"],
+      "entrypoint": "web/server/codexProbe.mjs",
+      "launcher": "spawnObservedLlm"
+    },
+    {
+      "id": "world-memory-management",
+      "providers": ["codex-cli", "antigravity-cli"],
+      "entrypoint": "web/server/worldMemoryApi.mjs",
+      "launcher": "runCodexChat/runAntigravityGenerate"
+    },
+    {
+      "id": "news-feed-translation",
+      "providers": ["codex-cli", "antigravity-cli"],
+      "entrypoint": "web/server/newsFeedApi.mjs",
+      "launcher": "spawnObservedLlm/runAntigravityGenerate"
+    },
+    {
+      "id": "economic-calendar-translation",
+      "providers": ["codex-cli", "antigravity-cli"],
+      "entrypoint": "web/server/economicCalendarApi.mjs",
+      "launcher": "spawnObservedLlm/runAntigravityGenerate"
+    },
+    {
+      "id": "toss-etf-name-translation",
+      "providers": ["codex-cli", "antigravity-cli"],
+      "entrypoint": "web/server/tossEtfNameTranslation.mjs",
+      "launcher": "spawnObservedLlm/runAntigravityGenerate"
+    },
+    {
+      "id": "shared-memory-market-summary",
+      "providers": ["codex-cli", "antigravity-cli"],
+      "entrypoint": "web/server/sharedMemoryStore.mjs",
+      "launcher": "spawnSyncObservedLlm"
+    },
+    {
+      "id": "magazine-decisions-and-comments",
+      "providers": ["codex-cli", "antigravity-cli"],
+      "entrypoint": "web/server/magazineApi.mjs",
+      "launcher": "runCodexChat"
+    },
+    {
+      "id": "magazine-generation-orchestrator",
+      "providers": ["codex-cli", "antigravity-cli"],
+      "entrypoint": "web/server/magazineApi.mjs",
+      "launcher": "spawnObservedLlm"
+    },
+    {
+      "id": "magazine-agent-pass",
+      "providers": ["codex-cli", "antigravity-cli"],
+      "entrypoint": "scripts/magazine_generate_with_codex.mjs",
+      "launcher": "spawnObservedLlm"
+    }
+  ]
+}

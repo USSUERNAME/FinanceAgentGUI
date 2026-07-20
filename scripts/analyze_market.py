@@ -26,6 +26,7 @@ RSS_FEEDS: list[tuple[str, str, int]] = [
     ("unusual_whales", "https://rss.app/feeds/nikLNBATmLDuprRz.xml", -540),
     ("FinancialJuice", "https://rss.app/feeds/5VaycMAa8SwPhOAP.xml", 0),
     ("*Walter Bloomberg", "https://rss.app/feeds/YcRRdWN5eSO3o2LP.xml", 0),
+    ("Wall St Engine", "https://rss.app/feeds/Hf52VRUllNu7gABF.xml", 0),
 ]
 
 FRED_GRAPH_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"

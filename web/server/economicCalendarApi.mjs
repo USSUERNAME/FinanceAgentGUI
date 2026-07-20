@@ -10,6 +10,7 @@ import {
   selectAntigravityModelForReasoning,
 } from "../src/agent/antigravityModelSelection.js";
 import { selectCodexTranslationModel } from "../src/agent/codexTranslationModelSelection.js";
+import { spawnObservedLlm, waitForLlmObservation } from "./llmProcessObserver.mjs";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const GUIBUILD_ROOT = resolve(WEB_ROOT, "..");
@@ -592,7 +593,7 @@ function runCodexEconomicTranslationBatch(items, modelInfo) {
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const child = spawn("codex", args, {
+    const child = spawnObservedLlm("codex", args, {
       cwd: WEB_ROOT,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -600,6 +601,11 @@ function runCodexEconomicTranslationBatch(items, modelInfo) {
         ...process.env,
         NO_COLOR: "1",
       },
+    }, {
+      feature: "economic-calendar-translation",
+      provider: "codex-cli",
+      model: modelInfo.model,
+      timeoutMs: ECONOMIC_TRANSLATION_TIMEOUT_MS,
     });
 
     const timer = setTimeout(() => {
@@ -626,11 +632,12 @@ function runCodexEconomicTranslationBatch(items, modelInfo) {
       reject(error);
     });
 
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       try {
+        await waitForLlmObservation(child);
         const output = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : stdout;
         if (code !== 0) throw new Error((stderr || output || `codex exited ${code}`).trim());
         resolveBatch(parseTranslationJsonPayload(output));
@@ -649,6 +656,7 @@ async function runAntigravityEconomicTranslationBatch(items, modelInfo) {
     model: modelInfo.model,
     approval: "default",
     timeoutMs: ECONOMIC_TRANSLATION_TIMEOUT_MS,
+    observationFeature: "economic-calendar-translation",
   });
   return parseTranslationJsonPayload(result.answer);
 }

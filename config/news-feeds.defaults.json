@@ -19,6 +19,13 @@
       "enabled": true
     },
     {
+      "id": "wall-st-engine",
+      "title": "Wall St Engine",
+      "url": "https://rss.app/feeds/Hf52VRUllNu7gABF.xml",
+      "itemContentMode": "title-only",
+      "enabled": true
+    },
+    {
       "id": "first-squawk",
       "title": "First Squawk",
       "url": "https://rss.app/feeds/d68ow40E3dkwaEvN.xml",

@@ -6571,8 +6571,15 @@ function WatchlistMain({
   const hasMixedPeriods = rows.some((row) => row.provider === "binance") &&
     rows.some((row) => row.provider !== "binance");
   const averageReturnLabel = hasMixedPeriods
-    ? `주식 ${stockAverageReturn.hasValue ? formatSignedPercent(stockAverageReturn.value) : "-"} · 암호자산 ${cryptoAverageReturn.hasValue ? formatSignedPercent(cryptoAverageReturn.value) : "-"}`
+    ? `주식 ${stockAverageReturn.hasValue ? formatSignedPercent(stockAverageReturn.value) : "-"} · 암호자산 ${cryptoAverageReturn.hasValue ? formatSignedPercent(cryptoAverageReturn.value) : "-"} · 합계 ${averageDailyReturn.hasValue ? formatSignedPercent(averageDailyReturn.value) : "-"}`
     : averageDailyReturn.hasValue ? formatSignedPercent(averageDailyReturn.value) : "-";
+  const averageReturnMetrics = hasMixedPeriods
+    ? [
+        { id: "stock", label: "주식", ...stockAverageReturn },
+        { id: "crypto", label: "암호자산", ...cryptoAverageReturn },
+        { id: "total", label: "합계", ...averageDailyReturn },
+      ]
+    : [{ id: "total", label: "합계", ...averageDailyReturn }];
   const averageReturnCaption = "일간 평균 수익";
   const shouldShowBlockingError = Boolean(error && !payload);
   const SymbolOrderIcon = symbolOrderEditing ? Save : PencilLine;
@@ -6673,11 +6680,18 @@ function WatchlistMain({
             <span>{selectedGroup?.name || "관심 목록"}</span>
           </button>
         )}
-        <div>
-          <strong className={!hasMixedPeriods && averageDailyReturn.hasValue ? valueTone(averageDailyReturn.value) : ""}>
-            {averageReturnLabel}
-          </strong>
-          <em>{averageReturnCaption}</em>
+        <div className="transaction-watchlist-return-summary">
+          <span className="transaction-watchlist-return-metrics" aria-label={averageReturnLabel}>
+            {averageReturnMetrics.map((metric) => (
+              <span className="transaction-watchlist-return-metric" key={metric.id}>
+                <strong>{metric.label}</strong>
+                <em className={metric.hasValue ? valueTone(metric.value) : ""}>
+                  {metric.hasValue ? formatSignedPercent(metric.value) : "-"}
+                </em>
+              </span>
+            ))}
+          </span>
+          <em className="transaction-watchlist-return-caption">{averageReturnCaption}</em>
         </div>
       </div>
 

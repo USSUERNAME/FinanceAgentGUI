@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   applyNewsFeedContentModes,
@@ -10,6 +11,10 @@ import {
   parseFeedXml,
   selectPendingNewsFeedTranslationBatch,
 } from "../server/newsFeedApi.mjs";
+
+const defaultNewsFeedConfig = JSON.parse(
+  readFileSync(new URL("../../config/news-feeds.defaults.json", import.meta.url), "utf8"),
+);
 
 test("news feed parser applies a source-specific published-time offset", () => {
   const parsed = parseFeedXml(
@@ -97,6 +102,27 @@ test("title-only feed drops duplicate RSS body and queues the title for translat
   assert.equal(parsed.items[0].originalText, "");
   assert.equal(parsed.items[0].itemContentMode, "title-only");
   assert.equal(parsed.items[0].translationSourceField, "title");
+});
+
+test("Wall St Engine default stores and translates only the RSS title", () => {
+  const feed = defaultNewsFeedConfig.feeds.find((item) => item.id === "wall-st-engine");
+  assert.ok(feed);
+
+  const parsed = parseFeedXml(
+    `<?xml version="1.0"?><rss version="2.0"><channel><item>
+      <title>Wall St Engine market headline.</title>
+      <description>Long repeated body that must not be stored or sent to the translation model.</description>
+      <link>https://x.com/wallstengine/status/2079161533012328453</link>
+      <pubDate>Mon, 20 Jul 2026 11:08:00 GMT</pubDate>
+    </item></channel></rss>`,
+    feed,
+  );
+
+  assert.equal(feed.itemContentMode, "title-only");
+  assert.equal(parsed.items[0].title, "Wall St Engine market headline.");
+  assert.equal(parsed.items[0].originalText, "");
+  assert.equal(parsed.items[0].translationSourceField, "title");
+  assert.equal(parsed.items[0].sourceUrl, "https://x.com/wallstengine/status/2079161533012328453");
 });
 
 test("news feed content migration is one-time and requeues title-only translations", () => {

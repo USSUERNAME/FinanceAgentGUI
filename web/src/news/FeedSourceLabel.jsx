@@ -5,6 +5,7 @@ import walterBloombergIcon from "../assets/walter-bloomberg-icon.png";
 import firstSquawkIcon from "../assets/first-squawk-icon.png";
 import unusualWhalesIcon from "../assets/unusual-whales-icon.png";
 import trumpsTruthIcon from "../assets/trumps-truth-icon.png";
+import wallStEngineIcon from "../assets/wall-st-engine-icon.png";
 
 export function feedIconFor(feedId, title) {
   const key = `${feedId || ""} ${title || ""}`.toLowerCase();
@@ -17,6 +18,9 @@ export function feedIconFor(feedId, title) {
   }
   if (key.includes("unusual-whales") || key.includes("unusual whales") || key.includes("unusual_whales")) {
     return unusualWhalesIcon;
+  }
+  if (key.includes("wall-st-engine") || key.includes("wall st engine") || key.includes("wallstengine")) {
+    return wallStEngineIcon;
   }
   if (key.includes("trumps-truth") || key.includes("trump's truth") || key.includes("trumpstruth")) {
     return trumpsTruthIcon;

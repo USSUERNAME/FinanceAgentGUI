@@ -65,6 +65,16 @@ instructions should be written relative to this project folder.
 - Writes to Notion, SQLite, finance memory, automation notes, report files, credentials, or local config need dry-run or target display, user confirmation, and post-run verification.
 - If the GUI cannot perform an action yet, say so and describe the needed connection or implementation step.
 
+## astop Observation On macOS
+
+- Treat `config/astop-observer.user.json` as the app's cached macOS capability record. `installed`, `serverHealthy`, and unavailable telemetry use explicit booleans or `null`; never reinterpret `null` as `false` or zero.
+- Every token-consuming local LLM process must use `web/server/llmProcessObserver.mjs`. When `installed:true`, this rule is mandatory regardless of the general `enabled` or `useForAgentTasks` setting: hold the LLM behind a launch gate, register its exact PID, keep the terminal wait connected, verify and acknowledge its event, then remove the temporary watch. If an installed astop server cannot provide that observation, fail closed before the LLM starts.
+- When the platform is unsupported or installation is `false` or `null`, run the existing LLM command directly without an astop registration step. Never require astop installation as a product prerequisite and never manufacture a fake watch. New LLM launch sites must be added to `config/llm-processes.json` and pass `npm run llm:observation:audit`.
+- When the injected `[astop 관찰 환경]` says `useForAgentTasks` is active, apply the `astop-observer` skill to every request. Run its preflight, recover relevant pending terminal events, and take the compact agent summary even when no exact local process can be watched.
+- Register only exact, safe local process targets. Keep an event wait attached until the needed outcome, acknowledge only captured terminal events, and remove temporary watches after reporting. Use astop only to observe; never kill, restart, reprioritize, or otherwise control a process through it.
+- Keep embedded Codex filesystem access read-only in chat mode. When astop is healthy and active, allow the agent turn enough network access to reach the configured loopback observer API; do not solve observer access by granting workspace-write or danger-full-access.
+- For non-LLM agent work, missing, indeterminate, disabled, or unhealthy astop keeps the normal execution and wait path. Do not install or change an astop daemon unless the user explicitly authorizes that system change. The app refreshes stale capability state instead of asking every agent turn to probe it independently.
+
 ## Local SQLite Stores
 
 - Read `docs/sqlite-stores.md` and `config/sqlite-stores.json` before initializing, migrating, repairing, deleting, or moving any app-owned SQLite store.

@@ -17262,11 +17262,12 @@ textarea:disabled {
   justify-self: start;
   min-width: 0;
   max-width: 100%;
+  margin-bottom: 3px;
   padding: 0;
   border: 0;
   background: transparent;
   color: #334155;
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 880 !important;
   text-align: left;
   cursor: pointer;
@@ -17349,6 +17350,45 @@ textarea:disabled {
 
 .transaction-main-summary em.is-negative {
   color: #2878ff;
+}
+
+.transaction-watchlist-return-summary {
+  align-items: flex-end !important;
+  gap: 10px 18px !important;
+}
+
+.transaction-watchlist-return-metrics {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.transaction-watchlist-return-metric {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 46px;
+}
+
+.transaction-main-summary .transaction-watchlist-return-metric strong {
+  color: #334155;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.transaction-main-summary .transaction-watchlist-return-metric em {
+  font-size: 13px;
+  font-style: normal;
+  line-height: 1.2;
+}
+
+.transaction-main-summary .transaction-watchlist-return-caption {
+  font-size: 13px;
+  font-style: normal;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .transaction-simulator-search-button {

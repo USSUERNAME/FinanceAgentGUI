@@ -20,6 +20,7 @@ import {
 } from "../src/agent/antigravityModelSelection.js";
 import { selectCodexTranslationModel } from "../src/agent/codexTranslationModelSelection.js";
 import { antigravityPrintInvocation } from "./antigravityCliCompatibility.mjs";
+import { spawnSyncObservedLlm } from "./llmProcessObserver.mjs";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const GUIBUILD_ROOT = resolve(WEB_ROOT, "..");
@@ -394,7 +395,7 @@ export function runCodexJsonModel(prompt, schema, modelInfo, timeoutMs = EXTERNA
   const schemaPath = join(tempDir, "schema.json");
   try {
     writeFileSync(schemaPath, `${JSON.stringify(schema, null, 2)}\n`);
-    const result = spawnSync(
+    const result = spawnSyncObservedLlm(
       "codex",
       [
         "--ask-for-approval",
@@ -423,7 +424,13 @@ export function runCodexJsonModel(prompt, schema, modelInfo, timeoutMs = EXTERNA
         timeout: timeoutMs,
         maxBuffer: 1024 * 1024,
         env: { ...process.env, NO_COLOR: "1" },
-      }
+      },
+      {
+        feature: "shared-memory-market-summary",
+        provider: "codex-cli",
+        model: modelInfo.model,
+        timeoutMs,
+      },
     );
     if (result.error) throw result.error;
     const output = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : result.stdout;
@@ -443,7 +450,7 @@ export function runAntigravityJsonModel(prompt, modelInfo, timeoutMs = EXTERNAL_
     printTimeout: "2m",
     prompt,
   });
-  const result = spawnSync(
+  const result = spawnSyncObservedLlm(
     path,
     invocation.args,
     {
@@ -453,7 +460,13 @@ export function runAntigravityJsonModel(prompt, modelInfo, timeoutMs = EXTERNAL_
       timeout: timeoutMs,
       maxBuffer: 1024 * 1024,
       env: { ...process.env, NO_COLOR: "1" },
-    }
+    },
+    {
+      feature: "shared-memory-market-summary",
+      provider: "antigravity-cli",
+      model: modelInfo.model,
+      timeoutMs,
+    },
   );
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error((result.stderr || result.stdout || `agy exited ${result.status}`).trim());

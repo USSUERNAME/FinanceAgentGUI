@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -24,6 +23,7 @@ import {
   selectAntigravityModelForReasoning,
 } from "../src/agent/antigravityModelSelection.js";
 import { selectCodexTranslationModel } from "../src/agent/codexTranslationModelSelection.js";
+import { spawnObservedLlm, waitForLlmObservation } from "./llmProcessObserver.mjs";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const GUIBUILD_ROOT = resolve(WEB_ROOT, "..");
@@ -88,6 +88,13 @@ const fallbackConfig = {
       id: "walter-bloomberg",
       title: "*Walter Bloomberg",
       url: "https://rss.app/feeds/YcRRdWN5eSO3o2LP.xml",
+      itemContentMode: "title-only",
+      enabled: true,
+    },
+    {
+      id: "wall-st-engine",
+      title: "Wall St Engine",
+      url: "https://rss.app/feeds/Hf52VRUllNu7gABF.xml",
       itemContentMode: "title-only",
       enabled: true,
     },
@@ -1157,7 +1164,7 @@ function runCodexTranslationBatch(items, modelInfo) {
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const child = spawn("codex", args, {
+    const child = spawnObservedLlm("codex", args, {
       cwd: WEB_ROOT,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -1165,6 +1172,11 @@ function runCodexTranslationBatch(items, modelInfo) {
         ...process.env,
         NO_COLOR: "1",
       },
+    }, {
+      feature: "news-feed-translation",
+      provider: "codex-cli",
+      model: modelInfo.model,
+      timeoutMs: TRANSLATION_TIMEOUT_MS,
     });
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -1193,11 +1205,12 @@ function runCodexTranslationBatch(items, modelInfo) {
       reject(error);
     });
 
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       try {
+        await waitForLlmObservation(child);
         const output = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : stdout;
         if (code !== 0) {
           throw new Error((stderr || output || `codex exited ${code}`).trim());
@@ -1218,6 +1231,7 @@ async function runAntigravityTranslationBatch(items, modelInfo) {
     model: modelInfo.model,
     approval: "default",
     timeoutMs: TRANSLATION_TIMEOUT_MS,
+    observationFeature: "news-feed-translation",
   });
   return parseJsonPayload(result.answer);
 }

@@ -2158,6 +2158,7 @@ async function runWorldMemoryModelText({ prompt, modelPolicy, taskType }) {
       model: modelPolicy.antigravity.model,
       approval: "default",
       timeoutMs: WORLD_MEMORY_MODEL_TIMEOUT_MS,
+      observationFeature: `world-memory-${taskType || "management"}`,
     });
     return {
       answer: String(result.answer || "").trim(),
@@ -2182,6 +2183,7 @@ async function runWorldMemoryModelText({ prompt, modelPolicy, taskType }) {
       approval: "never",
       taskType,
       timeoutMs: WORLD_MEMORY_MODEL_TIMEOUT_MS,
+      observationFeature: `world-memory-${taskType || "management"}`,
     });
     return {
       answer: String(result.answer || "").trim(),

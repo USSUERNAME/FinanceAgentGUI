@@ -1,7 +1,9 @@
 import { handleEconomicCalendarEndpoint } from "./economicCalendarApi.mjs";
 import { handleEarningsEndpoint } from "./earningsApi.mjs";
+import { ensureAstopObserverStatus } from "./astopObserver.mjs";
 import { handleBinanceMarketDataEndpoint } from "./binanceMarketDataApi.mjs";
 import { handleInvestSimulatorEndpoint } from "./investSimulatorApi.mjs";
+import { recoverPendingLlmObservations } from "./llmProcessObserver.mjs";
 import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mjs";
 import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
 import { handleMemoryEndpoint, startSharedMemoryMaintenanceScheduler } from "./memoryApi.mjs";
@@ -36,6 +38,13 @@ export function codexApiPlugin() {
   return {
     name: "finance-agent-codex-api",
     configureServer(server) {
+      ensureAstopObserverStatus();
+      const llmRecovery = recoverPendingLlmObservations();
+      if (llmRecovery.recovered || llmRecovery.failed) {
+        console.log(
+          `LLM astop recovery: recovered=${llmRecovery.recovered} failed=${llmRecovery.failed} ignored=${llmRecovery.ignored}`,
+        );
+      }
       startNewsFeedCollector();
       startWorldMemoryCollector();
       startMagazineScheduler();

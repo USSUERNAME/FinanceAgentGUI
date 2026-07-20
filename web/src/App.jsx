@@ -84,6 +84,7 @@ import {
 import { formatCount, formatDateTime, formatFileSize } from "./utils/formatters.js";
 import { MarkdownText } from "./utils/MarkdownText.jsx";
 import { parseReportArtifactAction, stripReportArtifactBlocks } from "./reports/reportArtifactAction.js";
+import { loadReportMarketProxyContext } from "./reports/reportMarketProxyContext.js";
 import { AppNavigation } from "./shell/AppNavigation.jsx";
 import { compactVisibleScreenText, collectVisibleScreenSnapshot } from "./shell/screenSnapshot.js";
 import { worldMemoryActionCatalog } from "./worldMemory/actionCatalog.js";
@@ -5524,6 +5525,31 @@ function App() {
     return payload;
   }
 
+  async function classifyReportGenerationRequest({ promptText = "", messages = [], signal } = {}) {
+    const response = await fetch("/api/reports", {
+      method: "POST",
+      signal,
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        action: "classify_report_request",
+        prompt: promptText,
+        messages,
+        source: {
+          surface: "reports-sidebar-agent-preflight",
+          screen: "reports",
+          provider: agentProvider,
+          providerLabel: agentProviderLabel,
+        },
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    return payload.decision || null;
+  }
+
   async function saveChatAnswerToReports({ message, answerText } = {}) {
     const content = String(answerText || "").trim();
     if (!content) throw new Error("보고서에 저장할 답변이 없습니다.");
@@ -5665,6 +5691,7 @@ function App() {
 
     let completedAnswer = "";
     let streamedText = "";
+    let sharedAnswerForMemory = "";
     let visibleAssistantTextForCatch = (text) => text;
     let flushAssistantMessageStream = () => {};
     const abortController = new AbortController();
@@ -5682,6 +5709,52 @@ function App() {
       options.includeNewsFeedSearchContext !== undefined ? Boolean(options.includeNewsFeedSearchContext) : true;
 
     try {
+      let reportGenerationDecision = null;
+      if (screenForMessage === "reports") {
+        updateAssistantMessage(
+          assistantId,
+          {
+            status: {
+              type: "status",
+              tone: "working",
+              title: "보고서 작성 의도 확인 중",
+              body: "요청을 일반 대화와 저장할 보고서 생성으로 의미 분류하고 있습니다.",
+            },
+            text: "",
+          },
+          chatScope
+        );
+        try {
+          reportGenerationDecision = await classifyReportGenerationRequest({
+            promptText: promptTextForAgent,
+            messages: history,
+            signal: abortController.signal,
+          });
+        } catch (error) {
+          if (error?.name === "AbortError") throw error;
+          reportGenerationDecision = null;
+        }
+      }
+      const shouldDirectSaveReport = Boolean(reportGenerationDecision?.shouldGenerateDirectly);
+      let reportMarketProxyContext = null;
+      if (shouldDirectSaveReport) {
+        updateAssistantMessage(
+          assistantId,
+          {
+            status: {
+              type: "status",
+              tone: "working",
+              title: "24시간 프록시 시세 확인 중",
+              body: "주요 ETF·원자재·암호자산의 Binance 24시간 시세를 보고서 보조 데이터로 확인하고 있습니다.",
+            },
+            text: "",
+          },
+          chatScope
+        );
+        reportMarketProxyContext = await loadReportMarketProxyContext({
+          signal: abortController.signal,
+        });
+      }
       const response = await fetch("/api/codex/chat/stream", {
         method: "POST",
         signal: abortController.signal,
@@ -5711,6 +5784,8 @@ function App() {
             options.includeReportCatalog !== undefined
               ? Boolean(options.includeReportCatalog)
               : screenForMessage === "reports",
+          reportGenerationMode: shouldDirectSaveReport ? "direct-save" : "legacy-artifact",
+          reportMarketProxyContext,
           includeNewsFeedContext:
             options.includeNewsFeedContext !== undefined
               ? Boolean(options.includeNewsFeedContext)
@@ -5753,6 +5828,7 @@ function App() {
       const shouldStripWorldMemoryAction = screenForMessage === "world-memory";
       const shouldStripReportArtifactAction = screenForMessage === "reports";
       const visibleAssistantText = (text) => {
+        if (shouldDirectSaveReport) return "";
         let output = shouldStripPortfolioWidgetAction ? stripPortfolioWidgetActionBlocks(text) : text;
         if (shouldStripWorldMemoryAction) output = stripWorldMemoryActionBlocks(output);
         if (shouldStripReportArtifactAction) output = stripReportArtifactBlocks(output);
@@ -5881,36 +5957,8 @@ function App() {
       if (completedAnswer) {
         let reportArtifactSaveResult = null;
         if (screenForMessage === "reports") {
-          const reportArtifactAction = parseReportArtifactAction(completedAnswer);
-          let reportArtifactSaveError = "";
-          if (reportArtifactAction) {
-            try {
-              reportArtifactSaveResult = await saveReportArtifactAction(reportArtifactAction, {
-                screen: screenForMessage,
-                promptText: displayText,
-              });
-            } catch (error) {
-              reportArtifactSaveError = error.message || "보고서 파일 저장에 실패했습니다.";
-            }
-            updateAssistantMessage(
-              assistantId,
-              {
-                status: latestStatus,
-                text: visibleAssistantText(completedAnswer),
-                extraBlocks: [
-                  {
-                    type: "status",
-                    tone: reportArtifactSaveResult ? "done" : "error",
-                    title: reportArtifactSaveResult ? "보고서 저장됨" : "보고서 저장 실패",
-                    body: reportArtifactSaveResult
-                      ? `'${reportArtifactSaveResult.saved?.title || reportArtifactAction.artifact.title}' 보고서가 글 목록에 추가되었습니다.`
-                      : reportArtifactSaveError,
-                  },
-                ],
-              },
-              chatScope
-            );
-          } else {
+          if (shouldDirectSaveReport) {
+            const reportMarkdown = stripReportArtifactBlocks(completedAnswer).trim();
             try {
               updateAssistantMessage(
                 assistantId,
@@ -5918,47 +5966,70 @@ function App() {
                   status: {
                     type: "status",
                     tone: "working",
-                    title: "보고서 저장 여부 확인 중",
-                    body: "저장 액션이 누락되어 요청 의도와 완성도를 의미 기반으로 다시 확인하고 있습니다.",
+                    title: "보고서 완결성 확인 중",
+                    body: "생성된 Markdown 전문을 의미 검증한 뒤 글 목록에 저장합니다.",
                   },
-                  text: visibleAssistantText(completedAnswer),
+                  text: "",
                 },
                 chatScope
               );
               const recovery = await recoverMissingReportArtifact({
                 promptText: promptTextForAgent,
-                answerText: visibleAssistantText(completedAnswer),
+                answerText: reportMarkdown,
               });
-              if (recovery.recovered && recovery.saved) {
-                reportArtifactSaveResult = recovery;
-                updateAssistantMessage(
-                  assistantId,
-                  {
-                    status: latestStatus,
-                    text: visibleAssistantText(completedAnswer),
-                    extraBlocks: [
-                      {
-                        type: "status",
-                        tone: "done",
-                        title: "보고서 저장됨",
-                        body: `'${recovery.saved.title}' 보고서가 글 목록에 추가되었습니다.`,
-                      },
-                    ],
-                  },
-                  chatScope
-                );
-              } else {
-                updateAssistantMessage(
-                  assistantId,
-                  {
-                    status: latestStatus,
-                    text: visibleAssistantText(completedAnswer),
-                  },
-                  chatScope
-                );
+              if (!recovery.recovered || !recovery.saved) {
+                throw new Error(recovery.decision?.reason || "완성된 보고서로 확인되지 않아 저장을 보류했습니다.");
               }
+              reportArtifactSaveResult = recovery;
+              sharedAnswerForMemory = `'${recovery.saved.title}' 보고서를 글 목록에 저장했습니다.`;
+              updateAssistantMessage(
+                assistantId,
+                {
+                  status: latestStatus,
+                  text: "",
+                  extraBlocks: [
+                    {
+                      type: "status",
+                      tone: "done",
+                      title: "보고서 저장됨",
+                      body: `'${recovery.saved.title}' 보고서가 글 목록에 추가되었습니다.`,
+                    },
+                  ],
+                },
+                chatScope
+              );
             } catch (error) {
-              reportArtifactSaveError = error.message || "보고서 저장 의도 재확인에 실패했습니다.";
+              const saveError = error.message || "보고서 파일 저장에 실패했습니다.";
+              sharedAnswerForMemory = reportMarkdown || saveError;
+              updateAssistantMessage(
+                assistantId,
+                {
+                  status: latestStatus,
+                  text: reportMarkdown,
+                  extraBlocks: [
+                    {
+                      type: "status",
+                      tone: "error",
+                      title: "보고서 저장 실패",
+                      body: saveError,
+                    },
+                  ],
+                },
+                chatScope
+              );
+            }
+          } else {
+            const reportArtifactAction = parseReportArtifactAction(completedAnswer);
+            let reportArtifactSaveError = "";
+            if (reportArtifactAction) {
+              try {
+                reportArtifactSaveResult = await saveReportArtifactAction(reportArtifactAction, {
+                  screen: screenForMessage,
+                  promptText: displayText,
+                });
+              } catch (error) {
+                reportArtifactSaveError = error.message || "보고서 파일 저장에 실패했습니다.";
+              }
               updateAssistantMessage(
                 assistantId,
                 {
@@ -5967,14 +6038,82 @@ function App() {
                   extraBlocks: [
                     {
                       type: "status",
-                      tone: "error",
-                      title: "보고서 저장 확인 실패",
-                      body: reportArtifactSaveError,
+                      tone: reportArtifactSaveResult ? "done" : "error",
+                      title: reportArtifactSaveResult ? "보고서 저장됨" : "보고서 저장 실패",
+                      body: reportArtifactSaveResult
+                        ? `'${reportArtifactSaveResult.saved?.title || reportArtifactAction.artifact.title}' 보고서가 글 목록에 추가되었습니다.`
+                        : reportArtifactSaveError,
                     },
                   ],
                 },
                 chatScope
               );
+            } else {
+              try {
+                updateAssistantMessage(
+                  assistantId,
+                  {
+                    status: {
+                      type: "status",
+                      tone: "working",
+                      title: "보고서 저장 여부 확인 중",
+                      body: "저장 액션이 누락되어 요청 의도와 완성도를 의미 기반으로 다시 확인하고 있습니다.",
+                    },
+                    text: visibleAssistantText(completedAnswer),
+                  },
+                  chatScope
+                );
+                const recovery = await recoverMissingReportArtifact({
+                  promptText: promptTextForAgent,
+                  answerText: visibleAssistantText(completedAnswer),
+                });
+                if (recovery.recovered && recovery.saved) {
+                  reportArtifactSaveResult = recovery;
+                  updateAssistantMessage(
+                    assistantId,
+                    {
+                      status: latestStatus,
+                      text: visibleAssistantText(completedAnswer),
+                      extraBlocks: [
+                        {
+                          type: "status",
+                          tone: "done",
+                          title: "보고서 저장됨",
+                          body: `'${recovery.saved.title}' 보고서가 글 목록에 추가되었습니다.`,
+                        },
+                      ],
+                    },
+                    chatScope
+                  );
+                } else {
+                  updateAssistantMessage(
+                    assistantId,
+                    {
+                      status: latestStatus,
+                      text: visibleAssistantText(completedAnswer),
+                    },
+                    chatScope
+                  );
+                }
+              } catch (error) {
+                reportArtifactSaveError = error.message || "보고서 저장 의도 재확인에 실패했습니다.";
+                updateAssistantMessage(
+                  assistantId,
+                  {
+                    status: latestStatus,
+                    text: visibleAssistantText(completedAnswer),
+                    extraBlocks: [
+                      {
+                        type: "status",
+                        tone: "error",
+                        title: "보고서 저장 확인 실패",
+                        body: reportArtifactSaveError,
+                      },
+                    ],
+                  },
+                  chatScope
+                );
+              }
             }
           }
         }
@@ -6008,7 +6147,8 @@ function App() {
         await saveSharedChatMemory({
           createdAt,
           promptText: displayText,
-          answerText: visibleAssistantText(completedAnswer) || "에이전트 액션을 생성했습니다.",
+          answerText:
+            sharedAnswerForMemory || visibleAssistantText(completedAnswer) || "에이전트 액션을 생성했습니다.",
           article: articleForMessage,
           attachments: attachmentsForMessage,
           screen: screenForMessage,

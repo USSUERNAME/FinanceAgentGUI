@@ -4,6 +4,8 @@ import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { handleArcaEndpoint } from "./arcaApi.mjs";
 import { handleArcaAuthEndpoint } from "./arcaAuthApi.mjs";
+import { ensureAstopObserverStatus } from "./astopObserver.mjs";
+import { recoverPendingLlmObservations } from "./llmProcessObserver.mjs";
 import { handleBinanceMarketDataEndpoint } from "./binanceMarketDataApi.mjs";
 import { handleEconomicCalendarEndpoint } from "./economicCalendarApi.mjs";
 import { handleEarningsEndpoint } from "./earningsApi.mjs";
@@ -519,6 +521,13 @@ const server = createServer(async (req, res) => {
 server.listen(port, host, () => {
   console.log(`FinanceAgentGUI web server listening on http://${host}:${port}/`);
   setTimeout(() => {
+    ensureAstopObserverStatus();
+    const llmRecovery = recoverPendingLlmObservations();
+    if (llmRecovery.recovered || llmRecovery.failed) {
+      console.log(
+        `LLM astop recovery: recovered=${llmRecovery.recovered} failed=${llmRecovery.failed} ignored=${llmRecovery.ignored}`,
+      );
+    }
     startNewsFeedCollector();
     startWorldMemoryCollector();
     startMagazineScheduler();

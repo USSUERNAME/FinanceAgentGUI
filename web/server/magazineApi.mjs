@@ -5,6 +5,7 @@ import { readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCodexOptions, runCodexChat, sendJson } from "./codexProbe.mjs";
+import { spawnObservedLlm, waitForLlmObservation } from "./llmProcessObserver.mjs";
 import {
   isMagazineEnabled,
   publicMagazineSettingsSnapshot,
@@ -1233,6 +1234,7 @@ async function classifyMagazineCommentBias({ body, article, comments, commentTex
       },
       includeNewsFeedSearchContext: false,
       requireWebSearch: false,
+      observationFeature: "magazine-comment-bias-classifier",
     });
     return normalizeClassifierBiasEvents(parseJsonObjectFromText(result.answer || ""));
   } catch {
@@ -2367,6 +2369,7 @@ async function decideScheduledMagazineArticleCount({ scheduledAt = "", topicDisc
       includeNewsFeedContext: false,
       includeNewsFeedSearchContext: false,
       requireWebSearch: false,
+      observationFeature: "magazine-article-count-decision",
     });
     const decision = normalizeMagazineArticleCountDecision(parseJsonObjectFromText(result.answer || ""), {
       maxCount,
@@ -2431,7 +2434,7 @@ function runMagazineGenerator(body = {}, action = "generateWithCodex") {
 
   return new Promise((resolveGenerator, reject) => {
     const startedAt = Date.now();
-    const child = spawn(process.execPath, args, {
+    const child = spawnObservedLlm(process.execPath, args, {
       cwd: GUIBUILD_ROOT,
       env: {
         ...process.env,
@@ -2440,6 +2443,11 @@ function runMagazineGenerator(body = {}, action = "generateWithCodex") {
         MAGAZINE_LOCKED_TOPIC_JSON: lockedTopic ? JSON.stringify(lockedTopic) : "",
       },
       stdio: ["ignore", "pipe", "pipe"],
+    }, {
+      feature: "magazine-generation-orchestrator",
+      provider,
+      model,
+      timeoutMs: MAGAZINE_GENERATION_TIMEOUT_MS,
     });
     let stdout = "";
     let stderr = "";
@@ -2458,8 +2466,14 @@ function runMagazineGenerator(body = {}, action = "generateWithCodex") {
       clearTimeout(timer);
       reject(error);
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       clearTimeout(timer);
+      try {
+        await waitForLlmObservation(child);
+      } catch (error) {
+        reject(error);
+        return;
+      }
       const elapsedMs = Date.now() - startedAt;
       const result = {
         ok: code === 0,
@@ -3515,6 +3529,7 @@ async function handleMagazineComments(req, res) {
         },
         includeNewsFeedSearchContext: true,
         requireWebSearch: true,
+        observationFeature: "magazine-comment-reply",
       });
       const action = parseMagazineCommentAction(result.answer || "");
       const visibleAnswer = stripMagazineCommentActionBlocks(result.answer || "") ||

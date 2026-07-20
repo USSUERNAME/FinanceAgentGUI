@@ -214,6 +214,7 @@ test("ticker normalization exposes USDT as native quote while presenting USD", (
     priceChangePercent: "1.25",
     volume: "42.5",
     quoteVolume: "5200000.75",
+    count: "4200",
     closeTime: 1770000000000,
   }, instrument);
   assert.equal(quote.instrumentId, "binance:spot:BTCUSDT");
@@ -223,6 +224,7 @@ test("ticker normalization exposes USDT as native quote while presenting USD", (
   assert.equal(quote.priceChangePercent, 1.25);
   assert.equal(quote.volume, 42.5);
   assert.equal(quote.quoteVolume, 5200000.75);
+  assert.equal(quote.tradeCount, 4200);
 });
 
 test("5 minute Binance klines aggregate into the UI's 10 minute interval", () => {

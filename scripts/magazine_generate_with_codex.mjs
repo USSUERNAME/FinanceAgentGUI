@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codexServiceTierArgs, normalizeCodexSpeed } from "../web/server/agentSpeed.mjs";
 import { antigravityPrintInvocation } from "../web/server/antigravityCliCompatibility.mjs";
+import { spawnObservedLlm, waitForLlmObservation } from "../web/server/llmProcessObserver.mjs";
 
 const SCRIPT_DIR = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const GUIBUILD_ROOT = resolve(SCRIPT_DIR, "..");
@@ -1521,11 +1522,12 @@ function buildRepairPrompt({ harnessProfile = DEFAULT_HARNESS_PROFILE, ...option
 
 async function runCommand(command, args, options = {}) {
   return new Promise((resolveCommand, reject) => {
-    const child = spawn(command, args, {
+    const spawnCommand = options.llm ? spawnObservedLlm : spawn;
+    const child = spawnCommand(command, args, {
       cwd: options.cwd || GUIBUILD_ROOT,
       env: { ...process.env, NO_COLOR: "1", ...(options.env || {}) },
       stdio: ["ignore", "pipe", "pipe"],
-    });
+    }, ...(options.llm ? [options.llm] : []));
     let stdout = "";
     let stderr = "";
     const timeoutMs = options.timeoutMs || 0;
@@ -1548,8 +1550,16 @@ async function runCommand(command, args, options = {}) {
       if (timer) clearTimeout(timer);
       reject(error);
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       if (timer) clearTimeout(timer);
+      if (options.llm) {
+        try {
+          await waitForLlmObservation(child);
+        } catch (error) {
+          reject(error);
+          return;
+        }
+      }
       if (code !== 0) {
         const error = new Error((stderr || stdout || `${command} exited ${code}`).trim());
         error.code = code;
@@ -1651,7 +1661,16 @@ async function runCodexPrompt({ codex, approval, sandbox, model, reasoning, spee
   const args = resumeSessionId
     ? buildCodexResumeArgs({ sessionId: resumeSessionId, model, reasoning, speed, outputPath, prompt, jsonEvents })
     : buildCodexArgs({ approval, sandbox, model, reasoning, speed, outputPath, prompt, persistSession, jsonEvents });
-  const commandResult = await runCommand(codex, args, { cwd: GUIBUILD_ROOT, timeoutMs });
+  const commandResult = await runCommand(codex, args, {
+    cwd: GUIBUILD_ROOT,
+    timeoutMs,
+    llm: {
+      feature: "magazine-agent-pass",
+      provider: CODEX_PROVIDER_ID,
+      model,
+      timeoutMs,
+    },
+  });
   const finalAnswer = existsSync(outputPath) ? readFileSync(outputPath, "utf8").trim() : "";
   if (finalAnswer) {
     console.log("\n--- Codex final answer ---");
@@ -1702,10 +1721,15 @@ async function runAntigravityPrompt({
   });
 
   return new Promise((resolvePrompt, reject) => {
-    const child = spawn(agy, invocation.args, {
+    const child = spawnObservedLlm(agy, invocation.args, {
       cwd: GUIBUILD_ROOT,
       env: { ...process.env, NO_COLOR: "1" },
       stdio: invocation.stdio,
+    }, {
+      feature: "magazine-agent-pass",
+      provider: ANTIGRAVITY_PROVIDER_ID,
+      model,
+      timeoutMs,
     });
     let stdout = "";
     let stderr = "";
@@ -1732,8 +1756,14 @@ async function runAntigravityPrompt({
       if (timer) clearTimeout(timer);
       reject(error);
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       if (timer) clearTimeout(timer);
+      try {
+        await waitForLlmObservation(child);
+      } catch (error) {
+        reject(error);
+        return;
+      }
       if (code !== 0) {
         const error = new Error((stderr || stdout || `Antigravity CLI exited ${code}`).trim());
         error.code = code;

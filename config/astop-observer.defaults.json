@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "enabled": "auto",
+  "macosOnly": true,
+  "requireForLlmProcesses": true,
+  "recheckIntervalHours": 72,
+  "server": "http://127.0.0.1:9723"
+}

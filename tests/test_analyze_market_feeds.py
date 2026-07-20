@@ -19,7 +19,7 @@ SPEC.loader.exec_module(analyze_market)
 
 
 class AnalyzeMarketFeedTest(unittest.TestCase):
-    def test_world_memory_breaking_news_uses_four_named_rss_feeds(self) -> None:
+    def test_world_memory_breaking_news_uses_five_named_rss_feeds(self) -> None:
         self.assertEqual(
             analyze_market.RSS_FEEDS,
             [
@@ -27,10 +27,11 @@ class AnalyzeMarketFeedTest(unittest.TestCase):
                 ("unusual_whales", "https://rss.app/feeds/nikLNBATmLDuprRz.xml", -540),
                 ("FinancialJuice", "https://rss.app/feeds/5VaycMAa8SwPhOAP.xml", 0),
                 ("*Walter Bloomberg", "https://rss.app/feeds/YcRRdWN5eSO3o2LP.xml", 0),
+                ("Wall St Engine", "https://rss.app/feeds/Hf52VRUllNu7gABF.xml", 0),
             ],
         )
 
-    def test_news_feed_defaults_ship_the_same_four_rss_app_sources(self) -> None:
+    def test_news_feed_defaults_ship_the_same_five_rss_app_sources(self) -> None:
         defaults = json.loads((ROOT / "config" / "news-feeds.defaults.json").read_text())
         configured = [
             (feed["title"], feed["url"], feed.get("publishedAtOffsetMinutes", 0))
@@ -39,6 +40,7 @@ class AnalyzeMarketFeedTest(unittest.TestCase):
 
         self.assertEqual(configured, analyze_market.RSS_FEEDS[2:] + analyze_market.RSS_FEEDS[:2])
         self.assertTrue(all(feed["enabled"] for feed in defaults["feeds"]))
+        self.assertTrue(all(feed["itemContentMode"] == "title-only" for feed in defaults["feeds"]))
 
     def test_rss_app_xml_is_parsed_with_rfc_2822_timestamp_and_source_name(self) -> None:
         xml = """<?xml version="1.0" encoding="UTF-8"?>

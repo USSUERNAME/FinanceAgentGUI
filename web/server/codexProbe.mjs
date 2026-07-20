@@ -17,7 +17,18 @@ import {
   normalizeCodexSpeed,
 } from "./agentSpeed.mjs";
 import { antigravityPrintInvocation } from "./antigravityCliCompatibility.mjs";
+import {
+  buildAstopObserverCliSandboxArgs,
+  buildAstopObserverContextSection,
+  buildAstopObserverSandboxPolicy,
+  ensureAstopObserverStatus,
+} from "./astopObserver.mjs";
 import { buildReportCatalogContextSection } from "./reportCatalog.mjs";
+import { createAgentMessageStreamState } from "./agentMessageStream.mjs";
+import {
+  spawnObservedLlm,
+  waitForLlmObservation,
+} from "./llmProcessObserver.mjs";
 import { buildSharedMemoryContextSection } from "./sharedMemoryStore.mjs";
 import { isWorldMemoryEnabled } from "./worldMemorySettings.mjs";
 
@@ -749,12 +760,13 @@ function writeAgentSettingsPatch(patch = {}) {
   return nextSettings;
 }
 
-function publicAgentSettingsSnapshot() {
+function publicAgentSettingsSnapshot({ forceObserver = false } = {}) {
   return {
     ok: true,
     configPath: "config/agent-settings.user.json",
     defaultConfigPath: "config/agent-settings.defaults.json",
     settings: readAgentSettings(),
+    astopObserver: ensureAstopObserverStatus({ force: forceObserver }),
   };
 }
 
@@ -3364,6 +3376,7 @@ function buildChatPrompt(payload, preparedAttachments = {}) {
     appAgents
       ? `AGENTS.md 지침:\n${appAgents}`
       : "AGENTS.md 지침 파일을 찾을 수 없다.",
+    buildAstopObserverContextSection(),
     attachmentContextSection(preparedAttachments),
     buildWorldMemoryGlobalContextSection(payload),
     buildWorldMemoryPageContextSection(payload),
@@ -3384,6 +3397,13 @@ function buildChatPrompt(payload, preparedAttachments = {}) {
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function llmObservationFeature(payload = {}, fallback = "agent-chat") {
+  const explicit = String(payload.observationFeature || "").trim();
+  if (explicit) return explicit;
+  const screen = String(payload.screen || "").trim();
+  return screen ? `${fallback}-${screen}` : fallback;
 }
 
 function buildAntigravityChatPrompt(payload, status, preparedAttachments = {}) {
@@ -3423,6 +3443,7 @@ function buildAntigravityChatPrompt(payload, status, preparedAttachments = {}) {
     appAgents
       ? `AGENTS.md 지침:\n${appAgents}`
       : "AGENTS.md 지침 파일을 찾을 수 없다.",
+    buildAstopObserverContextSection(),
     `[Antigravity 연결 상태]\n${JSON.stringify(statusContext, null, 2)}`,
     attachmentContextSection(preparedAttachments),
     buildWorldMemoryGlobalContextSection(payload),
@@ -3504,17 +3525,17 @@ export function runCodexChat(payload = {}) {
     const imageArgs = preparedAttachments.attachments
       .filter((attachment) => attachment.kind === "image")
       .flatMap((attachment) => ["-i", attachment.path]);
+    const sandboxArgs = buildAstopObserverCliSandboxArgs();
     const args = [
       "--ask-for-approval",
       approval,
+      ...sandboxArgs,
       ...imageArgs,
       "exec",
       "--skip-git-repo-check",
       "--ephemeral",
       "-C",
       WEB_ROOT,
-      "-s",
-      "read-only",
       "-m",
       model,
       "-c",
@@ -3530,7 +3551,7 @@ export function runCodexChat(payload = {}) {
     let settled = false;
     const startedAt = Date.now();
     const requestTimeoutMs = chatTimeoutMsForPayload(payload);
-    const child = spawn(path, args, {
+    const child = spawnObservedLlm(path, args, {
       cwd: WEB_ROOT,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -3538,6 +3559,11 @@ export function runCodexChat(payload = {}) {
         ...process.env,
         NO_COLOR: "1",
       },
+    }, {
+      feature: llmObservationFeature(payload, "codex-chat"),
+      provider: "codex-cli",
+      model,
+      timeoutMs: requestTimeoutMs,
     });
 
     const timer = setTimeout(() => {
@@ -3563,12 +3589,13 @@ export function runCodexChat(payload = {}) {
       cleanupPreparedAttachments(preparedAttachments);
       reject(error);
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
 
       try {
+        await waitForLlmObservation(child);
         const answer = existsSync(outputPath)
           ? readFileSync(outputPath, "utf8").trim()
           : stdout.trim();
@@ -3623,6 +3650,7 @@ export function runAntigravityCliPrint({
   cliPath = findAntigravityCliPath(),
   cliVersion = "",
   spawnProcess = spawn,
+  observationFeature = "antigravity-generate",
 }) {
   const path = cliPath;
   if (!path) {
@@ -3634,7 +3662,8 @@ export function runAntigravityCliPrint({
   const startedAt = Date.now();
   return new Promise((resolveGenerate, reject) => {
     const invocation = antigravityCliInvocation({ cliVersion, model, approval, prompt });
-    const child = spawnProcess(path, invocation.args, {
+    const spawnLlm = spawnProcess === spawn ? spawnObservedLlm : spawnProcess;
+    const child = spawnLlm(path, invocation.args, {
       cwd: WEB_ROOT,
       encoding: "utf8",
       stdio: invocation.stdio,
@@ -3642,7 +3671,14 @@ export function runAntigravityCliPrint({
         ...process.env,
         NO_COLOR: "1",
       },
-    });
+    }, ...(spawnProcess === spawn
+      ? [{
+          feature: observationFeature,
+          provider: "antigravity-cli",
+          model,
+          timeoutMs,
+        }]
+      : []));
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     let stdout = "";
@@ -3669,10 +3705,16 @@ export function runAntigravityCliPrint({
     });
     child.stdin?.once("error", rejectOnce);
     child.on("error", rejectOnce);
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      try {
+        await waitForLlmObservation(child);
+      } catch (error) {
+        reject(error);
+        return;
+      }
       const answer = stdout.trim();
       if (code !== 0) {
         reject(
@@ -3703,6 +3745,7 @@ export async function runAntigravityGenerate({
   model = "",
   approval = "default",
   timeoutMs = CHAT_TIMEOUT_MS,
+  observationFeature = "antigravity-generate",
 } = {}) {
   const status = getAntigravityCliStatus({ allowAuthProbe: true });
   if (!status.ready) {
@@ -3720,6 +3763,7 @@ export async function runAntigravityGenerate({
       approval,
       timeoutMs,
       cliVersion: status.version,
+      observationFeature,
     });
   } catch (error) {
     throw new Error(
@@ -3800,6 +3844,7 @@ async function runAntigravityChat(payload = {}) {
       approval: securityPreset.id,
       timeoutMs: chatTimeoutMsForPayload(payload),
       cliVersion: status.version,
+      observationFeature: llmObservationFeature(payload, "antigravity-chat"),
     });
   } catch (error) {
     throw new Error(
@@ -3937,6 +3982,7 @@ function streamAntigravityChat(payload = {}, res) {
     approval: securityPreset.id,
     timeoutMs: chatTimeoutMsForPayload(payload),
     cliVersion: status.version,
+    observationFeature: llmObservationFeature(payload, "antigravity-chat-stream"),
   })
     .then((result) => {
       writeStreamEvent(res, "message", {
@@ -3998,6 +4044,7 @@ function buildAppServerThreadStartParams({
       agentsInstructions
         ? `AGENTS.md 지침:\n${agentsInstructions}`
         : "AGENTS.md 지침 파일을 찾을 수 없다.",
+      buildAstopObserverContextSection(),
       buildPersonaModeSection(payload),
     ].join("\n\n"),
     ephemeral: true,
@@ -4106,7 +4153,7 @@ export function streamCodexChat(payload = {}, res) {
   const startedAt = Date.now();
   let stdoutBuffer = "";
   let stderrTail = "";
-  let finalAnswer = "";
+  const agentMessageStream = createAgentMessageStreamState();
   let completed = false;
   let closed = false;
   let initialized = false;
@@ -4154,7 +4201,7 @@ export function streamCodexChat(payload = {}, res) {
 
   writeStreamEvent(res, "started", { model, reasoning, approval });
 
-  child = spawn(path, ["app-server", "--stdio"], {
+  child = spawnObservedLlm(path, ["app-server", "--stdio"], {
     cwd: runtimeCwd,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"],
@@ -4162,6 +4209,11 @@ export function streamCodexChat(payload = {}, res) {
       ...process.env,
       NO_COLOR: "1",
     },
+  }, {
+    feature: llmObservationFeature(payload, "codex-app-server"),
+    provider: "codex-cli",
+    model,
+    timeoutMs: requestTimeoutMs,
   });
 
   if (requestTimeoutMs > 0) {
@@ -4295,6 +4347,7 @@ export function streamCodexChat(payload = {}, res) {
             model,
             effort: reasoning,
             approvalPolicy: approval,
+            sandboxPolicy: buildAstopObserverSandboxPolicy(),
             cwd: runtimeCwd,
             runtimeWorkspaceRoots,
           },
@@ -4362,11 +4415,19 @@ export function streamCodexChat(payload = {}, res) {
       return;
     }
 
+    if (
+      message.method === "item/started" &&
+      message.params?.item?.type === "agentMessage"
+    ) {
+      agentMessageStream.start(message.params.item);
+      return;
+    }
+
     if (message.method === "item/agentMessage/delta") {
-      const delta = String(message.params?.delta || "");
-      if (!delta) return;
-      finalAnswer += delta;
-      writeStreamEvent(res, "delta", { text: delta });
+      const streamed = agentMessageStream.delta(message.params);
+      if (streamed.kind === "delta" && streamed.text) {
+        writeStreamEvent(res, "delta", { text: streamed.text });
+      }
       return;
     }
 
@@ -4374,16 +4435,16 @@ export function streamCodexChat(payload = {}, res) {
       message.method === "item/completed" &&
       message.params?.item?.type === "agentMessage"
     ) {
-      const text = String(message.params.item.text || "");
-      if (text && !finalAnswer) {
-        finalAnswer = text;
-        writeStreamEvent(res, "message", { text });
+      const completedMessage = agentMessageStream.complete(message.params.item);
+      if (completedMessage.kind === "message" && completedMessage.text) {
+        writeStreamEvent(res, "message", { text: completedMessage.text });
       }
       return;
     }
 
     if (message.method === "turn/completed") {
       completed = true;
+      const finalAnswer = agentMessageStream.answer();
       writeStreamEvent(res, "done", {
         answer: finalAnswer,
         model,
@@ -4413,8 +4474,15 @@ export function streamCodexChat(payload = {}, res) {
     closeStream();
   });
 
-  child.on("close", (code) => {
+  child.on("close", async (code) => {
     if (closed) return;
+    try {
+      await waitForLlmObservation(child);
+    } catch (error) {
+      writeStreamEvent(res, "error", { error: error.message });
+      closeStream();
+      return;
+    }
     if (stdoutBuffer.trim()) {
       handleAppServerLine(stdoutBuffer);
     }
@@ -4424,7 +4492,7 @@ export function streamCodexChat(payload = {}, res) {
       });
     } else if (!completed && initialized) {
       writeStreamEvent(res, "done", {
-        answer: finalAnswer,
+        answer: agentMessageStream.answer(),
         model,
         reasoning,
         approval,
@@ -4857,6 +4925,7 @@ export function getCodexOptions() {
   const path = findCodexPath();
   const config = readConfig();
   const agentSettings = readAgentSettings();
+  const astopObserver = ensureAstopObserverStatus();
   const selectedProviderId = normalizeProviderId(
     agentSettings.selectedProvider,
   );
@@ -4890,6 +4959,7 @@ export function getCodexOptions() {
         defaultConfigPath: "config/agent-settings.defaults.json",
         settings: agentSettings,
       },
+      astopObserver,
       providers: providerOptionsFromStatus(codex, antigravity),
       approvalOptions: [],
       sandboxOptions: [],
@@ -4959,6 +5029,7 @@ export function getCodexOptions() {
       defaultConfigPath: "config/agent-settings.defaults.json",
       settings: agentSettings,
     },
+    astopObserver,
     providers: providerOptionsFromStatus(codex, antigravity),
     approvalOptions,
     sandboxOptions,
@@ -5039,7 +5110,13 @@ export function getCodexOptionsAsync({ force = false } = {}) {
 export async function handleAgentSettingsEndpoint(req, res) {
   try {
     if (req.method === "GET") {
-      sendJson(res, publicAgentSettingsSnapshot());
+      const url = new URL(req.url || "/api/codex/settings", "http://127.0.0.1");
+      sendJson(
+        res,
+        publicAgentSettingsSnapshot({
+          forceObserver: url.searchParams.get("refreshObserver") === "1",
+        }),
+      );
       return;
     }
 
@@ -5052,6 +5129,7 @@ export async function handleAgentSettingsEndpoint(req, res) {
         configPath: "config/agent-settings.user.json",
         defaultConfigPath: "config/agent-settings.defaults.json",
         settings,
+        astopObserver: ensureAstopObserverStatus(),
       });
       return;
     }

@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -18,6 +17,7 @@ import {
   selectAntigravityModelForReasoning,
 } from "../src/agent/antigravityModelSelection.js";
 import { selectCodexTranslationModel } from "../src/agent/codexTranslationModelSelection.js";
+import { spawnObservedLlm, waitForLlmObservation } from "./llmProcessObserver.mjs";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const GUIBUILD_ROOT = resolve(WEB_ROOT, "..");
@@ -453,7 +453,7 @@ function runCodexBatch(items, modelInfo) {
     };
     writeFileSync(schemaPath, `${JSON.stringify(schema, null, 2)}\n`);
 
-    const child = spawn("codex", [
+    const child = spawnObservedLlm("codex", [
       "--ask-for-approval",
       "never",
       "exec",
@@ -477,6 +477,11 @@ function runCodexBatch(items, modelInfo) {
       cwd: WEB_ROOT,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, NO_COLOR: "1" },
+    }, {
+      feature: "toss-etf-name-translation",
+      provider: "codex-cli",
+      model: modelInfo.model,
+      timeoutMs: TRANSLATION_TIMEOUT_MS,
     });
 
     let stdout = "";
@@ -499,11 +504,12 @@ function runCodexBatch(items, modelInfo) {
       rmSync(temporaryDir, { recursive: true, force: true });
       reject(error);
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       try {
+        await waitForLlmObservation(child);
         const output = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : stdout;
         if (code !== 0) throw new Error((stderr || output || `codex exited ${code}`).trim());
         resolveBatch(parseJsonPayload(output));
@@ -522,6 +528,7 @@ async function runAntigravityBatch(items, modelInfo) {
     model: modelInfo.model,
     approval: "default",
     timeoutMs: TRANSLATION_TIMEOUT_MS,
+    observationFeature: "toss-etf-name-translation",
   });
   return parseJsonPayload(result.answer);
 }
