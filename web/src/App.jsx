@@ -629,12 +629,33 @@ function buildMagazineArticleAgentContext(article) {
   };
 }
 
+function stockArticleInlineText(content) {
+  if (typeof content === "string") return content.trim();
+  return String(content?.text || "").trim();
+}
+
+function stockArticleBlockText(block) {
+  if (block?.type === "image") return `[이미지] ${String(block?.alt || "게시글 이미지").trim()}`;
+  if (block?.type === "list") {
+    return (Array.isArray(block.items) ? block.items : [])
+      .map((item, index) => `${block.ordered ? `${index + 1}.` : "-"} ${stockArticleInlineText(item)}`)
+      .join("\n");
+  }
+  if (block?.type === "table") {
+    const rows = [block.headers, ...(Array.isArray(block.rows) ? block.rows : [])].filter(
+      (row) => Array.isArray(row) && row.length
+    );
+    return rows.map((row) => `| ${row.map(stockArticleInlineText).join(" | ")} |`).join("\n");
+  }
+  return stockArticleInlineText(block);
+}
+
 function buildStockArticleAgentContext(article) {
   if (!article) return null;
   const blockText = Array.isArray(article.contentBlocks)
     ? article.contentBlocks
         .map((block) => {
-          const text = String(block?.text || "").trim();
+          const text = stockArticleBlockText(block);
           if (!text) return "";
           return block?.type === "heading" ? `${text}\n` : text;
         })
@@ -1962,6 +1983,7 @@ function App() {
   const [pendingDeletePortfolioCanvas, setPendingDeletePortfolioCanvas] = useState(null);
   const portfolioCanvasNameInputRef = useRef(null);
   const notificationStatusRef = useRef(null);
+  const arcaNotificationActionBusyRef = useRef(false);
   const browserNotificationLastShownRef = useRef(readLastBrowserNotificationId());
   const magazineCanvasRef = useRef(null);
   const magazineTopicModalRef = useRef(null);
@@ -2032,6 +2054,8 @@ function App() {
     notificationUrl: ARCA_NOTIFICATION_URL,
   });
   const [arcaNotificationBusy, setArcaNotificationBusy] = useState(false);
+  const [arcaNotificationActionBusy, setArcaNotificationActionBusy] = useState(false);
+  const [arcaNotificationActionError, setArcaNotificationActionError] = useState("");
   const [showHiddenNotices, setShowHiddenNotices] = useState(false);
   const [newsFeedStatus, setNewsFeedStatus] = useState(null);
   const [newsFeedItems, setNewsFeedItems] = useState([]);
@@ -3712,6 +3736,7 @@ function App() {
         ...payload,
         count: Math.max(0, Number(payload.count || 0)),
       });
+      if (!quiet) setArcaNotificationActionError("");
       return payload;
     } catch (error) {
       const fallbackConnected = Boolean(arcaAuthStatus?.connected || arcaNotificationStatus?.connected);
@@ -3728,6 +3753,43 @@ function App() {
       return null;
     } finally {
       if (!quiet) setArcaNotificationBusy(false);
+    }
+  }
+
+  async function markAllArcaNotificationsRead() {
+    if (arcaNotificationActionBusyRef.current) return null;
+    arcaNotificationActionBusyRef.current = true;
+    setArcaNotificationActionBusy(true);
+    setArcaNotificationActionError("");
+    try {
+      const response = await fetch("/api/arca/notifications", {
+        method: "DELETE",
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.accepted) {
+        throw new Error(payload?.error || `HTTP ${response.status}`);
+      }
+      setArcaNotificationStatus({
+        notificationUrl: ARCA_NOTIFICATION_URL,
+        ...payload,
+        count: Math.max(0, Number(payload.count || 0)),
+      });
+      if (!payload?.verified) {
+        setArcaNotificationActionError(
+          payload?.error ||
+            (payload?.remainingUnreadCount > 0
+              ? `읽음 처리 후에도 새 알림 ${payload.remainingUnreadCount}개가 남아 있습니다.`
+              : "읽음 처리는 접수됐지만 갱신 결과를 확인하지 못했습니다.")
+        );
+      }
+      return payload;
+    } catch (error) {
+      setArcaNotificationActionError(error.message);
+      return null;
+    } finally {
+      arcaNotificationActionBusyRef.current = false;
+      setArcaNotificationActionBusy(false);
     }
   }
 
@@ -4749,6 +4811,20 @@ function App() {
     });
   }
 
+  function openArcaNotificationArticle(item) {
+    if (!item?.isStockChannel || !item?.targetUrl) return;
+    void openArcaArticleReader({
+      type: "article",
+      id: item.articleId || item.id || "",
+      number: item.articleId || "",
+      title: item.title || "주식채널 알림 글",
+      author: item.author || "",
+      href: item.targetUrl,
+      url: item.targetUrl,
+      categoryLabel: "",
+    });
+  }
+
   async function attachArticleContext(row) {
     if (!row?.href || attachingArticleHref) return;
     setAttachingArticleHref(row.href);
@@ -5329,6 +5405,7 @@ function App() {
     let cancelled = false;
 
     async function pollArcaNotifications() {
+      if (arcaNotificationActionBusyRef.current) return;
       try {
         const response = await fetch("/api/arca/notifications", { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
@@ -7667,12 +7744,18 @@ function App() {
           boardSearchInput={boardSearchInput}
           cutRateOptions={cutRateOptions}
           notificationBusy={arcaNotificationBusy}
+          notificationActionBusy={arcaNotificationActionBusy}
+          notificationActionError={arcaNotificationActionError}
           notificationHealth={arcaNotificationHealth}
+          notificationStatus={arcaNotificationStatus}
           onAttachArticle={attachArticleContext}
           onBoardSearchInputChange={setBoardSearchInput}
           onCloseArticle={closeArcaArticleReader}
           onOpenArticle={(row) => void openArcaArticleReader(row)}
+          onMarkAllNotificationsRead={() => void markAllArcaNotificationsRead()}
+          onOpenNotificationArticle={openArcaNotificationArticle}
           onRefreshBoard={refreshBoard}
+          onRefreshNotifications={loadArcaNotifications}
           onRetryArticle={retryArcaArticleReader}
           onSelectCategory={selectBoardCategory}
           onSubmitSearch={submitBoardSearch}

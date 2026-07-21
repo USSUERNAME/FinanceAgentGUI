@@ -105,6 +105,68 @@ test("기본 Gravatar 아바타만 로컬 미디어 프록시로 변환한다", 
   assert.equal(comments[1].avatar, "");
 });
 
+test("댓글 메시지 앞의 링크 카드와 숨김 원본 URL을 함께 추출한다", () => {
+  const html = `
+    <div class="comment-item" id="c_938668123">
+      <div class="info-row">
+        <span class="user-info author"><a data-filter="조선닌자핫토리">작성자</a></span>
+      </div>
+      <div class="text d-none">
+        <pre><a href="http://RSS.app" target="_blank">RSS.app</a> 이라고 하는 서비스를 경유해서 가져옴</pre>
+      </div>
+      <a
+        href="https://unsafelink.com/http://RSS.app"
+        class="link-card-link external"
+        target="_blank"
+      >
+        <div class="link-card">
+          <div class="link-card-container">
+            <div class="link-card-thumbnail-wrapper">
+              <img src="//ac-p1.namu.la/rss-card.png?key=test" />
+            </div>
+            <div class="link-card-content">
+              <div>
+                <div class="link-card-link"><small>RSS.app</small></div>
+                <div class="link-card-title"><b>RSS Feed Generator, Widgets &amp; Bots</b></div>
+                <div class="link-card-description">RSS feed generator description.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </a>
+      <div class="message">
+        <div class="text"><pre>이라고 하는 서비스를 경유해서 가져옴</pre></div>
+      </div>
+    </div>
+  `;
+
+  const { comments } = extractArcaCommentsFromHtml(html);
+  const [comment] = comments;
+
+  assert.equal(comment.hasLinkCard, true);
+  assert.deepEqual(comment.links, [{ href: "http://rss.app/", label: "RSS.app" }]);
+  assert.match(comment.html, /class="link-card"/);
+  assert.match(comment.html, /RSS Feed Generator, Widgets &amp; Bots/);
+  assert.match(comment.html, /<pre>이라고 하는 서비스를 경유해서 가져옴<\/pre>/);
+});
+
+test("링크 카드가 없으면 숨김 댓글의 원본 URL을 대체 링크로 보존한다", () => {
+  const html = `
+    <div class="comment-item" id="c_938668124">
+      <div class="info-row"><span class="user-info"><a data-filter="링크 작성자">작성자</a></span></div>
+      <div class="text d-none"><pre><a href="https://example.com/source">원본 사이트</a></pre></div>
+      <div class="message"><div class="text"><pre>카드 생성 실패</pre></div></div>
+    </div>
+  `;
+
+  const { comments } = extractArcaCommentsFromHtml(html);
+  const [comment] = comments;
+
+  assert.equal(comment.hasLinkCard, false);
+  assert.deepEqual(comment.links, [{ href: "https://example.com/source", label: "원본 사이트" }]);
+  assert.doesNotMatch(comment.html, /text d-none/);
+});
+
 test("콤보콘은 최대 3개를 순서와 중복을 유지해 정규화한다", () => {
   const comment = normalizeArcaCommentWrite({
     contentType: "emoticon",

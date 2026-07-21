@@ -8,10 +8,14 @@ const MAX_ARTICLE_CONTEXT_LENGTH = 12000;
 const MAX_ARTICLE_READER_TEXT_LENGTH = 60000;
 const MAX_ARTICLE_READER_BLOCKS = 240;
 const MAX_ARTICLE_READER_IMAGES = 24;
+const MAX_ARTICLE_LIST_ITEMS = 200;
+const MAX_ARTICLE_TABLE_ROWS = 120;
+const MAX_ARTICLE_TABLE_COLUMNS = 24;
 const MAX_ARTICLE_IMAGE_BYTES = 12 * 1024 * 1024;
 const MAX_ARCA_MEDIA_BYTES = 20 * 1024 * 1024;
 const MAX_COMMENT_LENGTH = 8000;
 const MAX_COMBO_EMOTICONS = 3;
+const MAX_ARCA_NOTIFICATION_ITEMS = 50;
 const guardedArcaImageSockets = new WeakSet();
 
 function escapeRegExp(value) {
@@ -65,6 +69,19 @@ function safeArticleAssetUrl(href, baseUrl) {
     return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
   } catch {
     return "";
+  }
+}
+
+export function isArcaTwemojiSvgUrl(value, baseUrl = DEFAULT_BASE_URL) {
+  try {
+    const base = new URL(normalizeBaseUrl(baseUrl));
+    const url = new URL(String(value || ""), base);
+    return (
+      url.origin === base.origin &&
+      /^\/node_modules\/twemoji\/assets\/svg\/[0-9a-f-]+\.svg$/i.test(url.pathname)
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -165,14 +182,126 @@ function withArcaReaderImageProxies(article) {
   };
 }
 
-function articleBlockText(node, { preserveLines = false } = {}) {
+function sameArticleInlineStyle(left, right) {
+  return (
+    Boolean(left?.lineBreak) === Boolean(right?.lineBreak) &&
+    Boolean(left?.bold) === Boolean(right?.bold) &&
+    Boolean(left?.italic) === Boolean(right?.italic) &&
+    Boolean(left?.underline) === Boolean(right?.underline) &&
+    Boolean(left?.strike) === Boolean(right?.strike) &&
+    Boolean(left?.code) === Boolean(right?.code) &&
+    String(left?.href || "") === String(right?.href || "")
+  );
+}
+
+function articleInlineSegments(node, baseUrl, inherited = {}, output = [], skippedTags = new Set()) {
+  if (!node) return output;
+  const tagName = String(node.tagName || "").toLowerCase();
+  if (skippedTags.has(tagName)) return output;
+  if (!tagName) {
+    const text = String(node.rawText || node.text || "");
+    if (text) output.push({ text, ...inherited });
+    return output;
+  }
+  if (tagName === "br") {
+    output.push({ text: "\n", lineBreak: true, ...inherited });
+    return output;
+  }
+  if (tagName === "img") {
+    const source =
+      node.getAttribute?.("data-originalurl") ||
+      node.getAttribute?.("data-src") ||
+      node.getAttribute?.("src") ||
+      "";
+    if (isArcaTwemojiSvgUrl(source, baseUrl)) {
+      const text = String(node.getAttribute?.("alt") || node.getAttribute?.("title") || "");
+      if (text) output.push({ text, ...inherited });
+    }
+    return output;
+  }
+
+  const inlineStyle = String(node.getAttribute?.("style") || "").toLowerCase();
+  const href = tagName === "a" ? safeArticleAssetUrl(node.getAttribute?.("href"), baseUrl) : "";
+  const next = {
+    ...inherited,
+    ...(["b", "strong"].includes(tagName) || /font-weight\s*:\s*(?:bold|[6-9]00)/.test(inlineStyle)
+      ? { bold: true }
+      : {}),
+    ...(["i", "em"].includes(tagName) || /font-style\s*:\s*italic/.test(inlineStyle)
+      ? { italic: true }
+      : {}),
+    ...(tagName === "u" || /text-decoration[^;]*underline/.test(inlineStyle) ? { underline: true } : {}),
+    ...(["s", "strike", "del"].includes(tagName) || /text-decoration[^;]*line-through/.test(inlineStyle)
+      ? { strike: true }
+      : {}),
+    ...(tagName === "code" ? { code: true } : {}),
+    ...(href ? { href } : {}),
+  };
+  for (const child of node.childNodes || []) articleInlineSegments(child, baseUrl, next, output, skippedTags);
+  if (["p", "li", "blockquote", "pre", "h1", "h2", "h3", "h4", "h5", "h6", "th", "td"].includes(tagName)) {
+    output.push({ text: "\n", ...inherited });
+  }
+  return output;
+}
+
+function normalizeArticleInlineSegments(segments, { preserveLines = false } = {}) {
+  const normalized = [];
+  for (const segment of segments) {
+    if (segment?.lineBreak) {
+      normalized.push({ ...segment, text: "\n" });
+      continue;
+    }
+    const decoded = decodeHtmlEntities(segment?.text || "");
+    const text = preserveLines
+      ? decoded.replace(/[^\S\n]+/g, " ").replace(/\n{2,}/g, "\n")
+      : decoded.replace(/\s+/g, " ");
+    if (!text) continue;
+    const next = { ...segment, text };
+    const previous = normalized.at(-1);
+    if (previous && sameArticleInlineStyle(previous, next)) previous.text += next.text;
+    else normalized.push(next);
+  }
+  if (!normalized.length) return [];
+  normalized[0].text = normalized[0].text.trimStart();
+  normalized[normalized.length - 1].text = normalized[normalized.length - 1].text.trimEnd();
+  return normalized.filter((segment) => segment.text);
+}
+
+function articleInlineContent(
+  node,
+  { preserveLines = false, baseUrl = DEFAULT_BASE_URL, skippedTags = new Set() } = {}
+) {
+  const segments = normalizeArticleInlineSegments(
+    articleInlineSegments(node, baseUrl, {}, [], skippedTags),
+    { preserveLines }
+  );
+  const text = segments.map((segment) => segment.text).join("");
+  const hasRichFormatting = segments.some(
+    (segment) => segment.bold || segment.italic || segment.underline || segment.strike || segment.code || segment.href
+  );
+  return {
+    text,
+    ...(hasRichFormatting ? { segments } : {}),
+  };
+}
+
+function articleBlockText(node, options = {}) {
+  const content = articleInlineContent(node, options);
+  if (content.text) return content.text;
   const source = String(node?.structuredText || node?.text || node?.rawText || "");
   if (!source) return "";
   const lines = decodeHtmlEntities(source)
     .split(/\n+/)
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean);
-  return preserveLines ? lines.join("\n") : lines.join(" ");
+  return options.preserveLines ? lines.join("\n") : lines.join(" ");
+}
+
+function isArticleParagraphSpacer(node) {
+  if (String(node?.tagName || "").toLowerCase() !== "p") return false;
+  if ((node.querySelectorAll?.("img, video, audio, iframe, canvas, svg") || []).length) return false;
+  const source = decodeHtmlEntities(String(node.rawText || node.text || "")).replaceAll("\u00a0", " ");
+  return !source.trim();
 }
 
 function extractArticleContentBlocks(contentNode, config) {
@@ -181,7 +310,17 @@ function extractArticleContentBlocks(contentNode, config) {
   const blocks = [];
   const skippedTags = new Set(["script", "style", "noscript", "template", "svg"]);
   const textBlockTags = new Set(["p", "li", "blockquote", "pre", "h1", "h2", "h3", "h4", "h5", "h6"]);
-  const structuralTags = new Set([...textBlockTags, "div", "section", "article", "figure", "ul", "ol", "img"]);
+  const structuralTags = new Set([
+    ...textBlockTags,
+    "div",
+    "section",
+    "article",
+    "figure",
+    "ul",
+    "ol",
+    "table",
+    "img",
+  ]);
   let textLength = 0;
   let imageCount = 0;
 
@@ -199,6 +338,7 @@ function extractArticleContentBlocks(contentNode, config) {
   const pushImage = (node) => {
     if (imageCount >= MAX_ARTICLE_READER_IMAGES || blocks.length >= MAX_ARTICLE_READER_BLOCKS) return;
     const { originalUrl, readerUrl } = articleImageUrls(node, config);
+    if (isArcaTwemojiSvgUrl(readerUrl || originalUrl, config.baseUrl)) return;
     if (!originalUrl) return;
     blocks.push({
       type: "image",
@@ -207,6 +347,86 @@ function extractArticleContentBlocks(contentNode, config) {
       alt: decodeHtmlEntities(node?.getAttribute?.("alt") || "게시글 이미지"),
     });
     imageCount += 1;
+  };
+
+  const clippedInlineContent = (node, options = {}) => {
+    if (textLength >= MAX_ARTICLE_READER_TEXT_LENGTH) return null;
+    const content = articleInlineContent(node, { ...options, baseUrl: config.baseUrl });
+    if (!content.text) return null;
+    const remaining = MAX_ARTICLE_READER_TEXT_LENGTH - textLength;
+    const text = content.text.slice(0, remaining);
+    if (!text) return null;
+    let segments;
+    if (content.segments) {
+      let segmentRemaining = text.length;
+      segments = [];
+      for (const segment of content.segments) {
+        if (segmentRemaining <= 0) break;
+        const segmentText = segment.text.slice(0, segmentRemaining);
+        if (segmentText) segments.push({ ...segment, text: segmentText });
+        segmentRemaining -= segmentText.length;
+      }
+    }
+    textLength += text.length;
+    return { text, ...(segments?.length ? { segments } : {}) };
+  };
+
+  const pushInlineBlock = (type, content, extra = {}) => {
+    if (!content || blocks.length >= MAX_ARTICLE_READER_BLOCKS) return;
+    blocks.push({ type, text: content.text, ...(content.segments ? { segments: content.segments } : {}), ...extra });
+  };
+
+  const pushList = (node, ordered) => {
+    if (blocks.length >= MAX_ARTICLE_READER_BLOCKS) return;
+    const itemNodes = (node.childNodes || [])
+      .filter((child) => String(child?.tagName || "").toLowerCase() === "li")
+      .slice(0, MAX_ARTICLE_LIST_ITEMS);
+    const items = itemNodes
+      .map((item) => clippedInlineContent(item, { skippedTags: new Set(["ul", "ol", "table"]) }))
+      .filter(Boolean);
+    if (items.length) blocks.push({ type: "list", ordered: Boolean(ordered), items });
+  };
+
+  const pushTable = (node) => {
+    if (blocks.length >= MAX_ARTICLE_READER_BLOCKS) return;
+    const parsedRows = [];
+    for (const row of (node.querySelectorAll?.("tr") || []).slice(0, MAX_ARTICLE_TABLE_ROWS)) {
+      const directCells = (row.childNodes || []).filter((cell) =>
+        ["th", "td"].includes(String(cell?.tagName || "").toLowerCase())
+      );
+      const cellNodes = (directCells.length ? directCells : row.querySelectorAll?.("th, td") || []).slice(
+        0,
+        MAX_ARTICLE_TABLE_COLUMNS
+      );
+      const cells = cellNodes
+        .map((cell) => {
+          const content = clippedInlineContent(cell);
+          if (!content) return null;
+          const colSpan = Math.min(Math.max(parseInteger(cell.getAttribute?.("colspan")) || 1, 1), MAX_ARTICLE_TABLE_COLUMNS);
+          const rowSpan = Math.min(Math.max(parseInteger(cell.getAttribute?.("rowspan")) || 1, 1), MAX_ARTICLE_TABLE_ROWS);
+          return {
+            ...content,
+            ...(String(cell?.tagName || "").toLowerCase() === "th" ? { header: true } : {}),
+            ...(colSpan > 1 ? { colSpan } : {}),
+            ...(rowSpan > 1 ? { rowSpan } : {}),
+          };
+        })
+        .filter(Boolean);
+      if (cells.length) {
+        parsedRows.push({
+          cells,
+          hasHeader: cellNodes.some((cell) => String(cell?.tagName || "").toLowerCase() === "th"),
+        });
+      }
+      if (textLength >= MAX_ARTICLE_READER_TEXT_LENGTH) break;
+    }
+    if (!parsedRows.length) return;
+    const firstRowIsHeader = parsedRows[0].hasHeader;
+    blocks.push({
+      type: "table",
+      headers: firstRowIsHeader ? parsedRows[0].cells : [],
+      rows: parsedRows.slice(firstRowIsHeader ? 1 : 0).map((row) => row.cells),
+    });
   };
 
   const visit = (node) => {
@@ -218,11 +438,26 @@ function extractArticleContentBlocks(contentNode, config) {
       return;
     }
 
+    if (tagName === "ul" || tagName === "ol") {
+      pushList(node, tagName === "ol");
+      for (const image of node.querySelectorAll?.("img") || []) pushImage(image);
+      return;
+    }
+
+    if (tagName === "table") {
+      pushTable(node);
+      for (const image of node.querySelectorAll?.("img") || []) pushImage(image);
+      return;
+    }
+
     if (textBlockTags.has(tagName)) {
       const type = tagName === "blockquote" ? "quote" : tagName === "pre" ? "pre" : /^h[1-6]$/.test(tagName) ? "heading" : "paragraph";
-      pushText(type, articleBlockText(node, { preserveLines: tagName === "pre" }), {
-        ...(type === "heading" ? { level: Number(tagName.slice(1)) || 2 } : {}),
-      });
+      const content = clippedInlineContent(node, { preserveLines: tagName === "pre" });
+      if (content) {
+        pushInlineBlock(type, content, type === "heading" ? { level: Number(tagName.slice(1)) || 2 } : {});
+      } else if (isArticleParagraphSpacer(node)) {
+        blocks.push({ type: "spacer" });
+      }
       for (const image of node.querySelectorAll?.("img") || []) pushImage(image);
       return;
     }
@@ -230,11 +465,11 @@ function extractArticleContentBlocks(contentNode, config) {
     const children = Array.isArray(node.childNodes) ? node.childNodes : [];
     const hasStructuralChild = children.some((child) => structuralTags.has(String(child?.tagName || "").toLowerCase()));
     if (tagName && !hasStructuralChild) {
-      pushText("paragraph", articleBlockText(node));
+      pushInlineBlock("paragraph", clippedInlineContent(node));
       return;
     }
     if (!tagName) {
-      pushText("paragraph", articleBlockText(node));
+      pushText("paragraph", articleBlockText(node, { baseUrl: config.baseUrl }));
       return;
     }
     children.forEach(visit);
@@ -242,7 +477,7 @@ function extractArticleContentBlocks(contentNode, config) {
 
   const children = Array.isArray(contentNode.childNodes) ? contentNode.childNodes : [];
   children.forEach(visit);
-  if (!blocks.length) pushText("paragraph", articleBlockText(contentNode));
+  if (!blocks.length) pushInlineBlock("paragraph", clippedInlineContent(contentNode));
   return blocks;
 }
 
@@ -331,6 +566,14 @@ function buildNotificationUrl(config) {
   return new URL("/u/notification", config.baseUrl);
 }
 
+function buildNotificationProbeUrl(config) {
+  return new URL(`/b/${config.defaultChannel}`, config.baseUrl);
+}
+
+function buildNotificationReadAllUrl(config) {
+  return new URL("/api/notification", config.baseUrl);
+}
+
 export function isArcaLoginPage(response, html) {
   const finalUrl = String(response?.url || "");
   const source = String(html || "");
@@ -416,6 +659,139 @@ function extractNotificationCount(html) {
   }
 
   return { count: 0, source: "no-unread-marker" };
+}
+
+function arcaNotificationArticleTarget(href, baseUrl) {
+  const absolute = absoluteArcaUrl(href, baseUrl);
+  if (!absolute) return null;
+  try {
+    const url = new URL(absolute);
+    const base = new URL(baseUrl);
+    if (!["http:", "https:"].includes(url.protocol) || url.hostname !== base.hostname) return null;
+    const match = url.pathname.match(/^\/b\/([A-Za-z0-9_-]{1,64})\/(\d+)(?:\/(\d+))?\/?$/);
+    if (!match) return null;
+    return {
+      url: url.toString(),
+      channel: match[1],
+      articleId: match[2],
+      commentId: match[3] || "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function extractArcaNotificationsFromHtml(html, { baseUrl = DEFAULT_BASE_URL } = {}) {
+  const root = parse(String(html || ""));
+  const parsedCount = extractNotificationCount(html);
+  const rows = root.querySelectorAll(".notification-items .row.section, .user-notification .row.section");
+  const items = [];
+
+  for (const row of rows) {
+    if (items.length >= MAX_ARCA_NOTIFICATION_ITEMS) break;
+    const contentNode = row.querySelector(".col.row") || row;
+    const iconNode = row.querySelector(".vrow-icon");
+    const targetEntry = row
+      .querySelectorAll("a[href]")
+      .map((link) => ({ link, target: arcaNotificationArticleTarget(link.getAttribute("href"), baseUrl) }))
+      .find((entry) => entry.target);
+    if (!targetEntry) continue;
+
+    const authorLink = row.querySelector("a[data-filter]") || row.querySelector('a[href^="/u/@"]');
+    const timeNode = row.querySelector("time");
+    const checkbox = row.querySelector('input[name="notification-item"]');
+    const unread = !parseBooleanClass(iconNode, "read") && !parseBooleanClass(contentNode, "read");
+    const title = nodeText(targetEntry.link) || "알림 대상 글";
+    const createdAt = String(timeNode?.getAttribute("datetime") || "").trim();
+
+    items.push({
+      id:
+        String(checkbox?.getAttribute("value") || "").trim() ||
+        `${targetEntry.target.channel}:${targetEntry.target.articleId}:${targetEntry.target.commentId || createdAt}`,
+      unread,
+      title,
+      summary: nodeText(contentNode) || title,
+      author: String(authorLink?.getAttribute("data-filter") || nodeText(authorLink) || "").trim(),
+      createdAt,
+      targetUrl: targetEntry.target.url,
+      channel: targetEntry.target.channel,
+      articleId: targetEntry.target.articleId,
+      commentId: targetEntry.target.commentId,
+      isStockChannel: targetEntry.target.channel === DEFAULT_CHANNEL,
+    });
+  }
+
+  return {
+    count: parsedCount.count,
+    countSource: parsedCount.source,
+    items,
+  };
+}
+
+function notificationTimeIso(value) {
+  const numeric = Number(value);
+  const date = Number.isFinite(numeric) && numeric > 0
+    ? new Date(numeric < 10_000_000_000 ? numeric * 1000 : numeric)
+    : new Date(String(value || ""));
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+export function normalizeArcaNotificationApiPayload(payload, { baseUrl = DEFAULT_BASE_URL } = {}) {
+  const rows = Array.isArray(payload?.notifications) ? payload.notifications : [];
+  const items = [];
+
+  for (const [index, row] of rows.entries()) {
+    if (items.length >= MAX_ARCA_NOTIFICATION_ITEMS) break;
+    const target = arcaNotificationArticleTarget(row?.link, baseUrl);
+    if (!target) continue;
+    const createdAt = notificationTimeIso(row?.time);
+    const title = String(row?.title || "").replace(/\s+/g, " ").trim() || "알림 대상 글";
+    const author = String(row?.username || "").trim();
+    items.push({
+      id: `${target.channel}:${target.articleId}:${target.commentId || createdAt || index}`,
+      unread: !Boolean(row?.isRead),
+      type: String(row?.type || "").trim(),
+      title,
+      summary: title,
+      author,
+      createdAt,
+      targetUrl: target.url,
+      channel: target.channel,
+      articleId: target.articleId,
+      commentId: target.commentId,
+      isStockChannel: target.channel === DEFAULT_CHANNEL,
+    });
+  }
+
+  return {
+    items,
+    unreadCount: items.reduce((count, item) => count + (item.unread ? 1 : 0), 0),
+  };
+}
+
+async function readNotificationApiItems(config, notificationUrl) {
+  const url = buildNotificationReadAllUrl(config);
+  let response;
+  let body = "";
+  try {
+    response = await fetchWithTimeout(url, {
+      headers: {
+        ...buildHeaders({ referer: notificationUrl.toString() }),
+        accept: "application/json, text/javascript, */*; q=0.01",
+        "x-requested-with": "XMLHttpRequest",
+      },
+      redirect: "follow",
+    });
+    body = await readTextSafely(response);
+  } catch {
+    return null;
+  }
+  if (!response.ok || isCloudflareChallenge(response, body)) return null;
+  try {
+    return normalizeArcaNotificationApiPayload(JSON.parse(body), { baseUrl: config.baseUrl });
+  } catch {
+    return null;
+  }
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
@@ -587,11 +963,14 @@ function extractArticleDetail(root, config, url) {
     metaContent(root, ['meta[property="og:description"]', 'meta[name="description"]']) || "";
   const author = metaContent(root, ['meta[name="author"]']) || nodeText(root.querySelector(".article-info .user-info"));
   const contentNode = root.querySelector(".article-content") || root.querySelector(".article-body");
-  const contentTextFull = nodeText(contentNode) || description;
+  const contentHtml = String(contentNode?.innerHTML || "").trim();
+  const contentTextFull = articleBlockText(contentNode, { baseUrl: config.baseUrl }) || description;
   const contentBlocks = extractArticleContentBlocks(contentNode, config);
   const imageSources = (contentNode?.querySelectorAll("img") || [])
     .map((image) => articleImageUrls(image, config))
-    .filter((image) => image.originalUrl)
+    .filter(
+      (image) => image.originalUrl && !isArcaTwemojiSvgUrl(image.readerUrl || image.originalUrl, config.baseUrl)
+    )
     .slice(0, MAX_ARTICLE_READER_IMAGES);
   const imageUrls = imageSources.map((image) => image.originalUrl);
   const readerImageSourceUrls = imageSources.map((image) => image.readerUrl);
@@ -611,6 +990,7 @@ function extractArticleDetail(root, config, url) {
     contentText: contentTextFull.slice(0, MAX_ARTICLE_CONTEXT_LENGTH),
     contentLength: contentTextFull.length,
     contentTruncated: contentTextFull.length > MAX_ARTICLE_CONTEXT_LENGTH,
+    contentHtml,
     contentBlocks,
     imageUrls,
     readerImageSourceUrls,
@@ -652,6 +1032,33 @@ function commentDepth(comment, commentsById) {
   return depth;
 }
 
+function commentLinkContent(commentNode, baseUrl) {
+  const cardNodes = commentNode
+    .querySelectorAll("a.link-card-link")
+    .filter((node) => node.querySelector(".link-card"));
+  const cardsHtml = cardNodes.map((node) => node.toString()).join("\n").trim();
+  const links = [];
+  const seen = new Set();
+  const hiddenTextNodes = commentNode
+    .querySelectorAll(".text")
+    .filter((node) => node.classNames.includes("d-none"));
+  for (const hiddenTextNode of hiddenTextNodes) {
+    const preNodes = hiddenTextNode.querySelectorAll("pre");
+    const rawContents = preNodes.length
+      ? preNodes.map((node) => node.innerHTML)
+      : [hiddenTextNode.innerHTML];
+    for (const rawContent of rawContents) {
+      for (const node of parse(rawContent).querySelectorAll("a")) {
+        const href = safeArticleAssetUrl(node.getAttribute("href"), baseUrl);
+        if (!href || seen.has(href)) continue;
+        seen.add(href);
+        links.push({ href, label: nodeText(node) || href });
+      }
+    }
+  }
+  return { cardsHtml, links };
+}
+
 export function extractArcaCommentsFromHtml(
   html,
   { baseUrl = DEFAULT_BASE_URL } = {}
@@ -663,7 +1070,9 @@ export function extractArcaCommentsFromHtml(
     const id = String(commentNode.getAttribute("id") || "").replace(/^c_/, "");
     const userInfo = commentNode.querySelector(".user-info");
     const authorNode = userInfo?.querySelector("[data-filter]");
-    const textNode = commentNode.querySelector(".message .text pre, .message .text");
+    const messageTextNode = commentNode.querySelector(".message .text");
+    const textNode = messageTextNode?.querySelector("pre") || messageTextNode;
+    const linkContent = commentLinkContent(commentNode, config.baseUrl);
     const timeNode = commentNode.querySelector(".info-row time, time");
     const avatarNode = commentNode.querySelector(".avatar img");
     const avatarSource = safeArticleAssetUrl(avatarNode?.getAttribute("src"), config.baseUrl);
@@ -677,6 +1086,11 @@ export function extractArcaCommentsFromHtml(
       accountUser: Boolean(userInfo?.querySelector(".ion-android-person")),
       timeIso: timeNode?.getAttribute("datetime") || "",
       text: decodeHtmlEntities(String(textNode?.structuredText || textNode?.text || "").trim()),
+      html: [linkContent.cardsHtml, String(messageTextNode?.innerHTML || textNode?.innerHTML || "").trim()]
+        .filter(Boolean)
+        .join("\n"),
+      links: linkContent.links,
+      hasLinkCard: Boolean(linkContent.cardsHtml),
       deleted: Boolean(commentNode.querySelector(".deleted, .message.deleted")),
       avatar: avatarSource && isAllowedArcaImageProxyUrl(avatarSource, config.baseUrl)
         ? arcaMediaProxyPath(avatarSource)
@@ -1385,7 +1799,8 @@ async function probeChannel(payload = {}) {
 async function readNotifications() {
   const config = getConfig();
   const cookieHeader = getArcaCookieHeader();
-  const url = buildNotificationUrl(config);
+  const notificationUrl = buildNotificationUrl(config);
+  const probeUrl = buildNotificationProbeUrl(config);
   const checkedAt = new Date().toISOString();
 
   if (!cookieHeader) {
@@ -1395,15 +1810,17 @@ async function readNotifications() {
       connected: false,
       status: "signed-out",
       count: 0,
-      notificationUrl: url.toString(),
+      items: [],
+      notificationUrl: notificationUrl.toString(),
       checkedAt,
     };
   }
 
+  const apiItems = await readNotificationApiItems(config, probeUrl);
   let response;
   let html = "";
   try {
-    response = await fetchWithTimeout(url, {
+    response = await fetchWithTimeout(probeUrl, {
       headers: buildHeaders({ referer: `${config.baseUrl}/b/${config.defaultChannel}` }),
       redirect: "follow",
     });
@@ -1415,7 +1832,9 @@ async function readNotifications() {
       connected: true,
       status: "error",
       count: 0,
-      notificationUrl: url.toString(),
+      items: [],
+      notificationUrl: notificationUrl.toString(),
+      probeUrl: probeUrl.toString(),
       error: `아카라이브 알림 조회 실패: ${error.message}`,
       checkedAt,
     };
@@ -1428,7 +1847,9 @@ async function readNotifications() {
       connected: true,
       status: "error",
       count: 0,
-      notificationUrl: url.toString(),
+      items: [],
+      notificationUrl: notificationUrl.toString(),
+      probeUrl: probeUrl.toString(),
       statusCode: response.status,
       pageTitle: extractPageTitle(html),
       error: "Cloudflare challenge로 알림 조회가 차단되었습니다.",
@@ -1443,7 +1864,9 @@ async function readNotifications() {
       connected: false,
       status: "auth-required",
       count: 0,
-      notificationUrl: url.toString(),
+      items: [],
+      notificationUrl: notificationUrl.toString(),
+      probeUrl: probeUrl.toString(),
       statusCode: response.status,
       pageTitle: extractPageTitle(html),
       error: "저장된 세션으로 알림 페이지에 로그인하지 못했습니다.",
@@ -1458,7 +1881,9 @@ async function readNotifications() {
       connected: true,
       status: "error",
       count: 0,
-      notificationUrl: url.toString(),
+      items: [],
+      notificationUrl: notificationUrl.toString(),
+      probeUrl: probeUrl.toString(),
       statusCode: response.status,
       pageTitle: extractPageTitle(html),
       error: `아카라이브가 HTTP ${response.status}를 반환했습니다.`,
@@ -1466,18 +1891,121 @@ async function readNotifications() {
     };
   }
 
-  const parsed = extractNotificationCount(html);
+  const parsed = extractArcaNotificationsFromHtml(html, { baseUrl: config.baseUrl });
+  const count = Math.max(parsed.count, apiItems?.unreadCount || 0);
   return {
     ok: true,
     config,
     connected: true,
-    status: parsed.count > 0 ? "unread" : "idle",
-    count: parsed.count,
-    countSource: parsed.source,
-    notificationUrl: url.toString(),
+    status: count > 0 ? "unread" : "idle",
+    count,
+    countSource: apiItems?.unreadCount > parsed.count ? "notification-api" : parsed.countSource,
+    notificationUrl: notificationUrl.toString(),
+    probeUrl: probeUrl.toString(),
     statusCode: response.status,
     pageTitle: extractPageTitle(html),
+    items: apiItems?.items || [],
+    itemsSource: apiItems ? "notification-api" : "unavailable",
     checkedAt,
+  };
+}
+
+async function markAllNotificationsRead() {
+  const config = getConfig();
+  const cookieHeader = getArcaCookieHeader();
+  const notificationUrl = buildNotificationUrl(config);
+  const readAllUrl = buildNotificationReadAllUrl(config);
+  const checkedAt = new Date().toISOString();
+
+  if (!cookieHeader) {
+    return {
+      ok: false,
+      config,
+      connected: false,
+      status: "auth-required",
+      count: 0,
+      items: [],
+      notificationUrl: notificationUrl.toString(),
+      error: "아카라이브 로그인 후 모두 읽기를 사용할 수 있습니다.",
+      checkedAt,
+    };
+  }
+
+  let response;
+  let body = "";
+  try {
+    response = await fetchWithTimeout(readAllUrl, {
+      method: "DELETE",
+      headers: {
+        ...buildHeaders({ referer: notificationUrl.toString() }),
+        accept: "application/json, text/javascript, */*; q=0.01",
+        origin: config.baseUrl,
+        "x-requested-with": "XMLHttpRequest",
+      },
+      redirect: "follow",
+    });
+    body = await readTextSafely(response);
+  } catch (error) {
+    return {
+      ok: false,
+      config,
+      connected: true,
+      status: "error",
+      count: 0,
+      items: [],
+      notificationUrl: notificationUrl.toString(),
+      error: `아카라이브 알림 읽음 처리 실패: ${error.message}`,
+      checkedAt,
+    };
+  }
+
+  if (isCloudflareChallenge(response, body)) {
+    return {
+      ok: false,
+      config,
+      connected: true,
+      status: "error",
+      count: 0,
+      items: [],
+      notificationUrl: notificationUrl.toString(),
+      statusCode: response.status,
+      error: "Cloudflare challenge로 알림 읽음 처리가 차단되었습니다.",
+      checkedAt,
+    };
+  }
+
+  let result = null;
+  try {
+    result = JSON.parse(body);
+  } catch {
+    result = null;
+  }
+  if (!response.ok || result?.result !== true) {
+    return {
+      ok: false,
+      config,
+      connected: true,
+      status: "error",
+      count: 0,
+      items: [],
+      notificationUrl: notificationUrl.toString(),
+      statusCode: response.status,
+      error: response.ok
+        ? "아카라이브가 알림 읽음 처리를 확인하지 않았습니다."
+        : `아카라이브가 HTTP ${response.status}를 반환했습니다.`,
+      checkedAt,
+    };
+  }
+
+  const refreshed = await readNotifications();
+  const verified = Boolean(refreshed.ok && refreshed.connected && refreshed.count === 0);
+  return {
+    ...refreshed,
+    accepted: true,
+    markedAllRead: verified,
+    verified,
+    remainingUnreadCount: Math.max(0, Number(refreshed.count || 0)),
+    markedAllReadAt: new Date().toISOString(),
   };
 }
 
@@ -1556,11 +2084,11 @@ export async function handleArcaEndpoint(endpoint, req, res) {
     }
 
     if (endpoint === "notifications") {
-      if (!["GET", "POST"].includes(req.method || "")) {
+      if (!["GET", "POST", "DELETE"].includes(req.method || "")) {
         sendJson(res, { ok: false, error: "method not allowed" }, 405);
         return;
       }
-      sendJson(res, await readNotifications());
+      sendJson(res, req.method === "DELETE" ? await markAllNotificationsRead() : await readNotifications());
       return;
     }
 

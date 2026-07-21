@@ -99,6 +99,16 @@ The Arca.live notification login flow uses a dedicated browser profile:
 
 The user logs in manually in the opened browser. The app then captures only Arca.live cookies through the browser DevTools Protocol and stores them locally in `data/secrets/arca-session.json`.
 
+When that captured session is valid, the stock-channel index can show the Arca.live notification list inside the app. `모두 읽기` uses the same local session to call Arca.live's notification read endpoint and then verifies the refreshed unread count. `전체 보기` still opens the original Arca.live notification page. A stock-channel notification opens the existing in-app article reader; notifications for other channels keep the external new-tab behavior.
+
+Notification polling must not request `/u/notification`: Arca.live treats opening that page as reading the current notifications. The local poller reads the JSON notification feed and uses the configured channel page only for the unread badge; `/u/notification` is reserved for an explicit `전체 보기` navigation.
+
+The in-app article reader treats the fetched Arca.live article-body and comment HTML fragments as trusted content and inserts them directly into the local reader DOM without an iframe. Relative resource URLs are resolved against the original article URL, and injected `script` nodes are remounted so they execute. This deliberately inherits Arca.live's own content filtering trust boundary; upstream scripts run in the local app page context. Comment link-preview markup is retained instead of being flattened to plain text.
+
+General article images are the exception to direct resource loading: their raw `src` and `srcset` are withheld before DOM insertion, restored at the same document position through `/api/arca/article/image`, and loaded one at a time in document order. This preserves the earlier proxy, timeout, loading, and failure UI while leaving the surrounding upstream HTML intact.
+
+Arca.live Twemoji SVG URLs are resolved against the upstream origin so they are not reported as failed local images; the structured fallback still restores those replacements as text emoji. The fallback also preserves semantic paragraphs, headings, quotes, ordered and unordered lists, tables, links, inline emphasis, and blank `p`/`br` spacing when raw HTML is unavailable.
+
 Do not print the session file or raw cookie header. Status UI should show only safe metadata such as connected state, cookie names, domains, and timestamps.
 
 ## Toss Securities Open API Read-Only Connector

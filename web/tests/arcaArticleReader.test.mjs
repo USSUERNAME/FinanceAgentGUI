@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   arcaArticleImageProxyPath,
   extractArcaArticleDetailFromHtml,
+  extractArcaCommentsFromHtml,
   isAllowedArcaImageProxyUrl,
   isArcaImageClientDisconnectError,
+  isArcaTwemojiSvgUrl,
 } from "../server/arcaApi.mjs";
 
 test("아카라이브 글 본문을 안전한 읽기 블록 순서로 추출한다", () => {
@@ -44,6 +46,40 @@ test("아카라이브 글 본문을 안전한 읽기 블록 순서로 추출한�
   assert.equal(article.contentBlocks[0].text, "첫 번째 문단입니다.");
   assert.equal(article.contentBlocks[4].src, "https://arca.live/assets/chart.png");
   assert.equal(article.contentBlocks.some((block) => block.text?.includes("window.bad")), false);
+  assert.match(article.contentHtml, /<p>첫 번째 문단입니다\.<\/p>/);
+  assert.match(article.contentHtml, /<script>window\.bad = true<\/script>/);
+});
+
+test("댓글 원본 HTML과 링크 요약 박스 및 스크립트를 보존한다", () => {
+  const html = `
+    <html>
+      <body>
+        <div class="comment-item" id="c_123">
+          <div class="user-info"><span data-filter="댓글작성자#1234"></span></div>
+          <div class="message">
+            <div class="text">
+              <p>댓글 본문입니다.</p>
+              <a class="domain-preview" href="/b/stock/321">
+                <div class="domain-preview-title">요약 제목</div>
+                <div class="domain-preview-description">요약 설명</div>
+              </a>
+              <script>window.commentPreviewReady = true;</script>
+            </div>
+          </div>
+          <div class="info-row"><time datetime="2026-07-22T01:00:00.000Z"></time></div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const payload = extractArcaCommentsFromHtml(html);
+  const [comment] = payload.comments;
+
+  assert.equal(comment.id, "123");
+  assert.equal(comment.text.includes("댓글 본문입니다."), true);
+  assert.match(comment.html, /class="domain-preview"/);
+  assert.match(comment.html, /href="\/b\/stock\/321"/);
+  assert.match(comment.html, /<script>window\.commentPreviewReady = true;<\/script>/);
 });
 
 test("읽기 블록 이미지 URL은 http와 https만 허용한다", () => {
@@ -69,6 +105,104 @@ test("읽기 블록 이미지 URL은 http와 https만 허용한다", () => {
     article.contentBlocks.filter((block) => block.type === "image").map((block) => block.src),
     ["https://cdn.example.com/safe.png"]
   );
+});
+
+test("아카라이브 Twemoji SVG는 이미지 오류 대상이 아니라 본문 이모지로 복원한다", () => {
+  const html = `
+    <html>
+      <head><meta property="og:title" content="이모지 본문" /></head>
+      <body>
+        <div class="article-content">
+          <p>지수가 <img src="/node_modules/twemoji/assets/svg/1f4c9.svg" alt="📉" /> 하락했습니다.</p>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const article = extractArcaArticleDetailFromHtml(html, {
+    url: "https://arca.live/b/stock/999",
+  });
+
+  assert.equal(article.contentText, "지수가 📉 하락했습니다.");
+  assert.deepEqual(article.contentBlocks, [{ type: "paragraph", text: "지수가 📉 하락했습니다." }]);
+  assert.deepEqual(article.imageUrls, []);
+  assert.deepEqual(article.readerImageSourceUrls, []);
+});
+
+test("본문의 목록, 표, 볼드, 링크와 인용 서식을 구조적으로 보존한다", () => {
+  const html = `
+    <html>
+      <head><meta property="og:title" content="서식 본문" /></head>
+      <body>
+        <div class="article-content">
+          <p>일반 <strong>중요 문장</strong>과 <a href="/b/stock/321">관련 링크</a>입니다.<br />다음 줄입니다.</p>
+          <blockquote><b>인용 핵심</b>과 설명입니다.</blockquote>
+          <ul><li>첫 항목</li><li><strong>둘째</strong> 항목</li></ul>
+          <ol><li>첫 단계</li><li>둘째 단계</li></ol>
+          <table>
+            <thead><tr><th>종목</th><th>등락</th></tr></thead>
+            <tbody><tr><td><strong>ABC</strong></td><td><a href="https://example.com/chart">+3%</a></td></tr></tbody>
+          </table>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const article = extractArcaArticleDetailFromHtml(html, {
+    url: "https://arca.live/b/stock/1000",
+  });
+
+  assert.deepEqual(
+    article.contentBlocks.map((block) => block.type),
+    ["paragraph", "quote", "list", "list", "table"]
+  );
+  assert.equal(article.contentBlocks[0].segments[1].bold, true);
+  assert.equal(article.contentBlocks[0].segments[3].href, "https://arca.live/b/stock/321");
+  assert.equal(article.contentBlocks[0].text, "일반 중요 문장과 관련 링크입니다.\n다음 줄입니다.");
+  assert.equal(article.contentBlocks[0].segments.some((segment) => segment.lineBreak), true);
+  assert.equal(article.contentBlocks[1].segments[0].bold, true);
+  assert.equal(article.contentBlocks[2].ordered, false);
+  assert.deepEqual(article.contentBlocks[2].items.map((item) => item.text), ["첫 항목", "둘째 항목"]);
+  assert.equal(article.contentBlocks[2].items[1].segments[0].bold, true);
+  assert.equal(article.contentBlocks[3].ordered, true);
+  assert.deepEqual(article.contentBlocks[4].headers.map((cell) => cell.text), ["종목", "등락"]);
+  assert.deepEqual(article.contentBlocks[4].rows[0].map((cell) => cell.text), ["ABC", "+3%"]);
+  assert.equal(article.contentBlocks[4].rows[0][0].segments[0].bold, true);
+  assert.equal(article.contentBlocks[4].rows[0][1].segments[0].href, "https://example.com/chart");
+});
+
+test("nbsp와 br만 있는 p 태그를 빈 문단 간격으로 보존한다", () => {
+  const html = `
+    <html>
+      <head><meta property="og:title" content="빈 문단 본문" /></head>
+      <body>
+        <div class="article-content">
+          <p>첫 문단</p>
+          <p>&nbsp;</p>
+          <p><span>&nbsp;</span></p>
+          <p><br /></p>
+          <p>마지막 문단</p>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const article = extractArcaArticleDetailFromHtml(html, {
+    url: "https://arca.live/b/stock/1001",
+  });
+
+  assert.deepEqual(
+    article.contentBlocks.map((block) => block.type),
+    ["paragraph", "spacer", "spacer", "spacer", "paragraph"]
+  );
+  assert.equal(article.contentBlocks.filter((block) => block.type === "spacer").length, 3);
+});
+
+test("Twemoji 판별은 같은 Arca origin의 공식 SVG 경로에만 적용한다", () => {
+  assert.equal(isArcaTwemojiSvgUrl("https://arca.live/node_modules/twemoji/assets/svg/1f4c9.svg"), true);
+  assert.equal(isArcaTwemojiSvgUrl("/node_modules/twemoji/assets/svg/1f4c9.svg"), true);
+  assert.equal(isArcaTwemojiSvgUrl("https://example.com/node_modules/twemoji/assets/svg/1f4c9.svg"), false);
+  assert.equal(isArcaTwemojiSvgUrl("https://arca.live/assets/chart.svg"), false);
 });
 
 test("읽기 화면은 CDN 표시용 이미지를 쓰고 원본 URL을 별도로 보존한다", () => {

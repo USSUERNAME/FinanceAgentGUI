@@ -1,6 +1,8 @@
 import React from "react";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.js";
+import Bell from "lucide-react/dist/esm/icons/bell.js";
 import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check-big.js";
+import CheckCheck from "lucide-react/dist/esm/icons/check-check.js";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.js";
 import ChevronsRight from "lucide-react/dist/esm/icons/chevrons-right.js";
@@ -49,6 +51,144 @@ function formatArticleReaderTime(article) {
   }).format(date);
 }
 
+function formatArcaNotificationTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function ArcaNotificationDialog({
+  actionBusy,
+  actionError,
+  closeButtonRef,
+  notificationUrl,
+  onClose,
+  onMarkAllRead,
+  onOpenItem,
+  status,
+}) {
+  const items = Array.isArray(status?.items) ? status.items.filter((item) => item?.unread) : [];
+  const unreadCount = Math.max(0, Number(status?.count || 0));
+  const loading = Boolean(status?.loading);
+  const error = actionError || (status?.ok === false ? status?.error : "");
+
+  return (
+    <div className="arca-notification-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="arca-notification-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="arca-notification-title"
+        aria-describedby="arca-notification-description"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="arca-notification-modal-header">
+          <div>
+            <span className="arca-notification-modal-kicker">
+              <Bell size={15} strokeWidth={2.2} aria-hidden="true" />
+              아카라이브
+            </span>
+            <h2 id="arca-notification-title">알림</h2>
+            <p id="arca-notification-description">
+              {unreadCount > 0 ? `읽지 않은 알림 ${formatCount(unreadCount)}개` : "읽지 않은 알림이 없습니다."}
+            </p>
+          </div>
+          <div className="arca-notification-modal-header-actions">
+            <button
+              className="arca-notification-read-all"
+              type="button"
+              onClick={onMarkAllRead}
+              disabled={actionBusy || unreadCount === 0}
+            >
+              {actionBusy ? (
+                <LoaderCircle size={15} strokeWidth={2.2} className="is-spinning" aria-hidden="true" />
+              ) : (
+                <CheckCheck size={15} strokeWidth={2.2} aria-hidden="true" />
+              )}
+              <span>{actionBusy ? "처리 중" : "모두 읽기"}</span>
+            </button>
+            <button
+              className="arca-notification-modal-close"
+              type="button"
+              onClick={onClose}
+              ref={closeButtonRef}
+              aria-label="알림 닫기"
+              title="닫기"
+            >
+              <X size={18} strokeWidth={2.3} aria-hidden="true" />
+            </button>
+          </div>
+        </header>
+
+        {error ? (
+          <p className="arca-notification-modal-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="arca-notification-list" aria-live="polite">
+          {loading && !items.length ? (
+            <div className="arca-notification-empty is-loading">
+              <LoaderCircle size={20} strokeWidth={2.1} className="is-spinning" aria-hidden="true" />
+              <span>알림을 불러오는 중입니다.</span>
+            </div>
+          ) : items.length ? (
+            items.map((item) => (
+              <a
+                className={item.unread ? "arca-notification-item is-unread" : "arca-notification-item"}
+                href={item.targetUrl}
+                target="_blank"
+                rel="noreferrer"
+                key={item.id || item.targetUrl}
+                onClick={(event) => onOpenItem(event, item)}
+              >
+                <span className="arca-notification-unread-dot" aria-label={item.unread ? "읽지 않음" : "읽음"} />
+                <span className="arca-notification-item-copy">
+                  <strong>{item.title || "알림 대상 글"}</strong>
+                  {item.summary && item.summary !== item.title ? <span>{item.summary}</span> : null}
+                  <small>
+                    {item.channel ? `${item.channel} 채널` : "아카라이브"}
+                    {item.author ? ` · ${displayBoardAuthor(item.author)}` : ""}
+                    {formatArcaNotificationTime(item.createdAt)
+                      ? ` · ${formatArcaNotificationTime(item.createdAt)}`
+                      : ""}
+                  </small>
+                </span>
+                {item.isStockChannel ? (
+                  <ChevronRight size={17} strokeWidth={2.2} aria-hidden="true" />
+                ) : (
+                  <ExternalLink size={16} strokeWidth={2.1} aria-hidden="true" />
+                )}
+              </a>
+            ))
+          ) : (
+            <div className="arca-notification-empty">
+              <CheckCircle2 size={22} strokeWidth={2} aria-hidden="true" />
+              <strong>표시할 알림이 없습니다.</strong>
+              <span>새 알림이 생기면 이 목록에서 바로 확인할 수 있습니다.</span>
+            </div>
+          )}
+        </div>
+
+        <footer className="arca-notification-modal-footer">
+          <span>주식채널 글은 앱 본문으로, 다른 채널 글은 새 탭으로 엽니다.</span>
+          <a href={notificationUrl} target="_blank" rel="noreferrer">
+            전체 보기
+            <ExternalLink size={14} strokeWidth={2.1} aria-hidden="true" />
+          </a>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function CommentAvatar({ src }) {
   const [failedSrc, setFailedSrc] = React.useState("");
   const showImage = Boolean(src) && failedSrc !== src;
@@ -79,6 +219,304 @@ function articleReaderBlocks(article) {
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
     .map((paragraph) => ({ type: "paragraph", text: paragraph }));
+}
+
+function absoluteTrustedArcaUrl(value, baseUrl) {
+  const source = String(value || "").trim();
+  if (!source || source.startsWith("#") || /^(?:data:|blob:|javascript:|mailto:|tel:)/i.test(source)) {
+    return source;
+  }
+  try {
+    return new URL(source, baseUrl || "https://arca.live/").toString();
+  } catch {
+    return source;
+  }
+}
+
+function isTrustedArcaTwemoji(value, baseUrl) {
+  const absolute = absoluteTrustedArcaUrl(value, baseUrl);
+  try {
+    return /^\/node_modules\/twemoji\/assets\/svg\/[0-9a-f-]+\.svg$/i.test(new URL(absolute).pathname);
+  } catch {
+    return false;
+  }
+}
+
+function articleImageProxyPath(value) {
+  return `/api/arca/article/image?url=${encodeURIComponent(String(value || ""))}`;
+}
+
+function prepareTrustedArcaHtml(html, baseUrl, queueArticleImages) {
+  const source = String(html || "");
+  if (!queueArticleImages || typeof document === "undefined") return source;
+  const template = document.createElement("template");
+  template.innerHTML = source;
+  template.content.querySelectorAll("img").forEach((image) => {
+    const currentSrc = image.getAttribute("src") || "";
+    const candidate = image.getAttribute("data-originalurl") || image.getAttribute("data-src") || currentSrc;
+    if (!candidate || isTrustedArcaTwemoji(candidate, baseUrl)) return;
+    if (currentSrc) image.setAttribute("data-arca-reader-src", currentSrc);
+    image.removeAttribute("src");
+    image.removeAttribute("srcset");
+    image.closest("picture")?.querySelectorAll("source[srcset]").forEach((sourceNode) => {
+      sourceNode.removeAttribute("srcset");
+    });
+  });
+  return template.innerHTML;
+}
+
+function installQueuedArticleImages(root, baseUrl) {
+  const cleanupTasks = [];
+  const queue = [];
+
+  root.querySelectorAll("img").forEach((sourceImage) => {
+    const sourceValue =
+      sourceImage.getAttribute("data-originalurl") ||
+      sourceImage.getAttribute("data-src") ||
+      sourceImage.getAttribute("data-arca-reader-src") ||
+      sourceImage.getAttribute("src") ||
+      "";
+    if (!sourceValue || isTrustedArcaTwemoji(sourceValue, baseUrl)) return;
+
+    const displayValue =
+      sourceImage.getAttribute("data-src") ||
+      sourceImage.getAttribute("data-arca-reader-src") ||
+      sourceImage.getAttribute("src") ||
+      sourceValue;
+    const displayUrl = absoluteTrustedArcaUrl(displayValue, baseUrl);
+    const originalUrl = absoluteTrustedArcaUrl(sourceValue, baseUrl);
+    if (!/^https?:\/\//i.test(displayUrl)) return;
+
+    const figure = document.createElement("figure");
+    figure.className = "board-reader-figure is-waiting";
+    figure.setAttribute("aria-label", "게시글 이미지 로딩 대기");
+    figure.dataset.arcaReaderImageIndex = String(queue.length);
+
+    const status = document.createElement("div");
+    status.className = "board-reader-image-status";
+    const statusText = document.createElement("span");
+    statusText.textContent = "앞 이미지 로딩 후 불러옵니다";
+    status.append(statusText);
+
+    const image = document.createElement("img");
+    image.alt = sourceImage.getAttribute("alt") || "게시글 이미지";
+    image.decoding = "async";
+    figure.append(status, image);
+    sourceImage.replaceWith(figure);
+
+    queue.push({
+      displayUrl: articleImageProxyPath(displayUrl),
+      figure,
+      image,
+      originalUrl,
+      status,
+      statusText,
+    });
+  });
+
+  const activate = (index) => {
+    const item = queue[index];
+    if (!item) return;
+    let settled = false;
+    item.figure.className = "board-reader-figure is-loading";
+    item.figure.setAttribute("aria-label", "게시글 이미지 로딩 중");
+    item.status.setAttribute("role", "status");
+    item.statusText.textContent = "이미지를 불러오는 중입니다";
+    const spinner = document.createElement("span");
+    spinner.className = "board-reader-image-spinner is-spinning";
+    spinner.setAttribute("aria-hidden", "true");
+    item.status.prepend(spinner);
+
+    const settle = (nextStatus) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      item.image.removeEventListener("load", handleLoad);
+      item.image.removeEventListener("error", handleError);
+      if (nextStatus === "loaded") {
+        item.figure.className = "board-reader-figure is-loaded";
+        item.figure.removeAttribute("aria-label");
+        item.status.remove();
+      } else {
+        item.figure.className = "board-reader-figure is-error";
+        item.figure.setAttribute("aria-label", "게시글 이미지 로딩 실패");
+        item.status.className = "board-reader-image-status is-error";
+        item.status.setAttribute("role", "alert");
+        item.status.replaceChildren();
+        const message = document.createElement("span");
+        message.textContent = "이미지를 불러오지 못했습니다.";
+        item.status.append(message);
+        if (item.originalUrl) {
+          const link = document.createElement("a");
+          link.href = item.originalUrl;
+          link.target = "_blank";
+          link.rel = "noreferrer";
+          link.textContent = "원본 이미지 열기";
+          item.status.append(link);
+        }
+      }
+      activate(index + 1);
+    };
+    const handleLoad = () => settle("loaded");
+    const handleError = () => settle("error");
+    const timeoutId = window.setTimeout(handleError, ARTICLE_READER_IMAGE_TIMEOUT_MS);
+    item.image.addEventListener("load", handleLoad);
+    item.image.addEventListener("error", handleError);
+    item.image.src = item.displayUrl;
+    cleanupTasks.push(() => {
+      window.clearTimeout(timeoutId);
+      item.image.removeEventListener("load", handleLoad);
+      item.image.removeEventListener("error", handleError);
+    });
+  };
+
+  activate(0);
+  return () => cleanupTasks.forEach((cleanup) => cleanup());
+}
+
+const TrustedArcaHtml = React.memo(function TrustedArcaHtml({ html, baseUrl, className, queueArticleImages = false }) {
+  const rootRef = React.useRef(null);
+  const appliedHtmlRef = React.useRef("");
+  const renderedHtml = React.useMemo(
+    () => prepareTrustedArcaHtml(html, baseUrl, queueArticleImages),
+    [baseUrl, html, queueArticleImages]
+  );
+
+  React.useLayoutEffect(() => {
+    const root = rootRef.current;
+    const renderKey = `${queueArticleImages ? "queued-images" : "direct-images"}\n${baseUrl || ""}\n${html || ""}`;
+    if (!root || appliedHtmlRef.current === renderKey) return;
+    appliedHtmlRef.current = renderKey;
+
+    const urlAttributes = ["src", "href", "poster", "action", "data-src", "data-originalurl", "data-arca-reader-src"];
+    root.querySelectorAll("[src], [href], [poster], [action], [data-src], [data-originalurl], [data-arca-reader-src]").forEach((element) => {
+      urlAttributes.forEach((attribute) => {
+        if (!element.hasAttribute(attribute)) return;
+        const currentValue = element.getAttribute(attribute);
+        const absoluteValue = absoluteTrustedArcaUrl(currentValue, baseUrl);
+        if (absoluteValue && absoluteValue !== currentValue) element.setAttribute(attribute, absoluteValue);
+      });
+    });
+
+    root.querySelectorAll("a[href]").forEach((anchor) => {
+      if (!anchor.getAttribute("target")) anchor.setAttribute("target", "_blank");
+      if (anchor.getAttribute("target") === "_blank") {
+        const rel = new Set(String(anchor.getAttribute("rel") || "").split(/\s+/).filter(Boolean));
+        rel.add("noreferrer");
+        anchor.setAttribute("rel", [...rel].join(" "));
+      }
+    });
+
+    root.querySelectorAll("script").forEach((sourceScript) => {
+      const script = document.createElement("script");
+      [...sourceScript.attributes].forEach((attribute) => {
+        script.setAttribute(attribute.name, attribute.value);
+      });
+      if (script.src && !script.hasAttribute("async") && !script.hasAttribute("defer") && script.type !== "module") {
+        script.async = false;
+      }
+      script.textContent = sourceScript.textContent;
+      sourceScript.replaceWith(script);
+    });
+    if (queueArticleImages) return installQueuedArticleImages(root, baseUrl);
+    return undefined;
+  }, [baseUrl, html, queueArticleImages]);
+
+  return (
+    <div
+      ref={rootRef}
+      className={className}
+      data-trusted-arca-html="true"
+      dangerouslySetInnerHTML={{ __html: renderedHtml }}
+    />
+  );
+});
+
+function ArticleInlineContent({ content }) {
+  const fallbackText = typeof content === "string" ? content : String(content?.text || "");
+  const segments = Array.isArray(content?.segments) && content.segments.length
+    ? content.segments
+    : [{ text: fallbackText }];
+  return segments.map((segment, index) => {
+    let rendered = segment.text;
+    if (segment.code) rendered = <code>{rendered}</code>;
+    if (segment.bold) rendered = <strong>{rendered}</strong>;
+    if (segment.italic) rendered = <em>{rendered}</em>;
+    if (segment.underline) rendered = <u>{rendered}</u>;
+    if (segment.strike) rendered = <del>{rendered}</del>;
+    if (segment.href) {
+      rendered = (
+        <a href={segment.href} target="_blank" rel="noreferrer">
+          {rendered}
+        </a>
+      );
+    }
+    return <React.Fragment key={`${index}-${segment.text}`}>{rendered}</React.Fragment>;
+  });
+}
+
+function ArticleReaderList({ block }) {
+  const items = Array.isArray(block?.items) ? block.items : [];
+  const listItems = items.map((item, index) => (
+    <li key={`${index}-${item?.text || item}`}>
+      <ArticleInlineContent content={item} />
+    </li>
+  ));
+  return block?.ordered
+    ? <ol className="board-reader-list is-ordered">{listItems}</ol>
+    : <ul className="board-reader-list">{listItems}</ul>;
+}
+
+function ArticleReaderTableCell({ cell, header = false, scope }) {
+  const props = {
+    ...(scope ? { scope } : {}),
+    ...(Number(cell?.colSpan) > 1 ? { colSpan: cell.colSpan } : {}),
+    ...(Number(cell?.rowSpan) > 1 ? { rowSpan: cell.rowSpan } : {}),
+  };
+  return header
+    ? <th {...props}><ArticleInlineContent content={cell} /></th>
+    : <td {...props}><ArticleInlineContent content={cell} /></td>;
+}
+
+function ArticleReaderTable({ block }) {
+  const headers = Array.isArray(block?.headers) ? block.headers : [];
+  const rows = Array.isArray(block?.rows) ? block.rows : [];
+  return (
+    <div className="board-reader-table-scroll" role="region" aria-label="게시글 표" tabIndex={0}>
+      <table className="board-reader-table">
+        {headers.length ? (
+          <thead>
+            <tr>
+              {headers.map((cell, index) => (
+                <ArticleReaderTableCell
+                  cell={cell}
+                  header
+                  scope="col"
+                  key={`${index}-${cell?.text || cell}`}
+                />
+              ))}
+            </tr>
+          </thead>
+        ) : null}
+        {rows.length ? (
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {(Array.isArray(row) ? row : []).map((cell, cellIndex) => (
+                  <ArticleReaderTableCell
+                    cell={cell}
+                    header={Boolean(cell?.header)}
+                    scope={cell?.header ? "row" : undefined}
+                    key={`${cellIndex}-${cell?.text || cell}`}
+                  />
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        ) : null}
+      </table>
+    </div>
+  );
 }
 
 const ARTICLE_READER_IMAGE_TIMEOUT_MS = 45000;
@@ -162,10 +600,30 @@ function formatCommentTime(value) {
 }
 
 function CommentEmoticon({ media, className = "" }) {
+  const videoRef = React.useRef(null);
+
+  const playVideo = React.useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.defaultMuted = true;
+    video.muted = true;
+    const playback = video.play();
+    if (playback?.catch) playback.catch(() => {});
+  }, []);
+
+  React.useEffect(() => {
+    if (media?.type !== "video" || !media?.src) return undefined;
+    playVideo();
+    const video = videoRef.current;
+    video?.addEventListener("canplay", playVideo);
+    return () => video?.removeEventListener("canplay", playVideo);
+  }, [media?.src, media?.type, playVideo]);
+
   if (!media?.src) return null;
   if (media.type === "video") {
     return (
       <video
+        ref={videoRef}
         className={className}
         src={media.src}
         poster={media.poster || undefined}
@@ -175,6 +633,8 @@ function CommentEmoticon({ media, className = "" }) {
         playsInline
         preload="metadata"
         aria-label="아카콘"
+        onPointerEnter={playVideo}
+        onFocus={playVideo}
       />
     );
   }
@@ -330,11 +790,7 @@ function ArcaEmoticonPicker({ open, onClose, onSelect, onSubmitCombo, submitting
                     title="선택에서 제거"
                     key={`${item.packageId}-${item.id}-${index}`}
                   >
-                    {item.type === "video" && item.poster ? (
-                      <img src={item.poster} alt="" />
-                    ) : (
-                      <CommentEmoticon media={item} />
-                    )}
+                    <CommentEmoticon media={item} />
                     <span>{index + 1}</span>
                   </button>
                 ))}
@@ -377,11 +833,7 @@ function ArcaEmoticonPicker({ open, onClose, onSelect, onSubmitCombo, submitting
                   disabled={submitting || (mode === "combo" && comboItems.length >= MAX_COMBOCON_ITEMS)}
                   key={`${activePackageId}-${item.id}`}
                 >
-                  {item.type === "video" && item.poster ? (
-                    <img src={item.poster} alt="움직이는 아카콘 미리보기" loading="lazy" decoding="async" />
-                  ) : (
-                    <CommentEmoticon media={item} />
-                  )}
+                  <CommentEmoticon media={item} />
                   {item.type === "video" ? <span className="board-arcacon-motion">GIF</span> : null}
                 </button>
               ))}
@@ -598,15 +1050,37 @@ function StockArticleComments({ article }) {
                   {comment.authorManager ? <span className="is-manager">관리자</span> : null}
                   <time dateTime={comment.timeIso}>{formatCommentTime(comment.timeIso)}</time>
                 </div>
-                {comment.text ? <p>{comment.text}</p> : null}
-                {comment.emoticons?.length ? (
+                {comment.html ? (
+                  <TrustedArcaHtml
+                    html={comment.html}
+                    baseUrl={articleUrl}
+                    className="board-comment-trusted-html"
+                    queueArticleImages
+                  />
+                ) : comment.text ? <p>{comment.text}</p> : null}
+                {!comment.hasLinkCard && comment.links?.length ? (
+                  <div className="board-comment-link-fallbacks" aria-label="댓글 원본 링크">
+                    {comment.links.map((link) => (
+                      <a
+                        href={link.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        key={link.href}
+                      >
+                        <span>{link.label || link.href}</span>
+                        <ExternalLink size={13} strokeWidth={2.1} aria-hidden="true" />
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+                {!comment.html && comment.emoticons?.length ? (
                   <div className="board-comment-emoticons">
                     {comment.emoticons.map((media, index) => (
                       <CommentEmoticon media={media} key={`${comment.id}-${media.attachmentId || index}`} />
                     ))}
                   </div>
                 ) : null}
-                {!comment.text && !comment.emoticons?.length ? <p className="is-empty">삭제되었거나 표시할 수 없는 댓글입니다.</p> : null}
+                {!comment.html && !comment.text && !comment.emoticons?.length ? <p className="is-empty">삭제되었거나 표시할 수 없는 댓글입니다.</p> : null}
                 <button
                   className="board-comment-reply-button"
                   type="button"
@@ -640,6 +1114,7 @@ function StockArticleComments({ article }) {
 
 function StockArticleReader({ article, busy, error, onClose, onRetry }) {
   const blocks = articleReaderBlocks(article);
+  const trustedHtml = String(article?.contentHtml || "").trim();
   const blockImageUrls = new Set(blocks.filter((block) => block?.type === "image").map((block) => block.src));
   const fallbackImages = (article?.readerImageUrls || article?.imageUrls || []).filter(
     (src) => src && !blockImageUrls.has(src)
@@ -705,7 +1180,14 @@ function StockArticleReader({ article, busy, error, onClose, onRetry }) {
         ) : (
           <>
             <div className="board-reader-body">
-              {blocks.map((block, index) => {
+              {trustedHtml ? (
+                <TrustedArcaHtml
+                  html={trustedHtml}
+                  baseUrl={originalUrl}
+                  className="board-reader-trusted-html"
+                  queueArticleImages
+                />
+              ) : blocks.map((block, index) => {
               const key = `${block.type || "paragraph"}-${index}`;
               if (block.type === "image") {
                 const imageIndex = imageSequence;
@@ -722,12 +1204,21 @@ function StockArticleReader({ article, busy, error, onClose, onRetry }) {
                   />
                 );
               }
-              if (block.type === "quote") return <blockquote key={key}>{block.text}</blockquote>;
+              if (block.type === "list") return <ArticleReaderList block={block} key={key} />;
+              if (block.type === "table") return <ArticleReaderTable block={block} key={key} />;
+              if (block.type === "spacer") {
+                return <p className="board-reader-spacer" aria-hidden="true" key={key}>{"\u00a0"}</p>;
+              }
+              if (block.type === "quote") {
+                return <blockquote key={key}><ArticleInlineContent content={block} /></blockquote>;
+              }
               if (block.type === "pre") return <pre key={key}>{block.text}</pre>;
-              if (block.type === "heading") return <h2 key={key}>{block.text}</h2>;
-              return <p key={key}>{block.text}</p>;
+              if (block.type === "heading") {
+                return <h2 key={key}><ArticleInlineContent content={block} /></h2>;
+              }
+              return <p key={key}><ArticleInlineContent content={block} /></p>;
               })}
-              {fallbackImages.map((src, index) => {
+              {!trustedHtml && fallbackImages.map((src, index) => {
               const imageIndex = imageSequence;
               imageSequence += 1;
               return (
@@ -741,7 +1232,7 @@ function StockArticleReader({ article, busy, error, onClose, onRetry }) {
                 />
               );
               })}
-              {!blocks.length && !fallbackImages.length ? (
+              {!trustedHtml && !blocks.length && !fallbackImages.length ? (
                 <p className="board-reader-empty">표시할 본문이 없습니다. 원문 열기로 게시글을 확인해 주세요.</p>
               ) : null}
             </div>
@@ -1019,12 +1510,18 @@ export default function StockChannelView({
   boardSearchInput,
   cutRateOptions,
   notificationBusy,
+  notificationActionBusy,
+  notificationActionError,
   notificationHealth,
+  notificationStatus,
   onAttachArticle,
   onBoardSearchInputChange,
   onCloseArticle,
   onOpenArticle,
+  onMarkAllNotificationsRead,
+  onOpenNotificationArticle,
   onRefreshBoard,
+  onRefreshNotifications,
   onRetryArticle,
   onSelectCategory,
   onSubmitSearch,
@@ -1037,6 +1534,44 @@ export default function StockChannelView({
   writeUrl,
   notificationUrl,
 }) {
+  const [notificationDialogOpen, setNotificationDialogOpen] = React.useState(false);
+  const notificationTriggerRef = React.useRef(null);
+  const notificationCloseButtonRef = React.useRef(null);
+
+  const closeNotificationDialog = React.useCallback(() => {
+    setNotificationDialogOpen(false);
+  }, []);
+
+  const openNotificationDialog = React.useCallback(() => {
+    setNotificationDialogOpen(true);
+    void onRefreshNotifications();
+  }, [onRefreshNotifications]);
+
+  const openNotificationItem = React.useCallback(
+    (event, item) => {
+      if (!item?.isStockChannel || shouldOpenArticleExternally(event)) return;
+      event.preventDefault();
+      setNotificationDialogOpen(false);
+      onOpenNotificationArticle(item);
+    },
+    [onOpenNotificationArticle]
+  );
+
+  React.useEffect(() => {
+    if (!notificationDialogOpen) return undefined;
+    const trigger = notificationTriggerRef.current;
+    const focusTimer = window.requestAnimationFrame(() => notificationCloseButtonRef.current?.focus());
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") closeNotificationDialog();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusTimer);
+      window.removeEventListener("keydown", handleKeyDown);
+      trigger?.focus();
+    };
+  }, [closeNotificationDialog, notificationDialogOpen]);
+
   React.useEffect(() => {
     function handleShortcut(event) {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isTextEntryTarget(event.target)) {
@@ -1114,7 +1649,7 @@ export default function StockChannelView({
                 <span>글쓰기</span>
               </a>
               {notificationHealth.showNotificationCount ? (
-                <a
+                <button
                   className={[
                     "board-notification-link",
                     notificationHealth.level === "online" ? "is-online" : "",
@@ -1123,14 +1658,16 @@ export default function StockChannelView({
                   ]
                     .filter(Boolean)
                     .join(" ")}
-                  href={notificationUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                  type="button"
+                  onClick={openNotificationDialog}
+                  ref={notificationTriggerRef}
                   title={notificationHealth.title}
                   aria-label={notificationHealth.ariaLabel}
+                  aria-haspopup="dialog"
+                  aria-expanded={notificationDialogOpen}
                 >
                   <span>{formatCount(notificationHealth.count) || "0"}</span>
-                </a>
+                </button>
               ) : null}
             </div>
           </header>
@@ -1239,6 +1776,18 @@ export default function StockChannelView({
           </div>
         </section>
       </div>
+      {notificationDialogOpen ? (
+        <ArcaNotificationDialog
+          actionBusy={notificationActionBusy}
+          actionError={notificationActionError}
+          closeButtonRef={notificationCloseButtonRef}
+          notificationUrl={notificationUrl}
+          onClose={closeNotificationDialog}
+          onMarkAllRead={onMarkAllNotificationsRead}
+          onOpenItem={openNotificationItem}
+          status={{ ...notificationStatus, loading: notificationBusy }}
+        />
+      ) : null}
     </section>
   );
 }
