@@ -106,6 +106,26 @@ export function codexApiPlugin() {
         await handleLazyArcaEndpoint("articles", req, res);
       });
 
+      server.middlewares.use("/api/arca/comments", async (req, res) => {
+        await handleLazyArcaEndpoint("comments", req, res);
+      });
+
+      server.middlewares.use("/api/arca/comment", async (req, res) => {
+        await handleLazyArcaEndpoint("comment", req, res);
+      });
+
+      server.middlewares.use("/api/arca/emoticons", async (req, res) => {
+        await handleLazyArcaEndpoint("emoticons", req, res);
+      });
+
+      server.middlewares.use("/api/arca/media", async (req, res) => {
+        await handleLazyArcaEndpoint("media", req, res);
+      });
+
+      server.middlewares.use("/api/arca/article/image", async (req, res) => {
+        await handleLazyArcaEndpoint("article-image", req, res);
+      });
+
       server.middlewares.use("/api/arca/article", async (req, res) => {
         await handleLazyArcaEndpoint("article", req, res);
       });

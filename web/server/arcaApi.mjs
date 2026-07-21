@@ -5,6 +5,14 @@ import { readJsonBody, sendJson } from "./codexProbe.mjs";
 const DEFAULT_BASE_URL = "https://arca.live";
 const DEFAULT_CHANNEL = "stock";
 const MAX_ARTICLE_CONTEXT_LENGTH = 12000;
+const MAX_ARTICLE_READER_TEXT_LENGTH = 60000;
+const MAX_ARTICLE_READER_BLOCKS = 240;
+const MAX_ARTICLE_READER_IMAGES = 24;
+const MAX_ARTICLE_IMAGE_BYTES = 12 * 1024 * 1024;
+const MAX_ARCA_MEDIA_BYTES = 20 * 1024 * 1024;
+const MAX_COMMENT_LENGTH = 8000;
+const MAX_COMBO_EMOTICONS = 3;
+const guardedArcaImageSockets = new WeakSet();
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -30,7 +38,7 @@ function nodeText(node) {
 }
 
 function parseInteger(value) {
-  const digits = String(value || "").replace(/[^\d-]/g, "");
+  const digits = String(value ?? "").replace(/[^\d-]/g, "");
   if (!digits) return null;
   const parsed = Number.parseInt(digits, 10);
   return Number.isFinite(parsed) ? parsed : null;
@@ -47,6 +55,195 @@ function absoluteArcaUrl(href, baseUrl) {
   } catch {
     return "";
   }
+}
+
+function safeArticleAssetUrl(href, baseUrl) {
+  const absolute = absoluteArcaUrl(href, baseUrl);
+  if (!absolute) return "";
+  try {
+    const url = new URL(absolute);
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function articleImageUrls(node, config) {
+  const originalUrl = safeArticleAssetUrl(
+    node?.getAttribute?.("data-originalurl") || node?.getAttribute?.("data-src") || node?.getAttribute?.("src"),
+    config.baseUrl
+  );
+  const readerUrl = safeArticleAssetUrl(
+    node?.getAttribute?.("src") || node?.getAttribute?.("data-src") || node?.getAttribute?.("data-originalurl"),
+    config.baseUrl
+  );
+  return {
+    originalUrl,
+    readerUrl: readerUrl || originalUrl,
+  };
+}
+
+export function isAllowedArcaImageProxyUrl(value, baseUrl = DEFAULT_BASE_URL) {
+  try {
+    const url = new URL(String(value || ""));
+    const baseHost = new URL(normalizeBaseUrl(baseUrl)).hostname.toLowerCase();
+    const host = url.hostname.toLowerCase();
+    return (
+      url.protocol === "https:" &&
+      (
+        host === baseHost ||
+        host.endsWith(`.${baseHost}`) ||
+        host === "namu.la" ||
+        host.endsWith(".namu.la") ||
+        host === "secure.gravatar.com"
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function arcaArticleImageProxyPath(value) {
+  return `/api/arca/article/image?url=${encodeURIComponent(String(value || ""))}`;
+}
+
+export function arcaMediaProxyPath(value) {
+  return `/api/arca/media?url=${encodeURIComponent(String(value || ""))}`;
+}
+
+export function isArcaImageClientDisconnectError(error) {
+  return ["EPIPE", "ECONNRESET", "ERR_STREAM_DESTROYED", "ERR_HTTP2_STREAM_CANCEL"].includes(
+    String(error?.code || "").toUpperCase()
+  );
+}
+
+function guardArcaImageProxyClient(req, res, controller) {
+  const state = { disconnected: false };
+  const disconnect = () => {
+    state.disconnected = true;
+    if (!controller.signal.aborted) controller.abort();
+  };
+  req.once?.("aborted", disconnect);
+  res.once?.("close", () => {
+    if (!res.writableEnded) disconnect();
+  });
+  res.on?.("error", (error) => {
+    disconnect();
+    if (!isArcaImageClientDisconnectError(error)) {
+      console.error(`Arca image proxy response failed: ${error.message}`);
+    }
+  });
+  const socket = res.socket || req.socket;
+  if (socket && !guardedArcaImageSockets.has(socket)) {
+    guardedArcaImageSockets.add(socket);
+    socket.on("error", (error) => {
+      if (!isArcaImageClientDisconnectError(error)) {
+        console.error(`Arca image proxy socket failed: ${error.message}`);
+      }
+    });
+  }
+  return state;
+}
+
+function canWriteArcaImageProxyResponse(req, res, clientState) {
+  return !clientState.disconnected && !req.aborted && !res.destroyed && !res.writableEnded;
+}
+
+function withArcaReaderImageProxies(article) {
+  return {
+    ...article,
+    readerImageUrls: article.readerImageSourceUrls.map(arcaArticleImageProxyPath),
+    contentBlocks: article.contentBlocks.map((block) =>
+      block.type === "image"
+        ? {
+            ...block,
+            sourceSrc: block.src,
+            src: arcaArticleImageProxyPath(block.readerSrc || block.src),
+          }
+        : block
+    ),
+  };
+}
+
+function articleBlockText(node, { preserveLines = false } = {}) {
+  const source = String(node?.structuredText || node?.text || node?.rawText || "");
+  if (!source) return "";
+  const lines = decodeHtmlEntities(source)
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  return preserveLines ? lines.join("\n") : lines.join(" ");
+}
+
+function extractArticleContentBlocks(contentNode, config) {
+  if (!contentNode) return [];
+
+  const blocks = [];
+  const skippedTags = new Set(["script", "style", "noscript", "template", "svg"]);
+  const textBlockTags = new Set(["p", "li", "blockquote", "pre", "h1", "h2", "h3", "h4", "h5", "h6"]);
+  const structuralTags = new Set([...textBlockTags, "div", "section", "article", "figure", "ul", "ol", "img"]);
+  let textLength = 0;
+  let imageCount = 0;
+
+  const pushText = (type, text, extra = {}) => {
+    const normalized = String(text || "").trim();
+    if (!normalized || textLength >= MAX_ARTICLE_READER_TEXT_LENGTH || blocks.length >= MAX_ARTICLE_READER_BLOCKS) {
+      return;
+    }
+    const remaining = MAX_ARTICLE_READER_TEXT_LENGTH - textLength;
+    const clipped = normalized.slice(0, remaining);
+    blocks.push({ type, text: clipped, ...extra });
+    textLength += clipped.length;
+  };
+
+  const pushImage = (node) => {
+    if (imageCount >= MAX_ARTICLE_READER_IMAGES || blocks.length >= MAX_ARTICLE_READER_BLOCKS) return;
+    const { originalUrl, readerUrl } = articleImageUrls(node, config);
+    if (!originalUrl) return;
+    blocks.push({
+      type: "image",
+      src: originalUrl,
+      readerSrc: readerUrl,
+      alt: decodeHtmlEntities(node?.getAttribute?.("alt") || "게시글 이미지"),
+    });
+    imageCount += 1;
+  };
+
+  const visit = (node) => {
+    if (!node || blocks.length >= MAX_ARTICLE_READER_BLOCKS) return;
+    const tagName = String(node.tagName || "").toLowerCase();
+    if (skippedTags.has(tagName)) return;
+    if (tagName === "img") {
+      pushImage(node);
+      return;
+    }
+
+    if (textBlockTags.has(tagName)) {
+      const type = tagName === "blockquote" ? "quote" : tagName === "pre" ? "pre" : /^h[1-6]$/.test(tagName) ? "heading" : "paragraph";
+      pushText(type, articleBlockText(node, { preserveLines: tagName === "pre" }), {
+        ...(type === "heading" ? { level: Number(tagName.slice(1)) || 2 } : {}),
+      });
+      for (const image of node.querySelectorAll?.("img") || []) pushImage(image);
+      return;
+    }
+
+    const children = Array.isArray(node.childNodes) ? node.childNodes : [];
+    const hasStructuralChild = children.some((child) => structuralTags.has(String(child?.tagName || "").toLowerCase()));
+    if (tagName && !hasStructuralChild) {
+      pushText("paragraph", articleBlockText(node));
+      return;
+    }
+    if (!tagName) {
+      pushText("paragraph", articleBlockText(node));
+      return;
+    }
+    children.forEach(visit);
+  };
+
+  const children = Array.isArray(contentNode.childNodes) ? contentNode.childNodes : [];
+  children.forEach(visit);
+  if (!blocks.length) pushText("paragraph", articleBlockText(contentNode));
+  return blocks;
 }
 
 function categoryNameFromHref(href) {
@@ -391,10 +588,13 @@ function extractArticleDetail(root, config, url) {
   const author = metaContent(root, ['meta[name="author"]']) || nodeText(root.querySelector(".article-info .user-info"));
   const contentNode = root.querySelector(".article-content") || root.querySelector(".article-body");
   const contentTextFull = nodeText(contentNode) || description;
-  const imageUrls = (contentNode?.querySelectorAll("img") || [])
-    .map((image) => absoluteArcaUrl(image.getAttribute("data-originalurl") || image.getAttribute("src"), config.baseUrl))
-    .filter(Boolean)
-    .slice(0, 8);
+  const contentBlocks = extractArticleContentBlocks(contentNode, config);
+  const imageSources = (contentNode?.querySelectorAll("img") || [])
+    .map((image) => articleImageUrls(image, config))
+    .filter((image) => image.originalUrl)
+    .slice(0, MAX_ARTICLE_READER_IMAGES);
+  const imageUrls = imageSources.map((image) => image.originalUrl);
+  const readerImageSourceUrls = imageSources.map((image) => image.readerUrl);
   const canonicalHref =
     root.querySelector(".article-link a")?.getAttribute("href") ||
     metaContent(root, ['meta[property="og:url"]']) ||
@@ -411,12 +611,100 @@ function extractArticleDetail(root, config, url) {
     contentText: contentTextFull.slice(0, MAX_ARTICLE_CONTEXT_LENGTH),
     contentLength: contentTextFull.length,
     contentTruncated: contentTextFull.length > MAX_ARTICLE_CONTEXT_LENGTH,
+    contentBlocks,
     imageUrls,
+    readerImageSourceUrls,
     imageCount: imageUrls.length,
     commentCount,
     timeIso,
     url: absoluteArcaUrl(canonicalHref, config.baseUrl) || url.toString(),
   };
+}
+
+function commentParentId(commentNode) {
+  const href = commentNode.querySelector('.info-row a[href*="#c_"]')?.getAttribute("href") || "";
+  return href.match(/#c_(\d+)/)?.[1] || null;
+}
+
+function commentMedia(commentNode, config) {
+  return commentNode.querySelectorAll(".message .emoticon").map((node) => {
+    const tagName = String(node.tagName || "").toLowerCase();
+    const source = safeArticleAssetUrl(node.getAttribute("src"), config.baseUrl);
+    const posterSource = safeArticleAssetUrl(node.getAttribute("poster"), config.baseUrl);
+    return {
+      attachmentId: parseInteger(node.getAttribute("data-id")),
+      type: tagName === "video" || /\.mp4(?:[?#]|$)/i.test(source) ? "video" : "image",
+      src: source ? arcaMediaProxyPath(source) : "",
+      poster: posterSource ? arcaMediaProxyPath(posterSource) : "",
+    };
+  }).filter((media) => media.src);
+}
+
+function commentDepth(comment, commentsById) {
+  let depth = 0;
+  let parentId = comment.parentId;
+  const visited = new Set([comment.id]);
+  while (parentId && depth < 12 && !visited.has(parentId)) {
+    visited.add(parentId);
+    depth += 1;
+    parentId = commentsById.get(parentId)?.parentId || null;
+  }
+  return depth;
+}
+
+export function extractArcaCommentsFromHtml(
+  html,
+  { baseUrl = DEFAULT_BASE_URL } = {}
+) {
+  const config = { baseUrl: normalizeBaseUrl(baseUrl) };
+  const root = parse(String(html || ""));
+  const form = root.querySelector("#commentForm, form.reply-form.write");
+  const comments = root.querySelectorAll(".comment-item").map((commentNode) => {
+    const id = String(commentNode.getAttribute("id") || "").replace(/^c_/, "");
+    const userInfo = commentNode.querySelector(".user-info");
+    const authorNode = userInfo?.querySelector("[data-filter]");
+    const textNode = commentNode.querySelector(".message .text pre, .message .text");
+    const timeNode = commentNode.querySelector(".info-row time, time");
+    const avatarNode = commentNode.querySelector(".avatar img");
+    const avatarSource = safeArticleAssetUrl(avatarNode?.getAttribute("src"), config.baseUrl);
+    return {
+      id,
+      parentId: commentParentId(commentNode),
+      author: decodeHtmlEntities(authorNode?.getAttribute("data-filter") || nodeText(userInfo)),
+      authorFixed: Boolean(userInfo?.querySelector(".user-fixed")),
+      authorManager: Boolean(userInfo?.querySelector(".user-manager")),
+      articleAuthor: Boolean(userInfo?.classNames?.includes("author")),
+      accountUser: Boolean(userInfo?.querySelector(".ion-android-person")),
+      timeIso: timeNode?.getAttribute("datetime") || "",
+      text: decodeHtmlEntities(String(textNode?.structuredText || textNode?.text || "").trim()),
+      deleted: Boolean(commentNode.querySelector(".deleted, .message.deleted")),
+      avatar: avatarSource && isAllowedArcaImageProxyUrl(avatarSource, config.baseUrl)
+        ? arcaMediaProxyPath(avatarSource)
+        : "",
+      emoticons: commentMedia(commentNode, config),
+    };
+  }).filter((comment) => /^\d+$/.test(comment.id));
+  const commentsById = new Map(comments.map((comment) => [comment.id, comment]));
+  const currentUser = form?.querySelector(".reply-form-user-input")?.getAttribute("value") || "";
+  const canComment = Boolean(form?.querySelector('input[name="_csrf"]')?.getAttribute("value"));
+
+  return {
+    comments: comments.map((comment) => ({ ...comment, depth: commentDepth(comment, commentsById) })),
+    commenting: {
+      canComment,
+      currentUser: decodeHtmlEntities(currentUser),
+      maxLength: MAX_COMMENT_LENGTH,
+      supportsEmoticons: canComment,
+      supportsVoice: false,
+    },
+  };
+}
+
+export function extractArcaArticleDetailFromHtml(
+  html,
+  { url = `${DEFAULT_BASE_URL}/b/${DEFAULT_CHANNEL}/1`, baseUrl = DEFAULT_BASE_URL } = {}
+) {
+  return extractArticleDetail(parse(String(html || "")), { baseUrl: normalizeBaseUrl(baseUrl) }, new URL(url));
 }
 
 function buildArticleListUrl(config, payload) {
@@ -562,19 +850,474 @@ async function readArticleDetail(payload = {}) {
   }
 
   const root = parse(html);
+  const commentData = extractArcaCommentsFromHtml(html, { baseUrl: config.baseUrl });
   return {
     ok: response.ok && !issues.some((item) => item.status === "error"),
     config,
     endpoint: url.toString(),
     status: response.status,
-    article: extractArticleDetail(root, config, url),
+    article: {
+      ...withArcaReaderImageProxies(extractArticleDetail(root, config, url)),
+      ...commentData,
+      commenting: {
+        ...commentData.commenting,
+        signedIn: config.authSessionConfigured,
+      },
+    },
     issues,
     fetchedAt: new Date().toISOString(),
   };
 }
 
+async function readArticleComments(payload = {}) {
+  const config = getConfig();
+  const url = normalizeArticleUrl(payload, config);
+  if (!url) {
+    return {
+      ok: false,
+      issues: [issue("ARCA_ARTICLE_URL_INVALID", "error", "허용된 아카라이브 게시글 URL이 아닙니다.")],
+    };
+  }
+
+  let response;
+  let html = "";
+  try {
+    response = await fetchWithTimeout(url, {
+      headers: buildHeaders({ referer: `${config.baseUrl}/b/${config.defaultChannel}` }),
+      redirect: "follow",
+    });
+    html = await readTextSafely(response);
+  } catch (error) {
+    return {
+      ok: false,
+      endpoint: url.toString(),
+      issues: [issue("ARCA_COMMENT_NETWORK_FAILED", "error", `댓글 조회 실패: ${error.message}`)],
+    };
+  }
+
+  if (isCloudflareChallenge(response, html)) {
+    return {
+      ok: false,
+      endpoint: url.toString(),
+      status: response.status,
+      issues: [issue("ARCA_CLOUDFLARE_CHALLENGE", "error", "Cloudflare challenge로 댓글 조회가 차단되었습니다.")],
+    };
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      endpoint: url.toString(),
+      status: response.status,
+      issues: [issue("ARCA_HTTP_ERROR", "error", `아카라이브가 HTTP ${response.status}를 반환했습니다.`)],
+    };
+  }
+
+  const commentData = extractArcaCommentsFromHtml(html, { baseUrl: config.baseUrl });
+  return {
+    ok: true,
+    endpoint: url.toString(),
+    status: response.status,
+    ...commentData,
+    commenting: {
+      ...commentData.commenting,
+      signedIn: config.authSessionConfigured,
+    },
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+function normalizedEmoticonSelection(value) {
+  const emoticonId = parseInteger(value?.emoticonId ?? value?.packageId);
+  const attachmentId = parseInteger(value?.attachmentId ?? value?.id);
+  if (emoticonId == null || emoticonId < 0 || !attachmentId) return null;
+  return { emoticonId, attachmentId };
+}
+
+export function normalizeArcaCommentWrite(payload = {}) {
+  const contentType = payload.contentType === "emoticon" ? "emoticon" : "text";
+  const content = String(payload.content || "").trim();
+  const parentId = parseInteger(payload.parentId);
+  const providedEmoticons = Array.isArray(payload.emoticons) ? payload.emoticons : [];
+  const emoticons = (providedEmoticons.length
+    ? providedEmoticons
+    : [{ emoticonId: payload.emoticonId, attachmentId: payload.attachmentId }]
+  ).map(normalizedEmoticonSelection);
+
+  if (contentType === "text" && (!content || content.length > MAX_COMMENT_LENGTH)) return null;
+  if (
+    contentType === "emoticon" &&
+    (!emoticons.length || emoticons.length > MAX_COMBO_EMOTICONS || emoticons.some((item) => !item))
+  ) return null;
+  if (payload.parentId != null && payload.parentId !== "" && !parentId) return null;
+  return {
+    contentType,
+    content,
+    parentId,
+    emoticons: contentType === "emoticon" ? emoticons : [],
+  };
+}
+
+export function buildArcaCommentFormData(comment, csrf) {
+  const formData = new URLSearchParams({
+    _csrf: String(csrf || ""),
+    contentType: comment.contentType,
+    content: comment.content,
+  });
+  if (comment.parentId) formData.set("parentId", String(comment.parentId));
+  for (const emoticon of comment.emoticons || []) {
+    formData.append("emoticonId", String(emoticon.emoticonId));
+    formData.append("attachmentId", String(emoticon.attachmentId));
+  }
+  return formData;
+}
+
+function upstreamCommentError(response, body) {
+  try {
+    const payload = JSON.parse(body);
+    if (response.status >= 400 || payload?.result === false || payload?.ok === false) {
+      return String(payload.message || payload.error || "").trim();
+    }
+    return "";
+  } catch {
+    return response.status >= 400 ? stripTags(body).slice(0, 300) : "";
+  }
+}
+
+async function postArcaComment(payload = {}) {
+  const config = getConfig();
+  const url = normalizeArticleUrl(payload, config);
+  const comment = normalizeArcaCommentWrite(payload);
+  if (!url || !comment) {
+    return {
+      ok: false,
+      issues: [issue("ARCA_COMMENT_INVALID", "error", "댓글 내용 또는 대상이 올바르지 않습니다.")],
+    };
+  }
+  if (!getArcaCookieHeader()) {
+    return {
+      ok: false,
+      issues: [issue("ARCA_AUTH_REQUIRED", "error", "댓글을 작성하려면 설정에서 아카라이브 로그인을 연결해야 합니다.")],
+    };
+  }
+
+  const before = await readArticleComments({ url: url.toString() });
+  if (!before.ok || !before.commenting?.canComment) {
+    return {
+      ok: false,
+      issues: before.issues?.length
+        ? before.issues
+        : [issue("ARCA_COMMENT_NOT_ALLOWED", "error", "현재 계정이나 게시글에서는 댓글을 작성할 수 없습니다.")],
+    };
+  }
+
+  let pageResponse;
+  let pageHtml = "";
+  try {
+    pageResponse = await fetchWithTimeout(url, {
+      headers: buildHeaders({ referer: `${config.baseUrl}/b/${config.defaultChannel}` }),
+      redirect: "follow",
+    });
+    pageHtml = await readTextSafely(pageResponse);
+  } catch (error) {
+    return {
+      ok: false,
+      issues: [issue("ARCA_COMMENT_NETWORK_FAILED", "error", `댓글 작성 준비 실패: ${error.message}`)],
+    };
+  }
+
+  const root = parse(pageHtml);
+  const form = root.querySelector("#commentForm, form.reply-form.write");
+  const csrf = form?.querySelector('input[name="_csrf"]')?.getAttribute("value") || "";
+  const action = absoluteArcaUrl(form?.getAttribute("action"), config.baseUrl);
+  const expectedPath = `${url.pathname.replace(/\/+$/, "")}/comment`;
+  let actionUrl;
+  try {
+    actionUrl = new URL(action);
+  } catch {
+    actionUrl = null;
+  }
+  if (!csrf || !actionUrl || actionUrl.origin !== new URL(config.baseUrl).origin || actionUrl.pathname !== expectedPath) {
+    return {
+      ok: false,
+      issues: [issue("ARCA_COMMENT_FORM_CHANGED", "error", "아카라이브 댓글 작성 폼의 규격이 변경되었거나 작성 권한이 없습니다.")],
+    };
+  }
+
+  const formData = buildArcaCommentFormData(comment, csrf);
+
+  let response;
+  let responseBody = "";
+  try {
+    response = await fetchWithTimeout(actionUrl, {
+      method: "POST",
+      headers: {
+        ...buildHeaders({ referer: url.toString() }),
+        accept: "application/json,text/html;q=0.9,*/*;q=0.8",
+        "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+      },
+      body: formData,
+      redirect: "manual",
+    });
+    responseBody = await readTextSafely(response);
+  } catch (error) {
+    return {
+      ok: false,
+      issues: [issue("ARCA_COMMENT_POST_FAILED", "error", `댓글 작성 요청 실패: ${error.message}`)],
+    };
+  }
+
+  const upstreamError = upstreamCommentError(response, responseBody);
+  if (response.status >= 400 || upstreamError) {
+    return {
+      ok: false,
+      status: response.status,
+      issues: [issue("ARCA_COMMENT_REJECTED", "error", upstreamError || `아카라이브가 HTTP ${response.status}를 반환했습니다.`)],
+    };
+  }
+
+  const after = await readArticleComments({ url: url.toString() });
+  const beforeIds = new Set((before.comments || []).map((item) => item.id));
+  const createdComment = (after.comments || []).find((item) => {
+    if (beforeIds.has(item.id) || String(item.parentId || "") !== String(comment.parentId || "")) return false;
+    if (comment.contentType === "text") return item.text.trim() === comment.content;
+    const postedIds = comment.emoticons.map((emoticon) => emoticon.attachmentId);
+    const renderedIds = (item.emoticons || []).map((media) => media.attachmentId);
+    return postedIds.length === renderedIds.length && postedIds.every((id, index) => id === renderedIds[index]);
+  });
+
+  return {
+    ok: true,
+    verified: Boolean(createdComment),
+    createdCommentId: createdComment?.id || "",
+    comments: after.comments || before.comments || [],
+    commenting: after.commenting || before.commenting,
+    fetchedAt: after.fetchedAt || new Date().toISOString(),
+  };
+}
+
+async function readArcaEmoticons(payload = {}) {
+  const config = getConfig();
+  if (!getArcaCookieHeader()) {
+    return {
+      ok: false,
+      issues: [issue("ARCA_AUTH_REQUIRED", "error", "보유한 아카콘을 불러오려면 아카라이브 로그인이 필요합니다.")],
+    };
+  }
+  const hasPackageId = payload.packageId != null && String(payload.packageId).trim() !== "";
+  const packageIdText = String(payload.packageId ?? "").trim();
+  if (hasPackageId && !/^\d+$/.test(packageIdText)) {
+    return { ok: false, issues: [issue("ARCA_EMOTICON_PACKAGE_INVALID", "error", "아카콘 패키지 ID가 올바르지 않습니다.")] };
+  }
+  const endpoint = hasPackageId ? `/api/emoticon2/${packageIdText}` : "/api/emoticon";
+  const url = new URL(endpoint, config.baseUrl);
+  let response;
+  let json;
+  try {
+    response = await fetchWithTimeout(url, {
+      headers: {
+        ...buildHeaders({ referer: `${config.baseUrl}/b/${config.defaultChannel}` }),
+        accept: "application/json",
+      },
+      redirect: "follow",
+    });
+    json = await response.json();
+  } catch (error) {
+    return {
+      ok: false,
+      issues: [issue("ARCA_EMOTICON_NETWORK_FAILED", "error", `아카콘 조회 실패: ${error.message}`)],
+    };
+  }
+  if (!response.ok || !Array.isArray(json)) {
+    return {
+      ok: false,
+      status: response.status,
+      issues: [issue("ARCA_EMOTICON_HTTP_ERROR", "error", `아카콘 서버가 HTTP ${response.status}를 반환했습니다.`)],
+    };
+  }
+
+  if (!hasPackageId) {
+    return {
+      ok: true,
+      packages: json.map((item) => {
+        const source = safeArticleAssetUrl(item.thumbnail, config.baseUrl);
+        return {
+          id: Number(item.id),
+          title: String(item.title || "아카콘"),
+          count: Number(item.count || 0),
+          thumbnail: source ? arcaMediaProxyPath(source) : "",
+        };
+      }),
+    };
+  }
+
+  return {
+    ok: true,
+    packageId: Number(packageIdText),
+    items: json.map((item) => {
+      const source = safeArticleAssetUrl(item.imageUrl, config.baseUrl);
+      const posterSource = safeArticleAssetUrl(item.poster, config.baseUrl);
+      return {
+        id: Number(item.id),
+        type: item.type === "video" ? "video" : "image",
+        src: source ? arcaMediaProxyPath(source) : "",
+        poster: posterSource ? arcaMediaProxyPath(posterSource) : "",
+      };
+    }).filter((item) => item.src),
+  };
+}
+
+async function proxyArticleImage(payload = {}, req, res) {
+  const config = getConfig();
+  const rawUrl = String(payload.url || "").trim();
+  const controller = new AbortController();
+  const clientState = guardArcaImageProxyClient(req, res, controller);
+  const sendProxyError = (error, statusCode) => {
+    if (canWriteArcaImageProxyResponse(req, res, clientState)) {
+      sendJson(res, { ok: false, error }, statusCode);
+    }
+  };
+  if (!isAllowedArcaImageProxyUrl(rawUrl, config.baseUrl)) {
+    sendProxyError("허용된 아카라이브 이미지 URL이 아닙니다.", 400);
+    return;
+  }
+
+  let response;
+  let body = null;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 20000);
+  try {
+    response = await fetch(rawUrl, {
+      method: req.method === "HEAD" ? "HEAD" : "GET",
+      headers: {
+        ...buildHeaders({ referer: `${config.baseUrl}/b/${config.defaultChannel}` }),
+        accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+
+    const contentType = String(response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    const contentLength = Number(response.headers.get("content-length") || 0);
+    if (!response.ok) {
+      void response.body?.cancel();
+      sendProxyError(`게시글 이미지 서버가 HTTP ${response.status}를 반환했습니다.`, 502);
+      return;
+    }
+    if (!/^image\/(?:png|jpe?g|webp|gif|avif|bmp)$/.test(contentType)) {
+      void response.body?.cancel();
+      sendProxyError("지원하지 않는 게시글 이미지 형식입니다.", 415);
+      return;
+    }
+    if (contentLength > MAX_ARTICLE_IMAGE_BYTES) {
+      void response.body?.cancel();
+      sendProxyError("게시글 이미지가 허용 크기를 초과했습니다.", 413);
+      return;
+    }
+
+    if (req.method !== "HEAD") {
+      body = Buffer.from(await response.arrayBuffer());
+      if (body.length > MAX_ARTICLE_IMAGE_BYTES) {
+        sendProxyError("게시글 이미지가 허용 크기를 초과했습니다.", 413);
+        return;
+      }
+    }
+
+    if (!canWriteArcaImageProxyResponse(req, res, clientState)) return;
+    res.statusCode = 200;
+    res.setHeader("Content-Type", contentType);
+    if (body) {
+      res.setHeader("Content-Length", String(body.length));
+    } else if (contentLength > 0) {
+      res.setHeader("Content-Length", String(contentLength));
+    }
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.end(body || undefined);
+  } catch (error) {
+    if (clientState.disconnected) return;
+    sendProxyError(
+      timedOut ? "게시글 이미지 조회 시간이 초과되었습니다." : `게시글 이미지 조회 실패: ${error.message}`,
+      502
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function proxyArcaMedia(payload = {}, req, res) {
+  const config = getConfig();
+  const rawUrl = String(payload.url || "").trim();
+  const controller = new AbortController();
+  const clientState = guardArcaImageProxyClient(req, res, controller);
+  const sendProxyError = (error, statusCode) => {
+    if (canWriteArcaImageProxyResponse(req, res, clientState)) sendJson(res, { ok: false, error }, statusCode);
+  };
+  if (!isAllowedArcaImageProxyUrl(rawUrl, config.baseUrl)) {
+    sendProxyError("허용된 아카라이브 미디어 URL이 아닙니다.", 400);
+    return;
+  }
+
+  let response;
+  let body = null;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 20000);
+  try {
+    response = await fetch(rawUrl, {
+      method: req.method === "HEAD" ? "HEAD" : "GET",
+      headers: {
+        ...buildHeaders({ referer: `${config.baseUrl}/b/${config.defaultChannel}` }),
+        accept: "video/mp4,video/webm,image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    const contentType = String(response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    const contentLength = Number(response.headers.get("content-length") || 0);
+    if (!response.ok) {
+      void response.body?.cancel();
+      sendProxyError(`아카라이브 미디어 서버가 HTTP ${response.status}를 반환했습니다.`, 502);
+      return;
+    }
+    if (!/^(?:image\/(?:png|jpe?g|webp|gif|avif|bmp)|video\/(?:mp4|webm))$/.test(contentType)) {
+      void response.body?.cancel();
+      sendProxyError("지원하지 않는 아카라이브 미디어 형식입니다.", 415);
+      return;
+    }
+    if (contentLength > MAX_ARCA_MEDIA_BYTES) {
+      void response.body?.cancel();
+      sendProxyError("아카라이브 미디어가 허용 크기를 초과했습니다.", 413);
+      return;
+    }
+    if (req.method !== "HEAD") {
+      body = Buffer.from(await response.arrayBuffer());
+      if (body.length > MAX_ARCA_MEDIA_BYTES) {
+        sendProxyError("아카라이브 미디어가 허용 크기를 초과했습니다.", 413);
+        return;
+      }
+    }
+    if (!canWriteArcaImageProxyResponse(req, res, clientState)) return;
+    res.statusCode = 200;
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (body) res.setHeader("Content-Length", String(body.length));
+    res.end(body || undefined);
+  } catch (error) {
+    if (clientState.disconnected) return;
+    sendProxyError(timedOut ? "아카라이브 미디어 조회 시간이 초과되었습니다." : `아카라이브 미디어 조회 실패: ${error.message}`, 502);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function readEndpointPayload(req) {
-  if (req.method === "GET") {
+  if (["GET", "HEAD"].includes(req.method || "")) {
     const url = new URL(req.url || "/", "http://127.0.0.1");
     return Object.fromEntries(url.searchParams.entries());
   }
@@ -755,6 +1498,51 @@ export async function handleArcaEndpoint(endpoint, req, res) {
         return;
       }
       sendJson(res, await readArticleDetail(await readEndpointPayload(req)));
+      return;
+    }
+
+    if (endpoint === "comments") {
+      if (req.method !== "GET") {
+        sendJson(res, { ok: false, error: "method not allowed" }, 405);
+        return;
+      }
+      sendJson(res, await readArticleComments(await readEndpointPayload(req)));
+      return;
+    }
+
+    if (endpoint === "comment") {
+      if (req.method !== "POST") {
+        sendJson(res, { ok: false, error: "method not allowed" }, 405);
+        return;
+      }
+      sendJson(res, await postArcaComment(await readEndpointPayload(req)));
+      return;
+    }
+
+    if (endpoint === "emoticons") {
+      if (req.method !== "GET") {
+        sendJson(res, { ok: false, error: "method not allowed" }, 405);
+        return;
+      }
+      sendJson(res, await readArcaEmoticons(await readEndpointPayload(req)));
+      return;
+    }
+
+    if (endpoint === "media") {
+      if (!["GET", "HEAD"].includes(req.method || "")) {
+        sendJson(res, { ok: false, error: "method not allowed" }, 405);
+        return;
+      }
+      await proxyArcaMedia(await readEndpointPayload(req), req, res);
+      return;
+    }
+
+    if (endpoint === "article-image") {
+      if (!["GET", "HEAD"].includes(req.method || "")) {
+        sendJson(res, { ok: false, error: "method not allowed" }, 405);
+        return;
+      }
+      await proxyArticleImage(await readEndpointPayload(req), req, res);
       return;
     }
 

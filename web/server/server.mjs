@@ -143,6 +143,31 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.url?.startsWith("/api/arca/comments")) {
+    await handleArcaEndpoint("comments", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/arca/comment")) {
+    await handleArcaEndpoint("comment", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/arca/emoticons")) {
+    await handleArcaEndpoint("emoticons", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/arca/media")) {
+    await handleArcaEndpoint("media", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/arca/article/image")) {
+    await handleArcaEndpoint("article-image", req, res);
+    return;
+  }
+
   if (req.url?.startsWith("/api/arca/article")) {
     await handleArcaEndpoint("article", req, res);
     return;

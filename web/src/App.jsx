@@ -528,6 +528,7 @@ function MagazineUpdateSchedule({
 }
 
 const MAGAZINE_AGENT_CONTEXT_BODY_LIMIT = 12000;
+const STOCK_ARTICLE_AGENT_CONTEXT_BODY_LIMIT = 12000;
 
 function compactMagazineAgentText(value, maxLength = 1200) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -626,6 +627,59 @@ function buildMagazineArticleAgentContext(article) {
       : [],
     worldMemory: magazineArticleWorldMemoryContext(article.worldMemory),
   };
+}
+
+function buildStockArticleAgentContext(article) {
+  if (!article) return null;
+  const blockText = Array.isArray(article.contentBlocks)
+    ? article.contentBlocks
+        .map((block) => {
+          const text = String(block?.text || "").trim();
+          if (!text) return "";
+          return block?.type === "heading" ? `${text}\n` : text;
+        })
+        .filter(Boolean)
+        .join("\n\n")
+    : "";
+  const rawBodyText = String(blockText || article.contentText || article.description || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const bodyText = compactMagazineAgentText(rawBodyText, STOCK_ARTICLE_AGENT_CONTEXT_BODY_LIMIT);
+  return {
+    source: "stock-channel-reader",
+    id: compactMagazineAgentText(article.id || article.number || "", 120),
+    url: compactMagazineAgentText(article.url || article.href || "", 1000),
+    title: compactMagazineAgentText(article.title || "", 260),
+    categoryLabel: compactMagazineAgentText(article.categoryLabel || "", 100),
+    author: compactMagazineAgentText(article.author || "", 180),
+    publishedAt: compactMagazineAgentText(article.timeIso || "", 120),
+    publishedTimeLabel: compactMagazineAgentText(formatArticleReaderTimeForContext(article), 120),
+    stats: {
+      views: Number(article.view || 0),
+      recommendations: Number(article.rate || 0),
+      comments: Number(article.commentCount || 0),
+    },
+    bodyText,
+    bodyTruncated: rawBodyText.length > bodyText.length,
+    images: Array.isArray(article.imageUrls)
+      ? article.imageUrls.slice(0, 24).map((src) => compactMagazineAgentText(src, 1000)).filter(Boolean)
+      : [],
+  };
+}
+
+function formatArticleReaderTimeForContext(article) {
+  const value = article?.timeIso;
+  if (!value) return article?.timeLabel || "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return article?.timeLabel || value;
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function MagazineArticleList({
@@ -1934,6 +1988,9 @@ function App() {
   const [arcaBoard, setArcaBoard] = useState(null);
   const [arcaBoardBusy, setArcaBoardBusy] = useState(false);
   const [arcaBoardError, setArcaBoardError] = useState("");
+  const [arcaReaderArticle, setArcaReaderArticle] = useState(null);
+  const [arcaReaderBusy, setArcaReaderBusy] = useState(false);
+  const [arcaReaderError, setArcaReaderError] = useState("");
   const [arcaAuthStatus, setArcaAuthStatus] = useState(null);
   const [arcaAuthBusy, setArcaAuthBusy] = useState(false);
   const [arcaAuthAction, setArcaAuthAction] = useState("");
@@ -2041,6 +2098,9 @@ function App() {
   const newsFeedContentRevisionRef = useRef("");
   const magazineArticleCountRef = useRef(0);
   const magazineLatestArticleAtRef = useRef("");
+  const arcaCanvasRef = useRef(null);
+  const arcaReaderAbortRef = useRef(null);
+  const arcaReaderReturnScrollRef = useRef(0);
   const handleTransactionStatusContextChange = useCallback((contextPacket) => {
     transactionStatusContextRef.current = contextPacket && typeof contextPacket === "object"
       ? contextPacket
@@ -3041,12 +3101,17 @@ function App() {
 
   function handleSidebarItemClick(item) {
     if (!item.view) return;
+    if (item.view === "stock" && activeView === "stock" && arcaReaderArticle) {
+      closeArcaArticleReader();
+      return;
+    }
     if (item.view === "magazine" && activeView === "magazine" && (magazineActiveArticle || magazineActiveTopic)) {
       if (magazineActiveArticle) closeMagazineArticle();
       if (magazineActiveTopic) closeMagazineTopic();
       return;
     }
     if (item.view === "portfolio") {
+      if (arcaReaderArticle) closeArcaArticleReader();
       setActiveView("portfolio");
       setPortfolioContext(null);
       setPortfolioSidebarOpen((open) => !open);
@@ -3056,6 +3121,7 @@ function App() {
     if (item.view === "stock") {
       refreshBoard();
     }
+    if (arcaReaderArticle) closeArcaArticleReader();
     if (item.view === "reports") {
       void markReportsNotificationsOpened();
     }
@@ -4220,6 +4286,7 @@ function App() {
     memoryScope = "system-main",
     canvas = null,
     magazineArticleContext = null,
+    stockArticleContext = null,
     provider = agentProvider,
     providerLabel = agentProviderLabel,
   }) {
@@ -4289,6 +4356,16 @@ function App() {
                   topics: Array.isArray(magazineArticleContext.topics) ? magazineArticleContext.topics.slice(0, 8) : [],
                   publishedAt: magazineArticleContext.publishedAt || "",
                   publishedTimeLabel: magazineArticleContext.publishedTimeLabel || "",
+                }
+              : null,
+            stockChannelArticle: stockArticleContext
+              ? {
+                  id: stockArticleContext.id || "",
+                  url: stockArticleContext.url || "",
+                  title: stockArticleContext.title || "",
+                  categoryLabel: stockArticleContext.categoryLabel || "",
+                  author: stockArticleContext.author || "",
+                  publishedAt: stockArticleContext.publishedAt || "",
                 }
               : null,
             attachments: attachments.map((attachment) => ({
@@ -4605,6 +4682,71 @@ function App() {
   function submitBoardSearch(event) {
     event.preventDefault();
     updateBoardFilters({ keyword: boardSearchInput.trim(), page: 1 });
+  }
+
+  async function openArcaArticleReader(row, { rememberScroll = true } = {}) {
+    if (!row?.href) return;
+    if (rememberScroll) {
+      arcaReaderReturnScrollRef.current = arcaCanvasRef.current?.scrollTop ?? 0;
+    }
+    arcaReaderAbortRef.current?.abort();
+    const controller = new AbortController();
+    arcaReaderAbortRef.current = controller;
+    setArcaReaderArticle({ ...row, url: row.href, href: row.href });
+    setArcaReaderBusy(true);
+    setArcaReaderError("");
+    window.requestAnimationFrame(() => {
+      if (arcaCanvasRef.current) arcaCanvasRef.current.scrollTop = 0;
+    });
+
+    try {
+      const response = await fetch(`/api/arca/article?url=${encodeURIComponent(row.href)}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        const issueMessage = payload.issues?.[0]?.message || payload.error || `HTTP ${response.status}`;
+        throw new Error(issueMessage);
+      }
+      if (controller.signal.aborted) return;
+      setArcaReaderArticle({
+        ...row,
+        ...(payload.article || {}),
+        id: row.id,
+        number: row.number,
+        title: payload.article?.title || row.title,
+        author: payload.article?.author || row.author,
+        url: payload.article?.url || row.href,
+        href: row.href,
+        categoryLabel: row.categoryLabel,
+        view: row.view,
+        rate: row.rate,
+      });
+    } catch (error) {
+      if (error.name !== "AbortError") setArcaReaderError(error.message);
+    } finally {
+      if (arcaReaderAbortRef.current === controller) {
+        arcaReaderAbortRef.current = null;
+        setArcaReaderBusy(false);
+      }
+    }
+  }
+
+  function retryArcaArticleReader() {
+    if (!arcaReaderArticle?.href) return;
+    void openArcaArticleReader(arcaReaderArticle, { rememberScroll: false });
+  }
+
+  function closeArcaArticleReader() {
+    arcaReaderAbortRef.current?.abort();
+    arcaReaderAbortRef.current = null;
+    setArcaReaderArticle(null);
+    setArcaReaderBusy(false);
+    setArcaReaderError("");
+    window.requestAnimationFrame(() => {
+      if (arcaCanvasRef.current) arcaCanvasRef.current.scrollTop = arcaReaderReturnScrollRef.current;
+    });
   }
 
   async function attachArticleContext(row) {
@@ -5641,8 +5783,14 @@ function App() {
       portfolioActionInstructions,
       attachmentsSummary(attachmentsForMessage),
     ].filter(Boolean).join("\n\n");
+    const stockArticleContextForMessage =
+      options.stockArticleContext !== undefined
+        ? options.stockArticleContext
+        : screenForMessage === "stock" && arcaReaderArticle
+          ? buildStockArticleAgentContext(arcaReaderArticle)
+          : null;
     const boardIndexContext =
-      screenForMessage === "stock" && !articleForMessage
+      screenForMessage === "stock" && !articleForMessage && !stockArticleContextForMessage
         ? buildBoardIndexContextSnapshot(arcaBoard, boardFilters, {
             activeCategoryLabel,
             busy: arcaBoardBusy,
@@ -5798,6 +5946,7 @@ function App() {
           boardContext: boardIndexContext,
           calendarContext,
           magazineArticleContext: magazineArticleContextForMessage,
+          stockArticleContext: stockArticleContextForMessage,
           portfolioContext: portfolioContextForMessage,
           portfolioRetrievalQuery: isPortfolioScreenForMessage ? promptTextForAgent : "",
           transactionStatusContext: transactionStatusContextForMessage,
@@ -6154,6 +6303,7 @@ function App() {
           screen: screenForMessage,
           memoryScope: chatScope.type,
           magazineArticleContext: magazineArticleContextForMessage,
+          stockArticleContext: stockArticleContextForMessage,
           provider: messageRuntime.provider,
           providerLabel: messageRuntime.providerLabel,
           canvas: scopeCanvas
@@ -6699,7 +6849,7 @@ function App() {
         onSaveDraft={savePortfolioCanvasNameDraft}
         onSelectCanvas={selectPortfolioCanvas}
         onSelectItem={handleSidebarItemClick}
-        onSelectUtility={(item) => setActiveView(item.view)}
+        onSelectUtility={handleSidebarItemClick}
         portfolioCanvasModeMeta={portfolioCanvasModeMeta}
         portfolioCanvasNameDraft={portfolioCanvasNameDraft}
         portfolioCanvasMenuId={portfolioCanvasMenuId}
@@ -7504,8 +7654,11 @@ function App() {
         </section>
       ) : (
         <StockChannelView
+          activeArticle={arcaReaderArticle}
           activeCategoryLabel={activeCategoryLabel}
           agentIcon={agentIcon}
+          articleBusy={arcaReaderBusy}
+          articleError={arcaReaderError}
           attachingArticleHref={attachingArticleHref}
           board={arcaBoard}
           boardBusy={arcaBoardBusy}
@@ -7517,7 +7670,10 @@ function App() {
           notificationHealth={arcaNotificationHealth}
           onAttachArticle={attachArticleContext}
           onBoardSearchInputChange={setBoardSearchInput}
+          onCloseArticle={closeArcaArticleReader}
+          onOpenArticle={(row) => void openArcaArticleReader(row)}
           onRefreshBoard={refreshBoard}
+          onRetryArticle={retryArcaArticleReader}
           onSelectCategory={selectBoardCategory}
           onSubmitSearch={submitBoardSearch}
           onToggleHiddenNotices={() => setShowHiddenNotices((next) => !next)}
@@ -7525,6 +7681,7 @@ function App() {
           searchTargetOptions={searchTargetOptions}
           showHiddenNotices={showHiddenNotices}
           sortOptions={sortOptions}
+          canvasRef={arcaCanvasRef}
           writeUrl={ARCA_WRITE_URL}
           notificationUrl={ARCA_NOTIFICATION_URL}
         />
