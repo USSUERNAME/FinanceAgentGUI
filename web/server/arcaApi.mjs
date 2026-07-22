@@ -1348,7 +1348,9 @@ function normalizedEmoticonSelection(value) {
 }
 
 export function normalizeArcaCommentWrite(payload = {}) {
-  const contentType = payload.contentType === "emoticon" ? "emoticon" : "text";
+  const contentType = ["emoticon", "combo_emoticon"].includes(payload.contentType)
+    ? payload.contentType
+    : "text";
   const content = String(payload.content || "").trim();
   const parentId = parseInteger(payload.parentId);
   const providedEmoticons = Array.isArray(payload.emoticons) ? payload.emoticons : [];
@@ -1358,8 +1360,9 @@ export function normalizeArcaCommentWrite(payload = {}) {
   ).map(normalizedEmoticonSelection);
 
   if (contentType === "text" && (!content || content.length > MAX_COMMENT_LENGTH)) return null;
+  if (contentType === "emoticon" && (emoticons.length !== 1 || emoticons.some((item) => !item))) return null;
   if (
-    contentType === "emoticon" &&
+    contentType === "combo_emoticon" &&
     (!emoticons.length || emoticons.length > MAX_COMBO_EMOTICONS || emoticons.some((item) => !item))
   ) return null;
   if (payload.parentId != null && payload.parentId !== "" && !parentId) return null;
@@ -1367,7 +1370,7 @@ export function normalizeArcaCommentWrite(payload = {}) {
     contentType,
     content,
     parentId,
-    emoticons: contentType === "emoticon" ? emoticons : [],
+    emoticons: contentType === "text" ? [] : emoticons,
   };
 }
 
@@ -1378,14 +1381,25 @@ export function buildArcaCommentFormData(comment, csrf) {
     content: comment.content,
   });
   if (comment.parentId) formData.set("parentId", String(comment.parentId));
-  for (const emoticon of comment.emoticons || []) {
-    formData.append("emoticonId", String(emoticon.emoticonId));
-    formData.append("attachmentId", String(emoticon.attachmentId));
+  if (comment.contentType === "combo_emoticon") {
+    formData.set(
+      "combolist",
+      JSON.stringify(comment.emoticons.map((emoticon) => [
+        String(emoticon.emoticonId),
+        String(emoticon.attachmentId),
+      ]))
+    );
+  } else {
+    const [emoticon] = comment.emoticons || [];
+    if (emoticon) {
+      formData.set("emoticonId", String(emoticon.emoticonId));
+      formData.set("attachmentId", String(emoticon.attachmentId));
+    }
   }
   return formData;
 }
 
-function upstreamCommentError(response, body) {
+export function upstreamCommentError(response, body) {
   try {
     const payload = JSON.parse(body);
     if (response.status >= 400 || payload?.result === false || payload?.ok === false) {
@@ -1393,7 +1407,11 @@ function upstreamCommentError(response, body) {
     }
     return "";
   } catch {
-    return response.status >= 400 ? stripTags(body).slice(0, 300) : "";
+    if (response.status < 400) return "";
+    if (!/<[a-z][\s\S]*>/i.test(body)) return stripTags(body).slice(0, 300);
+    const root = parse(String(body || ""));
+    root.querySelectorAll("script, style, noscript, template").forEach((node) => node.remove());
+    return nodeText(root.querySelector('[role="alert"], .alert-danger, .alert-error, .error-message, .text-danger')).slice(0, 300);
   }
 }
 

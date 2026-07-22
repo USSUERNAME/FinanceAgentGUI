@@ -12589,7 +12589,6 @@ button {
 .board-reader-trusted-html :is(ul, ol),
 .board-reader-trusted-html blockquote,
 .board-reader-trusted-html pre,
-.board-reader-trusted-html table,
 .board-reader-trusted-html figure,
 .board-reader-trusted-html hr {
   margin-top: 0;
@@ -12607,12 +12606,45 @@ button {
   margin-bottom: 0;
 }
 
-.board-reader-trusted-html table {
-  display: block;
+.board-reader-trusted-table-scroll {
   width: 100%;
   max-width: 100%;
+  margin: 0 0 24px;
   overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid #d8dfdb;
+  border-radius: 9px;
+  background: #ffffff;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #aeb8b3 #eef2f0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.board-reader-trusted-table-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.board-reader-trusted-table-scroll::-webkit-scrollbar-track {
+  background: #eef2f0;
+}
+
+.board-reader-trusted-table-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid #eef2f0;
+  border-radius: 999px;
+  background: #aeb8b3;
+}
+
+.board-reader-trusted-table-scroll:focus-visible {
+  outline: 2px solid #5d8f7c;
+  outline-offset: 3px;
+}
+
+.board-reader-trusted-table-scroll > table {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  margin: 0;
   border-spacing: 0;
   border-collapse: collapse;
   background: #ffffff;

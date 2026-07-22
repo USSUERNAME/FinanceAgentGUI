@@ -246,6 +246,10 @@ function articleImageProxyPath(value) {
   return `/api/arca/article/image?url=${encodeURIComponent(String(value || ""))}`;
 }
 
+function articleMediaProxyPath(value) {
+  return `/api/arca/media?url=${encodeURIComponent(String(value || ""))}`;
+}
+
 function prepareTrustedArcaHtml(html, baseUrl, queueArticleImages) {
   const source = String(html || "");
   if (!queueArticleImages || typeof document === "undefined") return source;
@@ -263,6 +267,30 @@ function prepareTrustedArcaHtml(html, baseUrl, queueArticleImages) {
     });
   });
   return template.innerHTML;
+}
+
+function installTrustedArticleTableScrollers(root) {
+  root.querySelectorAll("table").forEach((table) => {
+    if (table.parentElement?.classList.contains("board-reader-trusted-table-scroll")) return;
+    const scroller = document.createElement("div");
+    scroller.className = "board-reader-trusted-table-scroll";
+    scroller.setAttribute("role", "region");
+    scroller.setAttribute("aria-label", "게시글 표");
+    scroller.tabIndex = 0;
+    table.before(scroller);
+    scroller.append(table);
+  });
+}
+
+function installTrustedArticleVideoMedia(root, baseUrl) {
+  root.querySelectorAll("video").forEach((video) => {
+    [video, ...video.querySelectorAll("source")].forEach((mediaNode) => {
+      const source = absoluteTrustedArcaUrl(mediaNode.getAttribute("src"), baseUrl);
+      if (/^https?:\/\//i.test(source)) mediaNode.setAttribute("src", articleMediaProxyPath(source));
+    });
+    const poster = absoluteTrustedArcaUrl(video.getAttribute("poster"), baseUrl);
+    if (/^https?:\/\//i.test(poster)) video.setAttribute("poster", articleMediaProxyPath(poster));
+  });
 }
 
 function installQueuedArticleImages(root, baseUrl) {
@@ -388,6 +416,8 @@ const TrustedArcaHtml = React.memo(function TrustedArcaHtml({ html, baseUrl, cla
     if (!root || appliedHtmlRef.current === renderKey) return;
     appliedHtmlRef.current = renderKey;
 
+    installTrustedArticleTableScrollers(root);
+
     const urlAttributes = ["src", "href", "poster", "action", "data-src", "data-originalurl", "data-arca-reader-src"];
     root.querySelectorAll("[src], [href], [poster], [action], [data-src], [data-originalurl], [data-arca-reader-src]").forEach((element) => {
       urlAttributes.forEach((attribute) => {
@@ -397,6 +427,8 @@ const TrustedArcaHtml = React.memo(function TrustedArcaHtml({ html, baseUrl, cla
         if (absoluteValue && absoluteValue !== currentValue) element.setAttribute(attribute, absoluteValue);
       });
     });
+
+    installTrustedArticleVideoMedia(root, baseUrl);
 
     root.querySelectorAll("a[href]").forEach((anchor) => {
       if (!anchor.getAttribute("target")) anchor.setAttribute("target", "_blank");
@@ -655,7 +687,6 @@ function ArcaEmoticonPicker({ open, onClose, onSelect, onSubmitCombo, submitting
   const [packages, setPackages] = React.useState([]);
   const [items, setItems] = React.useState([]);
   const [activePackageId, setActivePackageId] = React.useState(null);
-  const [visibleCount, setVisibleCount] = React.useState(48);
   const [mode, setMode] = React.useState("single");
   const [comboItems, setComboItems] = React.useState([]);
   const [busy, setBusy] = React.useState(false);
@@ -663,7 +694,6 @@ function ArcaEmoticonPicker({ open, onClose, onSelect, onSubmitCombo, submitting
 
   const loadPackage = React.useCallback(async (packageId) => {
     setActivePackageId(packageId);
-    setVisibleCount(48);
     setItems([]);
     setBusy(true);
     setError("");
@@ -825,7 +855,7 @@ function ArcaEmoticonPicker({ open, onClose, onSelect, onSubmitCombo, submitting
             </div>
           ) : (
             <div className="board-arcacon-grid">
-              {items.slice(0, visibleCount).map((item) => (
+              {items.map((item) => (
                 <button
                   type="button"
                   onClick={() => selectItem(item)}
@@ -840,15 +870,6 @@ function ArcaEmoticonPicker({ open, onClose, onSelect, onSubmitCombo, submitting
               {!items.length ? <p>보유한 아카콘이 없습니다.</p> : null}
             </div>
           )}
-          {!busy && !error && visibleCount < items.length ? (
-            <button
-              className="board-arcacon-more"
-              type="button"
-              onClick={() => setVisibleCount((count) => count + 48)}
-            >
-              더 보기 ({items.length - visibleCount})
-            </button>
-          ) : null}
         </div>
       </div>
     </div>
@@ -905,8 +926,8 @@ function CommentComposer({ articleUrl, commenting, parentComment = null, onCance
     void submitCommentPayload({ contentType: "text", content: text });
   }
 
-  function submitEmoticons(emoticons) {
-    const payload = createArcaEmoticonCommentPayload(emoticons);
+  function submitEmoticons(emoticons, options) {
+    const payload = createArcaEmoticonCommentPayload(emoticons, options);
     return payload ? submitCommentPayload(payload) : Promise.resolve(false);
   }
 
@@ -968,7 +989,7 @@ function CommentComposer({ articleUrl, commenting, parentComment = null, onCance
           setContent("");
           void submitEmoticons([item]);
         }}
-        onSubmitCombo={submitEmoticons}
+        onSubmitCombo={(items) => submitEmoticons(items, { combo: true })}
         submitting={busy}
       />
     </form>
@@ -1522,6 +1543,7 @@ export default function StockChannelView({
   onOpenNotificationArticle,
   onRefreshBoard,
   onRefreshNotifications,
+  onResetBoard,
   onRetryArticle,
   onSelectCategory,
   onSubmitSearch,
@@ -1628,9 +1650,10 @@ export default function StockChannelView({
                 <button
                   className="board-title-refresh"
                   type="button"
-                  onClick={onRefreshBoard}
+                  onClick={onResetBoard}
                   disabled={boardBusy}
-                  aria-label="아카라이브 주식채널 수동 갱신"
+                  aria-label="아카라이브 주식채널 필터 초기화"
+                  title="카테고리와 검색 조건을 초기화하고 전체 목록 보기"
                 >
                   아카라이브 주식채널
                 </button>

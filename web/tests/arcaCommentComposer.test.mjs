@@ -20,10 +20,17 @@ test("아카콘과 콤보콘 요청은 최대 3개의 선택 순서를 유지한
   assert.equal(MAX_COMBOCON_ITEMS, 3);
   assert.deepEqual(createArcaEmoticonCommentPayload([
     { packageId: 10, id: 101 },
-    { packageId: 20, id: 202 },
-    { packageId: 20, id: 202 },
   ]), {
     contentType: "emoticon",
+    content: "",
+    emoticons: [{ emoticonId: 10, attachmentId: 101 }],
+  });
+  assert.deepEqual(createArcaEmoticonCommentPayload([
+    { packageId: 10, id: 101 },
+    { packageId: 20, id: 202 },
+    { packageId: 20, id: 202 },
+  ], { combo: true }), {
+    contentType: "combo_emoticon",
     content: "",
     emoticons: [
       { emoticonId: 10, attachmentId: 101 },
@@ -31,11 +38,15 @@ test("아카콘과 콤보콘 요청은 최대 3개의 선택 순서를 유지한
       { emoticonId: 20, attachmentId: 202 },
     ],
   });
+  assert.equal(createArcaEmoticonCommentPayload([
+    { packageId: 1, id: 1 },
+    { packageId: 1, id: 2 },
+  ]), null);
   assert.equal(createArcaEmoticonCommentPayload([]), null);
   assert.equal(createArcaEmoticonCommentPayload([
     { packageId: 1, id: 1 },
     { packageId: 1, id: 2 },
     { packageId: 1, id: 3 },
     { packageId: 1, id: 4 },
-  ]), null);
+  ], { combo: true }), null);
 });

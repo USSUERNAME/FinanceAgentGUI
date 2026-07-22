@@ -1380,6 +1380,7 @@ const initialBoardFilters = {
 const defaultWorldMemorySettings = {
   ok: true,
   enabled: false,
+  autopilotEnabled: false,
   managementProvider: "default",
   managementModel: "",
   managementReasoning: "",
@@ -1389,6 +1390,7 @@ const defaultWorldMemorySettings = {
   settings: {
     version: 1,
     enabled: false,
+    autopilotEnabled: false,
     managementProvider: "default",
     managementModel: "",
     managementReasoning: "",
@@ -3123,6 +3125,13 @@ function App() {
     void loadArcaNotifications();
   }
 
+  function resetBoard() {
+    setShowHiddenNotices(false);
+    setBoardSearchInput("");
+    setBoardFilters({ ...initialBoardFilters });
+    void loadArcaNotifications();
+  }
+
   function handleSidebarItemClick(item) {
     if (!item.view) return;
     if (item.view === "stock" && activeView === "stock" && arcaReaderArticle) {
@@ -3589,6 +3598,30 @@ function App() {
             }
           : current
       );
+    } catch (error) {
+      setWorldMemorySettingsError(error.message);
+    } finally {
+      setWorldMemorySettingsSaving(false);
+    }
+  }
+
+  async function updateWorldMemoryAutopilotEnabled(autopilotEnabled) {
+    if (worldMemorySettingsSaving) return;
+    setWorldMemorySettingsSaving(true);
+    setWorldMemorySettingsError("");
+    try {
+      const response = await fetch("/api/world-memory/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ autopilotEnabled }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setWorldMemorySettings({ ...defaultWorldMemorySettings, ...payload });
+      await loadWorldMemoryStatus({ summary: true });
     } catch (error) {
       setWorldMemorySettingsError(error.message);
     } finally {
@@ -7033,6 +7066,7 @@ function App() {
               magazineSettingsError={magazineSettingsError}
               onToggleWorldMemoryTech={() => setWorldMemoryTechOpen((open) => !open)}
               onToggleWorldMemoryEnabled={updateWorldMemoryEnabled}
+              onToggleWorldMemoryAutopilot={updateWorldMemoryAutopilotEnabled}
               onWorldMemoryManagementSettingsChange={updateWorldMemoryManagementSettings}
               onToggleMagazineEnabled={updateMagazineEnabled}
               onMagazineWritingSettingsChange={updateMagazineWritingSettings}
@@ -7756,6 +7790,7 @@ function App() {
           onOpenNotificationArticle={openArcaNotificationArticle}
           onRefreshBoard={refreshBoard}
           onRefreshNotifications={loadArcaNotifications}
+          onResetBoard={resetBoard}
           onRetryArticle={retryArcaArticleReader}
           onSelectCategory={selectBoardCategory}
           onSubmitSearch={submitBoardSearch}
