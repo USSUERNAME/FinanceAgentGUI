@@ -1,24 +1,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { displayName } from "../src/transactions/transactionDomain.js";
 
-const source = readFileSync(new URL("../src/transactions/TransactionStatusView.jsx", import.meta.url), "utf8");
-
-function loadDisplayName() {
-  const match = source.match(
-    /function displayName\(item = \{\}\) \{[\s\S]*?\n\}\n\nfunction transactionNameTranslationPending/
-  );
-  assert.ok(match, "displayName implementation should be present");
-  const functionSource = match[0].replace(/\n\nfunction transactionNameTranslationPending[\s\S]*$/, "");
-  return Function(
-    "companyNames",
-    "normalizeTransactionInstrumentProvider",
-    `"use strict"; ${functionSource}; return displayName;`
-  )(
-    {},
-    (value = "toss") => String(value || "toss").trim().toLowerCase() === "binance" ? "binance" : "toss"
-  );
-}
+const source = [
+  "../src/transactions/TransactionStatusView.jsx",
+  "../src/transactions/TransactionStatusViews.jsx",
+  "../src/transactions/transactionDomain.js",
+  "../src/transactions/transactionMarketDataApi.js",
+  "../src/transactions/useTransactionMarketDataController.js",
+].map((sourcePath) => readFileSync(new URL(sourcePath, import.meta.url), "utf8")).join("\n");
 
 test("Binance canonical instrument ids preserve the uppercase exchange symbol", () => {
   assert.match(source, /return `binance:\$\{binanceMatch\[1\]\.toLowerCase\(\)\}:\$\{cleanTransactionWatchlistSymbol\(binanceMatch\[2\]\)\}`/);
@@ -99,8 +90,6 @@ test("Binance autocomplete and simulator filters expose accessible provider-awar
 });
 
 test("Toss ticker-only names use stored English names without changing Binance pair labels", () => {
-  const displayName = loadDisplayName();
-
   assert.match(source, /name: displayNameFromInstrumentSources\(item, option, price, instrument\)/);
   assert.equal(displayName({
     provider: "toss",

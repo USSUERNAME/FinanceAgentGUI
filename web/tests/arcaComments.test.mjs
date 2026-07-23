@@ -6,6 +6,7 @@ import {
   buildArcaCommentFormData,
   extractArcaCommentsFromHtml,
   normalizeArcaCommentWrite,
+  upstreamCommentError,
 } from "../server/arcaApi.mjs";
 
 test("댓글과 연속 답글의 계층, 작성 권한을 추출한다", () => {
@@ -169,7 +170,7 @@ test("링크 카드가 없으면 숨김 댓글의 원본 URL을 대체 링크로
 
 test("콤보콘은 최대 3개를 순서와 중복을 유지해 정규화한다", () => {
   const comment = normalizeArcaCommentWrite({
-    contentType: "emoticon",
+    contentType: "combo_emoticon",
     parentId: "939508609",
     emoticons: [
       { packageId: 10, id: 101 },
@@ -179,7 +180,7 @@ test("콤보콘은 최대 3개를 순서와 중복을 유지해 정규화한다"
   });
 
   assert.deepEqual(comment, {
-    contentType: "emoticon",
+    contentType: "combo_emoticon",
     content: "",
     parentId: 939508609,
     emoticons: [
@@ -189,7 +190,7 @@ test("콤보콘은 최대 3개를 순서와 중복을 유지해 정규화한다"
     ],
   });
   assert.equal(normalizeArcaCommentWrite({
-    contentType: "emoticon",
+    contentType: "combo_emoticon",
     emoticons: [
       { packageId: 1, id: 1 },
       { packageId: 1, id: 2 },
@@ -199,9 +200,9 @@ test("콤보콘은 최대 3개를 순서와 중복을 유지해 정규화한다"
   }), null);
 });
 
-test("콤보콘 폼은 동일한 필드 이름을 선택 순서대로 반복한다", () => {
+test("콤보콘 폼은 아카라이브 combolist 계약으로 선택 순서를 보낸다", () => {
   const formData = buildArcaCommentFormData({
-    contentType: "emoticon",
+    contentType: "combo_emoticon",
     content: "",
     parentId: 300,
     emoticons: [
@@ -211,7 +212,40 @@ test("콤보콘 폼은 동일한 필드 이름을 선택 순서대로 반복한�
     ],
   }, "csrf-token");
 
-  assert.deepEqual(formData.getAll("emoticonId"), ["10", "20", "20"]);
-  assert.deepEqual(formData.getAll("attachmentId"), ["101", "202", "202"]);
+  assert.equal(formData.get("contentType"), "combo_emoticon");
+  assert.equal(formData.get("combolist"), '[["10","101"],["20","202"],["20","202"]]');
+  assert.equal(formData.has("emoticonId"), false);
+  assert.equal(formData.has("attachmentId"), false);
   assert.equal(formData.get("parentId"), "300");
+});
+
+test("일반 아카콘 폼은 단일 ID 필드를 사용한다", () => {
+  const formData = buildArcaCommentFormData({
+    contentType: "emoticon",
+    content: "",
+    parentId: null,
+    emoticons: [{ emoticonId: 10, attachmentId: 101 }],
+  }, "csrf-token");
+
+  assert.equal(formData.get("contentType"), "emoticon");
+  assert.equal(formData.get("emoticonId"), "10");
+  assert.equal(formData.get("attachmentId"), "101");
+  assert.equal(formData.has("combolist"), false);
+});
+
+test("HTML 오류 응답의 페이지 스크립트를 사용자 오류로 노출하지 않는다", () => {
+  const body = `
+    <html>
+      <body>
+        <script>window.LiveConfig={"country":"AU"}</script>
+        <main>아카라이브</main>
+      </body>
+    </html>
+  `;
+
+  assert.equal(upstreamCommentError({ status: 400 }, body), "");
+  assert.equal(
+    upstreamCommentError({ status: 400 }, '<p class="alert-danger">콤보콘 요청이 올바르지 않습니다.</p>'),
+    "콤보콘 요청이 올바르지 않습니다."
+  );
 });

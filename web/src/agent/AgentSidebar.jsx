@@ -1,4 +1,5 @@
 import React from "react";
+import "./agent-shell.css";
 import AlertTriangle from "lucide-react/dist/esm/icons/alert-triangle.js";
 import ArrowUp from "lucide-react/dist/esm/icons/arrow-up.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";

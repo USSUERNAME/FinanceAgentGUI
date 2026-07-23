@@ -2,8 +2,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const source = readFileSync(new URL("../src/transactions/TransactionStatusView.jsx", import.meta.url), "utf8");
-const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const source = [
+  "../src/transactions/TransactionStatusView.jsx",
+  "../src/transactions/TransactionStatusViews.jsx",
+  "../src/transactions/transactionDomain.js",
+].map((sourcePath) => readFileSync(new URL(sourcePath, import.meta.url), "utf8")).join("\n");
+const styles = [
+  "../src/styles.css",
+  "../src/transactions/transaction-status.css",
+].map((sourcePath) => readFileSync(new URL(sourcePath, import.meta.url), "utf8")).join("\n");
 
 test("일별 시세 표는 상단 차트 주기와 독립적인 1일봉 페이지를 사용한다", () => {
   assert.match(source, /fetchTransactionInvestmentDetailCandles\(candleInstrument, "1d", controller\.signal, \{ force: true \}\)/);

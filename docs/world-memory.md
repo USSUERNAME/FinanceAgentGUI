@@ -22,6 +22,8 @@ World Memory is opt-in by default.
 - `config/world-memory.defaults.json` is tracked and sets `enabled: false`.
 - `config/world-memory.user.json` is ignored local configuration written by the
   Settings screen switch.
+- `Autopilot 모드` also defaults off and persists as `autopilotEnabled` in the
+  same ignored user configuration file.
 - When disabled, the left sidebar hides the World Memory menu and sidebar-agent
   prompts do not receive World Memory search context.
 - When enabled, the local collector can start and World Memory status/actions use
@@ -30,6 +32,37 @@ World Memory is opt-in by default.
   screens receive only bounded retrieval results when enabled: World Memory uses
   semantic search, while News Feed contributes a separate bounded lexical search
   result from `data/news-feed.json`.
+
+## Autopilot mode
+
+Autopilot is an explicit, user-controlled standing approval for World Memory
+change suggestions. It is available only while World Memory itself is enabled.
+Turning World Memory off also normalizes Autopilot back to off.
+
+After a collection or report refresh creates unresolved change suggestions, the
+configured World Memory management model evaluates each suggestion against the
+current report, local list/state/taxonomy/audit output, and semantic-search
+evidence. The model must return one structured JSON decision:
+
+- `accept_original`: apply the proposed direction as written.
+- `accept_modified`: apply the model's narrower or otherwise adjusted version.
+- `investigate`: when write evidence is insufficient, run a bounded read-only
+  follow-up instead of guessing or silently rejecting the suggestion.
+
+The server validates the decision with an allowlist and the existing World
+Memory action parameter contract before execution. Autopilot cannot emit an
+arbitrary shell command and cannot call `collectNow`, `pause`, `feedScan`,
+`report`, or `refreshReport` as a model-selected action. Mutation decisions are
+limited to `stateAdd`, `briefStoryBackfill`, `storyLink`, `taxonomyRefresh`, and
+`stateSync`; investigation decisions are limited to existing read-only World
+Memory actions. A failed model contract or action stays unresolved and is
+recorded as an Autopilot error rather than being treated as accepted.
+
+Successful mutations are recorded in the same suggestion ledger and followed by
+one report refresh. `autopilot` state and the latest bounded result summary live
+in ignored `data/world-memory/collector-state.json`. Enabling Autopilot also
+offers the current unresolved report suggestions to the same pipeline, so the
+user does not need to wait for the next six-hour collection.
 
 ## Tracked Blueprint
 
@@ -140,7 +173,7 @@ resume the connectivity retry immediately.
 
 ## Management model settings
 
-`PATCH /api/world-memory/settings` accepts `managementProvider`,
+`PATCH /api/world-memory/settings` accepts `autopilotEnabled`, `managementProvider`,
 `managementModel`, `managementReasoning`, and `managementSpeed`. The Settings
 page orders these as provider, model, model-specific reasoning, and speed when
 the selected model/reasoning combination actually exposes a controllable speed

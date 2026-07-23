@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import "./reports.css";
 import AlertTriangle from "lucide-react/dist/esm/icons/alert-triangle.js";
 import Copy from "lucide-react/dist/esm/icons/copy.js";
 import FileText from "lucide-react/dist/esm/icons/file-text.js";

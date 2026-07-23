@@ -42,6 +42,7 @@ const WORLD_MEMORY_CONNECTIVITY_PROBE_URLS = [
 ];
 const WORLD_MEMORY_HISTORY_LIMIT = 16;
 const WORLD_MEMORY_HANDLED_CHANGE_SUGGESTION_LIMIT = 40;
+const WORLD_MEMORY_AUTOPILOT_RESULT_LIMIT = 8;
 const OUTPUT_LIMIT = 1024 * 1024;
 const STEP_TEXT_LIMIT = 24 * 1024;
 const MODEL_INPUT_SECTION_LIMIT = 48 * 1024;
@@ -57,6 +58,22 @@ const changeSuggestionMutationActions = new Set([
   "storyLink",
   "taxonomyRefresh",
   "stateSync",
+]);
+const worldMemoryAutopilotReadActions = new Set([
+  "audit",
+  "harness",
+  "list",
+  "states",
+  "taxonomy",
+  "cleanupDryRun",
+  "storyMap",
+  "storyFamilyReview",
+  "embedStatus",
+  "semanticSearch",
+]);
+const worldMemoryAutopilotActions = new Set([
+  ...changeSuggestionMutationActions,
+  ...worldMemoryAutopilotReadActions,
 ]);
 
 export function worldMemorySuggestionStatusForAction(action = "") {
@@ -272,6 +289,9 @@ function runtimeState() {
       inFlightStartedAt: "",
       inFlightCycleId: "",
       nextTimerAt: "",
+      autopilotInFlight: null,
+      autopilotQueued: null,
+      lastAutopilotReportGeneratedAt: "",
     };
   }
   return globalThis[runtimeKey];
@@ -332,6 +352,19 @@ function defaultCollectorState() {
     changeSuggestionLedger: {
       version: 1,
       handled: [],
+    },
+    autopilot: {
+      running: false,
+      status: "idle",
+      lastStartedAt: "",
+      lastFinishedAt: "",
+      lastReportGeneratedAt: "",
+      lastError: "",
+      processedCount: 0,
+      completedCount: 0,
+      watchingCount: 0,
+      failedCount: 0,
+      results: [],
     },
     history: [],
   };
@@ -577,6 +610,7 @@ function readCollectorState() {
     modelPolicy: { ...base.modelPolicy, ...(raw.modelPolicy || {}) },
     report,
     changeSuggestionLedger: normalizeChangeSuggestionLedger(raw.changeSuggestionLedger),
+    autopilot: { ...base.autopilot, ...(raw.autopilot || {}) },
     history: compactCollectorHistory(raw.history),
   };
   const recovery = recoverWorldMemoryCollectorStateFromArtifacts(state);
@@ -651,6 +685,10 @@ function buildWorldMemoryDisabledStatus(settings = readWorldMemorySettings()) {
     configPath: "config/world-memory.user.json",
     defaultConfigPath: "config/world-memory.defaults.json",
     disabledReason: "월드 메모리 사용 설정이 꺼져 있습니다.",
+    autopilot: {
+      running: Boolean(runtime.autopilotInFlight),
+      status: settings.autopilotEnabled ? "disabled" : "off",
+    },
     paths: {
       root: GUIBUILD_ROOT,
       baseDir: WORLD_MEMORY_BASE_ARG,
@@ -1693,6 +1731,9 @@ function commandForAction(body = {}) {
       .join(",");
     const confidence = commandFloat(body.confidence, 0.7, 0, 1);
     const dedupeKey = optionalCommandTextArg(body.dedupeKey || body.dedupe_key || `gui-state-add-${stateKey}`, 180);
+    const actionSource = body.autopilot === true
+      ? "FinanceAgentGUI|local://world-memory-autopilot||Autopilot 모델 권고 자동 승인"
+      : "FinanceAgentGUI|local://world-memory-change-suggestion||사용자 승인 월드메모리 변경 제안";
     const args = [
       ...base,
       "add",
@@ -1733,7 +1774,7 @@ function commandForAction(body = {}) {
       "--state-confidence",
       String(confidence),
       "--source",
-      "FinanceAgentGUI|local://world-memory-change-suggestion||사용자 승인 월드메모리 변경 제안",
+      actionSource,
       "--dedupe-key",
       dedupeKey,
       "--skip-if-duplicate",
@@ -2265,6 +2306,89 @@ async function runSituationReportGeneration({
   };
 }
 
+export function worldMemoryAutopilotSuggestionItems(reportView = {}) {
+  return reportMemoryChangeSuggestionItems(reportView)
+    .filter((item) => item.status !== "completed")
+    .slice(0, 5);
+}
+
+export function buildWorldMemoryAutopilotPrompt({ suggestion = {}, reportView = {}, evidence = {} } = {}) {
+  return [
+    "World Memory Autopilot의 변경 제안 실행 결정을 내린다.",
+    "Autopilot ON은 사용자가 아래 허용 액션 범위에서 모델의 권고를 별도 확인 없이 실행하도록 미리 승인한 상태다.",
+    "원 제안을 무조건 그대로 복사하지 말고 현재 메모리와 근거를 의미 기준으로 판단한다.",
+    "원안이 타당하면 accept_original, 방향은 맞지만 범위나 수준을 조정해야 하면 accept_modified를 선택한다.",
+    "쓰기 근거가 부족하면 reject 대신 investigate를 선택하고 다음 판단에 필요한 읽기 액션을 실행한다.",
+    "문자열 일치나 키워드 포함 여부로 판단하지 말고 대상, 의도, 근거, 필요한 후속 조치가 같은지 분류한다.",
+    "반환은 JSON 객체 하나만 출력한다. 설명, 마크다운, 코드펜스는 넣지 않는다.",
+    "",
+    "허용 계약:",
+    "- accept_original | accept_modified: stateAdd, briefStoryBackfill, storyLink, taxonomyRefresh, stateSync 중 하나",
+    "- investigate: semanticSearch, list, states, taxonomy, storyMap, storyFamilyReview, cleanupDryRun, audit, harness, embedStatus 중 하나",
+    "- briefStoryBackfill의 eventIds는 제공된 근거에서 확인한 실제 ID만 사용한다.",
+    "- mutation에서 dryRun이나 replaceExisting을 사용하지 않는다. 기존 수동 지정을 덮어쓰지 않는다.",
+    "- stateAdd는 title, summary를, storyLink는 story, relatedStory를, semanticSearch는 query를 반드시 포함한다.",
+    "- 임의 shell 명령, 파일 경로, report/refreshReport/collectNow/pause/feedScan 액션은 허용되지 않는다.",
+    "",
+    "반환 schema:",
+    JSON.stringify(
+      {
+        recommendation: "accept_original | accept_modified | investigate",
+        action: "허용 액션 ID",
+        label: "조치명",
+        reason: "왜 이 수준의 조치가 최선인지",
+        params: {},
+      },
+      null,
+      2
+    ),
+    "",
+    "검토할 변경 제안:",
+    JSON.stringify(suggestion, null, 2),
+    "",
+    "현재 보고서:",
+    jsonForPrompt(reportView, 28 * 1024),
+    "",
+    "로컬 근거:",
+    jsonForPrompt(evidence, 72 * 1024),
+  ].join("\n");
+}
+
+export function normalizeWorldMemoryAutopilotDecision(value = {}) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const recommendation = String(source.recommendation || "").trim();
+  if (!["accept_original", "accept_modified", "investigate"].includes(recommendation)) {
+    throw new Error("Autopilot recommendation must be accept_original, accept_modified, or investigate");
+  }
+  const action = String(source.action || source.actionId || "").trim();
+  if (!worldMemoryAutopilotActions.has(action)) {
+    throw new Error(`Autopilot action is not allowed: ${action || "(empty)"}`);
+  }
+  const expectsReadOnly = recommendation === "investigate";
+  if (expectsReadOnly !== worldMemoryAutopilotReadActions.has(action)) {
+    throw new Error(`Autopilot recommendation/action mismatch: ${recommendation}/${action}`);
+  }
+  const params = source.params && typeof source.params === "object" && !Array.isArray(source.params)
+    ? { ...source.params }
+    : {};
+  if (!expectsReadOnly && (params.dryRun === true || params.dry_run === true)) {
+    throw new Error("Autopilot mutation cannot be dry-run");
+  }
+  if (action === "briefStoryBackfill" && (params.replaceExisting === true || params.replace_existing === true)) {
+    throw new Error("Autopilot cannot replace an existing brief story assignment");
+  }
+  commandForAction({ ...params, action, autopilot: true });
+  const reason = optionalCommandTextArg(source.reason || source.rationale || "", 900);
+  if (!reason) throw new Error("Autopilot decision requires reason");
+  return {
+    recommendation,
+    action,
+    label: optionalCommandTextArg(source.label || "", 180) || actionCatalog.find((item) => item.id === action)?.label || action,
+    reason,
+    params,
+  };
+}
+
 async function runCommandFromBody(body) {
   const command = commandForAction(body);
   const result = await runPythonScript({
@@ -2294,10 +2418,237 @@ async function runCommandFromBody(body) {
   };
 }
 
+function compactAutopilotResult(result = {}) {
+  return {
+    suggestion: optionalCommandTextArg(result.suggestion || "", 360),
+    continuityId: normalizeWorldMemorySuggestionContinuityId(result.continuityId),
+    recommendation: optionalCommandTextArg(result.recommendation || "", 40),
+    action: optionalCommandTextArg(result.action || "", 80),
+    label: optionalCommandTextArg(result.label || "", 180),
+    reason: optionalCommandTextArg(result.reason || "", 500),
+    status: optionalCommandTextArg(result.status || "", 40),
+    error: optionalCommandTextArg(result.error || "", 500),
+    finishedAt: optionalCommandTextArg(result.finishedAt || nowIso(), 80),
+  };
+}
+
+function updateWorldMemoryAutopilotProgress({ startedAt, reportGeneratedAt, status, results, lastError = "" }) {
+  const compactResults = results.slice(-WORLD_MEMORY_AUTOPILOT_RESULT_LIMIT).map(compactAutopilotResult);
+  const completedCount = results.filter((item) => item.status === "completed").length;
+  const watchingCount = results.filter((item) => item.status === "watching").length;
+  const failedCount = results.filter((item) => item.status === "failed").length;
+  return updateCollectorState((state) => ({
+    ...state,
+    autopilot: {
+      ...state.autopilot,
+      running: status === "running" || status === "refreshing",
+      status,
+      lastStartedAt: startedAt,
+      lastFinishedAt: status === "running" || status === "refreshing" ? "" : nowIso(),
+      lastReportGeneratedAt: reportGeneratedAt,
+      lastError,
+      processedCount: results.length,
+      completedCount,
+      watchingCount,
+      failedCount,
+      results: compactResults,
+    },
+  }));
+}
+
+async function runWorldMemoryAutopilotPass({ reportGeneratedAt = "", trigger = "report", force = false } = {}) {
+  const settings = readWorldMemorySettings();
+  if (!settings.enabled || !settings.autopilotEnabled) return { ok: true, skipped: true, reason: "autopilot-off" };
+
+  const startedAt = nowIso();
+  const initialState = readCollectorState();
+  const reportView = initialState.report?.view || null;
+  const suggestions = worldMemoryAutopilotSuggestionItems(reportView || {});
+  const effectiveReportGeneratedAt = reportGeneratedAt || initialState.report?.generatedAt || "";
+  const results = [];
+  updateWorldMemoryAutopilotProgress({
+    startedAt,
+    reportGeneratedAt: effectiveReportGeneratedAt,
+    status: suggestions.length ? "running" : "no-suggestions",
+    results,
+  });
+  if (!suggestions.length) return { ok: true, skipped: true, reason: "no-suggestions" };
+
+  const modelPolicy = resolveWorldMemoryModelPolicy();
+  const [listResult, statesResult, taxonomyResult, auditResult] = await Promise.all([
+    runCommandFromBody({ action: "list", days: 45, entryMode: "all", limit: 80 }),
+    runCommandFromBody({ action: "states", status: "all", limit: 100 }),
+    runCommandFromBody({ action: "taxonomy", type: "all", limit: 120 }),
+    runCommandFromBody({ action: "audit", days: 45 }),
+  ]);
+  const sharedEvidence = {
+    list: listResult.ok ? listResult.json : { error: listResult.error },
+    states: statesResult.ok ? statesResult.json : { error: statesResult.error },
+    taxonomy: taxonomyResult.ok ? taxonomyResult.json : { error: taxonomyResult.error },
+    audit: auditResult.ok ? auditResult.json : { error: auditResult.error },
+  };
+
+  let stopped = false;
+  for (const suggestion of suggestions) {
+    const currentSettings = readWorldMemorySettings();
+    if (!currentSettings.enabled || !currentSettings.autopilotEnabled) {
+      stopped = true;
+      break;
+    }
+    try {
+      const semanticResult = await runCommandFromBody({
+        action: "semanticSearch",
+        query: suggestion.text,
+        limit: 16,
+      });
+      const modelResult = await runWorldMemoryModelText({
+        prompt: buildWorldMemoryAutopilotPrompt({
+          suggestion,
+          reportView,
+          evidence: {
+            ...sharedEvidence,
+            semanticSearch: semanticResult.ok ? semanticResult.json : { error: semanticResult.error },
+          },
+        }),
+        taskType: "world-memory-autopilot",
+        modelPolicy,
+      });
+      const decision = normalizeWorldMemoryAutopilotDecision(parseJsonPayload(modelResult.answer));
+      const latestSettings = readWorldMemorySettings();
+      if (!latestSettings.enabled || !latestSettings.autopilotEnabled) {
+        stopped = true;
+        break;
+      }
+      const actionResult = await runCommandFromBody({
+        ...decision.params,
+        action: decision.action,
+        autopilot: true,
+      });
+      if (!actionResult.ok) throw new Error(actionResult.error || `${decision.action} 실행 실패`);
+      const suggestionStatus = worldMemorySuggestionStatusForAction(decision.action);
+      const acceptedSuggestion = normalizeAcceptedChangeSuggestion(
+        {
+          text: suggestion.text,
+          continuityId: suggestion.continuityId,
+          source: "world-memory-autopilot",
+          section: "memory-change",
+          sectionLabel: "월드 메모리 변경 제안",
+          action: decision.action,
+          label: decision.label,
+        },
+        { action: decision.action, params: decision.params }
+      );
+      updateCollectorState((state) => rememberChangeSuggestionStatus(state, acceptedSuggestion, suggestionStatus));
+      results.push({
+        suggestion: suggestion.text,
+        continuityId: suggestion.continuityId,
+        ...decision,
+        status: suggestionStatus,
+        finishedAt: nowIso(),
+      });
+    } catch (error) {
+      results.push({
+        suggestion: suggestion.text,
+        continuityId: suggestion.continuityId,
+        status: "failed",
+        error: error.message,
+        finishedAt: nowIso(),
+      });
+    }
+    updateWorldMemoryAutopilotProgress({
+      startedAt,
+      reportGeneratedAt: effectiveReportGeneratedAt,
+      status: "running",
+      results,
+    });
+  }
+
+  const completedCount = results.filter((item) => item.status === "completed").length;
+  let refreshError = "";
+  if (!stopped && completedCount > 0) {
+    updateWorldMemoryAutopilotProgress({
+      startedAt,
+      reportGeneratedAt: effectiveReportGeneratedAt,
+      status: "refreshing",
+      results,
+    });
+    const refreshResult = await refreshWorldMemoryReportSnapshot({
+      sourceAction: "autopilot",
+      reason: `Autopilot 변경 제안 ${completedCount}건 반영 후 재계산`,
+      skipAutopilot: true,
+    });
+    if (!refreshResult.ok) refreshError = refreshResult.error || "Autopilot 후 보고서 갱신 실패";
+  }
+
+  const finalStatus = stopped ? "stopped" : refreshError || results.some((item) => item.status === "failed") ? "completed-with-errors" : "completed";
+  const finalState = updateWorldMemoryAutopilotProgress({
+    startedAt,
+    reportGeneratedAt: effectiveReportGeneratedAt,
+    status: finalStatus,
+    results,
+    lastError: refreshError || results.find((item) => item.status === "failed")?.error || "",
+  });
+  updateCollectorState((state) =>
+    appendHistory(state, {
+      type: "autopilot",
+      status: finalStatus,
+      trigger,
+      force,
+      startedAt,
+      finishedAt: finalState.autopilot.lastFinishedAt,
+      reportGeneratedAt: effectiveReportGeneratedAt,
+      processedCount: finalState.autopilot.processedCount,
+      completedCount: finalState.autopilot.completedCount,
+      watchingCount: finalState.autopilot.watchingCount,
+      failedCount: finalState.autopilot.failedCount,
+      error: finalState.autopilot.lastError,
+    })
+  );
+  return {
+    ok: !refreshError && !results.some((item) => item.status === "failed"),
+    stopped,
+    status: finalStatus,
+    results: finalState.autopilot.results,
+  };
+}
+
+function scheduleWorldMemoryAutopilot(options = {}) {
+  const settings = readWorldMemorySettings();
+  if (!settings.enabled || !settings.autopilotEnabled) return null;
+  const runtime = runtimeState();
+  const reportGeneratedAt = options.reportGeneratedAt || readCollectorState().report?.generatedAt || "";
+  if (runtime.autopilotInFlight) {
+    runtime.autopilotQueued = { ...options, reportGeneratedAt };
+    return runtime.autopilotInFlight;
+  }
+  if (!options.force && reportGeneratedAt && runtime.lastAutopilotReportGeneratedAt === reportGeneratedAt) return null;
+  runtime.lastAutopilotReportGeneratedAt = reportGeneratedAt;
+  const task = runWorldMemoryAutopilotPass({ ...options, reportGeneratedAt }).catch((error) => {
+    const startedAt = nowIso();
+    updateWorldMemoryAutopilotProgress({
+      startedAt,
+      reportGeneratedAt,
+      status: "failed",
+      results: [],
+      lastError: error.message,
+    });
+    return { ok: false, error: error.message };
+  });
+  runtime.autopilotInFlight = task;
+  void task.finally(() => {
+    runtime.autopilotInFlight = null;
+    const queued = runtime.autopilotQueued;
+    runtime.autopilotQueued = null;
+    if (queued) scheduleWorldMemoryAutopilot(queued);
+  });
+  return task;
+}
+
 async function refreshWorldMemoryReportSnapshot({
   sourceAction = "",
   reason = "",
   acceptedChangeSuggestion = null,
+  skipAutopilot = false,
 } = {}) {
   const startedAt = nowIso();
   const modelPolicy = resolveWorldMemoryModelPolicy();
@@ -2407,6 +2758,13 @@ async function refreshWorldMemoryReportSnapshot({
         }
       );
     });
+
+    if (!skipAutopilot) {
+      scheduleWorldMemoryAutopilot({
+        reportGeneratedAt: finishedAt,
+        trigger: sourceAction ? `report-refresh:${sourceAction}` : "report-refresh",
+      });
+    }
 
     return {
       ok: true,
@@ -2697,6 +3055,11 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
             steps,
           }
         );
+      });
+
+      scheduleWorldMemoryAutopilot({
+        reportGeneratedAt: finishedAt,
+        trigger: `collection:${trigger}`,
       });
 
       return { ok: true, cycleId, steps };
@@ -3022,6 +3385,7 @@ function buildWorldMemorySummaryStatus() {
       nextTimerAt: runtime.nextTimerAt,
     },
     schedule: collectorState.schedule,
+    autopilot: collectorState.autopilot,
     report: filterStoredReport(
       collectorState.report,
       collectorState.changeSuggestionLedger?.handled || []
@@ -3107,6 +3471,7 @@ async function buildWorldMemoryStatus() {
       nextTimerAt: runtime.nextTimerAt,
     },
     schedule: collectorState.schedule,
+    autopilot: collectorState.autopilot,
     modelPolicy: collectorState.modelPolicy,
     report: publicReport,
     changeSuggestionLedger: collectorState.changeSuggestionLedger,
@@ -3199,9 +3564,18 @@ export async function handleWorldMemoryEndpoint(kind, req, res) {
 
       if (req.method === "PATCH" || req.method === "POST") {
         const body = await readJsonBody(req);
+        const previousSettings = readWorldMemorySettings();
         const settings = writeWorldMemorySettingsPatch(body);
         if (settings.enabled) {
           startWorldMemoryCollector();
+          if (settings.autopilotEnabled && !previousSettings.autopilotEnabled) {
+            const state = readCollectorState();
+            scheduleWorldMemoryAutopilot({
+              reportGeneratedAt: state.report?.generatedAt || "",
+              trigger: "settings-enabled",
+              force: true,
+            });
+          }
         } else {
           stopWorldMemoryCollector();
           disableMagazineSettings("world-memory-disabled");

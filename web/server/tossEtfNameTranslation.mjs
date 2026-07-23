@@ -340,6 +340,7 @@ function latestAntigravityTranslationModel(options) {
     ? options.antigravityModelCatalog.models.filter((item) => item?.selectable && item?.name)
     : [];
   return selectAntigravityModelForReasoning(catalogModels, {
+    cliVersion: options.antigravity?.version || "",
     currentModel:
       options.agentSettings?.settings?.providers?.[ANTIGRAVITY_PROVIDER_ID]?.model ||
       options.selected?.model ||

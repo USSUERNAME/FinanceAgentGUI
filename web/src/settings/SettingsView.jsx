@@ -1,4 +1,5 @@
 import React from "react";
+import "./settings.css";
 import AlertTriangle from "lucide-react/dist/esm/icons/alert-triangle.js";
 import Bell from "lucide-react/dist/esm/icons/bell.js";
 import Check from "lucide-react/dist/esm/icons/check.js";
@@ -1909,6 +1910,7 @@ export default function SettingsView({
   magazineSettingsError,
   onToggleWorldMemoryTech,
   onToggleWorldMemoryEnabled,
+  onToggleWorldMemoryAutopilot,
   onWorldMemoryManagementSettingsChange,
   onToggleMagazineEnabled,
   onMagazineWritingSettingsChange,
@@ -1985,6 +1987,7 @@ export default function SettingsView({
           magazineSettingsError={magazineSettingsError}
           onToggleTech={onToggleWorldMemoryTech}
           onToggleEnabled={onToggleWorldMemoryEnabled}
+          onToggleAutopilot={onToggleWorldMemoryAutopilot}
           onManagementSettingsChange={onWorldMemoryManagementSettingsChange}
           onToggleMagazineEnabled={onToggleMagazineEnabled}
           onMagazineWritingSettingsChange={onMagazineWritingSettingsChange}
@@ -2097,6 +2100,7 @@ function WorldMemoryDiagnosticsSection({
   magazineSettingsError = "",
   onToggleTech,
   onToggleEnabled,
+  onToggleAutopilot,
   onManagementSettingsChange = () => {},
   onToggleMagazineEnabled,
   onMagazineWritingSettingsChange = () => {},
@@ -2110,6 +2114,10 @@ function WorldMemoryDiagnosticsSection({
   onReloadModelCatalog = () => {},
 }) {
   const enabled = Boolean(settings?.enabled ?? status?.enabled);
+  const autopilotEnabled = Boolean(
+    settings?.autopilotEnabled ?? settings?.settings?.autopilotEnabled ?? status?.settings?.autopilotEnabled
+  );
+  const autopilot = status?.autopilot || {};
   const toggleBusy = settingsBusy || settingsSaving;
   const managementProvider = settings?.settings?.managementProvider || settings?.managementProvider || "default";
   const managementSelectedProvider = normalizeMagazineProviderId(managementProvider);
@@ -2247,6 +2255,37 @@ function WorldMemoryDiagnosticsSection({
             <span className="settings-toggle-thumb" />
           </span>
           <span>{settingsSaving ? "저장 중" : enabled ? "켜짐" : "꺼짐"}</span>
+        </button>
+      </div>
+
+      <div className={autopilotEnabled ? "settings-feature-row is-enabled" : "settings-feature-row is-disabled"}>
+        <div className="settings-source-main">
+          <strong className="settings-feature-title">Autopilot 모드</strong>
+          <em>
+            {!enabled
+              ? "월드 메모리를 켠 다음 사용할 수 있습니다."
+              : autopilotEnabled
+                ? autopilot.running
+                  ? "모델이 변경 제안을 검토하고 권고 조치를 자동 실행하고 있습니다."
+                  : autopilot.lastFinishedAt
+                    ? `별도 확인 없이 자동 실행 · 최근 ${Number(autopilot.processedCount || 0)}건 처리 · ${formatDateTime(autopilot.lastFinishedAt)}`
+                    : "모델이 수용·수정·조사를 권고한 변경 제안을 별도 확인 없이 자동 실행합니다."
+                : "변경 제안은 지금처럼 사용자가 검토하고 실행을 확인합니다."}
+          </em>
+        </div>
+        <button
+          type="button"
+          className={autopilotEnabled ? "settings-toggle is-on" : "settings-toggle"}
+          role="switch"
+          aria-label="Autopilot 모드"
+          aria-checked={autopilotEnabled}
+          disabled={!enabled || toggleBusy}
+          onClick={() => onToggleAutopilot?.(!autopilotEnabled)}
+        >
+          <span className="settings-toggle-track">
+            <span className="settings-toggle-thumb" />
+          </span>
+          <span>{settingsSaving ? "저장 중" : autopilotEnabled ? "켜짐" : "꺼짐"}</span>
         </button>
       </div>
 

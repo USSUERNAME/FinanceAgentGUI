@@ -822,12 +822,18 @@ function findAntigravityCliPath() {
 }
 
 function parseAntigravityReasoningLevel(modelName = "") {
-  const match = String(modelName).match(/\(([^)]+)\)\s*$/);
-  return match ? match[1].trim() : "";
+  const name = String(modelName);
+  const parenthesized = name.match(/\(([^)]+)\)\s*$/);
+  if (parenthesized) return parenthesized[1].trim();
+  const slugSuffix = name.match(/[-_\s]+(low|medium|high)\s*$/i);
+  return slugSuffix ? slugSuffix[1].toLowerCase() : "";
 }
 
 function parseAntigravityModelBase(modelName = "") {
-  return String(modelName).replace(/\s*\([^)]+\)\s*$/, "").trim();
+  return String(modelName)
+    .replace(/\s*\([^)]+\)\s*$/, "")
+    .replace(/[-_\s]+(?:low|medium|high)\s*$/i, "")
+    .trim();
 }
 
 function parseAntigravityModels(stdout = "") {

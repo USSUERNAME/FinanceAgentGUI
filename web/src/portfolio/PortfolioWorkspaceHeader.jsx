@@ -11,6 +11,7 @@ import FileText from "lucide-react/dist/esm/icons/file-text.js";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
 import Settings from "lucide-react/dist/esm/icons/settings.js";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
+import "./portfolioTossApiStatus.css";
 
 function formatTossSnapshotProgress(reconstruction = {}) {
   const progress = reconstruction?.progress || {};

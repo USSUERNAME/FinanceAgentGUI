@@ -36,8 +36,11 @@ These are hard requirements.
   preferred source type, and rationale. A separate image worker obtains the real
   bitmap, source, credit, and rights metadata. The writer does not search for or
   download the image.
-- Preserve the staging, metadata, timestamp, cover-decision, and file contracts
-  described in `docs/magazine.md`.
+- Preserve the staging, metadata, timestamp, and file contracts described in
+  `docs/magazine.md`. The writer does not self-certify cover eligibility.
+  After writing, an independent LLM classifier must always emit either
+  `promote` or `do-not-promote`; the publication gate fails closed when that
+  classification is missing or invalid.
 
 ## Editorial Discretion
 

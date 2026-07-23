@@ -4,13 +4,18 @@ import { readFileSync } from "node:fs";
 
 import { newsFeedSidebarHealthState } from "../src/news/newsFeedStatus.js";
 
-test("app loads the News Feed market summary before the News Feed page is opened", () => {
+test("shared memory controller loads the News Feed market summary before the page is opened", () => {
   const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
-  const startupPollingEffect = appSource.match(
-    /useEffect\(\(\) => \{\s*void loadSharedMemoryStatus\(\);[\s\S]*?MEMORY_MARKET_SUMMARY_POLL_INTERVAL_MS\);[\s\S]*?\}, \[\]\);/,
+  const controllerSource = readFileSync(
+    new URL("../src/memory/useSharedMemoryController.js", import.meta.url),
+    "utf8",
+  );
+  const startupPollingEffect = controllerSource.match(
+    /useEffect\(\(\) => \{\s*void loadSharedMemoryStatus\(\);[\s\S]*?MARKET_SUMMARY_POLL_INTERVAL_MS\);[\s\S]*?\}, \[loadSharedMemoryStatus\]\);/,
   );
 
-  assert.ok(startupPollingEffect, "shared memory market summary should be loaded by an app-start effect");
+  assert.match(appSource, /useSharedMemoryController\(\{ activeView \}\)/);
+  assert.ok(startupPollingEffect, "shared memory market summary should be loaded by the controller at startup");
   assert.doesNotMatch(startupPollingEffect[0], /activeView/);
 });
 

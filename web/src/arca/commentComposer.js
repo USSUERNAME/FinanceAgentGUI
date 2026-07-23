@@ -10,8 +10,9 @@ export function shouldSubmitCommentFromKeyEvent(event = {}) {
   );
 }
 
-export function createArcaEmoticonCommentPayload(items) {
+export function createArcaEmoticonCommentPayload(items, { combo = false } = {}) {
   if (!Array.isArray(items) || !items.length || items.length > MAX_COMBOCON_ITEMS) return null;
+  if (!combo && items.length !== 1) return null;
   const emoticons = items.map((item) => ({
     emoticonId: Number(item?.packageId),
     attachmentId: Number(item?.id),
@@ -19,5 +20,5 @@ export function createArcaEmoticonCommentPayload(items) {
   if (emoticons.some((item) => !Number.isInteger(item.emoticonId) || item.emoticonId < 0 || !Number.isInteger(item.attachmentId) || item.attachmentId <= 0)) {
     return null;
   }
-  return { contentType: "emoticon", content: "", emoticons };
+  return { contentType: combo ? "combo_emoticon" : "emoticon", content: "", emoticons };
 }

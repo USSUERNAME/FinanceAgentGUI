@@ -16,6 +16,7 @@ import { formatDateTime } from "../utils/formatters.js";
 import { worldMemoryActionCatalog } from "./actionCatalog.js";
 import { worldMemoryActionText, worldMemoryStatusLabel } from "./statusHelpers.js";
 import { normalizeMemoryChangeSuggestionItem, worldMemorySuggestionCanAskAgent } from "./suggestionStatus.js";
+import "./world-memory.css";
 
 function worldMemorySignalToneClass(tone) {
   if (tone === "positive") return "is-positive";

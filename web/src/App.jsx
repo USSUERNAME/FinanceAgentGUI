@@ -1,42 +1,50 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import Check from "lucide-react/dist/esm/icons/check.js";
-import Copy from "lucide-react/dist/esm/icons/copy.js";
-import FilePlus2 from "lucide-react/dist/esm/icons/file-plus-2.js";
-import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
-import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
-import SendHorizontal from "lucide-react/dist/esm/icons/send-horizontal.js";
-import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import X from "lucide-react/dist/esm/icons/x.js";
-import codexLogo from "./assets/codex-logo-transparent.png";
-import antigravityLogo from "./assets/antigravity-logo.png";
-import stockChannelMagazineLogo from "./assets/stock-channel-magazine-logo.png";
 import { AgentSidebar } from "./agent/AgentSidebar.jsx";
-import { ChatCanvas } from "./agent/ChatCanvas.jsx";
-import {
-  antigravityModelGroups,
-  antigravityPolicyOptions,
-  emptyAgentSettings,
-  fallbackApprovalOptions,
-  fallbackModelGroups,
-  fallbackProviderOptions,
-  getSpeedOptionsForReasoning,
-  loadingApprovalOptions,
-  loadingModelGroups,
-  modelGroupsFromAntigravityCatalog,
-  personaModeOptions,
-} from "./agent/agentOptions.js";
-import {
-  ANTIGRAVITY_TRANSLATION_FALLBACK_MODEL,
-  selectAntigravityModelForReasoning,
-} from "./agent/antigravityModelSelection.js";
-import { selectCodexTranslationModel } from "./agent/codexTranslationModelSelection.js";
+import { requestAgentChatStream } from "./agent/agentApi.js";
 import { attachmentsSummary } from "./agent/attachments.js";
-import { messageToHistoryText, parseSseEvent } from "./agent/chatProtocol.js";
+import { messageToHistoryText } from "./agent/chatProtocol.js";
+import { consumeAgentChatStream } from "./agent/chatStreamRunner.js";
+import {
+  chatScopeKey,
+  memorySummaryFromExchange,
+  memoryTagsForExchange,
+  memoryTitleFromPrompt,
+  normalizeWorldMemoryActionProposal,
+  parseWorldMemoryJsonAction,
+  personaEligibleScreens,
+  stripWorldMemoryActionBlocks,
+  systemMainChatScope,
+  trimForMemory,
+  worldMemoryActionsNeedingReportRefresh,
+  worldMemoryChatScope,
+} from "./agent/chatSessionModel.js";
+import {
+  ANTIGRAVITY_PROVIDER_ID,
+  useAgentRuntimeController,
+} from "./agent/useAgentRuntimeController.js";
+import { useChatComposerController } from "./agent/useChatComposerController.js";
 import { buildPromptWithArticleContext } from "./arca/articleContext.js";
-import StockChannelView from "./arca/StockChannelView.jsx";
+import { buildBoardIndexContextSnapshot } from "./arca/boardContextSnapshot.js";
+import { arcaNotificationHealthState } from "./arca/notificationStatus.js";
+import { useArcaController } from "./arca/useArcaController.js";
 import { buildEarningAnalysisPrompt, displayEarningValue } from "./calendars/earningPrompt.js";
-import { emptyMemoryStatus } from "./memory/sharedMemoryDefaults.js";
-import { mergeNewsFeedFirstPage, newsFeedContentRevision } from "./news/newsFeedPagination.js";
+import { useMagazineController } from "./magazine/useMagazineController.js";
+import { useMagazineReaderController } from "./magazine/useMagazineReaderController.js";
+import {
+  buildMagazineArticleAgentContext,
+  buildStockArticleAgentContext,
+  magazineArticleList,
+  magazineFallbackCoverStories,
+  magazineHeadlineStory,
+  normalizeMagazineComment,
+  normalizeMagazineCommentStore,
+  normalizeMagazineReaderArticle,
+  normalizeMagazineTopicCatalog,
+  writeMagazineArticleToClipboard,
+} from "./magazine/magazineWorkspaceModel.js";
+import { useSharedMemoryController } from "./memory/useSharedMemoryController.js";
+import { useNewsFeedController } from "./news/useNewsFeedController.js";
 import {
   parsePortfolioWidgetJsonAction,
   stripPortfolioWidgetActionBlocks,
@@ -55,1400 +63,33 @@ import {
   PortfolioCanvasDeleteDialog,
 } from "./portfolio/PortfolioCanvasDeleteDialog.jsx";
 import {
-  normalizePortfolioCanvasStore,
-  normalizePortfolioChatMessages,
-  portfolioCanvasStoreHasCanvases,
-  readStoredPortfolioCanvasStore,
-  writeStoredPortfolioCanvasStore,
-} from "./portfolio/workspaceState.js";
-import {
   PORTFOLIO_CANVAS_MODES,
-  portfolioCanvasModeList,
   portfolioCanvasModeMeta,
 } from "./portfolio/canvasModes.jsx";
-import {
-  portfolioSchemaTables,
-  portfolioTheoryPrinciples,
-} from "./portfolio/workspaceReferenceContent.js";
+import { portfolioSchemaTables } from "./portfolio/workspaceReferenceContent.js";
 import {
   normalizePortfolioWidgetReferenceList,
 } from "./portfolio/widgetRelations.js";
-import {
-  buildPortfolioCanvasCreateState,
-  buildPortfolioCanvasDeleteState,
-  buildPortfolioCanvasDuplicateState,
-  buildPortfolioCanvasRenameState,
-  buildPortfolioCanvasSelectState,
-  buildPortfolioCanvasWorkspaceUpdateState,
-} from "./portfolio/canvasStoreActions.js";
-import { formatCount, formatDateTime, formatFileSize } from "./utils/formatters.js";
-import { MarkdownText } from "./utils/MarkdownText.jsx";
+import { usePortfolioCanvasController } from "./portfolio/usePortfolioCanvasController.js";
 import { parseReportArtifactAction, stripReportArtifactBlocks } from "./reports/reportArtifactAction.js";
 import { loadReportMarketProxyContext } from "./reports/reportMarketProxyContext.js";
+import { postReportAction } from "./reports/reportsApi.js";
+import { useNotificationController } from "./reports/useNotificationController.js";
 import { AppNavigation } from "./shell/AppNavigation.jsx";
-import { compactVisibleScreenText, collectVisibleScreenSnapshot } from "./shell/screenSnapshot.js";
-import { worldMemoryActionCatalog } from "./worldMemory/actionCatalog.js";
+import { AppRoutes, RouteLoading } from "./shell/AppRoutes.jsx";
+import { collectVisibleScreenSnapshot } from "./shell/screenSnapshot.js";
 import { buildWorldMemoryAskRequest } from "./worldMemory/askRequest.js";
-import { worldMemoryActionText, worldMemoryHealthState } from "./worldMemory/statusHelpers.js";
+import { buildWorldMemoryPageContextSnapshot } from "./worldMemory/contextSnapshot.js";
+import { worldMemoryHealthState } from "./worldMemory/statusHelpers.js";
+import { useWorldMemoryController } from "./worldMemory/useWorldMemoryController.js";
+import { useTossInvestController } from "./transactions/useTossInvestController.js";
+import { useTransactionSettingsController } from "./transactions/useTransactionSettingsController.js";
 
-const SettingsView = React.lazy(() => import("./settings/SettingsView.jsx"));
 const TossInvestConnectionSection = React.lazy(() =>
   import("./settings/SettingsView.jsx").then((module) => ({ default: module.TossInvestConnectionSection }))
 );
-const ReportsView = React.lazy(() => import("./reports/ReportsView.jsx"));
-const NewsFeedView = React.lazy(() => import("./news/NewsFeedView.jsx"));
-const TransactionStatusView = React.lazy(() => import("./transactions/TransactionStatusView.jsx"));
-const WorldMemoryView = React.lazy(() => import("./worldMemory/WorldMemoryView.jsx"));
-const MagazinePortfolioEChart = React.lazy(() =>
-  import("./portfolio/PortfolioEChart.jsx").then((module) => ({ default: module.PortfolioEChart }))
-);
-const EarningCalendarView = React.lazy(() =>
-  import("./calendars/CalendarViews.jsx").then((module) => ({ default: module.EarningCalendarView }))
-);
-const EconomicCalendarView = React.lazy(() =>
-  import("./calendars/CalendarViews.jsx").then((module) => ({ default: module.EconomicCalendarView }))
-);
-const PortfolioGuidePage = React.lazy(() =>
-  import("./portfolio/PortfolioGuidePage.jsx").then((module) => ({ default: module.PortfolioGuidePage }))
-);
-const PortfolioWorkspace = React.lazy(() =>
-  import("./portfolio/PortfolioWorkspace.jsx").then((module) => ({ default: module.PortfolioWorkspace }))
-);
 
-const initialChatMessages = [];
-const systemMainChatScope = Object.freeze({ type: "system-main", canvasId: "" });
-const worldMemoryChatScope = Object.freeze({ type: "world-memory", canvasId: "" });
-const CODEX_PROVIDER_ID = "codex-cli";
-const ANTIGRAVITY_PROVIDER_ID = "antigravity-cli";
-const agentProviderIds = [CODEX_PROVIDER_ID, ANTIGRAVITY_PROVIDER_ID];
-
-function isWorldMemoryChatScope(scope) {
-  return scope?.type === "world-memory";
-}
-
-function chatScopeKey(scope = systemMainChatScope) {
-  if (scope?.type === "portfolio-canvas" && scope.canvasId) {
-    return `portfolio-canvas:${scope.canvasId}`;
-  }
-  if (isWorldMemoryChatScope(scope)) return "world-memory";
-  return "system-main";
-}
-
-function normalizeChatMessageList(value) {
-  return Array.isArray(value) ? value : initialChatMessages;
-}
-
-function normalizeAgentModelProvider(value) {
-  return value === CODEX_PROVIDER_ID || value === ANTIGRAVITY_PROVIDER_ID ? value : "default";
-}
-const magazineFallbackTopics = [
-  { label: "시장", emoji: "📈", tone: "market" },
-  { label: "금융", emoji: "🏦", tone: "finance" },
-  { label: "경제", emoji: "🌐", tone: "economy" },
-  { label: "산업", emoji: "🏭", tone: "industry" },
-  { label: "테크", emoji: "💻", tone: "tech" },
-  { label: "정치", emoji: "🏛️", tone: "policy" },
-  { label: "AI", emoji: "🤖", tone: "ai" },
-  { label: "기후", emoji: "🌱", tone: "climate" },
-  { label: "크립토", emoji: "🪙", tone: "crypto" },
-];
-const magazineToneSequence = ["market", "finance", "economy", "industry", "tech", "policy", "ai", "climate", "crypto"];
-const MAGAZINE_ARTICLE_PAGE_SIZE = 5;
-const MAGAZINE_GENERATE_ONE_TOOL_STORAGE_KEY = "finance-agent-gui:magazine-generate-one-tool";
-const magazineDefaultFollowupOptions = [
-  {
-    id: "deeper-data",
-    label: "데이터를 더 자세히",
-    prompt: "이 주제의 핵심 데이터를 더 비교하는 후속 기사",
-    tone: "market",
-  },
-  {
-    id: "market-impact",
-    label: "시장 영향 더 보기",
-    prompt: "이 이슈가 자산 가격과 업종에 미치는 영향",
-    tone: "finance",
-  },
-  {
-    id: "company-map",
-    label: "관련 기업으로 확장",
-    prompt: "연결되는 기업, ETF, 산업 밸류체인을 정리하는 기사",
-    tone: "industry",
-  },
-  {
-    id: "next-signal",
-    label: "다음 신호 추적",
-    prompt: "이 이슈를 확인하거나 반박할 다음 지표와 일정",
-    tone: "economy",
-  },
-];
-const magazineHeadlineStory = {
-  topic: "커버 스토리",
-  title: "금리 이후의 시장, 성장주의 판이 다시 열리나",
-  deck:
-    "달러 약세, 금리 인하 기대, 실적 시즌의 방향성이 한 화면에 걸린 이번 주 시장의 중심축을 짚습니다. 성장주 반등이 단순한 유동성 랠리인지, 아니면 이익 전망과 투자 심리가 함께 되살아나는 초기 신호인지 구분하는 것이 핵심입니다. 이번 커버스토리는 반도체, AI 인프라, 금융 여건, 경기민감 업종의 움직임을 연결해 다음 시장 국면의 주도권이 어디로 이동하는지 살펴봅니다.",
-  image:
-    "https://images.unsplash.com/photo-1740199929970-1c884baae7d8?auto=format&fit=crop&w=1200&q=80",
-  imageAlt: "도시 금융 지구의 고층 빌딩 전경",
-  imageCredit: "사진: Unsplash",
-};
-const magazineFeatureStories = [
-  {
-    topic: "시장",
-    title: "리스크 온의 재개, 지수보다 강한 섹터는 어디인가",
-    image:
-      "https://images.unsplash.com/photo-1742076553114-cfd4f27de46f?auto=format&fit=crop&w=900&q=80",
-    imageAlt: "노트북 화면에 표시된 주식 시장 차트",
-    imageCredit: "사진: Unsplash",
-  },
-  {
-    topic: "AI",
-    title: "데이터센터 전력 수요가 다시 CAPEX를 흔든다",
-    image:
-      "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=900&q=80",
-    imageAlt: "데이터센터 서버 랙",
-    imageCredit: "사진: Unsplash",
-  },
-  {
-    topic: "산업",
-    title: "항만과 운임이 말하는 공급망의 온도",
-    image:
-      "https://images.unsplash.com/photo-1769144256207-bc4bb75b29db?auto=format&fit=crop&w=900&q=80",
-    imageAlt: "컨테이너를 실은 화물선과 항만",
-    imageCredit: "사진: Unsplash",
-  },
-  {
-    topic: "기후",
-    title: "재생에너지 투자, 금리 하락 국면의 수혜가 될까",
-    image:
-      "https://images.unsplash.com/photo-1509391366360-2e959784a276?auto=format&fit=crop&w=900&q=80",
-    imageAlt: "넓게 펼쳐진 태양광 패널",
-    imageCredit: "사진: Unsplash",
-  },
-];
-const magazineFallbackCoverStories = [magazineHeadlineStory, ...magazineFeatureStories];
-const magazineArticleList = [
-  {
-    topics: ["시장", "경제"],
-    title: "달러 약세와 실적 기대가 만든 위험자산의 새 균형",
-    image:
-      "https://images.unsplash.com/photo-1742076553114-cfd4f27de46f?auto=format&fit=crop&w=900&q=80",
-    imageAlt: "노트북 화면에 표시된 주식 시장 차트",
-    imageCredit: "사진: Unsplash",
-    summary:
-      "금리 인하 기대가 선반영된 구간에서 환율, 이익 전망, 밸류에이션이 동시에 움직이는 흐름을 정리합니다. 최근 위험자산 반등은 단순한 유동성 기대만으로 설명하기 어렵고, 달러 약세와 기업 실적의 하향 안정이 함께 작동하고 있습니다. 이번 글은 시장이 어떤 조건에서 성장주와 경기민감주를 다시 가격에 반영하는지, 그리고 투자자가 확인해야 할 조기 신호가 무엇인지 분해합니다.",
-  },
-  {
-    topics: ["AI", "테크"],
-    title: "AI 인프라 병목은 GPU가 아니라 전력에서 시작된다",
-    image:
-      "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=900&q=80",
-    imageAlt: "데이터센터 서버 랙",
-    imageCredit: "사진: Unsplash",
-    summary:
-      "데이터센터 증설 경쟁이 전력망, 냉각, 부동산, 클라우드 CAPEX로 번지는 경로를 기사 후보로 분해합니다. AI 수요는 여전히 GPU와 모델 경쟁으로 소비되지만, 실제 투자 병목은 전력 인입과 운영 효율에서 먼저 드러나는 중입니다. 이 글은 전력 계약, 서버 밀도, 클라우드 기업의 자본지출 계획을 연결해 AI 인프라 사이클의 다음 수혜 영역을 살펴봅니다.",
-  },
-  {
-    topics: ["산업", "금융"],
-    title: "운임 반등이 제조업 마진에 보내는 조기 신호",
-    image:
-      "https://images.unsplash.com/photo-1769144256207-bc4bb75b29db?auto=format&fit=crop&w=900&q=80",
-    imageAlt: "컨테이너를 실은 화물선과 항만",
-    imageCredit: "사진: Unsplash",
-    summary:
-      "항만 체류, 컨테이너 운임, 재고 사이클을 함께 보며 산업재와 소비재의 비용 압력을 추적합니다. 운임 반등이 일시적인 병목인지, 아니면 제조업 주문 회복의 신호인지에 따라 시장 해석은 크게 달라집니다. 이번 글은 물류 비용 변화가 기업 마진, 납기, 재고 보충 전략에 미치는 영향을 정리하고 관련 업종의 민감도를 비교합니다.",
-  },
-  {
-    topics: ["기후", "정치"],
-    title: "재생에너지 보조금 논쟁이 다시 투자 사이클을 흔든다",
-    image:
-      "https://images.unsplash.com/photo-1509391366360-2e959784a276?auto=format&fit=crop&w=900&q=80",
-    imageAlt: "넓게 펼쳐진 태양광 패널",
-    imageCredit: "사진: Unsplash",
-    summary:
-      "정책 불확실성과 금리 변화가 태양광, 배터리, 전력 인프라 기업의 투자 판단에 미치는 영향을 요약합니다. 재생에너지 섹터는 장기 수요가 분명해도 보조금, 인허가, 자금조달 비용에 따라 단기 주가가 크게 흔들립니다. 이 글은 정책 논쟁이 프로젝트 파이프라인과 밸류에이션에 어떤 경로로 반영되는지, 그리고 금리 하락이 실제 주문 회복으로 이어지는 조건을 살핍니다.",
-  },
-  {
-    topics: ["크립토", "금융"],
-    title: "ETF 자금 유입 이후 크립토 시장의 두 번째 관문",
-    image:
-      "https://images.unsplash.com/photo-1518546305927-5a555bb7020d?auto=format&fit=crop&w=900&q=80",
-    imageAlt: "암호화폐 동전과 전자 회로 이미지",
-    imageCredit: "사진: Unsplash",
-    summary:
-      "기관 자금 유입 이후 유동성, 규제, 스테이블코인 결제망이 다음 가격 발견 구간을 어떻게 만들지 살핍니다. ETF 출시 이후 시장은 단기 수급보다 제도권 금융과 온체인 생태계가 만나는 구조적 변화를 더 크게 반영하고 있습니다. 이 글은 거래소 유동성, 커스터디, 결제 인프라, 규제 리스크를 함께 놓고 크립토 시장의 두 번째 성장 관문을 점검합니다.",
-  },
-];
-const magazineMockArticleSections = [
-  {
-    heading: "이슈의 핵심",
-    body:
-      "이번 목업 기사는 월드 메모리에서 감지한 주요 이슈를 하나의 매거진형 기사로 확장했을 때의 읽기 경험을 확인하기 위한 샘플입니다. 실제 구현에서는 이 위치에 핵심 배경, 시장 맥락, 관련 기업, 확인해야 할 데이터 포인트가 들어가게 됩니다.",
-  },
-  {
-    heading: "시장이 보는 신호",
-    body:
-      "금리, 환율, 수급, 실적 전망은 서로 따로 움직이는 것처럼 보이지만 기사 작성 단계에서는 하나의 내러티브로 묶여야 합니다. 독자는 이 문단에서 단순한 뉴스 요약이 아니라 왜 지금 이 주제가 중요한지, 어떤 변수가 다음 국면을 바꿀 수 있는지를 빠르게 파악하게 됩니다.",
-  },
-  {
-    heading: "다음 확인 포인트",
-    body:
-      "후속 기사에서는 관련 기업의 실적 발표, 정책 일정, 원자재 가격, ETF 자금 흐름, 산업별 주문 지표를 함께 비교할 수 있습니다. 이 목업은 그런 리서치 큐가 기사 본문으로 변환됐을 때 화면 안에서 충분히 읽을 만한지 확인하는 용도입니다.",
-  },
-];
-
-function normalizeMagazineTopicCatalog(topics) {
-  const sourceTopics = Array.isArray(topics) && topics.length ? topics : magazineFallbackTopics;
-  const seen = new Set();
-  const normalized = sourceTopics
-    .map((topic, index) => {
-      const label = String(topic?.label || topic || "").trim();
-      if (!label || seen.has(label)) return null;
-      seen.add(label);
-      return {
-        label,
-        emoji: String(topic?.emoji || "").trim(),
-        tone: String(topic?.tone || magazineToneSequence[index % magazineToneSequence.length] || "market").trim(),
-      };
-    })
-    .filter(Boolean);
-  return normalized.length ? normalized : magazineFallbackTopics;
-}
-
-function MagazineTopicRow({ topics, activeTopic = "", onSelectTopic, ariaLabel = "매거진 토픽" }) {
-  return (
-    <div className="magazine-topic-row" aria-label={ariaLabel}>
-      {topics.map((topic) => (
-        <button
-          className={[
-            "magazine-topic-badge",
-            `is-${topic.tone}`,
-            activeTopic === topic.label ? "is-active" : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-          type="button"
-          key={topic.label}
-          aria-pressed={activeTopic === topic.label}
-          onClick={(event) => onSelectTopic(event, topic.label)}
-        >
-          {topic.emoji ? (
-            <span className="magazine-topic-emoji" aria-hidden="true">
-              {topic.emoji}
-            </span>
-          ) : null}
-          <span>{topic.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function magazineArticleTopics(article) {
-  const topics = Array.isArray(article?.topics)
-    ? article.topics
-    : [article?.topic].filter(Boolean);
-  return topics.map((topic) => String(topic || "").trim()).filter(Boolean);
-}
-
-const magazineArticlePublishedFormatter = new Intl.DateTimeFormat("ko-KR", {
-  timeZone: "Asia/Seoul",
-  year: "numeric",
-  month: "numeric",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-
-const magazineUpdateScheduleFormatter = new Intl.DateTimeFormat("ko-KR", {
-  timeZone: "Asia/Seoul",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-});
-
-function magazineArticlePublishedTime(article) {
-  const rawValue = article?.publishedAt || article?.createdAt || article?.updatedAt || "";
-  if (!rawValue) return null;
-  const date = new Date(rawValue);
-  if (Number.isNaN(date.getTime())) return null;
-  return {
-    dateTime: date.toISOString(),
-    label: `송고 ${magazineArticlePublishedFormatter.format(date)}`,
-  };
-}
-
-function MagazinePublishedTime({ article, className = "" }) {
-  const publishedTime = magazineArticlePublishedTime(article);
-  if (!publishedTime) return null;
-  const classes = ["magazine-published-time", className].filter(Boolean).join(" ");
-  return (
-    <time className={classes} dateTime={publishedTime.dateTime}>
-      {publishedTime.label}
-    </time>
-  );
-}
-
-function formatMagazineUpdateScheduleTime(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const parts = Object.fromEntries(
-    magazineUpdateScheduleFormatter.formatToParts(date).map((part) => [part.type, part.value])
-  );
-  return `${parts.year}년 ${parts.month}월 ${parts.day}일 ${parts.hour}시 ${parts.minute}분`;
-}
-
-function magazineLatestUpdateTimestamp(status, articles = []) {
-  return (
-    status?.latestArticle?.publishedAt ||
-    status?.readState?.latestArticleAt ||
-    articles?.[0]?.publishedAt ||
-    articles?.[0]?.createdAt ||
-    articles?.[0]?.updatedAt ||
-    ""
-  );
-}
-
-function magazineNextUpdateLabel(status) {
-  if (status?.scheduler?.running || status?.scheduler?.currentCycle || status?.scheduler?.manualStartPending) {
-    return "모델 판단 중";
-  }
-  if (status?.scheduler?.generationInFlight || status?.scheduler?.generationLock) return "작성 중";
-  const nextUpdate = formatMagazineUpdateScheduleTime(
-    status?.scheduler?.nextRetryAt || status?.scheduler?.nextRunAt
-  );
-  if (nextUpdate) return nextUpdate;
-  if (status?.scheduler?.enabled === false) return "예정 없음";
-  return "대기 중";
-}
-
-function magazineSchedulerIsActive(status) {
-  const scheduler = status?.scheduler || {};
-  return Boolean(
-    scheduler.running ||
-      scheduler.currentCycle ||
-      scheduler.activeCycle ||
-      scheduler.generationInFlight ||
-      scheduler.generationLock ||
-      scheduler.manualStartPending ||
-      scheduler.manualStartRequestedAt
-  );
-}
-
-function magazineArticleCountDecisionLabel(status) {
-  const scheduler = status?.scheduler || {};
-  if (scheduler.manualStartPending || scheduler.manualStartRequestedAt) {
-    return "모델 판단 중: 지금 새 기사로 만들 만한 각도가 있는지 확인하고 있습니다.";
-  }
-  if (scheduler.generationInFlight || scheduler.generationLock) {
-    return "작성 작업 실행 중: 기존 작업이 끝난 뒤 다음 모델 판단을 진행합니다.";
-  }
-  const cycle = scheduler.currentCycle || scheduler.activeCycle || scheduler.lastCycle;
-  const decision = cycle?.articleCountDecision;
-  if (!decision && cycle?.reason === "generation-lock-active") {
-    return "작성 작업 실행 중: 모델 판단은 기존 작업 완료 후 다시 진행됩니다.";
-  }
-  if (!decision) return "";
-  const targetCount = Number.isFinite(Number(decision.targetCount)) ? Number(decision.targetCount) : 0;
-  const maxCount = Number.isFinite(Number(decision.maxCount)) ? Number(decision.maxCount) : 3;
-  const provider = decision.provider === "antigravity-cli" ? "Antigravity" : decision.provider === "codex-cli" ? "Codex" : "";
-  const suffix = decision.fallback ? "fallback" : provider;
-  const reason = String(decision.reason || "").trim();
-  return [
-    `모델 산정: ${targetCount}/${maxCount}`,
-    suffix ? ` · ${suffix}` : "",
-    reason ? ` · ${reason}` : "",
-  ].join("");
-}
-
-function MagazineUpdateSchedule({
-  status,
-  articles,
-  isStartingNow = false,
-  isGeneratingOne = false,
-  onStartNow,
-  onGenerateOne,
-}) {
-  const lastUpdate =
-    formatMagazineUpdateScheduleTime(magazineLatestUpdateTimestamp(status, articles)) || "기록 없음";
-  const nextUpdate = magazineNextUpdateLabel(status);
-  const decisionLabel = magazineArticleCountDecisionLabel(status);
-  const schedulerActive = magazineSchedulerIsActive(status);
-  const showStartButton =
-    Boolean(onStartNow) &&
-    !isStartingNow &&
-    !schedulerActive &&
-    status?.scheduler?.enabled !== false;
-  const generateOneDisabled = isGeneratingOne || isStartingNow || schedulerActive;
-  return (
-    <div className="magazine-update-schedule">
-      <div className="magazine-update-primary">
-        <p>마지막 업데이트: {lastUpdate} / 다음 업데이트 예정: {nextUpdate}</p>
-        {showStartButton || onGenerateOne ? (
-          <div className="magazine-update-actions">
-            {onGenerateOne ? (
-              <button
-                className="magazine-update-generate-one"
-                type="button"
-                onClick={onGenerateOne}
-                disabled={generateOneDisabled}
-                aria-label={isGeneratingOne ? "기사 1건 작성 중" : "기사 1건 작성"}
-                title={isGeneratingOne ? "기사 1건 작성 중" : "기사 1건 작성"}
-              >
-                {isGeneratingOne ? (
-                  <LoaderCircle size={14} strokeWidth={2.2} aria-hidden="true" />
-                ) : (
-                  <FilePlus2 size={14} strokeWidth={2.2} aria-hidden="true" />
-                )}
-                <span>{isGeneratingOne ? "작성 중" : "기사 1건 작성"}</span>
-              </button>
-            ) : null}
-            {showStartButton ? (
-              <button
-                className="magazine-update-refresh tooltip-button"
-                type="button"
-                aria-label="지금 매거진 작성 시작"
-                title="지금 매거진 작성 시작"
-                data-tooltip="지금 작성 시작"
-                onClick={onStartNow}
-              >
-                <RefreshCw size={14} strokeWidth={2.2} aria-hidden="true" />
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-      {decisionLabel ? <p>{decisionLabel}</p> : null}
-    </div>
-  );
-}
-
-const MAGAZINE_AGENT_CONTEXT_BODY_LIMIT = 12000;
-const STOCK_ARTICLE_AGENT_CONTEXT_BODY_LIMIT = 12000;
-
-function compactMagazineAgentText(value, maxLength = 1200) {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
-}
-
-function stripMagazineArticleHtml(html = "") {
-  const source = String(html || "");
-  if (!source) return "";
-  if (typeof window !== "undefined" && typeof window.DOMParser === "function") {
-    const parsed = new window.DOMParser().parseFromString(source, "text/html");
-    return compactMagazineAgentText(parsed.body?.textContent || "", MAGAZINE_AGENT_CONTEXT_BODY_LIMIT);
-  }
-  return compactMagazineAgentText(
-    source
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/(p|div|section|article|h1|h2|h3|li)>/gi, "\n")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/g, " ")
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, "\"")
-      .replace(/&#39;/g, "'"),
-    MAGAZINE_AGENT_CONTEXT_BODY_LIMIT
-  );
-}
-
-function magazineArticleWorldMemoryContext(worldMemory) {
-  const source = worldMemory && typeof worldMemory === "object" ? worldMemory : null;
-  if (!source) return null;
-  const vectorSearch = source.vectorSearch && typeof source.vectorSearch === "object" ? source.vectorSearch : {};
-  return {
-    retrievalPolicy: compactMagazineAgentText(source.retrievalPolicy || "", 120),
-    query: compactMagazineAgentText(source.query || "", 260),
-    vectorSearch: {
-      engine: compactMagazineAgentText(vectorSearch.engine || "", 80),
-      model: compactMagazineAgentText(vectorSearch.model || "", 80),
-      matchedCount: Number(vectorSearch.matchedCount || 0),
-      hits: Array.isArray(vectorSearch.hits)
-        ? vectorSearch.hits.slice(0, 8).map((hit) => ({
-            eventId: compactMagazineAgentText(hit?.eventId || "", 80),
-            title: compactMagazineAgentText(hit?.title || "", 220),
-            storyFamily: compactMagazineAgentText(hit?.storyFamily || "", 120),
-            createdAt: compactMagazineAgentText(hit?.createdAt || "", 80),
-          }))
-        : [],
-    },
-  };
-}
-
-function buildMagazineArticleAgentContext(article) {
-  if (!article) return null;
-  const publishedTime = magazineArticlePublishedTime(article);
-  const bodyText =
-    stripMagazineArticleHtml(article.bodyHtml) ||
-    magazineMockArticleSections.map((section) => `${section.heading}\n${section.body}`).join("\n\n");
-  return {
-    source: "magazine-reader",
-    id: compactMagazineAgentText(article.id || "", 120),
-    articleType: compactMagazineAgentText(article.articleType || "", 80),
-    title: compactMagazineAgentText(article.title || "", 240),
-    topics: magazineArticleTopics(article).map((topic) => compactMagazineAgentText(topic, 60)).slice(0, 12),
-    summary: compactMagazineAgentText(article.summary || "", 1400),
-    publishedAt: compactMagazineAgentText(article.publishedAt || article.createdAt || article.updatedAt || "", 120),
-    publishedTimeLabel: publishedTime?.label || "",
-    image: {
-      alt: compactMagazineAgentText(article.imageAlt || "", 180),
-      credit: compactMagazineAgentText(article.imageCredit || "", 180),
-    },
-    sourceBasis: Array.isArray(article.sourceBasis)
-      ? article.sourceBasis.map((item) => compactMagazineAgentText(item, 160)).filter(Boolean).slice(0, 8)
-      : [],
-    bodyText,
-    bodyTruncated: bodyText.length >= MAGAZINE_AGENT_CONTEXT_BODY_LIMIT,
-    chartBlocks: Array.isArray(article.chartBlocks)
-      ? article.chartBlocks.slice(0, 8).map((chart) => ({
-          id: compactMagazineAgentText(chart?.id || "", 80),
-          title: compactMagazineAgentText(chart?.title || "", 180),
-          note: compactMagazineAgentText(chart?.note || "", 360),
-          ariaLabel: compactMagazineAgentText(chart?.ariaLabel || "", 180),
-        }))
-      : [],
-    followupOptions: Array.isArray(article.followupOptions)
-      ? article.followupOptions.slice(0, 6).map((option) => ({
-          id: compactMagazineAgentText(option?.id || "", 80),
-          label: compactMagazineAgentText(option?.label || "", 120),
-          prompt: compactMagazineAgentText(option?.prompt || "", 260),
-          topics: Array.isArray(option?.topics)
-            ? option.topics.map((topic) => compactMagazineAgentText(topic, 60)).filter(Boolean).slice(0, 8)
-            : [],
-        }))
-      : [],
-    worldMemory: magazineArticleWorldMemoryContext(article.worldMemory),
-  };
-}
-
-function stockArticleInlineText(content) {
-  if (typeof content === "string") return content.trim();
-  return String(content?.text || "").trim();
-}
-
-function stockArticleBlockText(block) {
-  if (block?.type === "image") return `[이미지] ${String(block?.alt || "게시글 이미지").trim()}`;
-  if (block?.type === "list") {
-    return (Array.isArray(block.items) ? block.items : [])
-      .map((item, index) => `${block.ordered ? `${index + 1}.` : "-"} ${stockArticleInlineText(item)}`)
-      .join("\n");
-  }
-  if (block?.type === "table") {
-    const rows = [block.headers, ...(Array.isArray(block.rows) ? block.rows : [])].filter(
-      (row) => Array.isArray(row) && row.length
-    );
-    return rows.map((row) => `| ${row.map(stockArticleInlineText).join(" | ")} |`).join("\n");
-  }
-  return stockArticleInlineText(block);
-}
-
-function buildStockArticleAgentContext(article) {
-  if (!article) return null;
-  const blockText = Array.isArray(article.contentBlocks)
-    ? article.contentBlocks
-        .map((block) => {
-          const text = stockArticleBlockText(block);
-          if (!text) return "";
-          return block?.type === "heading" ? `${text}\n` : text;
-        })
-        .filter(Boolean)
-        .join("\n\n")
-    : "";
-  const rawBodyText = String(blockText || article.contentText || article.description || "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const bodyText = compactMagazineAgentText(rawBodyText, STOCK_ARTICLE_AGENT_CONTEXT_BODY_LIMIT);
-  return {
-    source: "stock-channel-reader",
-    id: compactMagazineAgentText(article.id || article.number || "", 120),
-    url: compactMagazineAgentText(article.url || article.href || "", 1000),
-    title: compactMagazineAgentText(article.title || "", 260),
-    categoryLabel: compactMagazineAgentText(article.categoryLabel || "", 100),
-    author: compactMagazineAgentText(article.author || "", 180),
-    publishedAt: compactMagazineAgentText(article.timeIso || "", 120),
-    publishedTimeLabel: compactMagazineAgentText(formatArticleReaderTimeForContext(article), 120),
-    stats: {
-      views: Number(article.view || 0),
-      recommendations: Number(article.rate || 0),
-      comments: Number(article.commentCount || 0),
-    },
-    bodyText,
-    bodyTruncated: rawBodyText.length > bodyText.length,
-    images: Array.isArray(article.imageUrls)
-      ? article.imageUrls.slice(0, 24).map((src) => compactMagazineAgentText(src, 1000)).filter(Boolean)
-      : [],
-  };
-}
-
-function formatArticleReaderTimeForContext(article) {
-  const value = article?.timeIso;
-  if (!value) return article?.timeLabel || "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return article?.timeLabel || value;
-  return new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function MagazineArticleList({
-  articles,
-  onOpenArticle,
-  emptyText = "아직 이 조건에 맞는 기사가 없습니다.",
-  listKey = "articles",
-}) {
-  const safeArticles = Array.isArray(articles) ? articles : [];
-  const sentinelRef = useRef(null);
-  const [visibleCount, setVisibleCount] = useState(MAGAZINE_ARTICLE_PAGE_SIZE);
-  const visibleArticles = safeArticles.slice(0, Math.min(visibleCount, safeArticles.length));
-  const hasMore = visibleArticles.length < safeArticles.length;
-
-  useEffect(() => {
-    setVisibleCount(MAGAZINE_ARTICLE_PAGE_SIZE);
-  }, [listKey]);
-
-  useEffect(() => {
-    setVisibleCount((current) => {
-      const maxVisible = Math.max(MAGAZINE_ARTICLE_PAGE_SIZE, safeArticles.length);
-      return Math.max(MAGAZINE_ARTICLE_PAGE_SIZE, Math.min(current, maxVisible));
-    });
-  }, [safeArticles.length]);
-
-  useEffect(() => {
-    if (!hasMore || typeof IntersectionObserver === "undefined") return undefined;
-    const node = sentinelRef.current;
-    if (!node) return undefined;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        setVisibleCount((current) => Math.min(current + MAGAZINE_ARTICLE_PAGE_SIZE, safeArticles.length));
-      },
-      { root: null, rootMargin: "320px 0px 420px", threshold: 0 }
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [hasMore, safeArticles.length, visibleCount]);
-
-  if (!safeArticles.length) {
-    return <p className="magazine-topic-empty">{emptyText}</p>;
-  }
-
-  return (
-    <div className="magazine-article-list">
-      {visibleArticles.map((article) => (
-        <article className="magazine-list-item" key={article.id || article.title}>
-          <div className="magazine-list-copy">
-            <div className="magazine-list-topic-row" aria-label="기사 토픽">
-              {magazineArticleTopics(article).map((topic) => (
-                <span className="magazine-list-topic" key={topic}>
-                  {topic}
-                </span>
-              ))}
-            </div>
-            <h3>
-              <a
-                className="magazine-article-link"
-                href="#magazine-reader"
-                onClick={(event) => onOpenArticle(event, article)}
-              >
-                {article.title}
-              </a>
-            </h3>
-            <MagazinePublishedTime article={article} />
-            <a
-              className="magazine-image-link"
-              href="#magazine-reader"
-              onClick={(event) => onOpenArticle(event, article)}
-              aria-label={`${article.title} 기사 열기`}
-            >
-              <div className="magazine-featured-image magazine-list-image">
-                <img src={article.image} alt={article.imageAlt} />
-              </div>
-            </a>
-            <p>{article.summary}</p>
-          </div>
-        </article>
-      ))}
-      {hasMore ? <div className="magazine-list-sentinel" ref={sentinelRef} aria-hidden="true" /> : null}
-    </div>
-  );
-}
-
-function normalizeMagazineReaderArticle(article) {
-  const topics = Array.isArray(article?.topics)
-    ? article.topics
-    : [article?.topic].filter(Boolean);
-  const followupOptions = Array.isArray(article?.followupOptions) && article.followupOptions.length
-    ? article.followupOptions
-    : magazineDefaultFollowupOptions;
-  return {
-    id: article?.id || "",
-    topics: topics.length ? topics : ["매거진"],
-    title: article?.title || "주식채널 매거진 기사",
-    summary:
-      article?.summary ||
-      article?.deck ||
-      "월드 메모리의 주요 이슈를 바탕으로 만든 매거진 기사 목업입니다.",
-    image: article?.image || magazineHeadlineStory.image,
-    imageAlt: article?.imageAlt || magazineHeadlineStory.imageAlt,
-    imageCredit: article?.imageCredit || magazineHeadlineStory.imageCredit,
-    bodyHtml: article?.bodyHtml || "",
-    chartBlocks: Array.isArray(article?.chartBlocks) ? article.chartBlocks : [],
-    followupOptions: followupOptions
-      .map((option, index) => ({
-        id: option?.id || `followup-${index + 1}`,
-        label: option?.label || option?.title || `후속 기사 ${index + 1}`,
-        prompt: option?.prompt || option?.label || "",
-        topics: Array.isArray(option?.topics) && option.topics.length ? option.topics : topics,
-        tone: option?.tone || magazineToneSequence[index % magazineToneSequence.length],
-      }))
-      .slice(0, 6),
-    worldMemory: article?.worldMemory || null,
-    generationAgent: article?.generationAgent || null,
-    articleType: article?.articleType || "",
-    publishedAt: article?.publishedAt || "",
-    createdAt: article?.createdAt || "",
-    updatedAt: article?.updatedAt || "",
-    sourceBasis: Array.isArray(article?.sourceBasis) ? article.sourceBasis : [],
-  };
-}
-
-const magazineClipboardExcludeSelector = [
-  ".magazine-reader-topic-row",
-  ".magazine-reader-followup",
-  ".magazine-reader-comments",
-  ".magazine-reader-return",
-].join(", ");
-
-const MAGAZINE_CLIPBOARD_IMAGE_ASPECT_RATIO = 16 / 9;
-
-function magazineBlobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("이미지를 읽지 못했습니다."));
-    reader.readAsDataURL(blob);
-  });
-}
-
-function loadMagazineClipboardImage(src) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("이미지를 불러오지 못했습니다."));
-    image.src = src;
-  });
-}
-
-async function magazineImageSrcToDataUrl(src, options = {}) {
-  const shouldCrop = Boolean(options.cropToReaderFrame);
-  if (!src) return src;
-  if (src.startsWith("data:") && !shouldCrop) return src;
-  const response = await fetch(src, { credentials: "same-origin" });
-  if (!response.ok) throw new Error(`이미지를 가져오지 못했습니다. (${response.status})`);
-  const blob = await response.blob();
-  if (!blob.type.startsWith("image/")) throw new Error("이미지 형식이 아닙니다.");
-  const dataUrl = await magazineBlobToDataUrl(blob);
-  if (!shouldCrop) return dataUrl;
-  const sourceImage = await loadMagazineClipboardImage(dataUrl);
-  const naturalWidth = sourceImage.naturalWidth || sourceImage.width;
-  const naturalHeight = sourceImage.naturalHeight || sourceImage.height;
-  if (!naturalWidth || !naturalHeight) return dataUrl;
-
-  const targetAspectRatio = Number(options.aspectRatio) || MAGAZINE_CLIPBOARD_IMAGE_ASPECT_RATIO;
-  const imageAspectRatio = naturalWidth / naturalHeight;
-  let sourceX = 0;
-  let sourceY = 0;
-  let sourceWidth = naturalWidth;
-  let sourceHeight = naturalHeight;
-
-  if (imageAspectRatio > targetAspectRatio) {
-    sourceWidth = naturalHeight * targetAspectRatio;
-    sourceX = (naturalWidth - sourceWidth) / 2;
-  } else if (imageAspectRatio < targetAspectRatio) {
-    sourceHeight = naturalWidth / targetAspectRatio;
-    sourceY = (naturalHeight - sourceHeight) / 2;
-  }
-
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(sourceWidth);
-  canvas.height = Math.round(sourceHeight);
-  const context = canvas.getContext("2d");
-  if (!context) return dataUrl;
-  context.drawImage(sourceImage, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.92);
-}
-
-async function inlineMagazineClipboardImages(sourceNode, cloneNode) {
-  const sourceImages = Array.from(sourceNode.querySelectorAll("img"));
-  const cloneImages = Array.from(cloneNode.querySelectorAll("img"));
-  await Promise.all(
-    cloneImages.map(async (image, index) => {
-      const sourceImage = sourceImages[index];
-      const source = sourceImage?.currentSrc || sourceImage?.src || image.currentSrc || image.src || image.getAttribute("src");
-      if (!source) return;
-      try {
-        const shouldCropToReaderFrame = Boolean(sourceImage?.closest(".magazine-featured-image"));
-        image.setAttribute("src", await magazineImageSrcToDataUrl(source, {
-          cropToReaderFrame: shouldCropToReaderFrame,
-          aspectRatio: MAGAZINE_CLIPBOARD_IMAGE_ASPECT_RATIO,
-        }));
-      } catch (error) {
-        image.setAttribute("src", new URL(source, window.location.href).href);
-        image.setAttribute("data-copy-image-warning", error.message || "image inline failed");
-      }
-    })
-  );
-}
-
-function inlineMagazineClipboardCanvases(sourceNode, cloneNode) {
-  const sourceCanvases = Array.from(sourceNode.querySelectorAll("canvas"));
-  const cloneCanvases = Array.from(cloneNode.querySelectorAll("canvas"));
-  cloneCanvases.forEach((canvas, index) => {
-    const sourceCanvas = sourceCanvases[index];
-    if (!sourceCanvas) return;
-    try {
-      const image = document.createElement("img");
-      image.src = sourceCanvas.toDataURL("image/png");
-      image.alt = canvas.getAttribute("aria-label") || "기사 차트";
-      image.width = sourceCanvas.width;
-      image.height = sourceCanvas.height;
-      canvas.replaceWith(image);
-    } catch {
-      canvas.remove();
-    }
-  });
-}
-
-function cleanMagazineClipboardNode(node) {
-  node.querySelectorAll(magazineClipboardExcludeSelector).forEach((element) => element.remove());
-  node.querySelectorAll("script, style, button, textarea, input").forEach((element) => element.remove());
-  node.querySelectorAll("a[href]").forEach((anchor) => {
-    anchor.setAttribute("href", new URL(anchor.getAttribute("href"), window.location.href).href);
-  });
-  node.querySelectorAll("[contenteditable]").forEach((element) => element.removeAttribute("contenteditable"));
-}
-
-function isMagazineClipboardNbspSpacer(element) {
-  return (
-    element?.classList?.contains("magazine-copy-heading-spacer") ||
-    element?.classList?.contains("magazine-copy-nbsp-spacer")
-  );
-}
-
-function trimMagazineClipboardTrailingWhitespace(element) {
-  if (isMagazineClipboardNbspSpacer(element)) return;
-  let current = element.lastChild;
-  while (current && current.nodeType === Node.TEXT_NODE && !current.nodeValue.trim()) {
-    const previous = current.previousSibling;
-    current.remove();
-    current = previous;
-  }
-  if (current?.nodeType === Node.TEXT_NODE) {
-    current.nodeValue = current.nodeValue.replace(/[ \t\u00a0]+$/g, "");
-  }
-}
-
-const magazineClipboardBlockLikeSelector = [
-  "article",
-  "section",
-  "div",
-  "p",
-  "blockquote",
-  "figure",
-  "figcaption",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-  "time",
-  "ul",
-  "ol",
-  "li",
-  "table",
-  "thead",
-  "tbody",
-  "tr",
-  "th",
-  "td",
-].join(", ");
-
-const magazineClipboardWhitespaceContainerSelector = [
-  "article",
-  "section",
-  "div",
-  "blockquote",
-  "figure",
-  "figcaption",
-  "ul",
-  "ol",
-  "table",
-  "thead",
-  "tbody",
-  "tr",
-].join(", ");
-
-function isMagazineClipboardBlockLikeNode(node) {
-  return node?.nodeType === Node.ELEMENT_NODE && node.matches(magazineClipboardBlockLikeSelector);
-}
-
-function shouldRemoveMagazineClipboardWhitespaceTextNode(textNode) {
-  if (textNode.nodeValue.trim()) return false;
-  const parent = textNode.parentElement;
-  if (!parent || parent.closest("pre, code, textarea")) return false;
-  if (isMagazineClipboardBlockLikeNode(textNode.previousSibling)) return true;
-  if (isMagazineClipboardBlockLikeNode(textNode.nextSibling)) return true;
-  return parent.matches(magazineClipboardWhitespaceContainerSelector);
-}
-
-function normalizeMagazineClipboardTextWhitespace(node) {
-  const textNodes = [];
-  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
-  while (walker.nextNode()) {
-    textNodes.push(walker.currentNode);
-  }
-  textNodes.forEach((textNode) => {
-    if (textNode.parentElement?.closest(".magazine-copy-heading-spacer, .magazine-copy-nbsp-spacer")) return;
-    textNode.nodeValue = textNode.nodeValue.replace(/\u00a0/g, " ");
-    if (shouldRemoveMagazineClipboardWhitespaceTextNode(textNode)) {
-      textNode.remove();
-    }
-  });
-  node
-    .querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, blockquote, figcaption, time")
-    .forEach(trimMagazineClipboardTrailingWhitespace);
-}
-
-function stripMagazineClipboardInternalMarkers(node) {
-  node.querySelectorAll(".magazine-copy-heading-spacer, .magazine-copy-nbsp-spacer").forEach((element) => {
-    element.classList.remove("magazine-copy-heading-spacer");
-    element.classList.remove("magazine-copy-nbsp-spacer");
-    if (!element.getAttribute("class")) {
-      element.removeAttribute("class");
-    }
-  });
-}
-
-function createMagazineClipboardSpacer() {
-  const spacer = document.createElement("p");
-  spacer.className = "magazine-copy-spacer";
-  spacer.appendChild(document.createElement("br"));
-  return spacer;
-}
-
-function createMagazineClipboardNbspSpacer(className = "magazine-copy-nbsp-spacer") {
-  const spacer = document.createElement("p");
-  spacer.className = className;
-  spacer.appendChild(document.createTextNode("\u00a0"));
-  return spacer;
-}
-
-function createMagazineClipboardHeadingSpacer({ trailingNbsp = false, withLineBreak = false } = {}) {
-  const spacer = createMagazineClipboardNbspSpacer("magazine-copy-heading-spacer");
-  if (withLineBreak) {
-    spacer.appendChild(document.createElement("br"));
-    if (trailingNbsp) {
-      spacer.appendChild(document.createTextNode("\u00a0"));
-    }
-  }
-  return spacer;
-}
-
-function nextMagazineClipboardElement(element) {
-  let next = element.nextSibling;
-  while (next && next.nodeType === Node.TEXT_NODE && !next.textContent.trim()) {
-    next = next.nextSibling;
-  }
-  return next?.nodeType === Node.ELEMENT_NODE ? next : null;
-}
-
-function addMagazineClipboardBlockquoteLeadBreak(container) {
-  const lead = container.firstElementChild;
-  if (!lead?.matches("strong, b")) return false;
-  const firstBreak = nextMagazineClipboardElement(lead);
-  if (!firstBreak?.matches("br")) return false;
-  const secondBreak = nextMagazineClipboardElement(firstBreak);
-  if (secondBreak?.matches("br")) return true;
-  firstBreak.insertAdjacentElement("afterend", document.createElement("br"));
-  return true;
-}
-
-function insertMagazineClipboardBlockquoteBreaks(node) {
-  node
-    .querySelectorAll(".magazine-reader-html blockquote, .magazine-reader-section blockquote, .magazine-reader-chart-section blockquote")
-    .forEach((quote) => {
-      if (addMagazineClipboardBlockquoteLeadBreak(quote)) return;
-      const firstParagraph = quote.firstElementChild;
-      if (firstParagraph?.matches("p")) {
-        addMagazineClipboardBlockquoteLeadBreak(firstParagraph);
-      }
-    });
-}
-
-function insertMagazineClipboardFigureCreditBreak(node) {
-  const figure = node.querySelector(".magazine-reader-figure");
-  if (!figure?.querySelector("figcaption")) return;
-  const nextElement = nextMagazineClipboardElement(figure);
-  if (!nextElement?.classList?.contains("magazine-reader-body")) return;
-  if (!nextElement.querySelector("p")) return;
-  figure.insertAdjacentElement("afterend", createMagazineClipboardNbspSpacer());
-}
-
-function insertMagazineClipboardBreaks(node) {
-  [
-    ".magazine-reader-published-time",
-    ".magazine-reader-summary",
-  ].forEach((selector) => {
-    const element = node.querySelector(selector);
-    if (!element) return;
-    element.insertAdjacentElement("afterend", createMagazineClipboardSpacer());
-  });
-  node.querySelectorAll("h2").forEach((heading) => {
-    heading.insertAdjacentElement("beforebegin", createMagazineClipboardHeadingSpacer({ trailingNbsp: true, withLineBreak: true }));
-    heading.insertAdjacentElement("afterend", createMagazineClipboardHeadingSpacer());
-  });
-  insertMagazineClipboardFigureCreditBreak(node);
-  insertMagazineClipboardBlockquoteBreaks(node);
-  node
-    .querySelectorAll(".magazine-reader-html p, .magazine-reader-section p, .magazine-reader-chart-section p")
-    .forEach((paragraph) => {
-      if (
-        paragraph.classList.contains("magazine-copy-spacer") ||
-        paragraph.classList.contains("magazine-copy-heading-spacer") ||
-        paragraph.closest("blockquote, figure, figcaption")
-      ) {
-        return;
-      }
-      const nextElement = nextMagazineClipboardElement(paragraph);
-      if (!nextElement || !nextElement.matches("p, blockquote, ul, ol")) return;
-      paragraph.insertAdjacentElement("afterend", createMagazineClipboardSpacer());
-    });
-  node
-    .querySelectorAll(".magazine-reader-html blockquote, .magazine-reader-section blockquote, .magazine-reader-chart-section blockquote")
-    .forEach((quote) => {
-      const nextElement = nextMagazineClipboardElement(quote);
-      if (nextElement?.classList?.contains("magazine-copy-spacer")) return;
-      quote.insertAdjacentElement("afterend", createMagazineClipboardSpacer());
-    });
-}
-
-function normalizeMagazineClipboardBodyHtml(node) {
-  node.querySelectorAll(".magazine-reader-html").forEach((body) => {
-    if (body.children.length !== 1) return;
-    const onlyChild = body.firstElementChild;
-    if (!onlyChild?.matches("article.magazine-article")) return;
-    onlyChild.replaceWith(...Array.from(onlyChild.childNodes));
-  });
-}
-
-function magazineClipboardProviderName(provider) {
-  return provider === "antigravity-cli" ? "Antigravity" : "Codex";
-}
-
-const MAGAZINE_CLIPBOARD_ATTRIBUTION_URL = "https://arca.live/b/stock/175140301";
-
-function magazineClipboardAttributionText(provider) {
-  return `Stock Channel Magazine+에서 ${magazineClipboardProviderName(provider)}로 생성됨`;
-}
-
-function appendMagazineClipboardAttribution(node, provider) {
-  for (let index = 0; index < 3; index += 1) {
-    const spacer = document.createElement("p");
-    spacer.appendChild(document.createElement("br"));
-    node.appendChild(spacer);
-  }
-  const attribution = document.createElement("p");
-  attribution.className = "magazine-copy-attribution";
-  const link = document.createElement("a");
-  link.href = MAGAZINE_CLIPBOARD_ATTRIBUTION_URL;
-  link.target = "_blank";
-  link.textContent = "Stock Channel Magazine+";
-  attribution.append(link, `에서 ${magazineClipboardProviderName(provider)}로 생성됨`);
-  node.appendChild(attribution);
-}
-
-function magazinePlainTextFromNode(node) {
-  const holder = document.createElement("div");
-  holder.style.position = "fixed";
-  holder.style.left = "-10000px";
-  holder.style.top = "0";
-  holder.style.whiteSpace = "pre-wrap";
-  holder.appendChild(node.cloneNode(true));
-  document.body.appendChild(holder);
-  const text = holder.innerText
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .trim();
-  holder.remove();
-  return text;
-}
-
-async function buildMagazineClipboardPayload(sourceNode, options = {}) {
-  if (!sourceNode) throw new Error("복사할 기사 본문을 찾지 못했습니다.");
-  const cloneNode = sourceNode.cloneNode(true);
-  cleanMagazineClipboardNode(cloneNode);
-  normalizeMagazineClipboardBodyHtml(cloneNode);
-  insertMagazineClipboardBreaks(cloneNode);
-  inlineMagazineClipboardCanvases(sourceNode, cloneNode);
-  await inlineMagazineClipboardImages(sourceNode, cloneNode);
-  normalizeMagazineClipboardTextWhitespace(cloneNode);
-  stripMagazineClipboardInternalMarkers(cloneNode);
-  const basePlainText = magazinePlainTextFromNode(cloneNode);
-  appendMagazineClipboardAttribution(cloneNode, options.provider);
-  const plainText = `${basePlainText}\n\n\n${magazineClipboardAttributionText(options.provider)}`.trim();
-  const html = [
-    "<!doctype html>",
-    "<html>",
-    "<head><meta charset=\"utf-8\"></head>",
-    "<body>",
-    cloneNode.outerHTML,
-    "</body>",
-    "</html>",
-  ].join("");
-  return { html, plainText };
-}
-
-async function writeMagazineArticleToClipboard(sourceNode, options = {}) {
-  const payloadPromise = buildMagazineClipboardPayload(sourceNode, options);
-  if (navigator.clipboard?.write && window.ClipboardItem) {
-    try {
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          "text/html": payloadPromise.then(
-            ({ html }) => new Blob([html], { type: "text/html" })
-          ),
-          "text/plain": payloadPromise.then(
-            ({ plainText }) => new Blob([plainText], { type: "text/plain" })
-          ),
-        }),
-      ]);
-      return { mode: "html" };
-    } catch (error) {
-      const { plainText } = await payloadPromise;
-      await navigator.clipboard.writeText(plainText);
-      return { mode: "text", warning: error.message || "HTML 복사 실패" };
-    }
-  }
-  const { plainText } = await payloadPromise;
-  await navigator.clipboard.writeText(plainText);
-  return { mode: "text" };
-}
-
-function normalizeMagazineCommentReply(reply) {
-  if (!reply || typeof reply !== "object") return null;
-  const text = String(reply.text || "").trim();
-  const status = String(reply.status || (text ? "complete" : "waiting")).trim();
-  return {
-    id: reply.id || `reply-${Date.now()}`,
-    author: reply.author || "매거진 편집자 AI",
-    text,
-    status,
-    createdAt: reply.createdAt || "",
-    biasEventIds: Array.isArray(reply.biasEventIds)
-      ? reply.biasEventIds.map((item) => String(item || "").trim()).filter(Boolean)
-      : [],
-  };
-}
-
-function normalizeMagazineComment(comment) {
-  if (!comment || typeof comment !== "object") return null;
-  const text = String(comment.text || "").trim();
-  if (!text) return null;
-  return {
-    id: comment.id || `comment-${Date.now()}`,
-    author: comment.author || "사용자",
-    text,
-    createdAt: comment.createdAt || "",
-    reply: normalizeMagazineCommentReply(comment.reply),
-  };
-}
-
-function normalizeMagazineCommentStore(payload, articleId = "") {
-  const comments = Array.isArray(payload?.comments) ? payload.comments : [];
-  return {
-    articleId: payload?.articleId || articleId,
-    updatedAt: payload?.updatedAt || "",
-    commentCount: Number(payload?.commentCount || comments.length || 0),
-    comments: comments.map(normalizeMagazineComment).filter(Boolean),
-  };
-}
-
-function magazineCommentStatusText(status) {
-  if (status === "waiting") return "답변 대기 중";
-  if (status === "generating") return "답변 중";
-  if (status === "error") return "답변 실패";
-  return "";
-}
-const personaEligibleScreens = new Set([
-  "chat",
-  "stock",
-  "news-feed",
-  "magazine",
-  "world-memory",
-  "reports",
-  "transaction-status",
-  "earning-calendar",
-  "economic-calendar",
-  "portfolio",
-  "portfolio-canvas",
-]);
-const ARCA_WRITE_URL = "https://arca.live/b/stock/write";
-const ARCA_NOTIFICATION_URL = "https://arca.live/u/notification";
-const ARCA_NOTIFICATION_POLL_INTERVAL_MS = 30000;
-const MAGAZINE_STATUS_POLL_INTERVAL_MS = 30000;
-const NOTIFICATION_STATUS_POLL_INTERVAL_MS = 15000;
-const MEMORY_MARKET_SUMMARY_POLL_INTERVAL_MS = 15 * 60 * 1000;
-const TOSS_INVEST_ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
-const TOSS_INVEST_ORDER_SYNC_PROGRESS_POLL_MS = 3000;
-const TOSS_INVEST_ORDER_SYNC_BATCH_DELAY_MS = 2000;
-const TOSS_INVEST_ORDER_SYNC_MAX_BATCHES = 100;
 const BROWSER_NOTIFICATION_LAST_SHOWN_KEY = "finance-agent-gui:last-browser-notification-id";
-const MEMORY_RECENT_LIMIT = 5;
-const MEMORY_DIALOG_PAGE_SIZE = 20;
-
-function mergeTossInvestOrderSyncStatus(current, next) {
-  const currentReconstruction = current?.reconstruction;
-  if (!currentReconstruction || currentReconstruction.status !== "running") return next;
-  const nextReconstruction = next?.reconstruction;
-  if (!nextReconstruction) {
-    return {
-      ...next,
-      reconstruction: currentReconstruction,
-    };
-  }
-  if (nextReconstruction.clientRunId === currentReconstruction.clientRunId) return next;
-  const sameServerRun = currentReconstruction.runId && nextReconstruction.runId === currentReconstruction.runId;
-  const serverRunStarted =
-    nextReconstruction.status === "running" && (nextReconstruction.runId || nextReconstruction.progress);
-  if (sameServerRun || serverRunStarted) {
-    return {
-      ...next,
-      reconstruction: {
-        ...currentReconstruction,
-        ...nextReconstruction,
-        clientRunId: currentReconstruction.clientRunId,
-        startedAt: currentReconstruction.startedAt || nextReconstruction.startedAt || "",
-      },
-    };
-  }
-  return {
-    ...next,
-    reconstruction: currentReconstruction,
-  };
-}
-
-function failRunningTossInvestOrderSyncReconstruction(current, error) {
-  if (!current?.reconstruction || current.reconstruction.status !== "running") return current;
-  return {
-    ...current,
-    reconstruction: {
-      ...current.reconstruction,
-      ok: false,
-      status: "failed",
-      error: error.message,
-      finishedAt: new Date().toISOString(),
-    },
-  };
-}
-const PORTFOLIO_CANVAS_FILE_SAVE_DEBOUNCE_MS = 450;
-const initialBoardFilters = {
-  channel: "stock",
-  category: "",
-  page: 1,
-  best: false,
-  sort: "",
-  cutRate: "",
-  target: "all",
-  keyword: "",
-};
-
-const defaultWorldMemorySettings = {
-  ok: true,
-  enabled: false,
-  managementProvider: "default",
-  managementModel: "",
-  managementReasoning: "",
-  managementSpeed: "standard",
-  configPath: "config/world-memory.user.json",
-  defaultConfigPath: "config/world-memory.defaults.json",
-  settings: {
-    version: 1,
-    enabled: false,
-    managementProvider: "default",
-    managementModel: "",
-    managementReasoning: "",
-    managementSpeed: "standard",
-  },
-};
-
-const defaultMagazineSettings = {
-  ok: true,
-  enabled: false,
-  worldMemoryEnabled: false,
-  writingProvider: "default",
-  writingModel: "",
-  writingReasoning: "",
-  writingSpeed: "standard",
-  schedulerIntervalHours: 6,
-  schedulerMaxArticlesPerCycle: 2,
-  disabledReason: "",
-  configPath: "config/magazine.user.json",
-  defaultConfigPath: "config/magazine.defaults.json",
-  settings: {
-    version: 1,
-    enabled: false,
-    writingProvider: "default",
-    writingModel: "",
-    writingReasoning: "",
-    writingSpeed: "standard",
-    schedulerIntervalHours: 6,
-    schedulerMaxArticlesPerCycle: 2,
-  },
-};
-
-const defaultTransactionSettings = {
-  ok: true,
-  configPath: "config/transaction-status.user.json",
-  defaultConfigPath: "config/transaction-status.defaults.json",
-  settings: {
-    version: 2,
-    menuHidden: false,
-  },
-};
-
-function readMagazineGenerateOneToolVisible() {
-  if (typeof window === "undefined") return false;
-  try {
-    const params = new URLSearchParams(window.location.search || "");
-    const paramValue = params.get("magazineGenerateOne");
-    if (paramValue === "1" || paramValue === "true") {
-      window.localStorage.setItem(MAGAZINE_GENERATE_ONE_TOOL_STORAGE_KEY, "1");
-      return true;
-    }
-    if (paramValue === "0" || paramValue === "false") {
-      window.localStorage.removeItem(MAGAZINE_GENERATE_ONE_TOOL_STORAGE_KEY);
-      return false;
-    }
-    return window.localStorage.getItem(MAGAZINE_GENERATE_ONE_TOOL_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
 
 function browserNotificationPermissionState() {
   if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
@@ -1473,41 +114,6 @@ function writeLastBrowserNotificationId(id) {
   }
 }
 
-async function loadPortfolioCanvasStoreFile() {
-  const response = await fetch("/api/portfolio/canvases", { cache: "no-store" });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.ok) {
-    throw new Error(payload.error || `HTTP ${response.status}`);
-  }
-  return {
-    ...payload,
-    store: normalizePortfolioCanvasStore(payload.store),
-  };
-}
-
-async function savePortfolioCanvasStoreFile(store) {
-  const response = await fetch("/api/portfolio/canvases", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-    body: JSON.stringify({ store: normalizePortfolioCanvasStore(store) }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.ok) {
-    throw new Error(payload.error || `HTTP ${response.status}`);
-  }
-  return payload;
-}
-
-const MIN_PROMPT_HEIGHT = 42;
-const MAX_PROMPT_HEIGHT = 132;
-const MAX_CHAT_ATTACHMENTS = 6;
-const MAX_CHAT_ATTACHMENT_BYTES = 8 * 1024 * 1024;
-const MAX_CHAT_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024;
-const MAX_CHAT_ATTACHMENT_INLINE_TEXT_CHARS = 300_000;
-const NEWS_FEED_PAGE_SIZE = 30;
-const BOARD_CONTEXT_NOTICE_LIMIT = 8;
-const BOARD_CONTEXT_ARTICLE_LIMIT = 35;
 const NEWS_FEED_POLL_INTERVAL_OPTIONS = Array.from({ length: 10 }, (_, index) => {
   const minutes = index + 1;
   return {
@@ -1517,864 +123,238 @@ const NEWS_FEED_POLL_INTERVAL_OPTIONS = Array.from({ length: 10 }, (_, index) =>
   };
 });
 
-const sortOptions = [
-  { id: "", label: "등록순" },
-  { id: "recentComment", label: "최근댓글" },
-  { id: "commentCount", label: "댓글순" },
-  { id: "rating", label: "추천순" },
-];
-
-const cutRateOptions = [
-  { id: "", label: "추천컷" },
-  { id: "5", label: "5컷" },
-  { id: "10", label: "10컷" },
-  { id: "20", label: "20컷" },
-];
-
-const searchTargetOptions = [
-  { id: "all", label: "전체" },
-  { id: "title_content", label: "제목+본문" },
-  { id: "title", label: "제목" },
-  { id: "content", label: "본문" },
-  { id: "nickname", label: "작성자" },
-];
-
-const worldMemoryActionsNeedingReportRefresh = new Set([
-  "stateAdd",
-  "briefStoryBackfill",
-  "storyLink",
-  "taxonomyRefresh",
-  "stateSync",
-]);
-
-const CHAT_STREAM_RENDER_INTERVAL_MS = 120;
-
-function stripWorldMemoryActionBlocks(answer = "") {
-  const text = String(answer || "");
-  return text
-    .replace(/```world_memory_action[\s\S]*?```/gi, "")
-    .replace(/```world_memory_action[\s\S]*$/gi, "")
-    .replace(/```json\s*([\s\S]*?)```/gi, (match, body) =>
-      /world_memory|briefStoryBackfill|storyLink|storyFamilyReview|taxonomyRefresh|stateAdd|stateSync|semanticSearch|cleanupDryRun/i.test(body) ? "" : match
-    )
-    .replace(/\n?\s*world_memory_action\s*{[\s\S]*$/i, "")
-    .trim();
-}
-
-function parseWorldMemoryJsonAction(answer = "") {
-  const raw = String(answer || "");
-  const blocks = [...raw.matchAll(/```(?:world_memory_action|json)\s*([\s\S]*?)```/gi)]
-    .map((match) => match[1]?.trim())
-    .filter(Boolean);
-  const markerIndex = raw.toLowerCase().lastIndexOf("world_memory_action");
-  const markerBody = markerIndex >= 0 ? raw.slice(markerIndex).replace(/^world_memory_action/i, "").trim() : "";
-  const looseJson =
-    raw.includes("{") && raw.includes("}") ? raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1).trim() : "";
-  const candidates = [...blocks, markerBody, looseJson, raw.trim()].filter(Boolean);
-
-  for (const candidate of candidates) {
-    const jsonCandidate =
-      candidate.startsWith("{") && candidate.endsWith("}")
-        ? candidate
-        : candidate.includes("{") && candidate.includes("}")
-          ? candidate.slice(candidate.indexOf("{"), candidate.lastIndexOf("}") + 1).trim()
-          : "";
-    if (!jsonCandidate) continue;
-    try {
-      const parsed = JSON.parse(jsonCandidate);
-      const action = String(parsed?.action || parsed?.actionId || "").trim();
-      if (action && worldMemoryActionCatalog[action]) return parsed;
-    } catch {
-      // Ignore prose or malformed JSON.
-    }
-  }
-  return null;
-}
-
-function normalizeWorldMemoryActionProposal(parsed, answer = "", focusContext = null) {
-  const action = String(parsed?.action || parsed?.actionId || "").trim();
-  if (!action || !worldMemoryActionCatalog[action]) return null;
-  const catalog = worldMemoryActionCatalog[action];
-  const params =
-    parsed?.params && typeof parsed.params === "object"
-      ? parsed.params
-      : parsed?.options && typeof parsed.options === "object"
-        ? parsed.options
-        : {};
-  const label = cleanPortfolioWidgetPrompt(parsed?.label || parsed?.title || catalog.label, 120);
-  const reason = cleanPortfolioWidgetPrompt(
-    parsed?.reason || parsed?.summary || parsed?.description || stripWorldMemoryActionBlocks(answer),
-    360
-  );
-  return {
-    id: `world_memory_action_${Date.now()}`,
-    action,
-    label,
-    reason,
-    riskLevel: parsed?.riskLevel || catalog.riskLevel,
-    options: {
-      ...params,
-      ...(parsed?.query && !params.query ? { query: parsed.query } : {}),
-      ...(parsed?.days && !params.days ? { days: parsed.days } : {}),
-      ...(parsed?.limit && !params.limit ? { limit: parsed.limit } : {}),
-    },
-    acceptedChangeSuggestion:
-      focusContext?.section === "memory-change"
-        ? {
-            ...focusContext,
-            action,
-            label,
-          }
-        : null,
-    raw: parsed,
-    answer,
-  };
-}
-
-function trimForMemory(value, maxLength = 420) {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  if (!text) return "";
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trim()}…` : text;
-}
-
-function memoryTitleFromPrompt(prompt, fallback = "에이전트 채팅") {
-  const firstLine = String(prompt || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find(Boolean);
-  const text = trimForMemory(firstLine || fallback, 64);
-  return text || fallback;
-}
-
-function memorySummaryFromExchange(prompt, answer) {
-  return [
-    `사용자: ${trimForMemory(prompt, 260)}`,
-    `응답: ${trimForMemory(answer, 720)}`,
-  ]
-    .filter((line) => !line.endsWith(": "))
-    .join("\n");
-}
-
-function memoryTagsForExchange({ screen, provider, article, attachments = [], taskType = "chat" }) {
-  return [
-    "agent-chat",
-    taskType,
-    screen,
-    provider,
-    article ? "article-context" : "",
-    attachments.length ? "attachments" : "",
-  ].filter(Boolean);
-}
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("파일을 읽지 못했습니다."));
-    reader.readAsDataURL(file);
-  });
-}
-
-function chatAttachmentCanInlineText(file) {
-  const type = String(file?.type || "").toLowerCase();
-  const name = String(file?.name || "").toLowerCase();
-  return (
-    type.startsWith("text/") ||
-    [
-      "application/json",
-      "application/javascript",
-      "application/xml",
-      "application/x-yaml",
-      "application/yaml",
-      "application/vnd.ms-excel",
-    ].includes(type) ||
-    /\.(csv|tsv|txt|json|xml|yaml|yml|md)$/i.test(name)
-  );
-}
-
-async function readFileAsInlineText(file) {
-  if (!chatAttachmentCanInlineText(file)) return "";
-  try {
-    const text = await file.text();
-    return String(text || "").slice(0, MAX_CHAT_ATTACHMENT_INLINE_TEXT_CHARS);
-  } catch {
-    return "";
-  }
-}
-
-async function fileToChatAttachment(file) {
-  const [dataUrl, text] = await Promise.all([readFileAsDataUrl(file), readFileAsInlineText(file)]);
-  const type = file.type || "application/octet-stream";
-  return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    name: file.name || (type.startsWith("image/") ? "pasted-image.png" : "attachment"),
-    type,
-    size: file.size,
-    dataUrl,
-    text,
-    previewUrl: type.startsWith("image/") ? dataUrl : "",
-    addedAt: new Date().toISOString(),
-  };
-}
-
-
-function arcaNotificationHealthState(status) {
-  const count = Math.max(0, Number(status?.count || 0));
-  const connected = Boolean(status?.connected);
-  const hasError = status?.status === "error" || status?.ok === false;
-
-  if (hasError) {
-    return {
-      level: "error",
-      sidebarLevel: "error",
-      count: 0,
-      showNotificationCount: false,
-      showSidebarDot: true,
-      title: status?.error ? `아카라이브 알림 조회 불가: ${status.error}` : "아카라이브 알림 조회 불가",
-      ariaLabel: "아카라이브 알림 조회 불가",
-    };
-  }
-
-  if (!connected) {
-    return {
-      level: "idle",
-      sidebarLevel: "online",
-      count: 0,
-      showNotificationCount: false,
-      showSidebarDot: true,
-      title: status?.error || "아카라이브 알림 로그인 필요",
-      ariaLabel: "아카라이브 알림 로그인 필요",
-    };
-  }
-
-  if (count > 0) {
-    return {
-      level: "online",
-      sidebarLevel: "online",
-      count,
-      showNotificationCount: true,
-      showSidebarDot: true,
-      title: `아카라이브 알림 ${formatCount(count)}개`,
-      ariaLabel: `아카라이브 알림 ${formatCount(count)}개`,
-    };
-  }
-
-  return {
-    level: "idle",
-    sidebarLevel: "online",
-    count: 0,
-    showNotificationCount: true,
-    showSidebarDot: true,
-    title: "아카라이브 알림 없음",
-    ariaLabel: "아카라이브 알림 없음",
-  };
-}
-
-
-
-function boardRowForContext(row, index) {
-  return {
-    rank: index + 1,
-    type: row.type || "article",
-    id: row.id || row.number || "",
-    title: row.title || "",
-    category: row.categoryLabel || "",
-    author: row.author || "",
-    comments: row.commentCount || 0,
-    views: row.view || 0,
-    recommendation: row.rate || 0,
-    time: row.timeIso || row.timeLabel || "",
-    url: row.href || "",
-  };
-}
-
-function buildBoardIndexContextSnapshot(board, filters, options = {}) {
-  const safeFilters = {
-    channel: filters?.channel || "stock",
-    category: filters?.category || "",
-    page: filters?.page || 1,
-    mode: filters?.best ? "best" : "all",
-    sort: filters?.sort || "registered",
-    cutRate: filters?.cutRate || "",
-    searchTarget: filters?.target || "all",
-    keyword: filters?.keyword || "",
-  };
-
-  if (!board) {
-    return {
-      available: false,
-      screen: "stock",
-      reason: "아카라이브 주식채널 목록이 아직 로드되지 않았습니다.",
-      filters: safeFilters,
-    };
-  }
-
-  const visibleNotices = [
-    ...(Array.isArray(board.notices) ? board.notices : []),
-    ...(options.showHiddenNotices && Array.isArray(board.hiddenNotices) ? board.hiddenNotices : []),
-  ];
-  const articles = Array.isArray(board.articles) ? board.articles : [];
-
-  return {
-    available: true,
-    screen: "stock",
-    source: "현재 화면에 렌더된 아카라이브 주식채널 인덱스 스냅샷",
-    pageTitle: board.pageTitle || "주식 채널",
-    endpoint: board.endpoint || "",
-    fetchedAt: board.fetchedAt || "",
-    uiState: {
-      categoryLabel: options.activeCategoryLabel || "",
-      loading: Boolean(options.busy),
-      error: options.error || "",
-      hiddenNoticesExpanded: Boolean(options.showHiddenNotices),
-    },
-    filters: safeFilters,
-    counts: {
-      noticesVisible: visibleNotices.length,
-      hiddenNoticesTotal: Array.isArray(board.hiddenNotices) ? board.hiddenNotices.length : 0,
-      articlesVisible: articles.length,
-      adsVisible: Array.isArray(board.ads) ? board.ads.length : 0,
-    },
-    notices: visibleNotices.slice(0, BOARD_CONTEXT_NOTICE_LIMIT).map(boardRowForContext),
-    articles: articles.slice(0, BOARD_CONTEXT_ARTICLE_LIMIT).map(boardRowForContext),
-    nextActionHint:
-      "사용자의 질문이 특정 제목이나 작성자에 관한 것 같으면 이 목록의 url을 열어 본문 컨텍스트를 확보해야 한다. 글 컨텍스트가 명시 첨부된 경우에는 이 인덱스 스냅샷보다 첨부 본문을 우선한다.",
-  };
-}
-
-
-function RouteLoading({ label = "화면 불러오는 중" }) {
-  return (
-    <div className="route-loading-state" role="status" aria-live="polite">
-      <LoaderCircle size={22} strokeWidth={2} />
-      <span>{label}</span>
-    </div>
-  );
-}
-
-function compactWorldMemoryReportForContext(report = {}) {
-  const view = report?.view || null;
-  return {
-    status: compactVisibleScreenText(report?.status || "empty", 60),
-    generatedAt: compactVisibleScreenText(report?.generatedAt || "", 80),
-    title: compactVisibleScreenText(view?.title || report?.title || "", 180),
-    asOf: compactVisibleScreenText(view?.asOf || report?.generatedAt || "", 80),
-    stance: compactVisibleScreenText(view?.stance || "", 80),
-    summary: compactVisibleScreenText(view?.summary || report?.summary || "", 700),
-    narrative: compactVisibleScreenText(view?.narrative || report?.text || "", 900),
-    signalRadar: Array.isArray(view?.signalRadar)
-      ? view.signalRadar.slice(0, 8).map((signal) => ({
-          label: compactVisibleScreenText(signal?.label, 80),
-          score: Number(signal?.score || 0),
-          tone: compactVisibleScreenText(signal?.tone, 40),
-          note: compactVisibleScreenText(signal?.note, 220),
-        }))
-      : [],
-    highlights: Array.isArray(view?.highlights)
-      ? view.highlights.slice(0, 8).map((item) => ({
-          tag: compactVisibleScreenText(item?.tag, 60),
-          title: compactVisibleScreenText(item?.title, 140),
-          body: compactVisibleScreenText(item?.body, 320),
-          importance: compactVisibleScreenText(item?.importance, 40),
-        }))
-      : [],
-    memoryChangeSuggestions: Array.isArray(view?.memoryChangeSuggestions)
-      ? view.memoryChangeSuggestions.slice(0, 8).map((item) => compactVisibleScreenText(item, 240))
-      : [],
-    portfolioSuggestions: Array.isArray(view?.portfolioSuggestions)
-      ? view.portfolioSuggestions.slice(0, 8).map((item) => compactVisibleScreenText(item, 240))
-      : [],
-    nextChecks: Array.isArray(view?.nextChecks)
-      ? view.nextChecks.slice(0, 8).map((item) => compactVisibleScreenText(item, 220))
-      : [],
-    textFallback: compactVisibleScreenText(report?.text || "", 1000),
-  };
-}
-
-function buildWorldMemoryPageContextSnapshot(status, actionResult, focusedChangeSuggestion = null) {
-  const collector = status?.collector || {};
-  const schedule = status?.schedule || {};
-  const report = status?.report || {};
-  const reportChangeSuggestions = Array.isArray(report?.view?.memoryChangeSuggestions)
-    ? report.view.memoryChangeSuggestions
-    : Array.isArray(report.suggestions)
-      ? report.suggestions
-      : [];
-  const pendingChangeSuggestion =
-    focusedChangeSuggestion && typeof focusedChangeSuggestion === "object"
-      ? {
-          source: compactVisibleScreenText(focusedChangeSuggestion.source || "world-memory-report-item", 80),
-          section: compactVisibleScreenText(focusedChangeSuggestion.section || "memory-change", 80),
-          sectionLabel: compactVisibleScreenText(focusedChangeSuggestion.sectionLabel || "월드 메모리 변경 제안", 120),
-          item:
-            focusedChangeSuggestion.item && typeof focusedChangeSuggestion.item === "object"
-              ? focusedChangeSuggestion.item
-              : null,
-        }
-      : null;
-  return {
-    source: "world-memory-page-state",
-    capturedAt: new Date().toISOString(),
-    screen: "world-memory",
-    collector: {
-      status: collector.status || "idle",
-      lastAction: collector.lastAction || "",
-      lastSuccessfulAt: collector.lastSuccessfulAt || "",
-      lastFinishedAt: collector.lastFinishedAt || "",
-      lastError: collector.lastError || "",
-    },
-    schedule: {
-      nextRunAt: schedule.nextRunAt || "",
-      nextRetryAt: schedule.nextRetryAt || "",
-      pausedUntil: schedule.pausedUntil || "",
-      activeCycle: schedule.activeCycle || null,
-    },
-    report: compactWorldMemoryReportForContext(report),
-    changeSuggestions: reportChangeSuggestions.slice(0, 10).map((item) => compactVisibleScreenText(item, 260)),
-    pendingChangeSuggestion,
-    recentRun: compactVisibleScreenText(worldMemoryActionText(actionResult) || collector.lastAction || "", 600),
-    availableActions: Object.entries(worldMemoryActionCatalog).map(([id, meta]) => ({
-      id,
-      label: meta.label,
-      riskLevel: meta.riskLevel,
-    })),
-  };
-}
-
 function App() {
   const [activeView, setActiveView] = useState("stock");
-  const [agentProvider, setAgentProvider] = useState("codex-cli");
-  const [providerOptions, setProviderOptions] = useState(fallbackProviderOptions);
-  const [approvalOptions, setApprovalOptions] = useState(fallbackApprovalOptions);
-  const [modelGroups, setModelGroups] = useState(fallbackModelGroups);
-  const [antigravityCatalogGroups, setAntigravityCatalogGroups] = useState(antigravityModelGroups);
-  const [agentUserSettings, setAgentUserSettings] = useState(emptyAgentSettings);
-  const [agentSettingsError, setAgentSettingsError] = useState("");
-  const [agentOptionsReady, setAgentOptionsReady] = useState(false);
-  const [modelCatalogRefreshing, setModelCatalogRefreshing] = useState(false);
-  const [personaMode, setPersonaMode] = useState("none");
-  const [chatMessages, setChatMessages] = useState(initialChatMessages);
-  const [worldMemoryChatMessages, setWorldMemoryChatMessages] = useState(initialChatMessages);
-  const [magazineActiveArticle, setMagazineActiveArticle] = useState(null);
-  const [magazineActiveTopic, setMagazineActiveTopic] = useState("");
-  const [magazineCatalog, setMagazineCatalog] = useState(null);
-  const [magazineStatus, setMagazineStatus] = useState(null);
-  const [magazinePreferenceStore, setMagazinePreferenceStore] = useState(null);
-  const [magazinePreferenceSavingId, setMagazinePreferenceSavingId] = useState("");
-  const [magazinePreferenceNotice, setMagazinePreferenceNotice] = useState("");
-  const [magazinePreferenceNoticeFading, setMagazinePreferenceNoticeFading] = useState(false);
-  const [magazineCommentStore, setMagazineCommentStore] = useState(null);
-  const [magazineCommentDraft, setMagazineCommentDraft] = useState("");
-  const [magazineCommentSubmitting, setMagazineCommentSubmitting] = useState(false);
-  const [magazineCommentError, setMagazineCommentError] = useState("");
-  const [magazineDeleteDialogOpen, setMagazineDeleteDialogOpen] = useState(false);
-  const [magazineDeleting, setMagazineDeleting] = useState(false);
-  const [magazineDeleteError, setMagazineDeleteError] = useState("");
-  const [magazineCopyStatus, setMagazineCopyStatus] = useState("idle");
-  const [magazineCopyError, setMagazineCopyError] = useState("");
-  const [magazineStartNowBusy, setMagazineStartNowBusy] = useState(false);
-  const [magazineGenerateOneBusy, setMagazineGenerateOneBusy] = useState(false);
-  const [magazineGenerateOneToolVisible] = useState(() => readMagazineGenerateOneToolVisible());
-  const [portfolioCanvasStore, setPortfolioCanvasStore] = useState(() => readStoredPortfolioCanvasStore());
-  const [portfolioSidebarOpen, setPortfolioSidebarOpen] = useState(false);
-  const [portfolioCanvasMenuId, setPortfolioCanvasMenuId] = useState("");
-  const [editingPortfolioCanvasId, setEditingPortfolioCanvasId] = useState("");
-  const [portfolioCanvasNameDraft, setPortfolioCanvasNameDraft] = useState("");
-  const [pendingDeletePortfolioCanvas, setPendingDeletePortfolioCanvas] = useState(null);
-  const portfolioCanvasNameInputRef = useRef(null);
+  const newsFeedController = useNewsFeedController({ activeView });
+  const {
+    newsFeedStatus,
+    newsFeedItems,
+    newsFeedBusy,
+    newsFeedRefreshBusy,
+    newsFeedLoadingMore,
+    newsFeedHasMore,
+    newsFeedError,
+    newsFeedSettings,
+    newsFeedSettingsBusy,
+    newsFeedSettingsSavingId,
+    newsFeedSettingsError,
+    loadNewsFeedSettings,
+    refreshNewsFeedStatus,
+    toggleNewsFeedSource,
+    updateNewsFeedPollInterval,
+    refreshNewsFeed,
+    updateNewsFeedMarketSummaryCollapsed,
+    handleNewsFeedScroll,
+  } = newsFeedController;
+  const worldMemoryController = useWorldMemoryController({ activeView });
+  const {
+    worldMemorySettings,
+    worldMemorySettingsBusy,
+    worldMemorySettingsSaving,
+    worldMemorySettingsError,
+    worldMemoryStatus,
+    worldMemoryBusy,
+    worldMemoryError,
+    worldMemoryActionBusy,
+    worldMemoryRunningAction,
+    worldMemoryRunningAgentActionId,
+    worldMemoryActionResult,
+    worldMemoryTechOpen,
+    loadWorldMemorySettings,
+    loadWorldMemoryStatus,
+    saveWorldMemoryEnabled,
+    updateWorldMemoryManagementSettings,
+    updateWorldMemoryAutopilotEnabled,
+    runWorldMemoryAction,
+    toggleWorldMemoryTech,
+  } = worldMemoryController;
+  const magazineController = useMagazineController({ activeView });
+  const {
+    magazineCatalog,
+    magazineStatus,
+    magazineSettings,
+    magazineSettingsBusy,
+    magazineSettingsSaving,
+    magazineSettingsError,
+    magazineStartNowBusy,
+    magazineGenerateOneBusy,
+    magazineGenerateOneToolVisible,
+    applyMagazineCatalogPayload,
+    loadMagazineSettings,
+    updateMagazineEnabled,
+    updateMagazineWritingSettings,
+    updateMagazineSchedulerInterval,
+    updateMagazineMaxArticlesPerCycle,
+    startMagazineNow,
+    generateOneMagazineArticle,
+    disableMagazineForWorldMemory,
+  } = magazineController;
+  const arcaController = useArcaController({ activeView });
+  const {
+    boardFilters,
+    boardSearchInput,
+    setBoardSearchInput,
+    arcaBoard,
+    arcaBoardBusy,
+    arcaBoardError,
+    arcaReaderArticle,
+    arcaReaderBusy,
+    arcaReaderError,
+    arcaAuthStatus,
+    arcaAuthBusy,
+    arcaAuthAction,
+    arcaAuthError,
+    arcaNotificationStatus,
+    arcaNotificationBusy,
+    arcaNotificationActionBusy,
+    arcaNotificationActionError,
+    showHiddenNotices,
+    arcaCanvasRef,
+    loadArcaNotifications,
+    markAllArcaNotificationsRead,
+    loadArcaAuthStatus,
+    startArcaLoginHandoff,
+    captureArcaLoginSession,
+    stopArcaLoginHandoff,
+    deleteArcaLoginSession,
+    updateBoardFilters,
+    selectBoardCategory,
+    refreshBoard,
+    resetBoard,
+    submitBoardSearch,
+    openArcaArticleReader,
+    retryArcaArticleReader,
+    closeArcaArticleReader,
+    openArcaNotificationArticle,
+    toggleHiddenNotices,
+  } = arcaController;
+  const transactionSettingsController = useTransactionSettingsController({ activeView });
+  const {
+    transactionSettings,
+    transactionSettingsBusy,
+    transactionSettingsSaving,
+    transactionSettingsError,
+    loadTransactionSettings,
+    saveTransactionStatusHidden,
+  } = transactionSettingsController;
+  const sharedMemoryController = useSharedMemoryController({ activeView });
+  const {
+    memoryStatus,
+    memoryBusy,
+    memoryError,
+    memoryRecentOpen,
+    memoryDialogOpen,
+    memoryDialogRecords,
+    memoryDialogBusy,
+    memoryDialogError,
+    memoryDialogHasMore,
+    memoryDialogTotalCount,
+    deletingMemoryRecordId,
+    loadSharedMemoryStatus,
+    toggleMemoryRecent,
+    openMemoryDialog,
+    closeMemoryDialog,
+    handleMemoryDialogScroll,
+    deleteMemoryRecord,
+    saveSharedMemoryRecord,
+  } = sharedMemoryController;
+  const notificationController = useNotificationController();
+  const {
+    notificationStatus,
+    markReportsNotificationsOpened,
+  } = notificationController;
+  const agentRuntimeController = useAgentRuntimeController();
+  const {
+    agentProvider,
+    providerOptions,
+    agentSettingsError,
+    agentOptionsReady,
+    modelCatalogRefreshing,
+    personaMode,
+    personaModeOptions,
+    codexStatus,
+    approval,
+    model,
+    reasoning,
+    speed,
+    activeModelGroups,
+    activeApprovalOptions,
+    selectedModelGroup,
+    reasoningOptions,
+    selectedReasoning,
+    speedOptions,
+    selectedSpeed,
+    selectedApproval,
+    selectedProvider,
+    agentProviderLabel,
+    agentIcon,
+    modelSummaryLabel,
+    toolbarApprovalOptions,
+    toolbarModelGroups,
+    toolbarApprovalValue,
+    toolbarModelValue,
+    toolbarReasoningValue,
+    toolbarSpeedValue,
+    newsFeedTranslationModelLabel,
+    loadingApprovalOptions,
+    loadingModelGroups,
+    agentProviderProfiles,
+    configuredProviderId,
+    handleAgentProviderChange,
+    updateAgentSelection,
+    updatePersonaMode,
+    updateProviderSelection,
+    updateProviderEnabled,
+    providerRuntimeForProvider,
+    reloadAgentModelCatalog,
+  } = agentRuntimeController;
   const notificationStatusRef = useRef(null);
-  const arcaNotificationActionBusyRef = useRef(false);
   const browserNotificationLastShownRef = useRef(readLastBrowserNotificationId());
-  const magazineCanvasRef = useRef(null);
-  const magazineTopicModalRef = useRef(null);
-  const magazineReaderArticleRef = useRef(null);
-  const magazineReturnScrollRef = useRef({ canvasTop: 0, topicTop: 0, hadTopic: false });
-  const [codexStatus, setCodexStatus] = useState({
-    available: false,
-    label: "Codex CLI 확인 중",
-    commandPreview: "",
-    version: "",
-  });
-  const [approval, setApproval] = useState(fallbackApprovalOptions[0].id);
-  const [model, setModel] = useState(fallbackModelGroups[0].slug);
-  const [reasoning, setReasoning] = useState(fallbackModelGroups[0].defaultReasoningLevel);
-  const [speed, setSpeed] = useState("standard");
-  const [prompt, setPrompt] = useState("");
-  const [worldMemoryPrompt, setWorldMemoryPrompt] = useState("");
-  const [sendingChatScopes, setSendingChatScopes] = useState({});
-  const activeChatAbortRefs = useRef(new Map());
-  const [promptHeight, setPromptHeight] = useState(MIN_PROMPT_HEIGHT);
-  const [promptOverflow, setPromptOverflow] = useState(false);
-  const [boardFilters, setBoardFilters] = useState(initialBoardFilters);
-  const [boardSearchInput, setBoardSearchInput] = useState("");
-  const [arcaBoard, setArcaBoard] = useState(null);
-  const [arcaBoardBusy, setArcaBoardBusy] = useState(false);
-  const [arcaBoardError, setArcaBoardError] = useState("");
-  const [arcaReaderArticle, setArcaReaderArticle] = useState(null);
-  const [arcaReaderBusy, setArcaReaderBusy] = useState(false);
-  const [arcaReaderError, setArcaReaderError] = useState("");
-  const [arcaAuthStatus, setArcaAuthStatus] = useState(null);
-  const [arcaAuthBusy, setArcaAuthBusy] = useState(false);
-  const [arcaAuthAction, setArcaAuthAction] = useState("");
-  const [arcaAuthError, setArcaAuthError] = useState("");
-  const [tossInvestStatus, setTossInvestStatus] = useState(null);
-  const [tossInvestBusy, setTossInvestBusy] = useState(false);
-  const [tossInvestAction, setTossInvestAction] = useState("");
-  const [tossInvestError, setTossInvestError] = useState("");
-  const [tossInvestErrorCode, setTossInvestErrorCode] = useState("");
-  const [tossInvestPublicIp, setTossInvestPublicIp] = useState(null);
-  const [tossInvestPublicIpBusy, setTossInvestPublicIpBusy] = useState(false);
-  const [tossInvestPublicIpError, setTossInvestPublicIpError] = useState("");
-  const [tossInvestDialogOpen, setTossInvestDialogOpen] = useState(false);
-  const [tossInvestOrderSyncStatus, setTossInvestOrderSyncStatus] = useState(null);
-  const [tossInvestOrderSyncBusy, setTossInvestOrderSyncBusy] = useState(false);
-  const [tossInvestOrderSyncAction, setTossInvestOrderSyncAction] = useState("");
-  const [tossInvestOrderSyncError, setTossInvestOrderSyncError] = useState("");
-  const [tossInvestOrderSyncErrorCode, setTossInvestOrderSyncErrorCode] = useState("");
-  const [transactionSettings, setTransactionSettings] = useState(defaultTransactionSettings);
-  const [transactionSettingsBusy, setTransactionSettingsBusy] = useState(false);
-  const [transactionSettingsSaving, setTransactionSettingsSaving] = useState(false);
-  const [transactionSettingsError, setTransactionSettingsError] = useState("");
-  const tossInvestCredentials = tossInvestStatus?.credentials || {};
-  const tossInvestConnectionUsable = Boolean(tossInvestCredentials.usable || tossInvestCredentials.unlocked);
-  const tossInvestConnected = Boolean(
-    (tossInvestStatus?.connected || tossInvestStatus?.token?.cached) && tossInvestConnectionUsable
-  );
-  const tossInvestOrderSyncEnabled = Boolean(
-    tossInvestOrderSyncStatus?.enabled || tossInvestOrderSyncStatus?.settings?.enabled
-  );
   const [browserNotificationPermission, setBrowserNotificationPermission] = useState(() =>
     browserNotificationPermissionState()
   );
-  const [arcaNotificationStatus, setArcaNotificationStatus] = useState({
-    ok: true,
-    connected: false,
-    status: "signed-out",
-    count: 0,
-    notificationUrl: ARCA_NOTIFICATION_URL,
-  });
-  const [arcaNotificationBusy, setArcaNotificationBusy] = useState(false);
-  const [arcaNotificationActionBusy, setArcaNotificationActionBusy] = useState(false);
-  const [arcaNotificationActionError, setArcaNotificationActionError] = useState("");
-  const [showHiddenNotices, setShowHiddenNotices] = useState(false);
-  const [newsFeedStatus, setNewsFeedStatus] = useState(null);
-  const [newsFeedItems, setNewsFeedItems] = useState([]);
-  const [newsFeedBusy, setNewsFeedBusy] = useState(false);
-  const [newsFeedRefreshBusy, setNewsFeedRefreshBusy] = useState(false);
-  const [newsFeedLoadingMore, setNewsFeedLoadingMore] = useState(false);
-  const [newsFeedHasMore, setNewsFeedHasMore] = useState(false);
-  const [newsFeedError, setNewsFeedError] = useState("");
-  const [newsFeedSettings, setNewsFeedSettings] = useState(null);
-  const [newsFeedSettingsBusy, setNewsFeedSettingsBusy] = useState(false);
-  const [newsFeedSettingsSavingId, setNewsFeedSettingsSavingId] = useState("");
-  const [newsFeedSettingsError, setNewsFeedSettingsError] = useState("");
-  const [notificationStatus, setNotificationStatus] = useState(null);
-  const [memoryStatus, setMemoryStatus] = useState(emptyMemoryStatus);
-  const [memoryBusy, setMemoryBusy] = useState(false);
-  const [memoryError, setMemoryError] = useState("");
-  const [memoryRecentOpen, setMemoryRecentOpen] = useState(false);
-  const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
-  const [memoryDialogRecords, setMemoryDialogRecords] = useState([]);
-  const [memoryDialogBusy, setMemoryDialogBusy] = useState(false);
-  const [memoryDialogError, setMemoryDialogError] = useState("");
-  const [memoryDialogHasMore, setMemoryDialogHasMore] = useState(false);
-  const [memoryDialogTotalCount, setMemoryDialogTotalCount] = useState(0);
-  const [deletingMemoryRecordId, setDeletingMemoryRecordId] = useState("");
-  const [worldMemorySettings, setWorldMemorySettings] = useState(defaultWorldMemorySettings);
-  const [worldMemorySettingsBusy, setWorldMemorySettingsBusy] = useState(false);
-  const [worldMemorySettingsSaving, setWorldMemorySettingsSaving] = useState(false);
-  const [worldMemorySettingsError, setWorldMemorySettingsError] = useState("");
-  const [magazineSettings, setMagazineSettings] = useState(defaultMagazineSettings);
-  const [magazineSettingsBusy, setMagazineSettingsBusy] = useState(false);
-  const [magazineSettingsSaving, setMagazineSettingsSaving] = useState(false);
-  const [magazineSettingsError, setMagazineSettingsError] = useState("");
-  const [worldMemoryStatus, setWorldMemoryStatus] = useState(null);
-  const [worldMemoryBusy, setWorldMemoryBusy] = useState(false);
-  const [worldMemoryError, setWorldMemoryError] = useState("");
-  const [worldMemoryActionBusy, setWorldMemoryActionBusy] = useState(false);
-  const [worldMemoryRunningAction, setWorldMemoryRunningAction] = useState("");
-  const [worldMemoryRunningAgentActionId, setWorldMemoryRunningAgentActionId] = useState("");
-  const [worldMemoryActionResult, setWorldMemoryActionResult] = useState(null);
   const [worldMemoryAgentAction, setWorldMemoryAgentAction] = useState(null);
-  const [worldMemoryTechOpen, setWorldMemoryTechOpen] = useState(false);
   const [worldMemoryFocusedChangeSuggestion, setWorldMemoryFocusedChangeSuggestion] = useState(null);
   const [reportRefreshSignal, setReportRefreshSignal] = useState(0);
   const [earningCalendarContext, setEarningCalendarContext] = useState(null);
   const [economicCalendarContext, setEconomicCalendarContext] = useState(null);
   const [portfolioContext, setPortfolioContext] = useState(null);
+  const portfolioCanvasController = usePortfolioCanvasController({
+    setActiveView,
+    setPortfolioContext,
+    defaultMode: PORTFOLIO_CANVAS_MODES.asset.id,
+  });
+  const {
+    portfolioCanvases,
+    activePortfolioCanvas,
+    portfolioSidebarOpen, setPortfolioSidebarOpen,
+    portfolioCanvasMenuId, setPortfolioCanvasMenuId,
+    editingPortfolioCanvasId,
+    portfolioCanvasNameDraft, setPortfolioCanvasNameDraft,
+    pendingDeletePortfolioCanvas,
+    portfolioCanvasNameInputRef,
+    updatePortfolioCanvasChatMessages,
+    updateActivePortfolioCanvasWorkspace,
+    createPortfolioCanvasFromGuide,
+    selectPortfolioCanvas,
+    renamePortfolioCanvasTo,
+    startPortfolioCanvasRename,
+    savePortfolioCanvasNameDraft,
+    handlePortfolioCanvasNameKeyDown,
+    duplicatePortfolioCanvas,
+    requestDeletePortfolioCanvas,
+    cancelDeletePortfolioCanvas,
+    confirmDeletePortfolioCanvas,
+  } = portfolioCanvasController;
   const [portfolioWidgetAgentAction, setPortfolioWidgetAgentAction] = useState(null);
   const [queuedPortfolioWidgetRequest, setQueuedPortfolioWidgetRequest] = useState(null);
-  const [attachedArticle, setAttachedArticle] = useState(null);
-  const [chatAttachments, setChatAttachments] = useState([]);
-  const [worldMemoryChatAttachments, setWorldMemoryChatAttachments] = useState([]);
-  const [attachmentError, setAttachmentError] = useState("");
-  const [worldMemoryAttachmentError, setWorldMemoryAttachmentError] = useState("");
-  const [isComposerDragging, setIsComposerDragging] = useState(false);
-  const [attachingArticleHref, setAttachingArticleHref] = useState("");
-  const messageStackRef = useRef(null);
-  const promptRef = useRef(null);
-  const fileInputRef = useRef(null);
   const activeViewRef = useRef(activeView);
-  const portfolioCanvasStoreRef = useRef(portfolioCanvasStore);
   const transactionStatusContextRef = useRef(null);
-  const portfolioCanvasFileReadyRef = useRef(false);
-  const portfolioCanvasFileSignatureRef = useRef("");
-  const newsFeedContentRevisionRef = useRef("");
-  const magazineArticleCountRef = useRef(0);
-  const magazineLatestArticleAtRef = useRef("");
-  const arcaCanvasRef = useRef(null);
-  const arcaReaderAbortRef = useRef(null);
-  const arcaReaderReturnScrollRef = useRef(0);
   const handleTransactionStatusContextChange = useCallback((contextPacket) => {
     transactionStatusContextRef.current = contextPacket && typeof contextPacket === "object"
       ? contextPacket
       : null;
   }, []);
-  const openMagazineTopic = useCallback((event, topicLabel) => {
-    event.preventDefault();
-    magazineCanvasRef.current?.scrollTo({ top: 0, behavior: "auto" });
-    setMagazineActiveArticle(null);
-    setMagazineDeleteDialogOpen(false);
-    setMagazineDeleting(false);
-    setMagazineDeleteError("");
-    setMagazineActiveTopic(topicLabel);
-  }, []);
-  const closeMagazineTopic = useCallback((event) => {
-    event?.preventDefault();
-    setMagazineActiveTopic("");
-  }, []);
-  const openMagazineArticle = useCallback((event, article) => {
-    event?.preventDefault();
-    magazineReturnScrollRef.current = {
-      canvasTop: magazineCanvasRef.current?.scrollTop ?? 0,
-      topicTop: magazineTopicModalRef.current?.scrollTop ?? 0,
-      hadTopic: Boolean(magazineActiveTopic),
-    };
-    setMagazinePreferenceNotice("");
-    setMagazinePreferenceNoticeFading(false);
-    setMagazineCommentDraft("");
-    setMagazineCommentError("");
-    setMagazineCommentStore(null);
-    setMagazineCopyStatus("idle");
-    setMagazineCopyError("");
-    setMagazineActiveArticle(normalizeMagazineReaderArticle(article));
-  }, [magazineActiveTopic]);
-  const closeMagazineArticle = useCallback(() => {
-    const returnScroll = magazineReturnScrollRef.current;
-    setMagazinePreferenceNotice("");
-    setMagazinePreferenceNoticeFading(false);
-    setMagazineCommentDraft("");
-    setMagazineCommentError("");
-    setMagazineCommentStore(null);
-    setMagazineDeleteDialogOpen(false);
-    setMagazineDeleting(false);
-    setMagazineDeleteError("");
-    setMagazineCopyStatus("idle");
-    setMagazineCopyError("");
-    setMagazineActiveArticle(null);
-    window.requestAnimationFrame(() => {
-      if (magazineCanvasRef.current) {
-        magazineCanvasRef.current.scrollTop = returnScroll.canvasTop;
-      }
-      if (returnScroll.hadTopic && magazineTopicModalRef.current) {
-        magazineTopicModalRef.current.scrollTop = returnScroll.topicTop;
-      }
-    });
-  }, []);
-  const openMagazineDeleteDialog = useCallback(() => {
-    setMagazineDeleteError("");
-    setMagazineDeleteDialogOpen(true);
-  }, []);
-  const closeMagazineDeleteDialog = useCallback(() => {
-    if (magazineDeleting) return;
-    setMagazineDeleteDialogOpen(false);
-    setMagazineDeleteError("");
-  }, [magazineDeleting]);
-  const copyMagazineArticle = useCallback(async () => {
-    if (magazineCopyStatus === "copying") return;
-    setMagazineCopyStatus("copying");
-    setMagazineCopyError("");
-    try {
-      const magazineRuntime = magazineWritingRuntime();
-      const result = await writeMagazineArticleToClipboard(magazineReaderArticleRef.current, {
-        provider: magazineActiveArticle?.generationAgent?.provider || magazineRuntime.provider,
-      });
-      setMagazineCopyStatus(result.mode === "text" ? "text" : "copied");
-      setMagazineCopyError(result.warning || "");
-      window.setTimeout(() => {
-        setMagazineCopyStatus("idle");
-        setMagazineCopyError("");
-      }, 2200);
-    } catch (error) {
-      setMagazineCopyStatus("error");
-      setMagazineCopyError(error.message || "기사를 복사하지 못했습니다.");
-    }
-  }, [agentProvider, agentUserSettings, approvalOptions, antigravityCatalogGroups, magazineActiveArticle, magazineCopyStatus, magazineSettings, modelGroups, providerOptions]);
-  const confirmMagazineArticleDelete = useCallback(async () => {
-    if (!magazineActiveArticle?.id || magazineDeleting) return;
-    setMagazineDeleting(true);
-    setMagazineDeleteError("");
-    try {
-      const response = await fetch(
-        `/api/magazine/articles?id=${encodeURIComponent(magazineActiveArticle.id)}`,
-        { method: "DELETE" }
-      );
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.error || "기사를 삭제하지 못했습니다.");
-      }
-      setMagazineCatalog(payload);
-      closeMagazineArticle();
-    } catch (error) {
-      setMagazineDeleteError(error.message);
-      setMagazineDeleting(false);
-    }
-  }, [closeMagazineArticle, magazineActiveArticle?.id, magazineDeleting]);
-  const selectedMagazinePreferenceIds = magazineActiveArticle?.id
-    ? (magazinePreferenceStore?.activeByArticle?.[magazineActiveArticle.id] || [])
-        .map((item) => item?.optionId)
-        .filter(Boolean)
-    : [];
-  const magazineComments = Array.isArray(magazineCommentStore?.comments) ? magazineCommentStore.comments : [];
-  const saveMagazinePreference = useCallback(async (option) => {
-    if (!magazineActiveArticle?.id || !option?.id) return;
-    setMagazinePreferenceSavingId(option.id);
-    try {
-      const response = await fetch("/api/magazine/preferences", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          articleId: magazineActiveArticle.id,
-          optionId: option.id,
-        }),
-      });
-      const payload = await response.json();
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.error || "매거진 편집 선호를 저장하지 못했습니다.");
-      }
-      setMagazinePreferenceStore(payload);
-      setMagazinePreferenceNoticeFading(false);
-      setMagazinePreferenceNotice(payload.message || "앞으로의 기사 편집에 반영하도록 하겠습니다");
-    } catch (error) {
-      console.warn("Magazine preference save failed", error);
-      setMagazinePreferenceNoticeFading(false);
-      setMagazinePreferenceNotice("저장하지 못했습니다. 잠시 후 다시 시도해 주세요.");
-    } finally {
-      setMagazinePreferenceSavingId("");
-    }
-  }, [magazineActiveArticle]);
-  const submitMagazineComment = useCallback(async (event) => {
-    event.preventDefault();
-    const text = magazineCommentDraft.trim();
-    if (!magazineActiveArticle?.id || !text || magazineCommentSubmitting) return;
-    const createdAt = new Date().toISOString();
-    const tempId = `temp-${Date.now()}`;
-    const pendingComment = normalizeMagazineComment({
-      id: tempId,
-      author: "사용자",
-      text,
-      createdAt,
-      reply: {
-        id: `reply-${tempId}`,
-        author: "매거진 편집자 AI",
-        text: "",
-        status: "waiting",
-        createdAt,
-      },
-    });
-    setMagazineCommentDraft("");
-    setMagazineCommentError("");
-    setMagazineCommentSubmitting(true);
-    setMagazineCommentStore((current) => {
-      const normalized = normalizeMagazineCommentStore(current, magazineActiveArticle.id);
-      return {
-        ...normalized,
-        updatedAt: createdAt,
-        commentCount: normalized.comments.length + 1,
-        comments: [...normalized.comments, pendingComment].filter(Boolean),
-      };
-    });
-    window.setTimeout(() => {
-      setMagazineCommentStore((current) => {
-        const normalized = normalizeMagazineCommentStore(current, magazineActiveArticle.id);
-        return {
-          ...normalized,
-          comments: normalized.comments.map((comment) =>
-            comment.id === tempId && comment.reply?.status === "waiting"
-              ? {
-                  ...comment,
-                  reply: {
-                    ...comment.reply,
-                    status: "generating",
-                  },
-                }
-              : comment
-          ),
-        };
-      });
-    }, 700);
-
-    try {
-      const magazineRuntime = magazineWritingRuntime();
-      const response = await fetch("/api/magazine/comments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          articleId: magazineActiveArticle.id,
-          text,
-          provider: magazineRuntime.provider,
-          model: magazineRuntime.selectedModelGroup?.slug,
-          reasoning: magazineRuntime.selectedReasoning?.id,
-          speed: magazineRuntime.selectedSpeed?.id,
-          approval: magazineRuntime.selectedApproval?.id,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.error || "댓글 답변을 저장하지 못했습니다.");
-      }
-      setMagazineCommentStore(normalizeMagazineCommentStore(payload, magazineActiveArticle.id));
-    } catch (error) {
-      setMagazineCommentError(error.message);
-      setMagazineCommentStore((current) => {
-        const normalized = normalizeMagazineCommentStore(current, magazineActiveArticle.id);
-        return {
-          ...normalized,
-          comments: normalized.comments.map((comment) =>
-            comment.id === tempId
-              ? {
-                  ...comment,
-                  reply: {
-                    id: `reply-${tempId}`,
-                    author: "매거진 편집자 AI",
-                    text: `답변 생성에 실패했습니다. (${error.message})`,
-                    status: "error",
-                    createdAt: new Date().toISOString(),
-                  },
-                }
-              : comment
-          ),
-        };
-      });
-    } finally {
-      setMagazineCommentSubmitting(false);
-    }
-  }, [
-    agentProvider,
-    agentUserSettings,
-    approval,
-    approvalOptions,
-    antigravityCatalogGroups,
-    magazineActiveArticle,
-    magazineCommentDraft,
-    magazineCommentSubmitting,
-    magazineSettings,
-    model,
-    modelGroups,
-    providerOptions,
-    reasoning,
-    speed,
-  ]);
   const magazineArticles = useMemo(() => {
     const catalogArticles = Array.isArray(magazineCatalog?.articles) ? magazineCatalog.articles : [];
     return catalogArticles.length ? catalogArticles : magazineArticleList;
@@ -2383,6 +363,47 @@ function App() {
     () => normalizeMagazineTopicCatalog(magazineCatalog?.topicCatalog),
     [magazineCatalog],
   );
+  const magazineReaderController = useMagazineReaderController({
+    activeView,
+    topicCatalog: magazineTopicCatalog,
+    applyCatalogPayload: applyMagazineCatalogPayload,
+    getWritingRuntime: magazineWritingRuntime,
+    normalizeArticle: normalizeMagazineReaderArticle,
+    normalizeComment: normalizeMagazineComment,
+    normalizeCommentStore: normalizeMagazineCommentStore,
+    writeArticleToClipboard: writeMagazineArticleToClipboard,
+  });
+  const {
+    magazineActiveArticle,
+    magazineActiveTopic,
+    magazinePreferenceSavingId,
+    magazinePreferenceNotice,
+    magazinePreferenceNoticeFading,
+    magazineCommentDraft,
+    setMagazineCommentDraft,
+    magazineCommentSubmitting,
+    magazineCommentError,
+    magazineDeleteDialogOpen,
+    magazineDeleting,
+    magazineDeleteError,
+    magazineCopyStatus,
+    magazineCopyError,
+    selectedMagazinePreferenceIds,
+    magazineComments,
+    magazineCanvasRef,
+    magazineTopicModalRef,
+    magazineReaderArticleRef,
+    openMagazineTopic,
+    closeMagazineTopic,
+    openMagazineArticle,
+    closeMagazineArticle,
+    openMagazineDeleteDialog,
+    closeMagazineDeleteDialog,
+    copyMagazineArticle,
+    confirmMagazineArticleDelete,
+    saveMagazinePreference,
+    submitMagazineComment,
+  } = magazineReaderController;
   const magazineActiveTopicEntry = magazineTopicCatalog.find((topic) => topic.label === magazineActiveTopic) || null;
   const magazineTopicArticles = useMemo(() => {
     if (!magazineActiveTopic) return [];
@@ -2396,58 +417,48 @@ function App() {
   }, [magazineCatalog]);
   const magazineCoverHeadline = magazineCoverStories[0] ?? magazineArticles[0] ?? magazineHeadlineStory;
   const magazineCoverCards = magazineCoverStories.slice(1, 5);
-  const activeModelGroups = agentProvider === ANTIGRAVITY_PROVIDER_ID ? antigravityCatalogGroups : modelGroups;
-  const activeApprovalOptions = agentProvider === ANTIGRAVITY_PROVIDER_ID ? antigravityPolicyOptions : approvalOptions;
   const worldMemoryEnabled = Boolean(worldMemorySettings?.enabled);
   const magazineEnabled = worldMemoryEnabled && Boolean(magazineSettings?.enabled);
   const transactionStatusHidden = Boolean(transactionSettings?.settings?.menuHidden);
-  const selectedModelGroup = useMemo(
-    () => activeModelGroups.find((item) => item.slug === model) ?? activeModelGroups[0] ?? fallbackModelGroups[0],
-    [model, activeModelGroups]
-  );
-  const reasoningOptions = selectedModelGroup?.reasoningLevels?.length
-    ? selectedModelGroup.reasoningLevels
-    : fallbackModelGroups[0].reasoningLevels;
-  const selectedReasoning = useMemo(
-    () =>
-      reasoningOptions.find((item) => item.id === reasoning) ??
-      reasoningOptions.find((item) => item.id === selectedModelGroup?.defaultReasoningLevel) ??
-      reasoningOptions[0],
-    [reasoning, reasoningOptions, selectedModelGroup]
-  );
-  const speedOptions = useMemo(
-    () => getSpeedOptionsForReasoning(selectedModelGroup, selectedReasoning?.id || reasoning),
-    [reasoning, selectedModelGroup, selectedReasoning]
-  );
-  const selectedSpeed = useMemo(
-    () => speedOptions.find((item) => item.id === speed) ?? speedOptions[0],
-    [speed, speedOptions]
-  );
   const arcaNotificationHealth = arcaNotificationHealthState(arcaNotificationStatus);
   const worldMemoryHealth = worldMemoryHealthState(worldMemoryStatus, {
     busy: worldMemoryBusy || worldMemoryActionBusy,
     enabled: worldMemoryEnabled,
     error: worldMemoryError || worldMemorySettingsError,
   });
-  const modelSummaryLabel = selectedModelGroup?.reasoningEmbedded
-    ? selectedModelGroup?.label || "모델"
-    : `${selectedModelGroup?.label || "모델"} ${selectedReasoning?.label || ""}`.trim();
-  const selectedApproval = useMemo(
-    () => activeApprovalOptions.find((item) => item.id === approval) ?? activeApprovalOptions[0],
-    [approval, activeApprovalOptions]
-  );
-  const selectedProvider = useMemo(
-    () => providerOptions.find((item) => item.id === agentProvider) ?? providerOptions[0] ?? fallbackProviderOptions[0],
-    [agentProvider, providerOptions]
-  );
-  const agentProviderLabel = agentOptionsReady ? selectedProvider?.label || "Codex CLI" : "에이전트";
-  const agentProviderAvailable = agentOptionsReady && Boolean(selectedProvider?.available);
-  const agentIcon = agentOptionsReady && agentProvider === ANTIGRAVITY_PROVIDER_ID ? antigravityLogo : codexLogo;
-  const portfolioCanvases = portfolioCanvasStore.canvases;
-  const activePortfolioCanvas = useMemo(
-    () => portfolioCanvases.find((canvas) => canvas.id === portfolioCanvasStore.activeCanvasId) || null,
-    [portfolioCanvases, portfolioCanvasStore.activeCanvasId]
-  );
+  const assetPortfolioActive =
+    activeView === "portfolio-canvas" &&
+    Boolean(activePortfolioCanvas) &&
+    portfolioCanvasModeMeta(activePortfolioCanvas.mode).id === PORTFOLIO_CANVAS_MODES.asset.id;
+  const tossInvestController = useTossInvestController({ activeView, assetPortfolioActive });
+  const {
+    tossInvestStatus,
+    tossInvestBusy,
+    tossInvestAction,
+    tossInvestError,
+    tossInvestErrorCode,
+    tossInvestPublicIp,
+    tossInvestPublicIpBusy,
+    tossInvestPublicIpError,
+    tossInvestDialogOpen,
+    tossInvestOrderSyncStatus,
+    tossInvestOrderSyncBusy,
+    tossInvestOrderSyncAction,
+    tossInvestOrderSyncError,
+    tossInvestOrderSyncErrorCode,
+    loadTossInvestStatus,
+    saveAndProbeTossInvestCredentials,
+    unlockAndProbeTossInvestVault,
+    lockTossInvestVault,
+    probeTossInvestConnection,
+    checkTossInvestPublicIp,
+    deleteTossInvestCredentials,
+    loadTossInvestOrderSyncStatus,
+    runTossInvestOrderSync,
+    updateTossInvestOrderSyncEnabled,
+    openTossInvestDialog,
+    closeTossInvestDialog,
+  } = tossInvestController;
   const isPortfolioCanvasView = activeView === "portfolio-canvas" && Boolean(activePortfolioCanvas);
   const isWorldMemoryChatView = activeView === "world-memory" && worldMemoryEnabled;
   const isChatCanvasView = activeView === "chat";
@@ -2457,304 +468,62 @@ function App() {
     : isWorldMemoryChatView
       ? worldMemoryChatScope
       : systemMainChatScope;
-  const visibleChatMessages = isPortfolioCanvasView
-    ? activePortfolioCanvas.chatMessages
-    : isWorldMemoryChatView
-      ? worldMemoryChatMessages
-      : chatMessages;
-  const activePrompt = promptForScope(activeChatScope);
-  const activeChatAttachments = attachmentsForScope(activeChatScope);
-  const activeAttachmentError = attachmentErrorForScope(activeChatScope);
-  const activeAttachedArticle = attachedArticleForScope(activeChatScope);
-  const isSending = isChatScopeSending(activeChatScope);
-  const activePortfolioChatIsSending = isPortfolioCanvasView ? isChatScopeSending(activeChatScope) : false;
-  const worldMemoryChatIsSending = isChatScopeSending(worldMemoryChatScope);
-
-  useEffect(() => {
-    if (!editingPortfolioCanvasId) return;
-    portfolioCanvasNameInputRef.current?.focus();
-    portfolioCanvasNameInputRef.current?.select();
-  }, [editingPortfolioCanvasId]);
-
-  const toolbarApprovalOptions = agentOptionsReady ? activeApprovalOptions : loadingApprovalOptions;
-  const toolbarModelGroups = agentOptionsReady ? activeModelGroups : loadingModelGroups;
-  const toolbarApprovalValue = agentOptionsReady ? selectedApproval?.id || approval : "loading";
-  const toolbarModelValue = agentOptionsReady ? selectedModelGroup?.slug || model : "loading";
-  const toolbarReasoningValue = agentOptionsReady ? selectedReasoning?.id || reasoning : "loading";
-  const toolbarSpeedValue = agentOptionsReady ? speed : "loading";
-  const newsFeedTranslationModelLabel = useMemo(() => {
-    if (!agentOptionsReady) return "";
-    if (agentProvider === ANTIGRAVITY_PROVIDER_ID) {
-      const translationModel = selectAntigravityModelForReasoning(antigravityCatalogGroups, {
-        currentModel: selectedModelGroup?.slug || model || ANTIGRAVITY_TRANSLATION_FALLBACK_MODEL,
-      });
-      return `Antigravity CLI · ${translationModel}`;
-    }
-
-    const translation = selectCodexTranslationModel({
-      cliVersion: codexStatus.version,
-      models: modelGroups,
-    });
-    return `${translation.model} · ${translation.reasoning}`;
-  }, [agentOptionsReady, agentProvider, antigravityCatalogGroups, selectedModelGroup, model, modelGroups, codexStatus.version]);
+  const chatComposerController = useChatComposerController({
+    activeChatScope,
+    activePortfolioCanvas,
+    isPortfolioCanvasView,
+    isWorldMemoryChatView,
+    portfolioCanvases,
+    updatePortfolioCanvasChatMessages,
+  });
+  const {
+    chatMessages,
+    setChatMessages,
+    activeChatAbortRefs,
+    promptHeight,
+    promptOverflow,
+    isComposerDragging,
+    attachingArticleHref,
+    messageStackRef,
+    promptRef,
+    fileInputRef,
+    visibleChatMessages,
+    activePrompt,
+    activeChatAttachments,
+    activeAttachmentError,
+    activeAttachedArticle,
+    isSending,
+    activePortfolioChatIsSending,
+    worldMemoryChatIsSending,
+    isChatScopeSending,
+    setChatScopeSending,
+    promptForScope,
+    setPromptForScope,
+    attachmentsForScope,
+    setAttachmentErrorForScope,
+    attachedArticleForScope,
+    clearAttachedArticleForScope,
+    clearComposerForScope,
+    updateChatMessagesForScope,
+    chatMessagesForScope,
+    startNewChat,
+    resolveChatScope,
+    attachArticleContext,
+    addChatAttachmentFiles,
+    removeChatAttachment,
+    handleComposerDragEnter,
+    handleComposerDragOver,
+    handleComposerDragLeave,
+    handleComposerDrop,
+    handleComposerPaste,
+    stopActiveChatResponse,
+  } = chatComposerController;
   const newsFeedMarketSummary = memoryStatus?.contextMemory?.marketSummary || null;
   const newsFeedMarketSummaryCollapsed = newsFeedStatus?.viewState?.marketSummaryCollapsed !== false;
   const activeCategoryLabel = useMemo(() => {
     const selected = arcaBoard?.categories?.find((category) => category.name === boardFilters.category);
     return selected?.label || "전체";
   }, [arcaBoard, boardFilters.category]);
-
-  function modelGroupsForProvider(
-    providerId,
-    groups = modelGroups,
-    nextAntigravityGroups = antigravityCatalogGroups
-  ) {
-    return providerId === ANTIGRAVITY_PROVIDER_ID
-      ? nextAntigravityGroups.length
-        ? nextAntigravityGroups
-        : antigravityModelGroups
-      : groups.length
-        ? groups
-        : fallbackModelGroups;
-  }
-
-  function selectionForProvider(
-    providerId,
-    preferred = {},
-    groups = modelGroups,
-    nextAntigravityGroups = antigravityCatalogGroups,
-    approvals = approvalOptions
-  ) {
-    const nextGroups = modelGroupsForProvider(providerId, groups, nextAntigravityGroups);
-    const nextApprovalOptions = providerId === ANTIGRAVITY_PROVIDER_ID
-      ? antigravityPolicyOptions
-      : approvals.length
-        ? approvals
-        : fallbackApprovalOptions;
-    const nextApproval = nextApprovalOptions.some((item) => item.id === preferred.approval)
-      ? preferred.approval
-      : nextApprovalOptions[0]?.id || fallbackApprovalOptions[0].id;
-    const nextGroup = nextGroups.find((item) => item.slug === preferred.model) ?? nextGroups[0] ?? fallbackModelGroups[0];
-    const nextReasoningLevels = nextGroup.reasoningLevels?.length
-      ? nextGroup.reasoningLevels
-      : fallbackModelGroups[0].reasoningLevels;
-    const nextReasoning = nextReasoningLevels.some((item) => item.id === preferred.reasoning)
-      ? preferred.reasoning
-      : nextGroup.defaultReasoningLevel || nextReasoningLevels[0]?.id || "medium";
-    const nextSpeedOptions = getSpeedOptionsForReasoning(nextGroup, nextReasoning);
-    const nextSpeed = nextSpeedOptions.some((item) => item.id === preferred.speed)
-      ? preferred.speed
-      : "standard";
-
-    return {
-      provider: providerId,
-      approval: nextApproval,
-      model: nextGroup.slug,
-      reasoning: nextReasoning,
-      speed: nextSpeed,
-    };
-  }
-
-  function agentProviderSettings(providerId, settings = agentUserSettings) {
-    return settings?.providers?.[providerId] || {};
-  }
-
-  function isAgentProviderEnabled(providerId, settings = agentUserSettings) {
-    const providerSettings = agentProviderSettings(providerId, settings);
-    if (typeof providerSettings.enabled === "boolean") return providerSettings.enabled;
-    return providerId === settings?.selectedProvider;
-  }
-
-  function enabledAgentProviders(settings = agentUserSettings) {
-    return agentProviderIds.filter((providerId) => isAgentProviderEnabled(providerId, settings));
-  }
-
-  function applyAgentSelection(selection) {
-    setApproval(selection.approval);
-    setModel(selection.model);
-    setReasoning(selection.reasoning);
-    setSpeed(selection.speed);
-  }
-
-  async function saveAgentSettingsPatch(patch) {
-    setAgentSettingsError("");
-    try {
-      const response = await fetch("/api/codex/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify(patch),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setAgentUserSettings(payload.settings || emptyAgentSettings);
-      return payload.settings || emptyAgentSettings;
-    } catch (error) {
-      setAgentSettingsError(error.message);
-      return null;
-    }
-  }
-
-  async function saveAgentSettings(selection) {
-    return saveAgentSettingsPatch({
-      selectedProvider: selection.provider,
-      providers: {
-        [selection.provider]: {
-          enabled: true,
-          approval: selection.approval,
-          model: selection.model,
-          reasoning: selection.reasoning,
-          speed: selection.speed,
-        },
-      },
-    });
-  }
-
-  async function savePersonaMode(nextPersonaMode) {
-    setAgentSettingsError("");
-    try {
-      const response = await fetch("/api/codex/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ personaMode: nextPersonaMode }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setAgentUserSettings(payload.settings || emptyAgentSettings);
-      return payload.settings || emptyAgentSettings;
-    } catch (error) {
-      setAgentSettingsError(error.message);
-      return null;
-    }
-  }
-
-  function updatePersonaMode(nextPersonaMode) {
-    const safePersonaMode = personaModeOptions.some((option) => option.id === nextPersonaMode)
-      ? nextPersonaMode
-      : "none";
-    setPersonaMode(safePersonaMode);
-    void savePersonaMode(safePersonaMode);
-  }
-
-  function handleAgentProviderChange(nextProvider) {
-    setAgentProvider(nextProvider);
-    const savedProviderSettings = agentProviderSettings(nextProvider);
-    const nextSelection = selectionForProvider(nextProvider, savedProviderSettings);
-    applyAgentSelection(nextSelection);
-    void saveAgentSettings(nextSelection).then((settings) => {
-      if (settings && nextProvider === ANTIGRAVITY_PROVIDER_ID) {
-        void refreshAgentOptions();
-      }
-    });
-  }
-
-  function updateAgentSelection(patch) {
-    const nextSelection = selectionForProvider(agentProvider, {
-      approval: selectedApproval?.id || approval,
-      model: selectedModelGroup?.slug || model,
-      reasoning: selectedReasoning?.id || reasoning,
-      speed: selectedSpeed?.id || speed,
-      ...patch,
-    });
-    applyAgentSelection(nextSelection);
-    void saveAgentSettings(nextSelection);
-  }
-
-  function updateProviderSelection(providerId, patch) {
-    const currentProviderSettings = agentProviderSettings(providerId);
-    const nextSelection = selectionForProvider(providerId, {
-      ...currentProviderSettings,
-      ...patch,
-    });
-    const providerPatch = {
-      enabled: isAgentProviderEnabled(providerId),
-      approval: nextSelection.approval,
-      model: nextSelection.model,
-      reasoning: nextSelection.reasoning,
-      speed: nextSelection.speed,
-    };
-
-    setAgentUserSettings((current) => ({
-      ...current,
-      providers: {
-        ...(current.providers || {}),
-        [providerId]: {
-          ...(current.providers?.[providerId] || {}),
-          ...providerPatch,
-        },
-      },
-    }));
-
-    if (providerId === agentProvider) {
-      applyAgentSelection(nextSelection);
-    }
-
-    void saveAgentSettingsPatch({
-      providers: {
-        [providerId]: providerPatch,
-      },
-    });
-  }
-
-  function updateProviderEnabled(providerId, enabled) {
-    const currentEnabledProviders = enabledAgentProviders();
-    if (!enabled && currentEnabledProviders.length <= 1 && currentEnabledProviders.includes(providerId)) {
-      return;
-    }
-
-    const currentProviderSettings = agentProviderSettings(providerId);
-    const providerSelection = selectionForProvider(providerId, currentProviderSettings);
-    const nextSelectedProvider =
-      !enabled && agentProvider === providerId
-        ? currentEnabledProviders.find((id) => id !== providerId) || agentProvider
-        : agentProvider;
-    const nextSelectedSettings = agentProviderSettings(nextSelectedProvider);
-    const nextSelection = selectionForProvider(nextSelectedProvider, nextSelectedSettings);
-    const providerPatch = {
-      enabled,
-      approval: providerSelection.approval,
-      model: providerSelection.model,
-      reasoning: providerSelection.reasoning,
-      speed: providerSelection.speed,
-    };
-
-    setAgentUserSettings((current) => ({
-      ...current,
-      selectedProvider: nextSelectedProvider,
-      providers: {
-        ...(current.providers || {}),
-        [providerId]: {
-          ...(current.providers?.[providerId] || {}),
-          ...providerPatch,
-        },
-      },
-    }));
-    if (nextSelectedProvider !== agentProvider) {
-      setAgentProvider(nextSelectedProvider);
-      applyAgentSelection(nextSelection);
-    }
-
-    void saveAgentSettingsPatch({
-      selectedProvider: nextSelectedProvider,
-      providers: {
-        [providerId]: providerPatch,
-      },
-    }).then((settings) => {
-      if (settings && providerId === ANTIGRAVITY_PROVIDER_ID) {
-        void refreshAgentOptions();
-      }
-    });
-  }
-
-  function configuredProviderId(setting) {
-    const normalized = normalizeAgentModelProvider(setting);
-    return normalized === "default" ? agentProvider : normalized;
-  }
 
   function worldMemoryManagementProviderId() {
     return configuredProviderId(
@@ -2784,345 +553,6 @@ function App() {
     });
   }
 
-  function commandPreviewForRuntime(runtime) {
-    if (!agentOptionsReady) {
-      return "에이전트 설정 불러오는 중";
-    }
-    if (runtime.provider === ANTIGRAVITY_PROVIDER_ID) {
-      return runtime.selectedProvider?.available
-        ? `agy --model "${runtime.selectedModelGroup?.slug || "Gemini 3.5 Flash (Medium)"}" · ${runtime.selectedApproval?.label || "Default"}`
-        : runtime.selectedProvider?.installCommand || "curl -fsSL https://antigravity.google/cli/install.sh | bash";
-    }
-    const approvalFlag = runtime.selectedApproval?.cli || "";
-    const modelFlag = runtime.selectedModelGroup?.slug ? `-m ${runtime.selectedModelGroup.slug}` : "";
-    const reasoningFlag = runtime.selectedReasoning?.cli || "";
-    const speedFlag = runtime.selectedSpeed?.cli || "";
-    return ["codex", approvalFlag, modelFlag, reasoningFlag, speedFlag].filter(Boolean).join(" ");
-  }
-
-  function providerRuntimeForProvider(providerId, overrides = {}) {
-    const runtimeProvider = providerId === ANTIGRAVITY_PROVIDER_ID ? ANTIGRAVITY_PROVIDER_ID : CODEX_PROVIDER_ID;
-    const providerStatus =
-      providerOptions.find((item) => item.id === runtimeProvider) ||
-      fallbackProviderOptions.find((item) => item.id === runtimeProvider) ||
-      { id: runtimeProvider, label: runtimeProvider };
-    const providerModelGroups = modelGroupsForProvider(runtimeProvider);
-    const providerApprovalOptions =
-      runtimeProvider === ANTIGRAVITY_PROVIDER_ID
-        ? antigravityPolicyOptions
-        : approvalOptions.length
-          ? approvalOptions
-          : fallbackApprovalOptions;
-    const baseSelection =
-      runtimeProvider === agentProvider
-        ? {
-            provider: runtimeProvider,
-            approval: selectedApproval?.id || approval,
-            model: selectedModelGroup?.slug || model,
-            reasoning: selectedReasoning?.id || reasoning,
-            speed: selectedSpeed?.id || speed,
-          }
-        : selectionForProvider(runtimeProvider, agentProviderSettings(runtimeProvider));
-    const providerSelection = selectionForProvider(runtimeProvider, {
-      ...baseSelection,
-      ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => String(value || "").trim())),
-    });
-    const providerModelGroup =
-      providerModelGroups.find((item) => item.slug === providerSelection.model) ||
-      providerModelGroups[0] ||
-      fallbackModelGroups[0];
-    const providerReasoningOptions = providerModelGroup?.reasoningLevels?.length
-      ? providerModelGroup.reasoningLevels
-      : fallbackModelGroups[0].reasoningLevels;
-    const providerSpeedOptions = getSpeedOptionsForReasoning(providerModelGroup, providerSelection.reasoning);
-    const runtime = {
-      provider: runtimeProvider,
-      selectedProvider: providerStatus,
-      providerLabel: agentOptionsReady
-        ? providerStatus?.label || (runtimeProvider === ANTIGRAVITY_PROVIDER_ID ? "Antigravity CLI" : "Codex CLI")
-        : "에이전트",
-      providerAvailable: agentOptionsReady && Boolean(providerStatus?.available),
-      icon: agentOptionsReady && runtimeProvider === ANTIGRAVITY_PROVIDER_ID ? antigravityLogo : codexLogo,
-      approvalOptions: providerApprovalOptions,
-      selectedApproval:
-        providerApprovalOptions.find((item) => item.id === providerSelection.approval) || providerApprovalOptions[0],
-      modelGroups: providerModelGroups,
-      selectedModelGroup: providerModelGroup,
-      reasoningOptions: providerReasoningOptions,
-      selectedReasoning:
-        providerReasoningOptions.find((item) => item.id === providerSelection.reasoning) || providerReasoningOptions[0],
-      speedOptions: providerSpeedOptions,
-      selectedSpeed: providerSpeedOptions.find((item) => item.id === providerSelection.speed) || providerSpeedOptions[0],
-    };
-    return {
-      ...runtime,
-      modelSummaryLabel: runtime.selectedModelGroup?.reasoningEmbedded
-        ? runtime.selectedModelGroup?.label || "모델"
-        : `${runtime.selectedModelGroup?.label || "모델"} ${runtime.selectedReasoning?.label || ""}`.trim(),
-      commandPreview: commandPreviewForRuntime(runtime),
-    };
-  }
-
-  function updatePortfolioCanvasStore(updater) {
-    setPortfolioCanvasStore((current) => normalizePortfolioCanvasStore(updater(current)));
-  }
-
-  const updatePortfolioCanvasWorkspace = useCallback((canvasId, workspace) => {
-    const targetCanvasId = String(canvasId || "").trim();
-    if (!targetCanvasId) return;
-    setPortfolioCanvasStore((current) =>
-      buildPortfolioCanvasWorkspaceUpdateState(current, workspace, targetCanvasId)
-    );
-  }, []);
-
-  const updateActivePortfolioCanvasWorkspace = useCallback(
-    (workspace) => {
-      if (!activePortfolioCanvas?.id) return;
-      updatePortfolioCanvasWorkspace(activePortfolioCanvas.id, workspace);
-    },
-    [activePortfolioCanvas?.id, updatePortfolioCanvasWorkspace]
-  );
-
-  function isChatScopeSending(scope) {
-    return Boolean(sendingChatScopes[chatScopeKey(scope)]);
-  }
-
-  function setChatScopeSending(scope, sending) {
-    const key = chatScopeKey(scope);
-    setSendingChatScopes((current) => {
-      if (sending) {
-        return current[key] ? current : { ...current, [key]: true };
-      }
-      if (!current[key]) return current;
-      const next = { ...current };
-      delete next[key];
-      return next;
-    });
-  }
-
-  function promptForScope(scope) {
-    return isWorldMemoryChatScope(scope) ? worldMemoryPrompt : prompt;
-  }
-
-  function setPromptForScope(scope, value) {
-    if (isWorldMemoryChatScope(scope)) {
-      setWorldMemoryPrompt(value);
-      return;
-    }
-    setPrompt(value);
-  }
-
-  function attachmentsForScope(scope) {
-    return isWorldMemoryChatScope(scope) ? worldMemoryChatAttachments : chatAttachments;
-  }
-
-  function setAttachmentsForScope(scope, updater) {
-    const setter = isWorldMemoryChatScope(scope) ? setWorldMemoryChatAttachments : setChatAttachments;
-    setter((current) => {
-      const nextAttachments = typeof updater === "function" ? updater(current) : updater;
-      return Array.isArray(nextAttachments) ? nextAttachments : [];
-    });
-  }
-
-  function attachmentErrorForScope(scope) {
-    return isWorldMemoryChatScope(scope) ? worldMemoryAttachmentError : attachmentError;
-  }
-
-  function setAttachmentErrorForScope(scope, value) {
-    if (isWorldMemoryChatScope(scope)) {
-      setWorldMemoryAttachmentError(value);
-      return;
-    }
-    setAttachmentError(value);
-  }
-
-  function attachedArticleForScope(scope) {
-    return isWorldMemoryChatScope(scope) ? null : attachedArticle;
-  }
-
-  function clearAttachedArticleForScope(scope) {
-    if (isWorldMemoryChatScope(scope)) return;
-    setAttachedArticle(null);
-  }
-
-  function clearComposerForScope(scope) {
-    setPromptForScope(scope, "");
-    setAttachmentsForScope(scope, []);
-    setAttachmentErrorForScope(scope, "");
-    clearAttachedArticleForScope(scope);
-  }
-
-  function updateChatMessagesForScope(scope, updater) {
-    if (scope?.type === "portfolio-canvas" && scope.canvasId) {
-      updatePortfolioCanvasStore((current) => ({
-        ...current,
-        canvases: current.canvases.map((canvas) => {
-          if (canvas.id !== scope.canvasId) return canvas;
-          const currentMessages = normalizePortfolioChatMessages(canvas.chatMessages);
-          const nextMessages = typeof updater === "function" ? updater(currentMessages) : updater;
-          return {
-            ...canvas,
-            chatMessages: normalizePortfolioChatMessages(nextMessages),
-            updatedAt: new Date().toISOString(),
-          };
-        }),
-      }));
-      return;
-    }
-    if (isWorldMemoryChatScope(scope)) {
-      setWorldMemoryChatMessages((messages) => {
-        const nextMessages = typeof updater === "function" ? updater(messages) : updater;
-        return normalizeChatMessageList(nextMessages);
-      });
-      return;
-    }
-    setChatMessages((messages) => {
-      const nextMessages = typeof updater === "function" ? updater(messages) : updater;
-      return normalizeChatMessageList(nextMessages);
-    });
-  }
-
-  function chatMessagesForScope(scope) {
-    if (scope?.type === "portfolio-canvas" && scope.canvasId) {
-      const canvas = portfolioCanvases.find((item) => item.id === scope.canvasId);
-      return normalizePortfolioChatMessages(canvas?.chatMessages);
-    }
-    if (isWorldMemoryChatScope(scope)) {
-      return normalizeChatMessageList(worldMemoryChatMessages);
-    }
-    return chatMessages;
-  }
-
-  function startNewChat() {
-    updateChatMessagesForScope(activeChatScope, initialChatMessages);
-    clearComposerForScope(activeChatScope);
-  }
-
-  function resolveChatScope(screen) {
-    if ((screen === "portfolio-canvas" || screen === "portfolio") && isPortfolioCanvasView && activePortfolioCanvas) {
-      return { type: "portfolio-canvas", canvasId: activePortfolioCanvas.id };
-    }
-    if (screen === "world-memory") {
-      return worldMemoryChatScope;
-    }
-    return systemMainChatScope;
-  }
-
-  function createPortfolioCanvasFromGuide(mode = PORTFOLIO_CANVAS_MODES.asset.id) {
-    let createdCanvasId = "";
-    updatePortfolioCanvasStore((current) => {
-      const result = buildPortfolioCanvasCreateState(current, mode);
-      createdCanvasId = result.canvasId;
-      return result.store;
-    });
-    setPortfolioSidebarOpen(true);
-    setPortfolioCanvasMenuId("");
-    setPortfolioContext(null);
-    setActiveView("portfolio-canvas");
-    return createdCanvasId;
-  }
-
-  function selectPortfolioCanvas(canvasId) {
-    updatePortfolioCanvasStore((current) => buildPortfolioCanvasSelectState(current, canvasId));
-    setPortfolioSidebarOpen(true);
-    setPortfolioCanvasMenuId("");
-    setPortfolioContext(null);
-    setActiveView("portfolio-canvas");
-  }
-
-  function renamePortfolioCanvasTo(canvasId, nextName) {
-    updatePortfolioCanvasStore((current) => buildPortfolioCanvasRenameState(current, canvasId, nextName).store);
-  }
-
-  function startPortfolioCanvasRename(canvas) {
-    if (!canvas) return;
-    setPortfolioSidebarOpen(true);
-    setPortfolioCanvasMenuId("");
-    setEditingPortfolioCanvasId(canvas.id);
-    setPortfolioCanvasNameDraft(canvas.name || "");
-  }
-
-  function closePortfolioCanvasRename() {
-    setEditingPortfolioCanvasId("");
-    setPortfolioCanvasNameDraft("");
-  }
-
-  function savePortfolioCanvasNameDraft() {
-    if (!editingPortfolioCanvasId) return;
-    const currentCanvas = portfolioCanvases.find((canvas) => canvas.id === editingPortfolioCanvasId);
-    const cleanName = cleanPortfolioWidgetPrompt(portfolioCanvasNameDraft, 80);
-    if (currentCanvas && cleanName && cleanName !== currentCanvas.name) {
-      renamePortfolioCanvasTo(currentCanvas.id, cleanName);
-    }
-    closePortfolioCanvasRename();
-  }
-
-  function handlePortfolioCanvasNameKeyDown(event) {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      savePortfolioCanvasNameDraft();
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.currentTarget.dataset.cancelled = "true";
-      closePortfolioCanvasRename();
-    }
-  }
-
-  function renamePortfolioCanvas(canvas) {
-    if (!canvas) return;
-    startPortfolioCanvasRename(canvas);
-  }
-
-  function duplicatePortfolioCanvas(canvas) {
-    if (!canvas) return;
-    let duplicatedCanvasId = "";
-    updatePortfolioCanvasStore((current) => {
-      const result = buildPortfolioCanvasDuplicateState(current, canvas);
-      duplicatedCanvasId = result.canvasId;
-      return result.store;
-    });
-    setPortfolioSidebarOpen(true);
-    setPortfolioCanvasMenuId("");
-    setPortfolioContext(null);
-    setActiveView("portfolio-canvas");
-    return duplicatedCanvasId;
-  }
-
-  function requestDeletePortfolioCanvas(canvas) {
-    setPendingDeletePortfolioCanvas(canvas || null);
-    setPortfolioCanvasMenuId("");
-  }
-
-  function confirmDeletePortfolioCanvas() {
-    const targetId = pendingDeletePortfolioCanvas?.id;
-    if (!targetId) return;
-    const visibleDeleteState = buildPortfolioCanvasDeleteState(portfolioCanvasStore, targetId);
-    setPortfolioCanvasStore((current) => buildPortfolioCanvasDeleteState(current, targetId).store);
-    if (visibleDeleteState.deletedActive) {
-      setPortfolioContext(null);
-      setActiveView(visibleDeleteState.nextActiveCanvasId ? "portfolio-canvas" : "portfolio");
-    }
-    if (editingPortfolioCanvasId === targetId) {
-      closePortfolioCanvasRename();
-    }
-    setPendingDeletePortfolioCanvas(null);
-  }
-
-  function updateBoardFilters(nextPatch) {
-    setBoardFilters((filters) => ({ ...filters, ...nextPatch }));
-  }
-
-  function selectBoardCategory(category) {
-    setShowHiddenNotices(false);
-    updateBoardFilters({ category, page: 1 });
-  }
-
-  function refreshBoard() {
-    setBoardFilters((filters) => ({ ...filters }));
-    void loadArcaNotifications();
-  }
-
   function handleSidebarItemClick(item) {
     if (!item.view) return;
     if (item.view === "stock" && activeView === "stock" && arcaReaderArticle) {
@@ -3150,112 +580,6 @@ function App() {
       void markReportsNotificationsOpened();
     }
     setActiveView(item.view);
-  }
-
-  async function loadNewsFeedItems({ reset = false } = {}) {
-    if (reset ? newsFeedBusy : newsFeedLoadingMore || newsFeedBusy || !newsFeedHasMore) return;
-    if (reset) {
-      setNewsFeedBusy(true);
-      setNewsFeedError("");
-    } else {
-      setNewsFeedLoadingMore(true);
-    }
-
-    try {
-      const offset = reset ? 0 : newsFeedItems.length;
-      const response = await fetch(`/api/news-feed/items?limit=${NEWS_FEED_PAGE_SIZE}&offset=${offset}`, {
-        cache: "no-store",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-
-      newsFeedContentRevisionRef.current = newsFeedContentRevision(payload);
-      setNewsFeedStatus((current) => ({
-        ...(current || {}),
-        itemCount: payload.itemCount,
-        readState: payload.readState || current?.readState,
-        offset: payload.offset,
-        limit: payload.limit,
-        hasMore: payload.hasMore,
-      }));
-      setNewsFeedHasMore(Boolean(payload.hasMore));
-      setNewsFeedItems((current) => {
-        const nextItems = reset ? payload.items || [] : [...current, ...(payload.items || [])];
-        const seen = new Set();
-        return nextItems.filter((item) => {
-          if (seen.has(item.id)) return false;
-          seen.add(item.id);
-          return true;
-        });
-      });
-    } catch (error) {
-      setNewsFeedError(error.message);
-    } finally {
-      setNewsFeedBusy(false);
-      setNewsFeedLoadingMore(false);
-    }
-  }
-
-  async function loadNewsFeedSettings() {
-    setNewsFeedSettingsBusy(true);
-    setNewsFeedSettingsError("");
-    try {
-      const response = await fetch("/api/news-feed/settings", { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setNewsFeedSettings(payload);
-    } catch (error) {
-      setNewsFeedSettingsError(error.message);
-    } finally {
-      setNewsFeedSettingsBusy(false);
-    }
-  }
-
-  async function loadSharedMemoryStatus() {
-    setMemoryBusy(true);
-    setMemoryError("");
-    try {
-      const response = await fetch(`/api/memory?limit=${MEMORY_RECENT_LIMIT}&offset=0`, { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setMemoryStatus(payload);
-    } catch (error) {
-      setMemoryError(error.message);
-    } finally {
-      setMemoryBusy(false);
-    }
-  }
-
-  async function refreshNotificationStatus() {
-    const response = await fetch("/api/notifications/status", { cache: "no-store" });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.ok) {
-      throw new Error(payload.error || `HTTP ${response.status}`);
-    }
-    setNotificationStatus(payload);
-    return payload;
-  }
-
-  async function markReportsNotificationsOpened() {
-    try {
-      const response = await fetch("/api/notifications/read-state", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "mark-reports-opened" }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (response.ok && payload.ok) {
-        setNotificationStatus(payload);
-      }
-    } catch {
-      // The notification badge will be reconciled by the next status poll.
-    }
   }
 
   function openReportsFromBrowserNotification(notification = null) {
@@ -3306,912 +630,28 @@ function App() {
     return true;
   }
 
-  async function loadWorldMemorySettings({ quiet = false, refreshStatus = false } = {}) {
-    if (!quiet) {
-      setWorldMemorySettingsBusy(true);
-      setWorldMemorySettingsError("");
-    }
-    try {
-      const response = await fetch("/api/world-memory/settings", { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const nextSettings = { ...defaultWorldMemorySettings, ...payload };
-      setWorldMemorySettings(nextSettings);
-      if (refreshStatus && nextSettings.enabled) {
-        await loadWorldMemoryStatus();
-      } else if (!nextSettings.enabled) {
-        setWorldMemoryStatus((current) => ({
-          ...(current || {}),
-          ok: true,
-          enabled: false,
-          settings: nextSettings.settings,
-          configPath: nextSettings.configPath,
-          defaultConfigPath: nextSettings.defaultConfigPath,
-          collector: {
-            ...(current?.collector || {}),
-            status: "disabled",
-            schedulerStarted: false,
-            inFlight: false,
-          },
-        }));
-        setWorldMemoryError("");
-      }
-      return nextSettings;
-    } catch (error) {
-      setWorldMemorySettingsError(error.message);
-      return null;
-    } finally {
-      if (!quiet) setWorldMemorySettingsBusy(false);
-    }
-  }
-
-  async function loadTransactionSettings({ quiet = false } = {}) {
-    if (!quiet) {
-      setTransactionSettingsBusy(true);
-      setTransactionSettingsError("");
-    }
-    try {
-      const response = await fetch("/api/transactions/settings", { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const nextSettings = {
-        ...defaultTransactionSettings,
-        ...payload,
-        settings: {
-          ...defaultTransactionSettings.settings,
-          ...(payload.settings || {}),
-        },
-      };
-      setTransactionSettings(nextSettings);
-      return nextSettings;
-    } catch (error) {
-      setTransactionSettingsError(error.message);
-      return null;
-    } finally {
-      if (!quiet) setTransactionSettingsBusy(false);
-    }
-  }
-
   async function updateTransactionStatusHidden(menuHidden) {
-    if (transactionSettingsSaving) return null;
-    setTransactionSettingsSaving(true);
-    setTransactionSettingsError("");
-    try {
-      const response = await fetch("/api/transactions/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ menuHidden }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const nextSettings = {
-        ...defaultTransactionSettings,
-        ...payload,
-        settings: {
-          ...defaultTransactionSettings.settings,
-          ...(payload.settings || {}),
-        },
-      };
-      setTransactionSettings(nextSettings);
-      if (nextSettings.settings.menuHidden && activeViewRef.current === "transaction-status") {
-        setActiveView("stock");
-      }
-      return nextSettings;
-    } catch (error) {
-      setTransactionSettingsError(error.message);
-      return null;
-    } finally {
-      setTransactionSettingsSaving(false);
+    const nextSettings = await saveTransactionStatusHidden(menuHidden);
+    if (nextSettings?.settings?.menuHidden && activeViewRef.current === "transaction-status") {
+      setActiveView("stock");
     }
-  }
-
-  async function loadMagazineSettings({ quiet = false } = {}) {
-    if (!quiet) {
-      setMagazineSettingsBusy(true);
-      setMagazineSettingsError("");
-    }
-    try {
-      const response = await fetch("/api/magazine/settings", { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const nextSettings = { ...defaultMagazineSettings, ...payload };
-      setMagazineSettings(nextSettings);
-      setMagazineStatus((current) => ({
-        ...(current || {}),
-        settings: nextSettings,
-        scheduler: current?.scheduler
-          ? {
-              ...current.scheduler,
-              enabled: Boolean(nextSettings.enabled),
-              settings: nextSettings,
-              nextRunAt: nextSettings.enabled ? current.scheduler.nextRunAt : "",
-            }
-          : current?.scheduler,
-      }));
-      return nextSettings;
-    } catch (error) {
-      setMagazineSettingsError(error.message);
-      return null;
-    } finally {
-      if (!quiet) setMagazineSettingsBusy(false);
-    }
-  }
-
-  async function loadWorldMemoryStatus({ summary = false } = {}) {
-    setWorldMemoryBusy(true);
-    setWorldMemoryError("");
-    try {
-      const response = await fetch(
-        summary ? "/api/world-memory/status?mode=summary" : "/api/world-memory/status",
-        { cache: "no-store" }
-      );
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setWorldMemoryStatus(payload);
-      if (!payload.ok && payload.dependencies?.issues?.length) {
-        const firstError = payload.dependencies.issues.find((issue) => issue.status === "error");
-        setWorldMemoryError(firstError?.message || "");
-      }
-    } catch (error) {
-      setWorldMemoryError(error.message);
-    } finally {
-      setWorldMemoryBusy(false);
-    }
+    return nextSettings;
   }
 
   async function updateWorldMemoryEnabled(enabled) {
-    if (worldMemorySettingsSaving) return;
-    setWorldMemorySettingsSaving(true);
-    setWorldMemorySettingsError("");
-    try {
-      const response = await fetch("/api/world-memory/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ enabled }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
+    const nextSettings = await saveWorldMemoryEnabled(enabled);
+    if (!nextSettings) return;
 
-      const nextSettings = { ...defaultWorldMemorySettings, ...payload };
-      setWorldMemorySettings(nextSettings);
-      setWorldMemoryAgentAction(null);
-      setWorldMemoryFocusedChangeSuggestion(null);
-      if (nextSettings.enabled) {
-        await loadWorldMemoryStatus();
-        void loadMagazineSettings({ quiet: true });
-      } else {
-        setMagazineSettings((current) => ({
-          ...(current || defaultMagazineSettings),
-          ok: true,
-          enabled: false,
-          worldMemoryEnabled: false,
-          disabledReason: "world-memory-disabled",
-          settings: {
-            ...((current || defaultMagazineSettings).settings || {}),
-            enabled: false,
-            disabledReason: "world-memory-disabled",
-          },
-        }));
-        setMagazineStatus((current) => ({
-          ...(current || {}),
-          settings: {
-            ...(current?.settings || defaultMagazineSettings),
-            enabled: false,
-            worldMemoryEnabled: false,
-            disabledReason: "world-memory-disabled",
-          },
-          scheduler: current?.scheduler
-            ? {
-                ...current.scheduler,
-                enabled: false,
-                nextRunAt: "",
-              }
-            : current?.scheduler,
-        }));
-        setMagazineSettingsError("");
-        setWorldMemoryError("");
-        setWorldMemoryStatus((current) => ({
-          ...(current || {}),
-          ok: true,
-          enabled: false,
-          settings: nextSettings.settings,
-          configPath: nextSettings.configPath,
-          defaultConfigPath: nextSettings.defaultConfigPath,
-          collector: {
-            ...(current?.collector || {}),
-            status: "disabled",
-            schedulerStarted: false,
-            inFlight: false,
-          },
-        }));
-        if (activeViewRef.current === "world-memory") {
-          setActiveView("stock");
-        }
-      }
-    } catch (error) {
-      setWorldMemorySettingsError(error.message);
-    } finally {
-      setWorldMemorySettingsSaving(false);
+    setWorldMemoryAgentAction(null);
+    setWorldMemoryFocusedChangeSuggestion(null);
+    if (nextSettings.enabled) {
+      void loadMagazineSettings({ quiet: true });
+      return;
     }
-  }
 
-  async function updateWorldMemoryManagementSettings(patch = {}) {
-    if (worldMemorySettingsSaving) return;
-    const source = patch && typeof patch === "object" ? patch : {};
-    const body = {
-      ...(Object.prototype.hasOwnProperty.call(source, "managementProvider")
-        ? { managementProvider: normalizeAgentModelProvider(source.managementProvider) }
-        : {}),
-      ...(String(source.managementModel || "").trim()
-        ? { managementModel: String(source.managementModel).trim() }
-        : {}),
-      ...(String(source.managementReasoning || "").trim()
-        ? { managementReasoning: String(source.managementReasoning).trim() }
-        : {}),
-      ...(String(source.managementSpeed || "").trim()
-        ? { managementSpeed: String(source.managementSpeed).trim() }
-        : {}),
-    };
-    if (!Object.keys(body).length) return;
-    setWorldMemorySettingsSaving(true);
-    setWorldMemorySettingsError("");
-    try {
-      const response = await fetch("/api/world-memory/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify(body),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setWorldMemorySettings({ ...defaultWorldMemorySettings, ...payload });
-      setWorldMemoryStatus((current) =>
-        current
-          ? {
-              ...current,
-              settings: payload.settings || current.settings,
-            }
-          : current
-      );
-    } catch (error) {
-      setWorldMemorySettingsError(error.message);
-    } finally {
-      setWorldMemorySettingsSaving(false);
-    }
-  }
-
-  async function updateMagazineEnabled(enabled) {
-    if (magazineSettingsSaving) return;
-    setMagazineSettingsSaving(true);
-    setMagazineSettingsError("");
-    try {
-      const response = await fetch("/api/magazine/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ enabled }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const nextSettings = { ...defaultMagazineSettings, ...payload };
-      setMagazineSettings(nextSettings);
-      await refreshMagazineStatus();
-    } catch (error) {
-      setMagazineSettingsError(error.message);
-    } finally {
-      setMagazineSettingsSaving(false);
-    }
-  }
-
-  async function updateMagazineWritingSettings(patch = {}) {
-    if (magazineSettingsSaving) return;
-    const source = patch && typeof patch === "object" ? patch : {};
-    const body = {
-      ...(Object.prototype.hasOwnProperty.call(source, "writingProvider")
-        ? { writingProvider: normalizeAgentModelProvider(source.writingProvider) }
-        : {}),
-      ...(String(source.writingModel || "").trim()
-        ? { writingModel: String(source.writingModel).trim() }
-        : {}),
-      ...(String(source.writingReasoning || "").trim()
-        ? { writingReasoning: String(source.writingReasoning).trim() }
-        : {}),
-      ...(String(source.writingSpeed || "").trim()
-        ? { writingSpeed: String(source.writingSpeed).trim() }
-        : {}),
-    };
-    if (!Object.keys(body).length) return;
-    setMagazineSettingsSaving(true);
-    setMagazineSettingsError("");
-    try {
-      const response = await fetch("/api/magazine/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify(body),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const nextSettings = { ...defaultMagazineSettings, ...payload };
-      setMagazineSettings(nextSettings);
-      setMagazineStatus((current) => ({
-        ...(current || {}),
-        settings: nextSettings,
-        scheduler: current?.scheduler
-          ? {
-              ...current.scheduler,
-              settings: nextSettings,
-            }
-          : current?.scheduler,
-      }));
-    } catch (error) {
-      setMagazineSettingsError(error.message);
-    } finally {
-      setMagazineSettingsSaving(false);
-    }
-  }
-
-  async function updateMagazineSchedulerInterval(schedulerIntervalHours) {
-    if (magazineSettingsSaving) return;
-    const safeIntervalHours = Math.max(1, Math.min(10, Math.round(Number(schedulerIntervalHours || 6))));
-    setMagazineSettingsSaving(true);
-    setMagazineSettingsError("");
-    try {
-      const response = await fetch("/api/magazine/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ schedulerIntervalHours: safeIntervalHours }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const nextSettings = { ...defaultMagazineSettings, ...payload };
-      setMagazineSettings(nextSettings);
-      await refreshMagazineStatus();
-    } catch (error) {
-      setMagazineSettingsError(error.message);
-    } finally {
-      setMagazineSettingsSaving(false);
-    }
-  }
-
-  async function updateMagazineMaxArticlesPerCycle(schedulerMaxArticlesPerCycle) {
-    if (magazineSettingsSaving) return;
-    const safeMaxArticles = Math.max(1, Math.min(3, Math.round(Number(schedulerMaxArticlesPerCycle || 2))));
-    setMagazineSettingsSaving(true);
-    setMagazineSettingsError("");
-    try {
-      const response = await fetch("/api/magazine/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ schedulerMaxArticlesPerCycle: safeMaxArticles }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const nextSettings = { ...defaultMagazineSettings, ...payload };
-      setMagazineSettings(nextSettings);
-      await refreshMagazineStatus();
-    } catch (error) {
-      setMagazineSettingsError(error.message);
-    } finally {
-      setMagazineSettingsSaving(false);
-    }
-  }
-
-  async function loadArcaNotifications({ quiet = false } = {}) {
-    if (!quiet) setArcaNotificationBusy(true);
-    try {
-      const response = await fetch("/api/arca/notifications", { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setArcaNotificationStatus({
-        notificationUrl: ARCA_NOTIFICATION_URL,
-        ...payload,
-        count: Math.max(0, Number(payload.count || 0)),
-      });
-      if (!quiet) setArcaNotificationActionError("");
-      return payload;
-    } catch (error) {
-      const fallbackConnected = Boolean(arcaAuthStatus?.connected || arcaNotificationStatus?.connected);
-      setArcaNotificationStatus((current) => ({
-        ...(current || {}),
-        ok: false,
-        connected: fallbackConnected,
-        status: "error",
-        count: 0,
-        notificationUrl: current?.notificationUrl || ARCA_NOTIFICATION_URL,
-        error: error.message,
-        checkedAt: new Date().toISOString(),
-      }));
-      return null;
-    } finally {
-      if (!quiet) setArcaNotificationBusy(false);
-    }
-  }
-
-  async function markAllArcaNotificationsRead() {
-    if (arcaNotificationActionBusyRef.current) return null;
-    arcaNotificationActionBusyRef.current = true;
-    setArcaNotificationActionBusy(true);
-    setArcaNotificationActionError("");
-    try {
-      const response = await fetch("/api/arca/notifications", {
-        method: "DELETE",
-        cache: "no-store",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.accepted) {
-        throw new Error(payload?.error || `HTTP ${response.status}`);
-      }
-      setArcaNotificationStatus({
-        notificationUrl: ARCA_NOTIFICATION_URL,
-        ...payload,
-        count: Math.max(0, Number(payload.count || 0)),
-      });
-      if (!payload?.verified) {
-        setArcaNotificationActionError(
-          payload?.error ||
-            (payload?.remainingUnreadCount > 0
-              ? `읽음 처리 후에도 새 알림 ${payload.remainingUnreadCount}개가 남아 있습니다.`
-              : "읽음 처리는 접수됐지만 갱신 결과를 확인하지 못했습니다.")
-        );
-      }
-      return payload;
-    } catch (error) {
-      setArcaNotificationActionError(error.message);
-      return null;
-    } finally {
-      arcaNotificationActionBusyRef.current = false;
-      setArcaNotificationActionBusy(false);
-    }
-  }
-
-  async function loadArcaAuthStatus({ actionLabel = "reload", quiet = false } = {}) {
-    if (!quiet) {
-      setArcaAuthBusy(true);
-      setArcaAuthAction(actionLabel);
-      setArcaAuthError("");
-    }
-    try {
-      const response = await fetch("/api/arca/auth/status", { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setArcaAuthStatus(payload);
-      if (!quiet) setArcaAuthError("");
-      return payload;
-    } catch (error) {
-      if (!quiet) setArcaAuthError(error.message);
-      return null;
-    } finally {
-      if (!quiet) {
-        setArcaAuthBusy(false);
-        setArcaAuthAction("");
-      }
-    }
-  }
-
-  async function runArcaAuthAction(actionName, endpoint, { method = "POST", confirmMessage = "" } = {}) {
-    if (arcaAuthBusy) return;
-    if (confirmMessage && typeof window !== "undefined" && !window.confirm(confirmMessage)) return;
-
-    setArcaAuthBusy(true);
-    setArcaAuthAction(actionName);
-    setArcaAuthError("");
-    try {
-      const response = await fetch(endpoint, {
-        method,
-        headers: method === "DELETE" ? undefined : { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: method === "DELETE" ? undefined : "{}",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setArcaAuthStatus(payload);
-      if (actionName === "capture") {
-        setBoardFilters((current) => ({ ...current }));
-      }
-      void loadArcaNotifications({ quiet: true });
-    } catch (error) {
-      setArcaAuthError(error.message);
-    } finally {
-      setArcaAuthBusy(false);
-      setArcaAuthAction("");
-    }
-  }
-
-  function startArcaLoginHandoff() {
-    void runArcaAuthAction("start", "/api/arca/auth/start");
-  }
-
-  function captureArcaLoginSession() {
-    void runArcaAuthAction("capture", "/api/arca/auth/capture");
-  }
-
-  function stopArcaLoginHandoff() {
-    void runArcaAuthAction("stop", "/api/arca/auth/stop");
-  }
-
-  function deleteArcaLoginSession() {
-    void runArcaAuthAction("delete", "/api/arca/auth/session", {
-      method: "DELETE",
-      confirmMessage: "저장된 아카라이브 알림 세션을 삭제할까요?",
-    });
-  }
-
-  async function loadTossInvestStatus({ actionLabel = "reload", quiet = false } = {}) {
-    if (!quiet) {
-      setTossInvestBusy(true);
-      setTossInvestAction(actionLabel);
-      setTossInvestError("");
-      setTossInvestErrorCode("");
-    }
-    try {
-      const response = await fetch("/api/tossinvest/auth/status", { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        if (!quiet) setTossInvestErrorCode(payload.errorCode || "");
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setTossInvestStatus(payload);
-      if (!quiet) {
-        setTossInvestError("");
-        setTossInvestErrorCode("");
-      }
-      return payload;
-    } catch (error) {
-      if (!quiet) setTossInvestError(error.message);
-      return null;
-    } finally {
-      if (!quiet) {
-        setTossInvestBusy(false);
-        setTossInvestAction("");
-      }
-    }
-  }
-
-  async function runTossInvestAction(actionName, endpoint, { method = "POST", body = null, confirmMessage = "" } = {}) {
-    if (tossInvestBusy) return null;
-    if (confirmMessage && typeof window !== "undefined" && !window.confirm(confirmMessage)) return null;
-
-    setTossInvestBusy(true);
-    setTossInvestAction(actionName);
-    setTossInvestError("");
-    setTossInvestErrorCode("");
-    try {
-      const response = await fetch(endpoint, {
-        method,
-        headers: method === "DELETE" ? undefined : { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: method === "DELETE" ? undefined : body ? JSON.stringify(body) : "{}",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        setTossInvestErrorCode(payload.errorCode || "");
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setTossInvestStatus(payload);
-      setTossInvestErrorCode("");
-      return payload;
-    } catch (error) {
-      setTossInvestError(error.message);
-      return null;
-    } finally {
-      setTossInvestBusy(false);
-      setTossInvestAction("");
-    }
-  }
-
-  function saveTossInvestCredentials(credentials) {
-    return runTossInvestAction("save", "/api/tossinvest/auth/credentials", {
-      method: "PUT",
-      body: credentials,
-    });
-  }
-
-  async function saveAndProbeTossInvestCredentials(credentials, { closeDialog = false } = {}) {
-    const saved = await saveTossInvestCredentials(credentials);
-    if (!saved) return null;
-    await probeTossInvestConnection();
-    if (closeDialog) setTossInvestDialogOpen(false);
-    return saved;
-  }
-
-  function unlockTossInvestVault(payload) {
-    return runTossInvestAction("unlock", "/api/tossinvest/auth/unlock", {
-      body: payload,
-    });
-  }
-
-  async function unlockAndProbeTossInvestVault(payload, { closeDialog = false } = {}) {
-    const unlocked = await unlockTossInvestVault(payload);
-    if (!unlocked) return null;
-    await probeTossInvestConnection();
-    if (closeDialog) setTossInvestDialogOpen(false);
-    return unlocked;
-  }
-
-  function lockTossInvestVault() {
-    return runTossInvestAction("lock", "/api/tossinvest/auth/lock");
-  }
-
-  function probeTossInvestConnection() {
-    return runTossInvestAction("probe", "/api/tossinvest/auth/probe");
-  }
-
-  async function checkTossInvestPublicIp() {
-    if (tossInvestPublicIpBusy) return null;
-    setTossInvestPublicIpBusy(true);
-    setTossInvestPublicIpError("");
-    try {
-      const response = await fetch("/api/tossinvest/network/public-ip", { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setTossInvestPublicIp(payload);
-      return payload;
-    } catch (error) {
-      setTossInvestPublicIpError(error.message);
-      return null;
-    } finally {
-      setTossInvestPublicIpBusy(false);
-    }
-  }
-
-  async function deleteTossInvestCredentials() {
-    const deleted = await runTossInvestAction("delete", "/api/tossinvest/auth/credentials", {
-      method: "DELETE",
-      confirmMessage: "저장된 토스증권 API 키와 동기화된 거래내역 SQLite를 함께 삭제할까요?",
-    });
-    if (deleted) {
-      await loadTossInvestOrderSyncStatus({ quiet: true });
-    }
-    return deleted;
-  }
-
-  async function loadTossInvestOrderSyncStatus({ actionLabel = "reload", quiet = false } = {}) {
-    if (!quiet) {
-      setTossInvestOrderSyncBusy(true);
-      setTossInvestOrderSyncAction(actionLabel);
-      setTossInvestOrderSyncError("");
-      setTossInvestOrderSyncErrorCode("");
-    }
-    try {
-      const response = await fetch("/api/tossinvest/order-sync/status", { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        const error = new Error(payload.error || `HTTP ${response.status}`);
-        error.errorCode = payload.errorCode || "";
-        throw error;
-      }
-      setTossInvestOrderSyncStatus((current) => mergeTossInvestOrderSyncStatus(current, payload));
-      if (!quiet) {
-        setTossInvestOrderSyncError("");
-        setTossInvestOrderSyncErrorCode("");
-      }
-      return payload;
-    } catch (error) {
-      if (!quiet) {
-        setTossInvestOrderSyncError(error.message);
-        setTossInvestOrderSyncErrorCode(error.errorCode || "");
-      }
-      return null;
-    } finally {
-      if (!quiet) {
-        setTossInvestOrderSyncBusy(false);
-        setTossInvestOrderSyncAction("");
-      }
-    }
-  }
-
-  function tossInvestOrderSyncHasMore(payload) {
-    if (payload?.sync?.hasNext) return true;
-    const states = Array.isArray(payload?.store?.states) ? payload.store.states : [];
-    return states.some((state) => Boolean(state?.has_next));
-  }
-
-  async function waitForTossInvestOrderSyncBatch() {
-    await new Promise((resolveTimer) => window.setTimeout(resolveTimer, TOSS_INVEST_ORDER_SYNC_BATCH_DELAY_MS));
-  }
-
-  async function requestTossInvestOrderSyncBatch() {
-    const response = await fetch("/api/tossinvest/order-sync/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: "{}",
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.ok) {
-      const error = new Error(payload.error || `HTTP ${response.status}`);
-      error.errorCode = payload.errorCode || "";
-      throw error;
-    }
-    setTossInvestOrderSyncStatus((current) => mergeTossInvestOrderSyncStatus(current, payload));
-    return payload;
-  }
-
-  async function requestTossInvestOrderSyncSnapshotRebuild({ forceFull = false } = {}) {
-    const clientRunId = `snapshot-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const startedAt = new Date().toISOString();
-    setTossInvestOrderSyncStatus((current) => ({
-      ...(current || {}),
-      reconstruction: {
-        ok: null,
-        status: "running",
-        clientRunId,
-        startedAt,
-      },
-    }));
-    const response = await fetch("/api/tossinvest/order-sync/rebuild", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({ forceFull }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.ok) {
-      const error = new Error(payload.error || `HTTP ${response.status}`);
-      error.errorCode = payload.errorCode || "";
-      throw error;
-    }
-    const reconstruction = payload.reconstruction
-      ? {
-          ...payload.reconstruction,
-          clientRunId,
-          startedAt,
-          finishedAt: new Date().toISOString(),
-          status: payload.reconstruction.status || (payload.reconstruction.ok === true ? "completed" : "failed"),
-        }
-      : {
-          ok: false,
-          clientRunId,
-          startedAt,
-          finishedAt: new Date().toISOString(),
-          status: "failed",
-          error: "포지션 스냅샷 생성 결과를 확인하지 못했습니다.",
-        };
-    const normalizedPayload = { ...payload, reconstruction };
-    setTossInvestOrderSyncStatus((current) => mergeTossInvestOrderSyncStatus(current, normalizedPayload));
-    return normalizedPayload;
-  }
-
-  async function runTossInvestOrderSyncBatches() {
-    let payload = null;
-    for (let batchIndex = 0; batchIndex < TOSS_INVEST_ORDER_SYNC_MAX_BATCHES; batchIndex += 1) {
-      if (batchIndex > 0) {
-        await waitForTossInvestOrderSyncBatch();
-        await loadTossInvestOrderSyncStatus({ quiet: true });
-      }
-      payload = await requestTossInvestOrderSyncBatch();
-      if (!tossInvestOrderSyncHasMore(payload)) {
-        const changedOrders =
-          Number(payload?.sync?.insertedCount || 0) + Number(payload?.sync?.updatedCount || 0);
-        setTossInvestOrderSyncAction("snapshot");
-        return await requestTossInvestOrderSyncSnapshotRebuild({ forceFull: changedOrders > 0 });
-      }
-    }
-    throw new Error("거래내역 동기화가 너무 오래 이어지고 있습니다. 잠시 후 다시 이어서 동기화해 주세요.");
-  }
-
-  async function runTossInvestOrderSync() {
-    if (tossInvestOrderSyncBusy) return null;
-    setTossInvestOrderSyncBusy(true);
-    setTossInvestOrderSyncAction("sync");
-    setTossInvestOrderSyncError("");
-    setTossInvestOrderSyncErrorCode("");
-    try {
-      return await runTossInvestOrderSyncBatches();
-    } catch (error) {
-      setTossInvestOrderSyncStatus((current) => failRunningTossInvestOrderSyncReconstruction(current, error));
-      setTossInvestOrderSyncError(error.message);
-      setTossInvestOrderSyncErrorCode(error.errorCode || "");
-      return null;
-    } finally {
-      setTossInvestOrderSyncBusy(false);
-      setTossInvestOrderSyncAction("");
-    }
-  }
-
-  async function updateTossInvestOrderSyncEnabled(enabled) {
-    if (tossInvestOrderSyncBusy) return null;
-    setTossInvestOrderSyncBusy(true);
-    setTossInvestOrderSyncAction("toggle");
-    setTossInvestOrderSyncError("");
-    setTossInvestOrderSyncErrorCode("");
-    try {
-      const response = await fetch("/api/tossinvest/order-sync/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ enabled }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        const error = new Error(payload.error || `HTTP ${response.status}`);
-        error.errorCode = payload.errorCode || "";
-        throw error;
-      }
-      setTossInvestOrderSyncStatus((current) => mergeTossInvestOrderSyncStatus(current, payload));
-      if (!enabled) return payload;
-
-      setTossInvestOrderSyncAction("sync");
-      return await runTossInvestOrderSyncBatches();
-    } catch (error) {
-      setTossInvestOrderSyncStatus((current) => failRunningTossInvestOrderSyncReconstruction(current, error));
-      setTossInvestOrderSyncError(error.message);
-      setTossInvestOrderSyncErrorCode(error.errorCode || "");
-      return null;
-    } finally {
-      setTossInvestOrderSyncBusy(false);
-      setTossInvestOrderSyncAction("");
-    }
-  }
-
-  function openTossInvestDialog() {
-    setTossInvestDialogOpen(true);
-    void loadTossInvestStatus({ quiet: true });
-  }
-
-  async function runWorldMemoryAction(action, options = {}) {
-    if (worldMemoryActionBusy) return;
-    const { uiAgentActionId = "", ...requestOptions } = options;
-    setWorldMemoryActionBusy(true);
-    setWorldMemoryRunningAction(action);
-    setWorldMemoryRunningAgentActionId(uiAgentActionId);
-    setWorldMemoryError("");
-    try {
-      const response = await fetch("/api/world-memory/action", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ action, ...requestOptions }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      setWorldMemoryActionResult(payload);
-      if (!response.ok || !payload.ok) {
-        setWorldMemoryError(payload.error || `HTTP ${response.status}`);
-      }
-      await loadWorldMemoryStatus();
-      return payload;
-    } catch (error) {
-      setWorldMemoryError(error.message);
-      return { ok: false, error: error.message };
-    } finally {
-      setWorldMemoryActionBusy(false);
-      setWorldMemoryRunningAction("");
-      setWorldMemoryRunningAgentActionId("");
+    disableMagazineForWorldMemory();
+    if (activeViewRef.current === "world-memory") {
+      setActiveView("stock");
     }
   }
 
@@ -4255,88 +695,6 @@ function App() {
     setWorldMemoryFocusedChangeSuggestion(null);
   }
 
-  async function loadMemoryDialogRecords({ reset = false } = {}) {
-    if (memoryDialogBusy) return;
-    const offset = reset ? 0 : memoryDialogRecords.length;
-    if (!reset && !memoryDialogHasMore) return;
-
-    setMemoryDialogBusy(true);
-    setMemoryDialogError("");
-    try {
-      const response = await fetch(`/api/memory?limit=${MEMORY_DIALOG_PAGE_SIZE}&offset=${offset}`, {
-        cache: "no-store",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const nextRecords = payload.records || [];
-      setMemoryDialogTotalCount(Number(payload.recordCount || 0));
-      setMemoryDialogHasMore(Boolean(payload.hasMore));
-      setMemoryDialogRecords((current) => {
-        const combined = reset ? nextRecords : [...current, ...nextRecords];
-        const seen = new Set();
-        return combined.filter((record) => {
-          if (!record?.id || seen.has(record.id)) return false;
-          seen.add(record.id);
-          return true;
-        });
-      });
-    } catch (error) {
-      setMemoryDialogError(error.message);
-    } finally {
-      setMemoryDialogBusy(false);
-    }
-  }
-
-  function openMemoryDialog() {
-    setMemoryDialogOpen(true);
-    setMemoryDialogRecords([]);
-    setMemoryDialogHasMore(false);
-    setMemoryDialogTotalCount(0);
-    void loadMemoryDialogRecords({ reset: true });
-  }
-
-  function handleMemoryDialogScroll(event) {
-    const element = event.currentTarget;
-    const remaining = element.scrollHeight - element.scrollTop - element.clientHeight;
-    if (remaining < 260) {
-      void loadMemoryDialogRecords({ reset: false });
-    }
-  }
-
-  async function deleteMemoryRecord(record) {
-    if (!record?.id || deletingMemoryRecordId) return;
-    const title = record.title || "공유 작업 메모리";
-    if (!window.confirm(`"${title}" 기록을 삭제할까요?`)) return;
-
-    setDeletingMemoryRecordId(record.id);
-    setMemoryError("");
-    setMemoryDialogError("");
-    try {
-      const response = await fetch(`/api/memory?id=${encodeURIComponent(record.id)}&limit=${MEMORY_RECENT_LIMIT}&offset=0`, {
-        method: "DELETE",
-        cache: "no-store",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setMemoryStatus(payload.status || emptyMemoryStatus);
-      if (memoryDialogOpen) {
-        setMemoryDialogRecords([]);
-        setMemoryDialogHasMore(false);
-        setMemoryDialogTotalCount(0);
-        await loadMemoryDialogRecords({ reset: true });
-      }
-    } catch (error) {
-      setMemoryError(error.message);
-      setMemoryDialogError(error.message);
-    } finally {
-      setDeletingMemoryRecordId("");
-    }
-  }
-
   async function saveSharedChatMemory({
     createdAt,
     promptText,
@@ -4355,12 +713,7 @@ function App() {
     const summary = memorySummaryFromExchange(promptText, answerText);
     if (!summary) return;
 
-    try {
-      const response = await fetch("/api/memory", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
+    await saveSharedMemoryRecord({
           provider,
           providerLabel,
           screen,
@@ -4448,914 +801,13 @@ function App() {
             providerLabel,
             writer: provider,
           },
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setMemoryStatus(payload.status || emptyMemoryStatus);
-      setMemoryError("");
-    } catch (error) {
-      setMemoryError(error.message);
-    }
-  }
-
-  async function refreshNewsFeedStatus() {
-    try {
-      const response = await fetch("/api/news-feed/status", { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      newsFeedContentRevisionRef.current = newsFeedContentRevision(payload);
-      setNewsFeedStatus((current) =>
-        payload.collector || payload.feeds
-          ? payload
-          : {
-              ...(current || {}),
-              itemCount: payload.itemCount,
-              offset: payload.offset,
-              limit: payload.limit,
-              hasMore: payload.hasMore,
-            }
-      );
-    } catch {
-      // Settings toggles should still succeed even if the status probe is momentarily stale.
-    }
-  }
-
-  async function markNewsFeedOpened() {
-    try {
-      const response = await fetch("/api/news-feed/read-state", {
-        method: "POST",
-        cache: "no-store",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      newsFeedContentRevisionRef.current = newsFeedContentRevision(payload);
-      setNewsFeedStatus(payload);
-      return payload;
-    } catch {
-      return null;
-    }
-  }
-
-  function applyMagazineCatalogPayload(payload) {
-    const articles = Array.isArray(payload?.articles) ? payload.articles : [];
-    setMagazineCatalog({
-      articles,
-      coverStories: Array.isArray(payload?.coverStories) ? payload.coverStories : [],
-      topicCatalog: Array.isArray(payload?.topicCatalog) ? payload.topicCatalog : [],
-    });
-    setMagazineStatus((current) => ({
-      ...(current || {}),
-      ok: payload?.ok !== false,
-      storage: payload?.storage || current?.storage || "files",
-      articleCount: articles.length,
-      readState: payload?.readState || current?.readState || null,
-      settings: payload?.settings || current?.settings || null,
-      scheduler: payload?.scheduler || current?.scheduler || null,
-    }));
-    if (payload?.settings) {
-      setMagazineSettings({ ...defaultMagazineSettings, ...payload.settings });
-    }
-  }
-
-  async function refreshMagazineCatalog({ signal } = {}) {
-    const response = await fetch("/api/magazine/articles", {
-      cache: "no-store",
-      signal,
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload?.ok) {
-      throw new Error(payload?.error || `HTTP ${response.status}`);
-    }
-    applyMagazineCatalogPayload(payload);
-    return payload;
-  }
-
-  async function refreshMagazineStatus({ signal } = {}) {
-    const response = await fetch("/api/magazine/status", {
-      cache: "no-store",
-      signal,
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload?.ok) {
-      throw new Error(payload?.error || `HTTP ${response.status}`);
-    }
-    setMagazineStatus(payload);
-    if (payload?.settings) {
-      setMagazineSettings({ ...defaultMagazineSettings, ...payload.settings });
-    }
-    return payload;
-  }
-
-  async function markMagazineOpened() {
-    try {
-      const response = await fetch("/api/magazine/read-state", {
-        method: "POST",
-        cache: "no-store",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.error || `HTTP ${response.status}`);
-      }
-      setMagazineStatus(payload);
-      return payload;
-    } catch {
-      return null;
-    }
-  }
-
-  async function startMagazineNow() {
-    if (magazineStartNowBusy || magazineSchedulerIsActive(magazineStatus)) return;
-    setMagazineStartNowBusy(true);
-    try {
-      const response = await fetch("/api/magazine/status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ action: "runNow" }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.error || `HTTP ${response.status}`);
-      }
-      setMagazineStatus(payload);
-      if (payload?.settings) {
-        setMagazineSettings({ ...defaultMagazineSettings, ...payload.settings });
-      }
-    } catch (error) {
-      setMagazineStatus((current) => ({
-        ...(current || {}),
-        ok: false,
-        error: error.message,
-      }));
-      if (/cycle is active|already running/i.test(error.message || "")) {
-        void refreshMagazineStatus().catch(() => {});
-      }
-    } finally {
-      setMagazineStartNowBusy(false);
-    }
-  }
-
-  async function generateOneMagazineArticle() {
-    if (magazineGenerateOneBusy || magazineStartNowBusy || magazineSchedulerIsActive(magazineStatus)) return;
-    setMagazineGenerateOneBusy(true);
-    try {
-      const response = await fetch("/api/magazine/articles", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          action: "generateWithCodex",
-          count: 1,
-          replace: false,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.error || `HTTP ${response.status}`);
-      }
-      applyMagazineCatalogPayload(payload);
-      void refreshMagazineStatus().catch(() => {});
-    } catch (error) {
-      setMagazineStatus((current) => ({
-        ...(current || {}),
-        ok: false,
-        error: error.message,
-      }));
-      if (/cycle is active|already running|generation is already running/i.test(error.message || "")) {
-        void refreshMagazineStatus().catch(() => {});
-      }
-    } finally {
-      setMagazineGenerateOneBusy(false);
-    }
-  }
-
-  async function toggleNewsFeedSource(feedId, enabled) {
-    setNewsFeedSettingsSavingId(feedId);
-    setNewsFeedSettingsError("");
-    try {
-      const response = await fetch("/api/news-feed/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ feedId, enabled }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setNewsFeedSettings(payload);
-      await refreshNewsFeedStatus();
-      if (activeView === "news-feed") {
-        await loadNewsFeedItems({ reset: true });
-      }
-    } catch (error) {
-      setNewsFeedSettingsError(error.message);
-    } finally {
-      setNewsFeedSettingsSavingId("");
-    }
-  }
-
-  async function updateNewsFeedPollInterval(pollIntervalSeconds) {
-    setNewsFeedSettingsSavingId("poll-interval");
-    setNewsFeedSettingsError("");
-    try {
-      const response = await fetch("/api/news-feed/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ pollIntervalSeconds }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setNewsFeedSettings(payload);
-      await refreshNewsFeedStatus();
-    } catch (error) {
-      setNewsFeedSettingsError(error.message);
-    } finally {
-      setNewsFeedSettingsSavingId("");
-    }
-  }
-
-  async function refreshNewsFeed() {
-    setNewsFeedRefreshBusy(true);
-    setNewsFeedError("");
-    try {
-      const response = await fetch("/api/news-feed/refresh", {
-        method: "POST",
-        cache: "no-store",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      newsFeedContentRevisionRef.current = newsFeedContentRevision(payload);
-      setNewsFeedStatus(payload);
-    } catch (error) {
-      setNewsFeedError(error.message);
-    } finally {
-      setNewsFeedRefreshBusy(false);
-    }
-  }
-
-  async function updateNewsFeedMarketSummaryCollapsed(collapsed) {
-    const nextCollapsed = Boolean(collapsed);
-    setNewsFeedStatus((current) => ({
-      ...(current || {}),
-      viewState: {
-        ...(current?.viewState || {}),
-        marketSummaryCollapsed: nextCollapsed,
-      },
-    }));
-    try {
-      const response = await fetch("/api/news-feed/view-state", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ marketSummaryCollapsed: nextCollapsed }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      setNewsFeedStatus(payload);
-    } catch (error) {
-      setNewsFeedError(error.message);
-    }
-  }
-
-  function handleNewsFeedScroll(event) {
-    if (activeView !== "news-feed" || newsFeedBusy || newsFeedLoadingMore || !newsFeedHasMore) return;
-    const element = event.currentTarget;
-    const remaining = element.scrollHeight - element.scrollTop - element.clientHeight;
-    if (remaining < 420) {
-      void loadNewsFeedItems({ reset: false });
-    }
-  }
-
-  function submitBoardSearch(event) {
-    event.preventDefault();
-    updateBoardFilters({ keyword: boardSearchInput.trim(), page: 1 });
-  }
-
-  async function openArcaArticleReader(row, { rememberScroll = true } = {}) {
-    if (!row?.href) return;
-    if (rememberScroll) {
-      arcaReaderReturnScrollRef.current = arcaCanvasRef.current?.scrollTop ?? 0;
-    }
-    arcaReaderAbortRef.current?.abort();
-    const controller = new AbortController();
-    arcaReaderAbortRef.current = controller;
-    setArcaReaderArticle({ ...row, url: row.href, href: row.href });
-    setArcaReaderBusy(true);
-    setArcaReaderError("");
-    window.requestAnimationFrame(() => {
-      if (arcaCanvasRef.current) arcaCanvasRef.current.scrollTop = 0;
-    });
-
-    try {
-      const response = await fetch(`/api/arca/article?url=${encodeURIComponent(row.href)}`, {
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        const issueMessage = payload.issues?.[0]?.message || payload.error || `HTTP ${response.status}`;
-        throw new Error(issueMessage);
-      }
-      if (controller.signal.aborted) return;
-      setArcaReaderArticle({
-        ...row,
-        ...(payload.article || {}),
-        id: row.id,
-        number: row.number,
-        title: payload.article?.title || row.title,
-        author: payload.article?.author || row.author,
-        url: payload.article?.url || row.href,
-        href: row.href,
-        categoryLabel: row.categoryLabel,
-        view: row.view,
-        rate: row.rate,
-      });
-    } catch (error) {
-      if (error.name !== "AbortError") setArcaReaderError(error.message);
-    } finally {
-      if (arcaReaderAbortRef.current === controller) {
-        arcaReaderAbortRef.current = null;
-        setArcaReaderBusy(false);
-      }
-    }
-  }
-
-  function retryArcaArticleReader() {
-    if (!arcaReaderArticle?.href) return;
-    void openArcaArticleReader(arcaReaderArticle, { rememberScroll: false });
-  }
-
-  function closeArcaArticleReader() {
-    arcaReaderAbortRef.current?.abort();
-    arcaReaderAbortRef.current = null;
-    setArcaReaderArticle(null);
-    setArcaReaderBusy(false);
-    setArcaReaderError("");
-    window.requestAnimationFrame(() => {
-      if (arcaCanvasRef.current) arcaCanvasRef.current.scrollTop = arcaReaderReturnScrollRef.current;
     });
   }
-
-  function openArcaNotificationArticle(item) {
-    if (!item?.isStockChannel || !item?.targetUrl) return;
-    void openArcaArticleReader({
-      type: "article",
-      id: item.articleId || item.id || "",
-      number: item.articleId || "",
-      title: item.title || "주식채널 알림 글",
-      author: item.author || "",
-      href: item.targetUrl,
-      url: item.targetUrl,
-      categoryLabel: "",
-    });
-  }
-
-  async function attachArticleContext(row) {
-    if (!row?.href || attachingArticleHref) return;
-    setAttachingArticleHref(row.href);
-    try {
-      const response = await fetch(`/api/arca/article?url=${encodeURIComponent(row.href)}`, { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) {
-        const issueMessage = payload.issues?.[0]?.message || payload.error || `HTTP ${response.status}`;
-        throw new Error(issueMessage);
-      }
-      setAttachedArticle({
-        ...payload.article,
-        id: row.id,
-        number: row.number,
-        title: payload.article?.title || row.title,
-        author: payload.article?.author || row.author,
-        url: payload.article?.url || row.href,
-        href: row.href,
-      });
-      promptRef.current?.focus();
-    } catch (error) {
-      setAttachedArticle({
-        id: row.id,
-        number: row.number,
-        title: row.title,
-        author: row.author,
-        url: row.href,
-        href: row.href,
-        error: `본문을 가져오지 못했습니다: ${error.message}`,
-      });
-    } finally {
-      setAttachingArticleHref("");
-    }
-  }
-
-  async function addChatAttachmentFiles(fileList) {
-    const scope = activeChatScope;
-    const scopeAttachments = attachmentsForScope(scope);
-    const incoming = Array.from(fileList || []).filter((file) => file && typeof file.size === "number");
-    if (!incoming.length) return;
-
-    setAttachmentErrorForScope(scope, "");
-    const remainingSlots = MAX_CHAT_ATTACHMENTS - scopeAttachments.length;
-    if (remainingSlots <= 0) {
-      setAttachmentErrorForScope(scope, `첨부는 최대 ${MAX_CHAT_ATTACHMENTS}개까지 가능합니다.`);
-      return;
-    }
-
-    const accepted = [];
-    const rejected = [];
-    let totalBytes = scopeAttachments.reduce((sum, item) => sum + Number(item.size || 0), 0);
-
-    for (const file of incoming.slice(0, remainingSlots)) {
-      if (file.size > MAX_CHAT_ATTACHMENT_BYTES) {
-        rejected.push(`${file.name || "파일"}: ${formatFileSize(MAX_CHAT_ATTACHMENT_BYTES)} 초과`);
-        continue;
-      }
-      if (totalBytes + file.size > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
-        rejected.push(`${file.name || "파일"}: 전체 ${formatFileSize(MAX_CHAT_ATTACHMENT_TOTAL_BYTES)} 제한 초과`);
-        continue;
-      }
-      accepted.push(file);
-      totalBytes += file.size;
-    }
-
-    if (incoming.length > remainingSlots) {
-      rejected.push(`최대 ${MAX_CHAT_ATTACHMENTS}개 제한으로 ${incoming.length - remainingSlots}개 제외`);
-    }
-
-    if (rejected.length) {
-      setAttachmentErrorForScope(scope, rejected.join(" / "));
-    }
-    if (!accepted.length) return;
-
-    try {
-      const nextAttachments = await Promise.all(accepted.map(fileToChatAttachment));
-      setAttachmentsForScope(scope, (current) => [...current, ...nextAttachments].slice(0, MAX_CHAT_ATTACHMENTS));
-      promptRef.current?.focus();
-    } catch (error) {
-      setAttachmentErrorForScope(scope, error.message || "첨부 파일을 읽지 못했습니다.");
-    }
-  }
-
-  function removeChatAttachment(id) {
-    const scope = activeChatScope;
-    setAttachmentsForScope(scope, (current) => current.filter((attachment) => attachment.id !== id));
-    setAttachmentErrorForScope(scope, "");
-  }
-
-  function hasFileTransfer(event) {
-    return Array.from(event.dataTransfer?.types || []).includes("Files");
-  }
-
-  function handleComposerDragEnter(event) {
-    if (!hasFileTransfer(event)) return;
-    event.preventDefault();
-    setIsComposerDragging(true);
-  }
-
-  function handleComposerDragOver(event) {
-    if (!hasFileTransfer(event)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-    setIsComposerDragging(true);
-  }
-
-  function handleComposerDragLeave(event) {
-    if (event.currentTarget.contains(event.relatedTarget)) return;
-    setIsComposerDragging(false);
-  }
-
-  function handleComposerDrop(event) {
-    if (!hasFileTransfer(event)) return;
-    event.preventDefault();
-    setIsComposerDragging(false);
-    void addChatAttachmentFiles(event.dataTransfer.files);
-  }
-
-  function handleComposerPaste(event) {
-    const files = Array.from(event.clipboardData?.files || []);
-    if (!files.length) return;
-    event.preventDefault();
-    void addChatAttachmentFiles(files);
-  }
-
-  async function refreshAgentOptions({ isCancelled = () => false, force = false } = {}) {
-    try {
-      const response = await fetch(force ? "/api/codex/options?refresh=1" : "/api/codex/options", {
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const payload = await response.json();
-      if (isCancelled()) return;
-
-      const nextProviderOptions = payload.providers?.length ? payload.providers : fallbackProviderOptions;
-      const nextApprovalOptions = payload.approvalOptions?.length
-        ? payload.approvalOptions
-        : fallbackApprovalOptions;
-      const nextModelGroups = payload.modelGroups?.length ? payload.modelGroups : fallbackModelGroups;
-      const nextAntigravityModelGroups = modelGroupsFromAntigravityCatalog(payload.antigravityModelCatalog);
-      const nextAgentSettings = payload.agentSettings?.settings || emptyAgentSettings;
-      const selectedProviderFromSettings = payload.selected?.provider || nextAgentSettings.selectedProvider;
-      const nextProvider = nextProviderOptions.some((item) => item.id === selectedProviderFromSettings)
-        ? selectedProviderFromSettings
-        : nextProviderOptions.some((item) => item.id === payload.selected?.provider)
-          ? payload.selected.provider
-          : "codex-cli";
-      const nextSelection = selectionForProvider(
-        nextProvider,
-        payload.selected || nextAgentSettings.providers?.[nextProvider] || {},
-        nextModelGroups,
-        nextAntigravityModelGroups,
-        nextApprovalOptions
-      );
-
-      setProviderOptions(nextProviderOptions);
-      setAgentProvider(nextProvider);
-      setApprovalOptions(nextApprovalOptions);
-      setModelGroups(nextModelGroups);
-      setAntigravityCatalogGroups(nextAntigravityModelGroups);
-      setAgentUserSettings(nextAgentSettings);
-      setPersonaMode(nextAgentSettings.personaMode || "none");
-      applyAgentSelection(nextSelection);
-      setAgentOptionsReady(true);
-      setCodexStatus({
-        available: Boolean(payload.codex?.available),
-        label: payload.codex?.available
-          ? "Codex CLI 연결됨"
-          : payload.codex?.error || "Codex CLI 연결 실패",
-        commandPreview: "",
-        version: payload.codex?.version || "",
-      });
-    } catch (error) {
-      if (isCancelled()) return;
-      setCodexStatus({
-        available: false,
-        label: `Codex CLI probe 실패: ${error.message}`,
-        commandPreview: "",
-      });
-      setAgentOptionsReady(true);
-    }
-  }
-
-  async function reloadAgentModelCatalog() {
-    if (modelCatalogRefreshing) return;
-    setModelCatalogRefreshing(true);
-    try {
-      await refreshAgentOptions({ force: true });
-    } finally {
-      setModelCatalogRefreshing(false);
-    }
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    void refreshAgentOptions({ isCancelled: () => cancelled });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    void Promise.all([
-      loadWorldMemorySettings({ quiet: true }),
-      loadWorldMemoryStatus({ summary: true }),
-      loadTransactionSettings({ quiet: true }),
-    ]);
-  }, []);
-
-  useEffect(() => {
-    if (!tossInvestConnected || !tossInvestOrderSyncEnabled) return undefined;
-
-    const timer = window.setInterval(() => {
-      if (tossInvestOrderSyncBusy) return;
-      void runTossInvestOrderSync();
-    }, TOSS_INVEST_ORDER_SYNC_INTERVAL_MS);
-
-    return () => window.clearInterval(timer);
-  }, [tossInvestConnected, tossInvestOrderSyncEnabled, tossInvestOrderSyncBusy]);
-
-  useEffect(() => {
-    if (!tossInvestOrderSyncBusy || !["sync", "snapshot"].includes(tossInvestOrderSyncAction)) return undefined;
-
-    void loadTossInvestOrderSyncStatus({ quiet: true });
-    const timer = window.setInterval(() => {
-      void loadTossInvestOrderSyncStatus({ quiet: true });
-    }, TOSS_INVEST_ORDER_SYNC_PROGRESS_POLL_MS);
-
-    return () => window.clearInterval(timer);
-  }, [tossInvestOrderSyncBusy, tossInvestOrderSyncAction]);
-
-  useEffect(() => {
-    if (activeView !== "magazine") return undefined;
-    const controller = new AbortController();
-    async function loadMagazinePreferences() {
-      try {
-        const response = await fetch("/api/magazine/preferences", {
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload = await response.json();
-        if (!payload?.ok) throw new Error(payload?.error || "매거진 편집 선호를 읽을 수 없습니다.");
-        setMagazinePreferenceStore(payload);
-      } catch (error) {
-        if (error.name !== "AbortError") {
-          console.warn("Magazine preferences load failed", error);
-        }
-      }
-    }
-    void loadMagazinePreferences();
-    return () => {
-      controller.abort();
-    };
-  }, [activeView]);
-
-  useEffect(() => {
-    if (!magazineActiveArticle?.id) return undefined;
-    const controller = new AbortController();
-    async function loadMagazineComments() {
-      try {
-        const response = await fetch(`/api/magazine/comments?articleId=${encodeURIComponent(magazineActiveArticle.id)}`, {
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload = await response.json();
-        if (!payload?.ok) throw new Error(payload?.error || "매거진 댓글을 읽을 수 없습니다.");
-        setMagazineCommentStore(normalizeMagazineCommentStore(payload, magazineActiveArticle.id));
-      } catch (error) {
-        if (error.name !== "AbortError") {
-          console.warn("Magazine comments load failed", error);
-          setMagazineCommentError(error.message);
-        }
-      }
-    }
-    void loadMagazineComments();
-    return () => {
-      controller.abort();
-    };
-  }, [magazineActiveArticle?.id]);
-
-  useEffect(() => {
-    if (!magazinePreferenceNotice) return undefined;
-    setMagazinePreferenceNoticeFading(false);
-    const fadeTimeoutId = window.setTimeout(() => {
-      setMagazinePreferenceNoticeFading(true);
-    }, 2000);
-    const clearTimeoutId = window.setTimeout(() => {
-      setMagazinePreferenceNotice("");
-      setMagazinePreferenceNoticeFading(false);
-    }, 2800);
-    return () => {
-      window.clearTimeout(fadeTimeoutId);
-      window.clearTimeout(clearTimeoutId);
-    };
-  }, [magazinePreferenceNotice]);
 
   useEffect(() => {
     activeViewRef.current = activeView;
   }, [activeView]);
 
-  useEffect(() => {
-    if (activeView !== "magazine") {
-      setMagazineActiveArticle(null);
-      setMagazineActiveTopic("");
-    }
-  }, [activeView]);
-
-  useEffect(() => {
-    if (magazineActiveTopic && !magazineActiveTopicEntry) {
-      setMagazineActiveTopic("");
-    }
-  }, [magazineActiveTopic, magazineActiveTopicEntry]);
-
-  useEffect(() => {
-    if (activeView !== "magazine" || (!magazineActiveArticle && !magazineActiveTopic)) return undefined;
-
-    function handleMagazineReaderKeyDown(event) {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      if (magazineDeleteDialogOpen) {
-        closeMagazineDeleteDialog();
-        return;
-      }
-      if (magazineActiveArticle) {
-        closeMagazineArticle();
-        return;
-      }
-      closeMagazineTopic();
-    }
-
-    window.addEventListener("keydown", handleMagazineReaderKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleMagazineReaderKeyDown);
-    };
-  }, [activeView, closeMagazineArticle, closeMagazineDeleteDialog, closeMagazineTopic, magazineActiveArticle, magazineActiveTopic, magazineDeleteDialogOpen]);
-
-  useEffect(() => {
-    portfolioCanvasStoreRef.current = portfolioCanvasStore;
-    writeStoredPortfolioCanvasStore(portfolioCanvasStore);
-  }, [portfolioCanvasStore]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const browserStoreAtBoot = readStoredPortfolioCanvasStore();
-
-    async function hydratePortfolioCanvasStore() {
-      try {
-        const payload = await loadPortfolioCanvasStoreFile();
-        if (cancelled) return;
-        const fileStore = normalizePortfolioCanvasStore(payload.store);
-        const currentStore = normalizePortfolioCanvasStore(portfolioCanvasStoreRef.current);
-        const userChangedBeforeHydration =
-          portfolioCanvasStoreHasCanvases(currentStore) &&
-          JSON.stringify(currentStore) !== JSON.stringify(normalizePortfolioCanvasStore(browserStoreAtBoot));
-        const browserStore = portfolioCanvasStoreHasCanvases(currentStore) ? currentStore : browserStoreAtBoot;
-        const nextStore =
-          userChangedBeforeHydration || !portfolioCanvasStoreHasCanvases(fileStore)
-            ? browserStore
-            : fileStore;
-
-        if (portfolioCanvasStoreHasCanvases(nextStore) || portfolioCanvasStoreHasCanvases(fileStore)) {
-          portfolioCanvasFileSignatureRef.current = JSON.stringify(normalizePortfolioCanvasStore(nextStore));
-          setPortfolioCanvasStore(normalizePortfolioCanvasStore(nextStore));
-          writeStoredPortfolioCanvasStore(nextStore);
-        }
-        portfolioCanvasFileReadyRef.current = true;
-
-        if (
-          portfolioCanvasStoreHasCanvases(nextStore) &&
-          (userChangedBeforeHydration || !portfolioCanvasStoreHasCanvases(fileStore) || payload.source === "backup")
-        ) {
-          void savePortfolioCanvasStoreFile(nextStore).catch(() => {});
-        }
-      } catch {
-        if (!cancelled) {
-          portfolioCanvasFileReadyRef.current = false;
-        }
-      }
-    }
-
-    void hydratePortfolioCanvasStore();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!portfolioCanvasFileReadyRef.current) return;
-    const nextStore = normalizePortfolioCanvasStore(portfolioCanvasStore);
-    const nextSignature = JSON.stringify(nextStore);
-    if (nextSignature === portfolioCanvasFileSignatureRef.current) return;
-    const timer = window.setTimeout(() => {
-      portfolioCanvasFileSignatureRef.current = nextSignature;
-      void savePortfolioCanvasStoreFile(nextStore).catch(() => {
-        if (portfolioCanvasFileSignatureRef.current === nextSignature) {
-          portfolioCanvasFileSignatureRef.current = "";
-        }
-      });
-    }, PORTFOLIO_CANVAS_FILE_SAVE_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [portfolioCanvasStore]);
-
-  useEffect(() => {
-    magazineArticleCountRef.current = Number(
-      magazineStatus?.articleCount || magazineCatalog?.articles?.length || 0
-    );
-  }, [magazineCatalog?.articles?.length, magazineStatus?.articleCount]);
-
-  useEffect(() => {
-    magazineLatestArticleAtRef.current = magazineStatus?.readState?.latestArticleAt || "";
-  }, [magazineStatus?.readState?.latestArticleAt]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function pollNewsFeedStatus() {
-      try {
-        const response = await fetch("/api/news-feed/status", { cache: "no-store" });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.ok) {
-          throw new Error(payload.error || `HTTP ${response.status}`);
-        }
-        if (cancelled) return;
-        const previousContentRevision = newsFeedContentRevisionRef.current;
-        const nextContentRevision = newsFeedContentRevision(payload);
-        newsFeedContentRevisionRef.current = nextContentRevision;
-        setNewsFeedStatus(payload);
-
-        if (
-          activeViewRef.current === "news-feed" &&
-          previousContentRevision &&
-          nextContentRevision !== previousContentRevision
-        ) {
-          const itemsResponse = await fetch(`/api/news-feed/items?limit=${NEWS_FEED_PAGE_SIZE}&offset=0`, {
-            cache: "no-store",
-          });
-          const itemsPayload = await itemsResponse.json().catch(() => ({}));
-          if (!cancelled && itemsResponse.ok && itemsPayload.ok) {
-            newsFeedContentRevisionRef.current = newsFeedContentRevision(itemsPayload);
-            setNewsFeedStatus((current) => ({
-              ...(current || {}),
-              itemCount: itemsPayload.itemCount,
-              readState: itemsPayload.readState || current?.readState,
-              offset: itemsPayload.offset,
-              limit: itemsPayload.limit,
-              hasMore: itemsPayload.hasMore,
-            }));
-            setNewsFeedHasMore(Boolean(itemsPayload.hasMore));
-            setNewsFeedItems((current) => mergeNewsFeedFirstPage(current, itemsPayload.items || []));
-          }
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setNewsFeedStatus((current) => ({
-            ...(current || {}),
-            collector: {
-              ...(current?.collector || {}),
-              healthy: false,
-              lastError: error.message,
-            },
-          }));
-        }
-      }
-    }
-
-    pollNewsFeedStatus();
-    const timer = window.setInterval(pollNewsFeedStatus, 15000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function pollMagazineStatus() {
-      try {
-        const payload = await refreshMagazineStatus();
-        if (cancelled) return;
-        const nextArticleCount = Number(payload.articleCount || 0);
-        const nextLatestArticleAt = payload.readState?.latestArticleAt || "";
-        const catalogChanged =
-          nextArticleCount !== magazineArticleCountRef.current ||
-          nextLatestArticleAt !== magazineLatestArticleAtRef.current;
-        if (catalogChanged && activeViewRef.current === "magazine") {
-          await refreshMagazineCatalog();
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setMagazineStatus((current) => ({
-            ...(current || {}),
-            ok: false,
-            error: error.message,
-          }));
-        }
-      }
-    }
-
-    void pollMagazineStatus();
-    const timer = window.setInterval(pollMagazineStatus, MAGAZINE_STATUS_POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function pollNotificationStatus() {
-      try {
-        const payload = await refreshNotificationStatus();
-        if (cancelled) return;
-        setNotificationStatus(payload);
-      } catch {
-        // Keep the last known badge state; notification polling should not disturb the workspace.
-      }
-    }
-
-    void pollNotificationStatus();
-    const timer = window.setInterval(pollNotificationStatus, NOTIFICATION_STATUS_POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
 
   useEffect(() => {
     notificationStatusRef.current = notificationStatus;
@@ -5402,139 +854,17 @@ function App() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function pollArcaNotifications() {
-      if (arcaNotificationActionBusyRef.current) return;
-      try {
-        const response = await fetch("/api/arca/notifications", { cache: "no-store" });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(payload.error || `HTTP ${response.status}`);
-        }
-        if (cancelled) return;
-        setArcaNotificationStatus({
-          notificationUrl: ARCA_NOTIFICATION_URL,
-          ...payload,
-          count: Math.max(0, Number(payload.count || 0)),
-        });
-      } catch (error) {
-        if (cancelled) return;
-        setArcaNotificationStatus((current) => ({
-          ...(current || {}),
-          ok: false,
-          connected: Boolean(current?.connected),
-          status: "error",
-          count: 0,
-          notificationUrl: current?.notificationUrl || ARCA_NOTIFICATION_URL,
-          error: error.message,
-          checkedAt: new Date().toISOString(),
-        }));
-      }
-    }
-
-    pollArcaNotifications();
-    const timer = window.setInterval(pollArcaNotifications, ARCA_NOTIFICATION_POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (activeView !== "news-feed") return;
-    let cancelled = false;
-
-    async function openNewsFeed() {
-      await Promise.all([markNewsFeedOpened(), loadNewsFeedItems({ reset: true })]);
-      if (cancelled) return;
-      void refreshNewsFeedStatus();
-    }
-
-    void openNewsFeed();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeView]);
-
-  useEffect(() => {
-    void loadSharedMemoryStatus();
-    const timer = window.setInterval(() => {
-      void loadSharedMemoryStatus();
-    }, MEMORY_MARKET_SUMMARY_POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (activeView !== "magazine") return;
-    let cancelled = false;
-
-    async function openMagazine() {
-      await markMagazineOpened();
-      if (cancelled) return;
-      try {
-        await refreshMagazineCatalog();
-      } catch (error) {
-        if (error.name !== "AbortError") {
-          console.warn("Magazine catalog refresh failed", error);
-        }
-      }
-    }
-
-    void openMagazine();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeView]);
-
-  useEffect(() => {
-    if (activeView !== "settings") return;
-    void loadNewsFeedSettings();
-    void loadSharedMemoryStatus();
-    void loadWorldMemorySettings({ refreshStatus: true });
-    void loadMagazineSettings({ quiet: true });
-    void loadArcaAuthStatus({ quiet: true });
-    void loadTossInvestStatus({ quiet: true });
-    void loadTossInvestOrderSyncStatus({ quiet: true });
-    void loadTransactionSettings();
-  }, [activeView]);
-
-  useEffect(() => {
     if (activeView !== "transaction-status") return;
     if (transactionStatusHidden) {
       setActiveView("stock");
-      return;
     }
-    void loadTossInvestStatus({ quiet: true });
   }, [activeView, transactionStatusHidden]);
-
-  useEffect(() => {
-    if (activeView !== "portfolio-canvas" || !activePortfolioCanvas) return;
-    if (portfolioCanvasModeMeta(activePortfolioCanvas.mode).id !== PORTFOLIO_CANVAS_MODES.asset.id) return;
-    void loadTossInvestStatus({ quiet: true });
-    void loadTossInvestOrderSyncStatus({ quiet: true });
-  }, [activeView, activePortfolioCanvas?.id, activePortfolioCanvas?.mode]);
-
-  useEffect(() => {
-    if (!tossInvestDialogOpen) return undefined;
-
-    function handleTossInvestDialogKeyDown(event) {
-      if (event.key === "Escape") {
-        setTossInvestDialogOpen(false);
-      }
-    }
-
-    window.addEventListener("keydown", handleTossInvestDialogKeyDown);
-    return () => window.removeEventListener("keydown", handleTossInvestDialogKeyDown);
-  }, [tossInvestDialogOpen]);
 
   useEffect(() => {
     if (activeView !== "world-memory") return;
     if (!worldMemoryEnabled) {
       setActiveView("stock");
-      return;
     }
-    void loadWorldMemoryStatus();
   }, [activeView, worldMemoryEnabled]);
 
   useEffect(() => {
@@ -5542,88 +872,6 @@ function App() {
       setActiveView("stock");
     }
   }, [activeView, magazineEnabled]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadArcaBoard() {
-      setArcaBoardBusy(true);
-      setArcaBoardError("");
-      try {
-        const response = await fetch("/api/arca/articles", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(boardFilters),
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok && !payload.issues?.length) {
-          throw new Error(payload.error || `HTTP ${response.status}`);
-        }
-        if (cancelled) return;
-        setArcaBoard(payload);
-        if (!payload.ok && payload.issues?.length) {
-          setArcaBoardError(payload.issues.map((item) => item.message).join(" / "));
-        }
-      } catch (error) {
-        if (cancelled) return;
-        setArcaBoardError(error.message);
-      } finally {
-        if (!cancelled) setArcaBoardBusy(false);
-      }
-    }
-
-    loadArcaBoard();
-    return () => {
-      cancelled = true;
-    };
-  }, [boardFilters]);
-
-  useEffect(() => {
-    if (!reasoningOptions.some((item) => item.id === reasoning)) {
-      setReasoning(selectedModelGroup.defaultReasoningLevel || reasoningOptions[0]?.id || "medium");
-    }
-    if (speedOptions.length && !speedOptions.some((item) => item.id === speed)) {
-      setSpeed("standard");
-    }
-    if (!speedOptions.length && speed !== "standard") {
-      setSpeed("standard");
-    }
-  }, [reasoning, reasoningOptions, selectedModelGroup, speed, speedOptions]);
-
-  useEffect(() => {
-    const stack = messageStackRef.current;
-    if (!stack) return;
-    stack.scrollTop = stack.scrollHeight;
-  }, [visibleChatMessages]);
-
-  useLayoutEffect(() => {
-    const textarea = promptRef.current;
-    if (!textarea) return;
-    textarea.style.height = "auto";
-    const nextHeight = Math.min(
-      Math.max(textarea.scrollHeight, MIN_PROMPT_HEIGHT),
-      MAX_PROMPT_HEIGHT
-    );
-    setPromptHeight(nextHeight);
-    setPromptOverflow(textarea.scrollHeight > MAX_PROMPT_HEIGHT);
-    textarea.style.height = `${nextHeight}px`;
-  }, [activePrompt]);
-
-  const commandPreview = useMemo(() => {
-    if (!agentOptionsReady) {
-      return "에이전트 설정 불러오는 중";
-    }
-    if (agentProvider === ANTIGRAVITY_PROVIDER_ID) {
-      return selectedProvider?.available
-        ? `agy --model "${selectedModelGroup?.slug || "Gemini 3.5 Flash (Medium)"}" · ${selectedApproval?.label || "Default"}`
-        : selectedProvider?.installCommand || "curl -fsSL https://antigravity.google/cli/install.sh | bash";
-    }
-    const approvalFlag = selectedApproval?.cli || "";
-    const modelFlag = selectedModelGroup?.slug ? `-m ${selectedModelGroup.slug}` : "";
-    const reasoningFlag = selectedReasoning?.cli || "";
-    const speedFlag = selectedSpeed?.cli || "";
-    return ["codex", approvalFlag, modelFlag, reasoningFlag, speedFlag].filter(Boolean).join(" ");
-  }, [agentOptionsReady, agentProvider, selectedProvider, selectedApproval, selectedModelGroup, selectedReasoning, selectedSpeed]);
 
   function buildPendingAssistant(id, runtime = providerRuntimeForProvider(agentProvider)) {
     return {
@@ -5686,58 +934,36 @@ function App() {
     return true;
   }
 
-  function stopActiveChatResponse(scope = activeChatScope) {
-    activeChatAbortRefs.current.get(chatScopeKey(scope))?.abort();
-  }
-
   async function saveReportArtifactAction(action, request = {}) {
     if (!action?.artifact?.title || !action?.artifact?.content) return null;
-    const response = await fetch("/api/reports", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({
-        action: action.action,
-        classification: action.classification,
-        artifact: action.artifact,
-        source: {
-          surface: "reports-sidebar-agent",
-          screen: request.screen || "reports",
-          prompt: request.promptText || "",
-          provider: agentProvider,
-          providerLabel: agentProviderLabel,
-        },
-      }),
+    const payload = await postReportAction({
+      action: action.action,
+      classification: action.classification,
+      artifact: action.artifact,
+      source: {
+        surface: "reports-sidebar-agent",
+        screen: request.screen || "reports",
+        prompt: request.promptText || "",
+        provider: agentProvider,
+        providerLabel: agentProviderLabel,
+      },
     });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.ok) {
-      throw new Error(payload.error || `HTTP ${response.status}`);
-    }
     setReportRefreshSignal((current) => current + 1);
     return payload;
   }
 
   async function recoverMissingReportArtifact({ promptText = "", answerText = "" } = {}) {
-    const response = await fetch("/api/reports", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({
-        action: "recover_missing_report_artifact",
-        prompt: promptText,
-        answer: answerText,
-        source: {
-          surface: "reports-sidebar-agent-fallback",
-          screen: "reports",
-          provider: agentProvider,
-          providerLabel: agentProviderLabel,
-        },
-      }),
+    const payload = await postReportAction({
+      action: "recover_missing_report_artifact",
+      prompt: promptText,
+      answer: answerText,
+      source: {
+        surface: "reports-sidebar-agent-fallback",
+        screen: "reports",
+        provider: agentProvider,
+        providerLabel: agentProviderLabel,
+      },
     });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.ok) {
-      throw new Error(payload.error || `HTTP ${response.status}`);
-    }
     if (payload.recovered && payload.saved) {
       setReportRefreshSignal((current) => current + 1);
     }
@@ -5745,56 +971,34 @@ function App() {
   }
 
   async function classifyReportGenerationRequest({ promptText = "", messages = [], signal } = {}) {
-    const response = await fetch("/api/reports", {
-      method: "POST",
-      signal,
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({
-        action: "classify_report_request",
-        prompt: promptText,
-        messages,
-        source: {
-          surface: "reports-sidebar-agent-preflight",
-          screen: "reports",
-          provider: agentProvider,
-          providerLabel: agentProviderLabel,
-        },
-      }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.ok) {
-      throw new Error(payload.error || `HTTP ${response.status}`);
-    }
+    const payload = await postReportAction({
+      action: "classify_report_request",
+      prompt: promptText,
+      messages,
+      source: {
+        surface: "reports-sidebar-agent-preflight",
+        screen: "reports",
+        provider: agentProvider,
+        providerLabel: agentProviderLabel,
+      },
+    }, { signal });
     return payload.decision || null;
   }
 
   async function saveChatAnswerToReports({ message, answerText } = {}) {
     const content = String(answerText || "").trim();
     if (!content) throw new Error("보고서에 저장할 답변이 없습니다.");
-    const response = await fetch("/api/reports", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({
-        action: "save_chat_answer",
-        artifact: {
-          content,
-          format: "markdown",
-        },
-        source: {
-          surface: "agent-chat-answer-action",
-          screen: activeView,
-          provider: agentProvider,
-          providerLabel: message?.providerLabel || agentProviderLabel,
-          messageId: message?.id || "",
-        },
-      }),
+    const payload = await postReportAction({
+      action: "save_chat_answer",
+      artifact: { content, format: "markdown" },
+      source: {
+        surface: "agent-chat-answer-action",
+        screen: activeView,
+        provider: agentProvider,
+        providerLabel: message?.providerLabel || agentProviderLabel,
+        messageId: message?.id || "",
+      },
     });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.ok) {
-      throw new Error(payload.error || `HTTP ${response.status}`);
-    }
     setReportRefreshSignal((current) => current + 1);
     return payload;
   }
@@ -5918,7 +1122,6 @@ function App() {
     let streamedText = "";
     let sharedAnswerForMemory = "";
     let visibleAssistantTextForCatch = (text) => text;
-    let flushAssistantMessageStream = () => {};
     const abortController = new AbortController();
     const chatScopeAbortKey = chatScopeKey(chatScope);
     activeChatAbortRefs.current.set(chatScopeAbortKey, abortController);
@@ -5980,11 +1183,7 @@ function App() {
           signal: abortController.signal,
         });
       }
-      const response = await fetch("/api/codex/chat/stream", {
-        method: "POST",
-        signal: abortController.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const response = await requestAgentChatStream({
           prompt: promptWithContext,
           messages: history,
           provider: messageRuntime.provider,
@@ -6037,19 +1236,7 @@ function App() {
             dataUrl: attachment.dataUrl,
             text: attachment.text || "",
           })),
-        }),
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      if (!response.body) {
-        throw new Error("Streaming response body is unavailable");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      }, { signal: abortController.signal });
       const shouldStripPortfolioWidgetAction = options.stripPortfolioWidgetActionBlocks || isPortfolioScreenForMessage;
       const shouldStripWorldMemoryAction = screenForMessage === "world-memory";
       const shouldStripReportArtifactAction = screenForMessage === "reports";
@@ -6061,125 +1248,20 @@ function App() {
         return output;
       };
       visibleAssistantTextForCatch = visibleAssistantText;
-      let streamRenderTimer = null;
-      let lastStreamRenderAt = 0;
-      const renderAssistantStreamText = ({ immediate = false } = {}) => {
-        const render = () => {
-          if (streamRenderTimer) {
-            window.clearTimeout(streamRenderTimer);
-            streamRenderTimer = null;
-          }
-          lastStreamRenderAt = Date.now();
-          updateAssistantMessage(assistantId, { status: latestStatus, text: visibleAssistantText(streamedText) }, chatScope);
-        };
-        if (immediate) {
-          render();
-          return;
-        }
-        const waitMs = CHAT_STREAM_RENDER_INTERVAL_MS - (Date.now() - lastStreamRenderAt);
-        if (waitMs <= 0) {
-          render();
-          return;
-        }
-        if (!streamRenderTimer) {
-          streamRenderTimer = window.setTimeout(render, waitMs);
-        }
-      };
-      flushAssistantMessageStream = () => renderAssistantStreamText({ immediate: true });
-      let latestStatus = {
-        type: "status",
-        tone: "working",
-        title: `${messageRuntime.providerLabel} 응답 준비 중`,
-        body:
-          messageRuntime.provider === ANTIGRAVITY_PROVIDER_ID
-            ? `${messageRuntime.selectedModelGroup?.label || "Gemini"} · ${messageRuntime.selectedApproval?.label || "Default"} 권한으로 대화 컨텍스트를 전달하고 있습니다.`
-            : `${messageRuntime.modelSummaryLabel} 모델을 읽기 전용 Codex CLI 세션으로 호출하고 있습니다.`,
-      };
-      let firstAssistantTokenSeen = false;
-      const notifyFirstAssistantToken = () => {
-        if (firstAssistantTokenSeen) return;
-        firstAssistantTokenSeen = true;
-        if (typeof options.onFirstDelta === "function") {
-          options.onFirstDelta();
-        }
-      };
-
-      function applyStreamEvent(event) {
-        const data = event.data || {};
-        if (event.type === "started") {
-          const providerName = data.providerLabel || messageRuntime.providerLabel;
-          latestStatus = {
-            type: "status",
-            tone: "working",
-            title: `${providerName} 세션 시작`,
-            body: [
-              data.model || messageRuntime.selectedModelGroup?.slug,
-              data.reasoning || messageRuntime.selectedReasoning?.id,
-              data.approval || messageRuntime.selectedApproval?.label,
-            ].filter(Boolean).join(" · "),
-          };
-          renderAssistantStreamText({ immediate: true });
-        }
-        if (event.type === "status") {
-          latestStatus = {
-            type: "status",
-            tone: "working",
-            title: data.title || `${messageRuntime.providerLabel} 응답 생성 중`,
-            body: data.body || `${messageRuntime.providerLabel}가 요청을 처리하고 있습니다.`,
-          };
-          renderAssistantStreamText({ immediate: true });
-        }
-        if (event.type === "delta") {
-          const deltaText = data.text || data.delta || "";
-          if (deltaText) notifyFirstAssistantToken();
-          streamedText += deltaText;
-          renderAssistantStreamText();
-        }
-        if (event.type === "message") {
-          if (data.text) notifyFirstAssistantToken();
-          streamedText = data.text || streamedText;
-          latestStatus = {
-            type: "status",
-            tone: "working",
-            title: "응답 수신 중",
-            body: `${data.providerLabel || messageRuntime.providerLabel}에서 최종 메시지를 받았습니다.`,
-          };
-          renderAssistantStreamText({ immediate: true });
-        }
-        if (event.type === "done") {
-          if (data.answer || streamedText) notifyFirstAssistantToken();
-          streamedText = data.answer || streamedText || "응답이 비어 있습니다.";
-          latestStatus = {
-            type: "status",
-            tone: "done",
-            title: `${data.providerLabel || messageRuntime.providerLabel} 응답`,
-            body: `${data.model || messageRuntime.selectedModelGroup?.slug} · ${data.reasoning || messageRuntime.selectedReasoning?.id} · ${Math.max(1, Math.round((data.elapsedMs || 0) / 1000))}초`,
-          };
-          renderAssistantStreamText({ immediate: true });
-        }
-        if (event.type === "error") {
-          throw new Error(data.error || `${messageRuntime.providerLabel} stream failed`);
-        }
-      }
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split(/\n\n/);
-        buffer = events.pop() || "";
-        for (const rawEvent of events) {
-          if (!rawEvent.trim()) continue;
-          applyStreamEvent(parseSseEvent(rawEvent));
-        }
-      }
-
-      const tail = buffer + decoder.decode();
-      if (tail.trim()) {
-        applyStreamEvent(parseSseEvent(tail));
-      }
-      flushAssistantMessageStream();
-      completedAnswer = streamedText.trim();
+      const streamResult = await consumeAgentChatStream(response, {
+        runtime: messageRuntime,
+        transformText: visibleAssistantText,
+        onFirstDelta: options.onFirstDelta,
+        onRawText: (text) => {
+          streamedText = text;
+        },
+        onRender: ({ status, text }) => {
+          updateAssistantMessage(assistantId, { status, text }, chatScope);
+        },
+      });
+      streamedText = streamResult.rawText;
+      completedAnswer = streamResult.answer;
+      const latestStatus = streamResult.latestStatus;
       if (completedAnswer) {
         let reportArtifactSaveResult = null;
         if (screenForMessage === "reports") {
@@ -6435,7 +1517,6 @@ function App() {
       }
     } catch (error) {
       if (error?.name === "AbortError") {
-        flushAssistantMessageStream();
         updateAssistantMessage(
           assistantId,
           {
@@ -6445,7 +1526,7 @@ function App() {
               title: "응답 중단됨",
               body: "사용자가 에이전트 실행을 정지했습니다.",
             },
-            text: visibleAssistantTextForCatch(streamedText),
+            text: visibleAssistantTextForCatch(error.partialText ?? streamedText),
           },
           chatScope
         );
@@ -6454,7 +1535,6 @@ function App() {
       if (typeof options.onError === "function") {
         options.onError(error);
       }
-      flushAssistantMessageStream();
       updateChatMessagesForScope(chatScope, (messages) =>
         messages.map((message) =>
           message.id === assistantId
@@ -6616,23 +1696,20 @@ function App() {
       time: new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }),
     };
     const assistantId = `assistant-${createdAt}`;
+    const earningRuntime = providerRuntimeForProvider(agentProvider);
     const history = chatMessages.map((message) => ({
       role: message.role,
       text: messageToHistoryText(message),
     }));
 
-    setChatMessages((messages) => [...messages, userMessage, buildPendingAssistant(assistantId)]);
+    setChatMessages((messages) => [...messages, userMessage, buildPendingAssistant(assistantId, earningRuntime)]);
     setAttachmentErrorForScope(systemMainChatScope, "");
     setChatScopeSending(systemMainChatScope, true);
 
     let completedAnswer = "";
-    let flushEarningMessageStream = () => {};
 
     try {
-      const response = await fetch("/api/codex/chat/stream", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const response = await requestAgentChatStream({
           prompt: promptWithContext,
           messages: history,
           provider: agentProvider,
@@ -6650,127 +1727,15 @@ function App() {
           boardContext: null,
           calendarContext: earningCalendarContext,
           attachments: [],
-        }),
       });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      if (!response.body) {
-        throw new Error("Streaming response body is unavailable");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let streamedText = "";
-      let streamRenderTimer = null;
-      let lastStreamRenderAt = 0;
-      let latestStatus = {
-        type: "status",
-        tone: "working",
-        title: `${agentProviderLabel} 어닝 분석 준비 중`,
-        body:
-          agentProvider === ANTIGRAVITY_PROVIDER_ID
-            ? `${selectedModelGroup?.label || "Gemini"} · ${selectedApproval?.label || "Default"} 권한으로 이벤트 컨텍스트를 전달하고 있습니다.`
-            : `${modelSummaryLabel} 모델을 읽기 전용 Codex CLI 세션으로 호출하고 있습니다.`,
-      };
-      const renderAssistantStreamText = ({ immediate = false } = {}) => {
-        const render = () => {
-          if (streamRenderTimer) {
-            window.clearTimeout(streamRenderTimer);
-            streamRenderTimer = null;
-          }
-          lastStreamRenderAt = Date.now();
-          updateAssistantMessage(assistantId, { status: latestStatus, text: streamedText });
-        };
-        if (immediate) {
-          render();
-          return;
-        }
-        const waitMs = CHAT_STREAM_RENDER_INTERVAL_MS - (Date.now() - lastStreamRenderAt);
-        if (waitMs <= 0) {
-          render();
-          return;
-        }
-        if (!streamRenderTimer) {
-          streamRenderTimer = window.setTimeout(render, waitMs);
-        }
-      };
-      flushEarningMessageStream = () => renderAssistantStreamText({ immediate: true });
-
-      function applyStreamEvent(eventChunk) {
-        const data = eventChunk.data || {};
-        if (eventChunk.type === "started") {
-          const providerName = data.providerLabel || agentProviderLabel;
-          latestStatus = {
-            type: "status",
-            tone: "working",
-            title: `${providerName} 어닝 분석 시작`,
-            body: [
-              data.model || selectedModelGroup?.slug,
-              data.reasoning || selectedReasoning?.id,
-              data.approval || selectedApproval?.label,
-            ].filter(Boolean).join(" · "),
-          };
-          renderAssistantStreamText({ immediate: true });
-        }
-        if (eventChunk.type === "status") {
-          latestStatus = {
-            type: "status",
-            tone: "working",
-            title: data.title || `${agentProviderLabel} 어닝 분석 중`,
-            body: data.body || `${agentProviderLabel}가 이벤트 발생 여부와 관련 자료를 확인하고 있습니다.`,
-          };
-          renderAssistantStreamText({ immediate: true });
-        }
-        if (eventChunk.type === "delta") {
-          streamedText += data.text || data.delta || "";
-          renderAssistantStreamText();
-        }
-        if (eventChunk.type === "message") {
-          streamedText = data.text || streamedText;
-          latestStatus = {
-            type: "status",
-            tone: "working",
-            title: "어닝 분석 수신 중",
-            body: `${data.providerLabel || agentProviderLabel}에서 최종 메시지를 받았습니다.`,
-          };
-          renderAssistantStreamText({ immediate: true });
-        }
-        if (eventChunk.type === "done") {
-          streamedText = data.answer || streamedText || "응답이 비어 있습니다.";
-          latestStatus = {
-            type: "status",
-            tone: "done",
-            title: `${data.providerLabel || agentProviderLabel} 어닝 분석`,
-            body: `${data.model || selectedModelGroup?.slug} · ${data.reasoning || selectedReasoning?.id} · ${Math.max(1, Math.round((data.elapsedMs || 0) / 1000))}초`,
-          };
-          renderAssistantStreamText({ immediate: true });
-        }
-        if (eventChunk.type === "error") {
-          throw new Error(data.error || `${agentProviderLabel} stream failed`);
-        }
-      }
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split(/\n\n/);
-        buffer = events.pop() || "";
-        for (const rawEvent of events) {
-          if (!rawEvent.trim()) continue;
-          applyStreamEvent(parseSseEvent(rawEvent));
-        }
-      }
-
-      const tail = buffer + decoder.decode();
-      if (tail.trim()) {
-        applyStreamEvent(parseSseEvent(tail));
-      }
-      flushEarningMessageStream();
-      completedAnswer = streamedText.trim();
+      const streamResult = await consumeAgentChatStream(response, {
+        runtime: earningRuntime,
+        mode: "earning",
+        onRender: ({ status, text }) => {
+          updateAssistantMessage(assistantId, { status, text });
+        },
+      });
+      completedAnswer = streamResult.answer;
       if (completedAnswer) {
         await saveSharedChatMemory({
           createdAt,
@@ -6783,7 +1748,6 @@ function App() {
         });
       }
     } catch (error) {
-      flushEarningMessageStream();
       setChatMessages((messages) =>
         messages.map((message) =>
           message.id === assistantId
@@ -6815,55 +1779,6 @@ function App() {
       : activeView === "magazine" && magazineEnabled
         ? magazineAgentRuntime
         : defaultAgentRuntime;
-  const enabledAgentProviderIds = enabledAgentProviders();
-  const agentProviderProfiles = agentProviderIds.map((providerId) => {
-    const providerStatus =
-      providerOptions.find((item) => item.id === providerId) ||
-      fallbackProviderOptions.find((item) => item.id === providerId) ||
-      { id: providerId, label: providerId };
-    const providerApprovalOptions =
-      providerId === ANTIGRAVITY_PROVIDER_ID
-        ? antigravityPolicyOptions
-        : approvalOptions.length
-          ? approvalOptions
-          : fallbackApprovalOptions;
-    const providerModelGroups = modelGroupsForProvider(providerId);
-    const savedProviderSettings = agentProviderSettings(providerId);
-    const providerSelection =
-      providerId === agentProvider
-        ? {
-            provider: providerId,
-            approval: selectedApproval?.id || approval,
-            model: selectedModelGroup?.slug || model,
-            reasoning: selectedReasoning?.id || reasoning,
-            speed: selectedSpeed?.id || speed,
-          }
-        : selectionForProvider(providerId, savedProviderSettings);
-    const providerModelGroup =
-      providerModelGroups.find((item) => item.slug === providerSelection.model) ||
-      providerModelGroups[0] ||
-      fallbackModelGroups[0];
-    const providerReasoningOptions = providerModelGroup?.reasoningLevels?.length
-      ? providerModelGroup.reasoningLevels
-      : fallbackModelGroups[0].reasoningLevels;
-    const providerSpeedOptions = getSpeedOptionsForReasoning(providerModelGroup, providerSelection.reasoning);
-
-    return {
-      id: providerId,
-      label: providerStatus.label || (providerId === ANTIGRAVITY_PROVIDER_ID ? "Antigravity CLI" : "Codex CLI"),
-      enabled: isAgentProviderEnabled(providerId),
-      toggleDisabled: isAgentProviderEnabled(providerId) && enabledAgentProviderIds.length <= 1,
-      status: providerStatus,
-      approvalOptions: providerApprovalOptions,
-      approval: providerSelection.approval,
-      modelGroups: providerModelGroups,
-      model: providerSelection.model,
-      reasoningOptions: providerReasoningOptions,
-      reasoning: providerSelection.reasoning,
-      speedOptions: providerSpeedOptions,
-      speed: providerSelection.speed,
-    };
-  });
   const promotedTossInvestError = tossInvestError || tossInvestOrderSyncError;
   const promotedTossInvestErrorCode = tossInvestError
     ? tossInvestErrorCode
@@ -6895,8 +1810,292 @@ function App() {
     action: tossInvestOrderSyncAction,
     error: tossInvestOrderSyncError,
     errorCode: tossInvestOrderSyncErrorCode,
+    onReload: () => void loadTossInvestOrderSyncStatus(),
     onToggleEnabled: updateTossInvestOrderSyncEnabled,
     onRunSync: () => void runTossInvestOrderSync(),
+  };
+  const routeModels = {
+    settings: () => ({
+      newsFeed: newsFeedController,
+      sharedMemory: sharedMemoryController,
+      worldMemory: worldMemoryController,
+      magazine: magazineController,
+      transaction: transactionSettingsController,
+      arca: arcaController,
+      tossInvest: tossInvestConnectionProps,
+      tossOrderSync: tossInvestOrderSyncProps,
+      transactionStatusHidden,
+      onToggleWorldMemoryEnabled: updateWorldMemoryEnabled,
+      onToggleTransactionStatusHidden: updateTransactionStatusHidden,
+      agent: {
+        providerOptions,
+        provider: agentProvider,
+        onProviderChange: handleAgentProviderChange,
+        providerStatus: selectedProvider,
+        providerProfiles: agentProviderProfiles,
+        onProviderEnabledChange: updateProviderEnabled,
+        onProviderSettingChange: updateProviderSelection,
+        approvalOptions: activeApprovalOptions,
+        approval: selectedApproval?.id || approval,
+        onApprovalChange: (nextApproval) => updateAgentSelection({ approval: nextApproval }),
+        modelGroups: activeModelGroups,
+        model: selectedModelGroup?.slug || model,
+        onModelChange: (nextModel) => updateAgentSelection({ model: nextModel }),
+        reasoningOptions,
+        reasoning: selectedReasoning?.id || reasoning,
+        onReasoningChange: (nextReasoning) => updateAgentSelection({ reasoning: nextReasoning }),
+        speedOptions,
+        speed,
+        onSpeedChange: (nextSpeed) => updateAgentSelection({ speed: nextSpeed }),
+        personaModeOptions,
+        personaMode,
+        onPersonaModeChange: updatePersonaMode,
+        settingsError: agentSettingsError,
+        loading: !agentOptionsReady,
+        modelCatalogRefreshing,
+        onReloadModelCatalog: reloadAgentModelCatalog,
+      },
+    }),
+    chat: () => ({
+      activeWorldMemoryActionId: worldMemoryAgentAction?.id || "",
+      runningWorldMemoryAgentActionId: worldMemoryRunningAgentActionId,
+      addChatAttachmentFiles,
+      agentIcon,
+      agentOptionsReady,
+      agentProviderLabel,
+      attachedArticle: activeAttachedArticle,
+      attachmentError: activeAttachmentError,
+      chatAttachments: activeChatAttachments,
+      fileInputRef,
+      handleComposerDragEnter,
+      handleComposerDragLeave,
+      handleComposerDragOver,
+      handleComposerDrop,
+      handleComposerPaste,
+      isComposerDragging,
+      isSending,
+      messageStackRef,
+      onClearAttachedArticle: () => clearAttachedArticleForScope(activeChatScope),
+      onExecuteWorldMemoryAction: executeWorldMemoryAgentAction,
+      onNewChat: startNewChat,
+      onPromptChange: (nextPrompt) => setPromptForScope(activeChatScope, nextPrompt),
+      onRemoveChatAttachment: removeChatAttachment,
+      onSaveAnswerToReports: saveChatAnswerToReports,
+      onSelectApproval: (nextApproval) => updateAgentSelection({ approval: nextApproval }),
+      onSelectModel: (nextModel) => updateAgentSelection({ model: nextModel }),
+      onSelectReasoning: (nextReasoning) => updateAgentSelection({ reasoning: nextReasoning }),
+      onSelectSpeed: (nextSpeed) => updateAgentSelection({ speed: nextSpeed }),
+      onStopSend: stopActiveChatResponse,
+      prompt: activePrompt,
+      promptHeight,
+      promptOverflow,
+      promptRef,
+      sendPrompt,
+      toolbarApprovalOptions,
+      toolbarApprovalValue,
+      toolbarModelGroups,
+      toolbarModelValue,
+      toolbarReasoningValue,
+      toolbarSpeedValue,
+      visibleChatMessages,
+      worldMemoryActionBusy,
+    }),
+    reports: () => ({
+      refreshSignal: reportRefreshSignal,
+      agentIcon,
+      agentProvider,
+      agentProviderLabel,
+      agentOptionsReady,
+      agentModel: selectedModelGroup?.slug || model,
+      agentReasoning: selectedReasoning?.id || reasoning,
+      agentApproval: selectedApproval?.id || approval,
+      isSending,
+      worldMemoryEnabled,
+      onResearchPrompt: handleReportsBoredResearch,
+    }),
+    transactionStatus: () => ({
+      tossStatus: tossInvestStatus,
+      tossBusy: tossInvestBusy,
+      tossError: promotedTossInvestError,
+      tossErrorCode: promotedTossInvestErrorCode,
+      tossPublicIp: tossInvestPublicIp,
+      tossPublicIpBusy: tossInvestPublicIpBusy,
+      tossPublicIpError: tossInvestPublicIpError,
+      onOpenSettings: openTossInvestDialog,
+      onDeleteCredentials: deleteTossInvestCredentials,
+      onCheckPublicIp: checkTossInvestPublicIp,
+      onReload: () => void loadTossInvestStatus(),
+      onContextChange: handleTransactionStatusContextChange,
+    }),
+    worldMemory: () => ({
+      enabled: worldMemoryEnabled,
+      viewProps: {
+        status: worldMemoryStatus,
+        busy: worldMemoryBusy,
+        error: worldMemoryError,
+        actionBusy: worldMemoryActionBusy,
+        activeAction: worldMemoryRunningAction,
+        agentActionBusy: Boolean(
+          worldMemoryRunningAgentActionId && worldMemoryRunningAgentActionId === worldMemoryAgentAction?.id
+        ),
+        actionResult: worldMemoryActionResult,
+        agentAction: worldMemoryAgentAction,
+        agentIcon: worldMemoryAgentRuntime.icon,
+        agentProvider: worldMemoryAgentRuntime.provider,
+        agentOptionsReady,
+        isSending: worldMemoryChatIsSending,
+        onClearAgentAction: () => {
+          setWorldMemoryAgentAction(null);
+          setWorldMemoryFocusedChangeSuggestion(null);
+        },
+        onExecuteAgentAction: executeWorldMemoryAgentAction,
+        onAskReportItem: askWorldMemoryReportItem,
+        onReload: loadWorldMemoryStatus,
+        onRunAction: runWorldMemoryAction,
+      },
+    }),
+    newsFeed: () => ({
+      onScroll: handleNewsFeedScroll,
+      viewProps: {
+        status: newsFeedStatus,
+        items: newsFeedItems,
+        busy: newsFeedBusy,
+        refreshBusy: newsFeedRefreshBusy,
+        loadingMore: newsFeedLoadingMore,
+        error: newsFeedError,
+        hasMore: newsFeedHasMore,
+        translationModelLabel: newsFeedTranslationModelLabel,
+        marketSummary: newsFeedMarketSummary,
+        marketSummaryCollapsed: newsFeedMarketSummaryCollapsed,
+        onMarketSummaryCollapsedChange: updateNewsFeedMarketSummaryCollapsed,
+        onRefresh: refreshNewsFeed,
+      },
+    }),
+    magazine: () => ({
+      magazineActiveArticle,
+      magazineCanvasRef,
+      magazineStatus,
+      magazineArticles,
+      magazineStartNowBusy,
+      magazineGenerateOneBusy,
+      startMagazineNow,
+      magazineGenerateOneToolVisible,
+      generateOneMagazineArticle,
+      magazineTopicCatalog,
+      magazineActiveTopic,
+      openMagazineTopic,
+      magazineCoverHeadline,
+      openMagazineArticle,
+      magazineCoverCards,
+      magazineActiveTopicEntry,
+      closeMagazineTopic,
+      magazineTopicArticles,
+      magazineTopicModalRef,
+      closeMagazineArticle,
+      magazineCopyStatus,
+      copyMagazineArticle,
+      magazineCopyError,
+      openMagazineDeleteDialog,
+      magazineDeleting,
+      magazineReaderArticleRef,
+      selectedMagazinePreferenceIds,
+      magazinePreferenceSavingId,
+      saveMagazinePreference,
+      magazinePreferenceNotice,
+      magazinePreferenceNoticeFading,
+      magazineComments,
+      magazineCommentDraft,
+      setMagazineCommentDraft,
+      magazineCommentSubmitting,
+      magazineCommentError,
+      submitMagazineComment,
+      magazineDeleteDialogOpen,
+      confirmMagazineArticleDelete,
+      magazineDeleteError,
+      closeMagazineDeleteDialog,
+    }),
+    portfolio: () => ({
+      onCreateCanvas: createPortfolioCanvasFromGuide,
+    }),
+    portfolioCanvas: () => ({
+      canvas: activePortfolioCanvas,
+      onCreateCanvas: createPortfolioCanvasFromGuide,
+      workspaceProps: activePortfolioCanvas ? {
+        onWorkspaceChange: updateActivePortfolioCanvasWorkspace,
+        onRenameCanvas: (nextName) => renamePortfolioCanvasTo(activePortfolioCanvas.id, nextName),
+        onOpenGuide: () => {
+          setActiveView("portfolio");
+          setPortfolioContext(null);
+        },
+        onContextChange: setPortfolioContext,
+        onWidgetPromptRequest: handlePortfolioWidgetPromptRequest,
+        agentWidgetAction: portfolioWidgetAgentAction,
+        agentProvider,
+        tossInvestStatus,
+        tossInvestBusy,
+        tossInvestError: promotedTossInvestError,
+        tossInvestErrorCode: promotedTossInvestErrorCode,
+        tossInvestPublicIp,
+        tossInvestPublicIpBusy,
+        tossInvestPublicIpError,
+        tossInvestOrderSyncStatus,
+        tossInvestOrderSyncBusy,
+        tossInvestOrderSyncAction,
+        tossInvestOrderSyncError,
+        tossInvestOrderSyncErrorCode,
+        onOpenSettings: openTossInvestDialog,
+        onDeleteTossInvestCredentials: deleteTossInvestCredentials,
+        onProbeTossInvestConnection: probeTossInvestConnection,
+        onRunTossInvestOrderSync: () => void runTossInvestOrderSync(),
+        onCheckTossInvestPublicIp: checkTossInvestPublicIp,
+        onAgentWidgetActionConsumed: (actionId) =>
+          setPortfolioWidgetAgentAction((current) => (current?.id === actionId ? null : current)),
+      } : {},
+    }),
+    earningCalendar: () => ({
+      agentIcon,
+      analysisReady: agentOptionsReady,
+      analysisBusy: isSending,
+      onAnalyzeEarning: analyzeEarningEvent,
+      onContextChange: setEarningCalendarContext,
+    }),
+    economicCalendar: () => ({
+      onContextChange: setEconomicCalendarContext,
+    }),
+    stock: () => ({
+      activeArticle: arcaReaderArticle,
+      activeCategoryLabel,
+      agentIcon,
+      articleBusy: arcaReaderBusy,
+      articleError: arcaReaderError,
+      attachingArticleHref,
+      board: arcaBoard,
+      boardBusy: arcaBoardBusy,
+      boardError: arcaBoardError,
+      boardFilters,
+      boardSearchInput,
+      notificationBusy: arcaNotificationBusy,
+      notificationActionBusy: arcaNotificationActionBusy,
+      notificationActionError: arcaNotificationActionError,
+      notificationHealth: arcaNotificationHealth,
+      notificationStatus: arcaNotificationStatus,
+      onAttachArticle: attachArticleContext,
+      onBoardSearchInputChange: setBoardSearchInput,
+      onCloseArticle: closeArcaArticleReader,
+      onOpenArticle: (row) => void openArcaArticleReader(row),
+      onMarkAllNotificationsRead: () => void markAllArcaNotificationsRead(),
+      onOpenNotificationArticle: openArcaNotificationArticle,
+      onRefreshBoard: refreshBoard,
+      onRefreshNotifications: loadArcaNotifications,
+      onResetBoard: resetBoard,
+      onRetryArticle: retryArcaArticleReader,
+      onSelectCategory: selectBoardCategory,
+      onSubmitSearch: submitBoardSearch,
+      onToggleHiddenNotices: toggleHiddenNotices,
+      onUpdateFilters: updateBoardFilters,
+      showHiddenNotices,
+      canvasRef: arcaCanvasRef,
+    }),
   };
 
   return (
@@ -6941,7 +2140,7 @@ function App() {
         <div
           className="portfolio-asset-api-modal-backdrop"
           role="presentation"
-          onMouseDown={() => setTossInvestDialogOpen(false)}
+          onMouseDown={closeTossInvestDialog}
         >
           <div
             className="portfolio-asset-api-modal"
@@ -6955,7 +2154,7 @@ function App() {
               type="button"
               aria-label="토스증권 API 설정 닫기"
               title="닫기"
-              onClick={() => setTossInvestDialogOpen(false)}
+              onClick={closeTossInvestDialog}
             >
               <X size={18} strokeWidth={2.4} />
             </button>
@@ -6974,802 +2173,7 @@ function App() {
         </div>
       ) : null}
 
-      {activeView === "settings" ? (
-        <section className="workspace-canvas settings-canvas" aria-label="설정">
-          <React.Suspense fallback={<RouteLoading label="설정 불러오는 중" />}>
-            <SettingsView
-              settings={newsFeedSettings}
-              busy={
-                newsFeedSettingsBusy ||
-                worldMemorySettingsBusy ||
-                magazineSettingsBusy ||
-                tossInvestBusy ||
-                tossInvestOrderSyncBusy ||
-                transactionSettingsBusy
-              }
-              savingFeedId={newsFeedSettingsSavingId}
-              error={newsFeedSettingsError}
-              onReload={() => {
-                void loadNewsFeedSettings();
-                void loadWorldMemorySettings({ refreshStatus: true });
-                void loadMagazineSettings({ quiet: true });
-                void loadTossInvestStatus();
-                void loadTossInvestOrderSyncStatus();
-                void loadTransactionSettings();
-              }}
-              onToggleFeed={toggleNewsFeedSource}
-              onPollIntervalChange={updateNewsFeedPollInterval}
-              memoryStatus={memoryStatus}
-              memoryBusy={memoryBusy}
-              memoryError={memoryError}
-              memoryRecentOpen={memoryRecentOpen}
-              onToggleMemoryRecent={() => setMemoryRecentOpen((open) => !open)}
-              onReloadMemory={loadSharedMemoryStatus}
-              onOpenMemoryDialog={openMemoryDialog}
-              onDeleteMemoryRecord={deleteMemoryRecord}
-              deletingMemoryRecordId={deletingMemoryRecordId}
-              memoryDialog={{
-                open: memoryDialogOpen,
-                records: memoryDialogRecords,
-                totalCount: memoryDialogTotalCount,
-                hasMore: memoryDialogHasMore,
-                busy: memoryDialogBusy,
-                error: memoryDialogError,
-                deletingRecordId: deletingMemoryRecordId,
-                onClose: () => setMemoryDialogOpen(false),
-                onScroll: handleMemoryDialogScroll,
-              }}
-              worldMemoryStatus={worldMemoryStatus}
-              worldMemoryBusy={worldMemoryBusy}
-              worldMemoryError={worldMemoryError}
-              worldMemoryTechOpen={worldMemoryTechOpen}
-              worldMemorySettings={worldMemorySettings}
-              worldMemorySettingsBusy={worldMemorySettingsBusy}
-              worldMemorySettingsSaving={worldMemorySettingsSaving}
-              worldMemorySettingsError={worldMemorySettingsError}
-              magazineSettings={magazineSettings}
-              magazineSettingsBusy={magazineSettingsBusy}
-              magazineSettingsSaving={magazineSettingsSaving}
-              magazineSettingsError={magazineSettingsError}
-              onToggleWorldMemoryTech={() => setWorldMemoryTechOpen((open) => !open)}
-              onToggleWorldMemoryEnabled={updateWorldMemoryEnabled}
-              onWorldMemoryManagementSettingsChange={updateWorldMemoryManagementSettings}
-              onToggleMagazineEnabled={updateMagazineEnabled}
-              onMagazineWritingSettingsChange={updateMagazineWritingSettings}
-              onMagazineSchedulerIntervalChange={updateMagazineSchedulerInterval}
-              onMagazineMaxArticlesPerCycleChange={updateMagazineMaxArticlesPerCycle}
-              onReloadWorldMemory={loadWorldMemoryStatus}
-              tossInvest={tossInvestConnectionProps}
-              tossOrderSync={tossInvestOrderSyncProps}
-              transactionStatusVisibility={{
-                hidden: transactionStatusHidden,
-                busy: transactionSettingsBusy,
-                saving: transactionSettingsSaving,
-                error: transactionSettingsError,
-                onChange: updateTransactionStatusHidden,
-              }}
-              arcaAuth={{
-                status: arcaAuthStatus,
-                busy: arcaAuthBusy,
-                action: arcaAuthAction,
-                error: arcaAuthError,
-                onReload: () => void loadArcaAuthStatus(),
-                onStartHandoff: startArcaLoginHandoff,
-                onCaptureSession: captureArcaLoginSession,
-                onStopHandoff: stopArcaLoginHandoff,
-                onDeleteSession: deleteArcaLoginSession,
-              }}
-              agentSettings={{
-                providerOptions,
-                provider: agentProvider,
-                onProviderChange: handleAgentProviderChange,
-                providerStatus: selectedProvider,
-                providerProfiles: agentProviderProfiles,
-                onProviderEnabledChange: updateProviderEnabled,
-                onProviderSettingChange: updateProviderSelection,
-                approvalOptions: activeApprovalOptions,
-                approval: selectedApproval?.id || approval,
-                onApprovalChange: (nextApproval) => updateAgentSelection({ approval: nextApproval }),
-                modelGroups: activeModelGroups,
-                model: selectedModelGroup?.slug || model,
-                onModelChange: (nextModel) => updateAgentSelection({ model: nextModel }),
-                reasoningOptions,
-                reasoning: selectedReasoning?.id || reasoning,
-                onReasoningChange: (nextReasoning) => updateAgentSelection({ reasoning: nextReasoning }),
-                speedOptions,
-                speed,
-                onSpeedChange: (nextSpeed) => updateAgentSelection({ speed: nextSpeed }),
-                personaModeOptions,
-                personaMode,
-                onPersonaModeChange: updatePersonaMode,
-                settingsError: agentSettingsError,
-                loading: !agentOptionsReady,
-                modelCatalogRefreshing,
-                onReloadModelCatalog: reloadAgentModelCatalog,
-              }}
-            />
-          </React.Suspense>
-        </section>
-      ) : activeView === "chat" ? (
-        <ChatCanvas
-          activeWorldMemoryActionId={worldMemoryAgentAction?.id || ""}
-          runningWorldMemoryAgentActionId={worldMemoryRunningAgentActionId}
-          addChatAttachmentFiles={addChatAttachmentFiles}
-          agentIcon={agentIcon}
-          agentOptionsReady={agentOptionsReady}
-          agentProviderLabel={agentProviderLabel}
-          attachedArticle={activeAttachedArticle}
-          attachmentError={activeAttachmentError}
-          chatAttachments={activeChatAttachments}
-          fileInputRef={fileInputRef}
-          handleComposerDragEnter={handleComposerDragEnter}
-          handleComposerDragLeave={handleComposerDragLeave}
-          handleComposerDragOver={handleComposerDragOver}
-          handleComposerDrop={handleComposerDrop}
-          handleComposerPaste={handleComposerPaste}
-          isComposerDragging={isComposerDragging}
-          isSending={isSending}
-          messageStackRef={messageStackRef}
-          onClearAttachedArticle={() => clearAttachedArticleForScope(activeChatScope)}
-          onExecuteWorldMemoryAction={executeWorldMemoryAgentAction}
-          onNewChat={startNewChat}
-          onPromptChange={(nextPrompt) => setPromptForScope(activeChatScope, nextPrompt)}
-          onRemoveChatAttachment={removeChatAttachment}
-          onSaveAnswerToReports={saveChatAnswerToReports}
-          onSelectApproval={(nextApproval) => updateAgentSelection({ approval: nextApproval })}
-          onSelectModel={(nextModel) => updateAgentSelection({ model: nextModel })}
-          onSelectReasoning={(nextReasoning) => updateAgentSelection({ reasoning: nextReasoning })}
-          onSelectSpeed={(nextSpeed) => updateAgentSelection({ speed: nextSpeed })}
-          onStopSend={stopActiveChatResponse}
-          prompt={activePrompt}
-          promptHeight={promptHeight}
-          promptOverflow={promptOverflow}
-          promptRef={promptRef}
-          sendPrompt={sendPrompt}
-          toolbarApprovalOptions={toolbarApprovalOptions}
-          toolbarApprovalValue={toolbarApprovalValue}
-          toolbarModelGroups={toolbarModelGroups}
-          toolbarModelValue={toolbarModelValue}
-          toolbarReasoningValue={toolbarReasoningValue}
-          toolbarSpeedValue={toolbarSpeedValue}
-          visibleChatMessages={visibleChatMessages}
-          worldMemoryActionBusy={worldMemoryActionBusy}
-        />
-      ) : activeView === "reports" ? (
-        <section className="workspace-canvas reports-canvas" aria-label="보고서">
-          <React.Suspense fallback={<RouteLoading label="보고서 불러오는 중" />}>
-            <ReportsView
-              refreshSignal={reportRefreshSignal}
-              agentIcon={agentIcon}
-              agentProvider={agentProvider}
-              agentProviderLabel={agentProviderLabel}
-              agentOptionsReady={agentOptionsReady}
-              agentModel={selectedModelGroup?.slug || model}
-              agentReasoning={selectedReasoning?.id || reasoning}
-              agentApproval={selectedApproval?.id || approval}
-              isSending={isSending}
-              worldMemoryEnabled={worldMemoryEnabled}
-              onResearchPrompt={handleReportsBoredResearch}
-            />
-          </React.Suspense>
-        </section>
-      ) : activeView === "transaction-status" ? (
-        <React.Suspense fallback={<RouteLoading label="거래현황 불러오는 중" />}>
-          <TransactionStatusView
-            tossStatus={tossInvestStatus}
-            tossBusy={tossInvestBusy}
-            tossError={promotedTossInvestError}
-            tossErrorCode={promotedTossInvestErrorCode}
-            tossPublicIp={tossInvestPublicIp}
-            tossPublicIpBusy={tossInvestPublicIpBusy}
-            tossPublicIpError={tossInvestPublicIpError}
-            onOpenSettings={openTossInvestDialog}
-            onDeleteCredentials={deleteTossInvestCredentials}
-            onCheckPublicIp={checkTossInvestPublicIp}
-            onReload={() => {
-              void loadTossInvestStatus();
-            }}
-            onContextChange={handleTransactionStatusContextChange}
-          />
-        </React.Suspense>
-      ) : activeView === "world-memory" && worldMemoryEnabled ? (
-        <section className="workspace-canvas world-memory-canvas" aria-label="World Memory">
-          <React.Suspense fallback={<RouteLoading label="World Memory 불러오는 중" />}>
-            <WorldMemoryView
-              status={worldMemoryStatus}
-              busy={worldMemoryBusy}
-              error={worldMemoryError}
-              actionBusy={worldMemoryActionBusy}
-              activeAction={worldMemoryRunningAction}
-              agentActionBusy={Boolean(worldMemoryRunningAgentActionId && worldMemoryRunningAgentActionId === worldMemoryAgentAction?.id)}
-              actionResult={worldMemoryActionResult}
-              agentAction={worldMemoryAgentAction}
-              agentIcon={worldMemoryAgentRuntime.icon}
-              agentProvider={worldMemoryAgentRuntime.provider}
-              agentOptionsReady={agentOptionsReady}
-              isSending={worldMemoryChatIsSending}
-              onClearAgentAction={() => {
-                setWorldMemoryAgentAction(null);
-                setWorldMemoryFocusedChangeSuggestion(null);
-              }}
-              onExecuteAgentAction={executeWorldMemoryAgentAction}
-              onAskReportItem={askWorldMemoryReportItem}
-              onReload={loadWorldMemoryStatus}
-              onRunAction={runWorldMemoryAction}
-            />
-          </React.Suspense>
-        </section>
-      ) : activeView === "news-feed" ? (
-        <section className="workspace-canvas news-feed-canvas" aria-label="News Feed" onScroll={handleNewsFeedScroll}>
-          <React.Suspense fallback={<RouteLoading label="News Feed 불러오는 중" />}>
-            <NewsFeedView
-              status={newsFeedStatus}
-              items={newsFeedItems}
-              busy={newsFeedBusy}
-              refreshBusy={newsFeedRefreshBusy}
-              loadingMore={newsFeedLoadingMore}
-              error={newsFeedError}
-              hasMore={newsFeedHasMore}
-              translationModelLabel={newsFeedTranslationModelLabel}
-              marketSummary={newsFeedMarketSummary}
-              marketSummaryCollapsed={newsFeedMarketSummaryCollapsed}
-              onMarketSummaryCollapsedChange={updateNewsFeedMarketSummaryCollapsed}
-              onRefresh={refreshNewsFeed}
-            />
-          </React.Suspense>
-        </section>
-      ) : activeView === "magazine" ? (
-        <section
-          className={`workspace-canvas magazine-canvas${magazineActiveArticle ? " is-reader-open" : ""}`}
-          aria-label="주식채널 매거진+"
-          ref={magazineCanvasRef}
-        >
-          <div className="magazine-empty-page">
-            <MagazineUpdateSchedule
-              status={magazineStatus}
-              articles={magazineArticles}
-              isStartingNow={magazineStartNowBusy}
-              isGeneratingOne={magazineGenerateOneBusy}
-              onStartNow={startMagazineNow}
-              onGenerateOne={magazineGenerateOneToolVisible ? generateOneMagazineArticle : null}
-            />
-            <h1 className="magazine-logo-heading">
-              <img
-                className="magazine-logo-image"
-                src={stockChannelMagazineLogo}
-                alt="Stock Channel Magazine+"
-              />
-            </h1>
-            <MagazineTopicRow
-              topics={magazineTopicCatalog}
-              activeTopic={magazineActiveTopic}
-              onSelectTopic={openMagazineTopic}
-            />
-            <div className="magazine-issue-layout" aria-label="매거진 기사 목업">
-              <article className="magazine-headline-story">
-                <div className="magazine-headline-copy">
-                  <span className="magazine-story-kicker">{magazineCoverHeadline.topic}</span>
-                  <h2>
-                    <a
-                      className="magazine-article-link"
-                      href="#magazine-reader"
-                      onClick={(event) => openMagazineArticle(event, magazineCoverHeadline)}
-                    >
-                      {magazineCoverHeadline.title}
-                    </a>
-                  </h2>
-                  <p>{magazineCoverHeadline.deck}</p>
-                  <MagazinePublishedTime article={magazineCoverHeadline} />
-                </div>
-                <a
-                  className="magazine-image-link"
-                  href="#magazine-reader"
-                  onClick={(event) => openMagazineArticle(event, magazineCoverHeadline)}
-                  aria-label={`${magazineCoverHeadline.title} 기사 열기`}
-                >
-                  <div className="magazine-featured-image magazine-headline-image">
-                    <img src={magazineCoverHeadline.image} alt={magazineCoverHeadline.imageAlt} />
-                  </div>
-                </a>
-              </article>
-              <div className="magazine-card-grid" aria-label="피처드 기사">
-                {magazineCoverCards.map((story) => (
-                  <article className="magazine-article-card" key={story.id || story.title}>
-                    <a
-                      className="magazine-image-link"
-                      href="#magazine-reader"
-                      onClick={(event) => openMagazineArticle(event, story)}
-                      aria-label={`${story.title} 기사 열기`}
-                    >
-                      <div className="magazine-featured-image">
-                        <img src={story.image} alt={story.imageAlt} />
-                      </div>
-                    </a>
-                    <div className="magazine-card-copy">
-                      <span className="magazine-story-kicker">{story.topic}</span>
-                      <h3>
-                        <a
-                          className="magazine-article-link"
-                          href="#magazine-reader"
-                          onClick={(event) => openMagazineArticle(event, story)}
-                        >
-                          {story.title}
-                        </a>
-                      </h3>
-                    </div>
-                  </article>
-                ))}
-              </div>
-              <section className="magazine-list-section" aria-labelledby="magazine-article-list-heading">
-                <div className="magazine-section-heading">
-                  <h2 id="magazine-article-list-heading">최신 기사</h2>
-                </div>
-                <MagazineArticleList
-                  articles={magazineArticles}
-                  listKey="latest"
-                  onOpenArticle={openMagazineArticle}
-                />
-              </section>
-            </div>
-          </div>
-          {magazineActiveTopicEntry ? (
-            <div
-              className="magazine-topic-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="magazine-topic-view-title"
-              ref={magazineTopicModalRef}
-            >
-              <div className="magazine-topic-shell">
-                <a className="magazine-topic-return-link" href="#magazine-all" onClick={closeMagazineTopic}>
-                  ← 전체 기사 보기로 돌아가기
-                </a>
-                <header className="magazine-topic-view-header">
-                  <h1>
-                    <a className="magazine-title-link" href="#magazine-all" onClick={closeMagazineTopic}>
-                      주식채널 매거진+
-                    </a>
-                  </h1>
-                  <MagazineTopicRow
-                    topics={magazineTopicCatalog}
-                    activeTopic={magazineActiveTopic}
-                    onSelectTopic={openMagazineTopic}
-                    ariaLabel="매거진 토픽 필터"
-                  />
-                </header>
-                <section className="magazine-list-section" aria-labelledby="magazine-topic-view-title">
-                  <div className="magazine-section-heading">
-                    <h2 id="magazine-topic-view-title">{magazineActiveTopic} 주제의 기사</h2>
-                  </div>
-                  <MagazineArticleList
-                    articles={magazineTopicArticles}
-                    listKey={`topic:${magazineActiveTopic}`}
-                    onOpenArticle={openMagazineArticle}
-                    emptyText={`${magazineActiveTopic} 주제로 분류된 기사가 아직 없습니다.`}
-                  />
-                </section>
-              </div>
-            </div>
-          ) : null}
-          {magazineActiveArticle ? (
-            <div className="magazine-reader-modal" role="dialog" aria-modal="true" aria-labelledby="magazine-reader-title">
-              <div className="magazine-reader-shell">
-                <div className="magazine-reader-actions">
-                  <div className="magazine-reader-left-actions">
-                    <button className="magazine-reader-close" type="button" onClick={closeMagazineArticle}>
-                      기사 닫기
-                    </button>
-                    <button
-                      className={[
-                        "magazine-reader-copy",
-                        magazineCopyStatus !== "idle" ? `is-${magazineCopyStatus}` : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      type="button"
-                      onClick={copyMagazineArticle}
-                      disabled={magazineCopyStatus === "copying"}
-                      title={magazineCopyError || undefined}
-                    >
-                      <Copy size={15} strokeWidth={2.2} aria-hidden="true" />
-                      <span>
-                        {magazineCopyStatus === "copying"
-                          ? "복사 중"
-                          : magazineCopyStatus === "copied"
-                            ? "복사됨"
-                            : magazineCopyStatus === "text"
-                              ? "텍스트 복사됨"
-                              : magazineCopyStatus === "error"
-                                ? "복사 실패"
-                                : "복사하기"}
-                      </span>
-                    </button>
-                  </div>
-                  <button
-                    className="magazine-reader-delete"
-                    type="button"
-                    onClick={openMagazineDeleteDialog}
-                    disabled={!magazineActiveArticle.id || magazineDeleting}
-                  >
-                    <Trash2 size={15} strokeWidth={2.2} aria-hidden="true" />
-                    <span>기사 삭제</span>
-                  </button>
-                </div>
-                <article className="magazine-reader-article" ref={magazineReaderArticleRef}>
-                  <div className="magazine-reader-topic-row" aria-label="기사 토픽">
-                    {magazineActiveArticle.topics.map((topic) => (
-                      <span className="magazine-list-topic" key={topic}>
-                        {topic}
-                      </span>
-                    ))}
-                  </div>
-                  <h1 id="magazine-reader-title">{magazineActiveArticle.title}</h1>
-                  <MagazinePublishedTime article={magazineActiveArticle} className="magazine-reader-published-time" />
-                  <p className="magazine-reader-summary">{magazineActiveArticle.summary}</p>
-                  <figure className="magazine-reader-figure">
-                    <div className="magazine-featured-image magazine-reader-image">
-                      <img src={magazineActiveArticle.image} alt={magazineActiveArticle.imageAlt} />
-                    </div>
-                    {magazineActiveArticle.imageCredit ? (
-                      <figcaption>{magazineActiveArticle.imageCredit}</figcaption>
-                    ) : null}
-                  </figure>
-                  <div className="magazine-reader-body">
-                    {magazineActiveArticle.bodyHtml ? (
-                      <div
-                        className="magazine-reader-html"
-                        dangerouslySetInnerHTML={{ __html: magazineActiveArticle.bodyHtml }}
-                      />
-                    ) : (
-                      magazineMockArticleSections.map((section) => (
-                        <section className="magazine-reader-section" key={section.heading}>
-                          <h2>{section.heading}</h2>
-                          <p>{section.body}</p>
-                        </section>
-                      ))
-                    )}
-                    {magazineActiveArticle.chartBlocks.length ? (
-                      <div className="magazine-reader-chart-list" aria-label="기사 데이터 차트">
-                        {magazineActiveArticle.chartBlocks.map((chart, index) => (
-                          <section className="magazine-reader-chart-section" key={chart.id || chart.title || index}>
-                            <h2>{chart.title}</h2>
-                            {chart.note ? <p>{chart.note}</p> : null}
-                            <div className="magazine-reader-chart-frame">
-                              <React.Suspense fallback={<div className="magazine-reader-chart-loading">차트 읽는 중</div>}>
-                                <MagazinePortfolioEChart
-                                  option={chart.option}
-                                  className="magazine-reader-echart"
-                                  ariaLabel={chart.ariaLabel || `${chart.title} 차트`}
-                                />
-                              </React.Suspense>
-                            </div>
-                          </section>
-                        ))}
-                      </div>
-                    ) : null}
-                    {magazineActiveArticle.followupOptions.length ? (
-                      <section className="magazine-reader-followup" aria-label="앞으로 알고 싶은 기사 방향">
-                        <h2>앞으로 이 분야에 대해 더 알고 싶은 것이 있으신가요?</h2>
-                        <div className="magazine-reader-followup-options">
-                          {magazineActiveArticle.followupOptions.map((option, index) => {
-                            const isSelected = selectedMagazinePreferenceIds.includes(option.id);
-                            const isSaving = magazinePreferenceSavingId === option.id;
-                            const tone = option.tone || magazineToneSequence[index % magazineToneSequence.length];
-                            return (
-                              <button
-                                className={[
-                                  "magazine-reader-followup-choice",
-                                  `is-${tone}`,
-                                  isSelected ? "is-selected" : "",
-                                ]
-                                  .filter(Boolean)
-                                  .join(" ")}
-                                type="button"
-                                key={option.id}
-                                aria-pressed={isSelected}
-                                disabled={Boolean(magazinePreferenceSavingId)}
-                                onClick={() => saveMagazinePreference(option)}
-                              >
-                                {isSelected ? <Check size={14} strokeWidth={2.4} aria-hidden="true" /> : null}
-                                <span>{isSaving ? "저장 중" : option.label}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {magazinePreferenceNotice ? (
-                          <div
-                            className={[
-                              "magazine-reader-followup-notice",
-                              magazinePreferenceNoticeFading ? "is-fading" : "",
-                            ]
-                              .filter(Boolean)
-                              .join(" ")}
-                            role="status"
-                          >
-                            {magazinePreferenceNotice}
-                          </div>
-                        ) : null}
-                      </section>
-                    ) : null}
-                    <section className="magazine-reader-comments" aria-label="기사 댓글">
-                      <h2>추가로 요청하고 싶은 것이 있거나 궁금하신 점이 있다면 알려주세요</h2>
-                      <div className="magazine-reader-comment-list">
-                        {magazineComments.length ? (
-                          magazineComments.map((comment) => {
-                            const replyStatusText = magazineCommentStatusText(comment.reply?.status);
-                            return (
-                              <article className="magazine-reader-comment" key={comment.id}>
-                                <div className="magazine-reader-comment-meta">
-                                  <strong>{comment.author || "사용자"}</strong>
-                                  <span>{formatDateTime(comment.createdAt)}</span>
-                                </div>
-                                <p>{comment.text}</p>
-                                {comment.reply ? (
-                                  <div
-                                    className={[
-                                      "magazine-reader-comment-reply",
-                                      comment.reply.status === "error" ? "is-error" : "",
-                                      ["waiting", "generating"].includes(comment.reply.status) ? "is-pending" : "",
-                                    ]
-                                      .filter(Boolean)
-                                      .join(" ")}
-                                  >
-                                    <div className="magazine-reader-comment-meta">
-                                      <strong>{comment.reply.author || "매거진 편집자 AI"}</strong>
-                                      <span>
-                                        {replyStatusText || formatDateTime(comment.reply.createdAt)}
-                                      </span>
-                                    </div>
-                                    {["waiting", "generating"].includes(comment.reply.status) ? (
-                                      <div className="magazine-reader-comment-pending">
-                                        <LoaderCircle size={16} strokeWidth={2.2} className="is-spinning" aria-hidden="true" />
-                                        <span>{replyStatusText}</span>
-                                      </div>
-                                    ) : (
-                                      <>
-                                        <div className="magazine-reader-comment-markdown">
-                                          <MarkdownText text={comment.reply.text} splitSingleLineParagraphs />
-                                        </div>
-                                        {comment.reply.biasEventIds?.length ? (
-                                          <div className="magazine-reader-comment-bias-applied" role="status">
-                                            <span className="magazine-reader-comment-bias-icon" aria-hidden="true">
-                                              <Check size={13} strokeWidth={2.7} />
-                                            </span>
-                                            <span>사용자의 편집 방향 수정 요청이 반영되었습니다</span>
-                                          </div>
-                                        ) : null}
-                                      </>
-                                    )}
-                                  </div>
-                                ) : null}
-                              </article>
-                            );
-                          })
-                        ) : (
-                          <p className="magazine-reader-comments-empty">아직 남겨진 코멘트가 없습니다.</p>
-                        )}
-                      </div>
-                      <form className="magazine-reader-comment-form" onSubmit={submitMagazineComment}>
-                        <label className="sr-only" htmlFor="magazine-comment-input">
-                          기사 코멘트
-                        </label>
-                        <textarea
-                          id="magazine-comment-input"
-                          value={magazineCommentDraft}
-                          maxLength={4000}
-                          onChange={(event) => setMagazineCommentDraft(event.target.value)}
-                          placeholder="궁금한 점이나 앞으로 보고 싶은 기사 방향을 적어주세요."
-                          disabled={magazineCommentSubmitting}
-                        />
-                        <div className="magazine-reader-comment-form-row">
-                          {magazineCommentError ? (
-                            <span className="magazine-reader-comment-error">{magazineCommentError}</span>
-                          ) : (
-                            <span>{magazineCommentDraft.length.toLocaleString("ko-KR")} / 4,000</span>
-                          )}
-                          <button
-                            className={[
-                              "magazine-reader-comment-submit",
-                              magazineCommentSubmitting ? "is-loading" : "",
-                            ]
-                              .filter(Boolean)
-                              .join(" ")}
-                            type="submit"
-                            disabled={!magazineCommentDraft.trim() || magazineCommentSubmitting}
-                            aria-label={magazineCommentSubmitting ? "답변 준비 중" : "등록"}
-                            title={magazineCommentSubmitting ? "답변 준비 중" : undefined}
-                          >
-                            {magazineCommentSubmitting ? (
-                              <LoaderCircle size={16} strokeWidth={2.2} className="is-spinning" aria-hidden="true" />
-                            ) : (
-                              <>
-                                <SendHorizontal size={16} strokeWidth={2.2} aria-hidden="true" />
-                                <span>등록</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </form>
-                    </section>
-                    <button className="magazine-reader-return" type="button" onClick={closeMagazineArticle}>
-                      돌아가기
-                    </button>
-                  </div>
-                </article>
-              </div>
-              {magazineDeleteDialogOpen ? (
-                <div className="magazine-reader-delete-overlay">
-                  <div
-                    className="magazine-reader-delete-dialog"
-                    role="alertdialog"
-                    aria-modal="true"
-                    aria-labelledby="magazine-delete-dialog-title"
-                    aria-describedby="magazine-delete-dialog-description"
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" || event.nativeEvent?.isComposing || magazineDeleting) return;
-                      event.preventDefault();
-                      event.stopPropagation();
-                      void confirmMagazineArticleDelete();
-                    }}
-                  >
-                    <h2 id="magazine-delete-dialog-title">정말 삭제하시겠습니까?</h2>
-                    <p id="magazine-delete-dialog-description">삭제한 기사는 되돌릴 수 없습니다.</p>
-                    {magazineDeleteError ? (
-                      <p className="magazine-reader-delete-error" role="alert">
-                        {magazineDeleteError}
-                      </p>
-                    ) : null}
-                    <div className="magazine-reader-delete-dialog-actions">
-                      <button
-                        className="magazine-reader-delete-cancel"
-                        type="button"
-                        onClick={closeMagazineDeleteDialog}
-                        disabled={magazineDeleting}
-                      >
-                        취소
-                      </button>
-                      <button
-                        className="magazine-reader-delete-confirm"
-                        type="button"
-                        onClick={confirmMagazineArticleDelete}
-                        disabled={magazineDeleting}
-                        autoFocus
-                      >
-                        {magazineDeleting ? (
-                          <LoaderCircle size={15} strokeWidth={2.2} className="is-spinning" aria-hidden="true" />
-                        ) : null}
-                        <span>{magazineDeleting ? "삭제 중" : "확인"}</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </section>
-      ) : activeView === "portfolio" ? (
-        <section className="workspace-canvas portfolio-canvas" aria-label="포트폴리오">
-          <div className="portfolio-shell">
-            <React.Suspense fallback={<RouteLoading label="포트폴리오 화면 불러오는 중" />}>
-              <PortfolioGuidePage
-                modes={portfolioCanvasModeList}
-                principles={portfolioTheoryPrinciples}
-                onCreateCanvas={createPortfolioCanvasFromGuide}
-              />
-            </React.Suspense>
-          </div>
-        </section>
-      ) : activeView === "portfolio-canvas" ? (
-        <section
-          className="workspace-canvas portfolio-canvas"
-          aria-label={activePortfolioCanvas ? `${activePortfolioCanvas.name} 포트폴리오 캔버스` : "포트폴리오"}
-        >
-          <React.Suspense fallback={<RouteLoading label="포트폴리오 캔버스 불러오는 중" />}>
-            {activePortfolioCanvas ? (
-              <PortfolioWorkspace
-                key={activePortfolioCanvas.id}
-                canvas={activePortfolioCanvas}
-                onWorkspaceChange={updateActivePortfolioCanvasWorkspace}
-                onRenameCanvas={(nextName) => renamePortfolioCanvasTo(activePortfolioCanvas.id, nextName)}
-                onOpenGuide={() => {
-                  setActiveView("portfolio");
-                  setPortfolioContext(null);
-                }}
-                onContextChange={setPortfolioContext}
-                onWidgetPromptRequest={handlePortfolioWidgetPromptRequest}
-                agentWidgetAction={portfolioWidgetAgentAction}
-                agentProvider={agentProvider}
-                tossInvestStatus={tossInvestStatus}
-                tossInvestBusy={tossInvestBusy}
-                tossInvestError={promotedTossInvestError}
-                tossInvestErrorCode={promotedTossInvestErrorCode}
-                tossInvestPublicIp={tossInvestPublicIp}
-                tossInvestPublicIpBusy={tossInvestPublicIpBusy}
-                tossInvestPublicIpError={tossInvestPublicIpError}
-                tossInvestOrderSyncStatus={tossInvestOrderSyncStatus}
-                tossInvestOrderSyncBusy={tossInvestOrderSyncBusy}
-                tossInvestOrderSyncAction={tossInvestOrderSyncAction}
-                tossInvestOrderSyncError={tossInvestOrderSyncError}
-                tossInvestOrderSyncErrorCode={tossInvestOrderSyncErrorCode}
-                onOpenSettings={openTossInvestDialog}
-                onDeleteTossInvestCredentials={deleteTossInvestCredentials}
-                onProbeTossInvestConnection={probeTossInvestConnection}
-                onRunTossInvestOrderSync={() => void runTossInvestOrderSync()}
-                onCheckTossInvestPublicIp={checkTossInvestPublicIp}
-                onAgentWidgetActionConsumed={(actionId) =>
-                  setPortfolioWidgetAgentAction((current) => (current?.id === actionId ? null : current))
-                }
-              />
-            ) : (
-              <div className="portfolio-shell">
-                <PortfolioGuidePage
-                  modes={portfolioCanvasModeList}
-                  principles={portfolioTheoryPrinciples}
-                  onCreateCanvas={createPortfolioCanvasFromGuide}
-                />
-              </div>
-            )}
-          </React.Suspense>
-        </section>
-      ) : activeView === "earning-calendar" ? (
-        <section className="workspace-canvas calendar-canvas" aria-label="Earning Calendar">
-          <React.Suspense fallback={<RouteLoading label="실적 캘린더 불러오는 중" />}>
-            <EarningCalendarView
-              agentIcon={agentIcon}
-              analysisReady={agentOptionsReady}
-              analysisBusy={isSending}
-              onAnalyzeEarning={analyzeEarningEvent}
-              onContextChange={setEarningCalendarContext}
-            />
-          </React.Suspense>
-        </section>
-      ) : activeView === "economic-calendar" ? (
-        <section className="workspace-canvas calendar-canvas" aria-label="Economic Calendar">
-          <React.Suspense fallback={<RouteLoading label="경제 캘린더 불러오는 중" />}>
-            <EconomicCalendarView onContextChange={setEconomicCalendarContext} />
-          </React.Suspense>
-        </section>
-      ) : (
-        <StockChannelView
-          activeArticle={arcaReaderArticle}
-          activeCategoryLabel={activeCategoryLabel}
-          agentIcon={agentIcon}
-          articleBusy={arcaReaderBusy}
-          articleError={arcaReaderError}
-          attachingArticleHref={attachingArticleHref}
-          board={arcaBoard}
-          boardBusy={arcaBoardBusy}
-          boardError={arcaBoardError}
-          boardFilters={boardFilters}
-          boardSearchInput={boardSearchInput}
-          cutRateOptions={cutRateOptions}
-          notificationBusy={arcaNotificationBusy}
-          notificationActionBusy={arcaNotificationActionBusy}
-          notificationActionError={arcaNotificationActionError}
-          notificationHealth={arcaNotificationHealth}
-          notificationStatus={arcaNotificationStatus}
-          onAttachArticle={attachArticleContext}
-          onBoardSearchInputChange={setBoardSearchInput}
-          onCloseArticle={closeArcaArticleReader}
-          onOpenArticle={(row) => void openArcaArticleReader(row)}
-          onMarkAllNotificationsRead={() => void markAllArcaNotificationsRead()}
-          onOpenNotificationArticle={openArcaNotificationArticle}
-          onRefreshBoard={refreshBoard}
-          onRefreshNotifications={loadArcaNotifications}
-          onRetryArticle={retryArcaArticleReader}
-          onSelectCategory={selectBoardCategory}
-          onSubmitSearch={submitBoardSearch}
-          onToggleHiddenNotices={() => setShowHiddenNotices((next) => !next)}
-          onUpdateFilters={updateBoardFilters}
-          searchTargetOptions={searchTargetOptions}
-          showHiddenNotices={showHiddenNotices}
-          sortOptions={sortOptions}
-          canvasRef={arcaCanvasRef}
-          writeUrl={ARCA_WRITE_URL}
-          notificationUrl={ARCA_NOTIFICATION_URL}
-        />
-      )}
-
+      <AppRoutes activeView={activeView} models={routeModels} />
       {isFullWidthCanvasView ? null : (
         <AgentSidebar
           addChatAttachmentFiles={addChatAttachmentFiles}
@@ -7824,7 +2228,7 @@ function App() {
 
       <PortfolioCanvasDeleteDialog
         canvas={pendingDeletePortfolioCanvas}
-        onCancel={() => setPendingDeletePortfolioCanvas(null)}
+        onCancel={cancelDeletePortfolioCanvas}
         onConfirm={confirmDeletePortfolioCanvas}
       />
     </main>

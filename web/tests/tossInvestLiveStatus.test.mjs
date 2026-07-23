@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TickMarkType } from "lightweight-charts";
 
 import { __tossInvestTestHooks, handleTossInvestEndpoint } from "../server/tossInvestApi.mjs";
+import { formatTransactionChartTickMark } from "../src/transactions/transactionDomain.js";
 import { resolveUsRegularSessionBasis } from "../src/transactions/watchlistReturnBasis.js";
 
 const {
@@ -1352,10 +1354,17 @@ test("Toss investment status endpoint chunks large price requests by 200 symbols
 });
 
 test("transaction status view reads the live Toss API endpoint and does not expose snapshot internals", () => {
-  const source = readFileSync(
-    resolve(TEST_DIR, "../src/transactions/TransactionStatusView.jsx"),
-    "utf8",
-  );
+  const source = [
+    "../src/transactions/TransactionStatusView.jsx",
+    "../src/transactions/TransactionStatusViews.jsx",
+    "../src/transactions/transactionDomain.js",
+    "../src/transactions/transactionMarketDataApi.js",
+    "../src/transactions/useTransactionMarketDataController.js",
+    "../src/transactions/useTransactionDisplaySettingsController.js",
+    "../src/transactions/useTransactionShellState.js",
+    "../src/transactions/useTransactionSimulatorState.js",
+    "../src/transactions/useTransactionWatchlistState.js",
+  ].map((sourcePath) => readFileSync(resolve(TEST_DIR, sourcePath), "utf8")).join("\n");
   const portfolioStatusSource = readFileSync(
     resolve(TEST_DIR, "../src/portfolio/PortfolioWorkspaceHeader.jsx"),
     "utf8",
@@ -1366,7 +1375,10 @@ test("transaction status view reads the live Toss API endpoint and does not expo
   const viteServerSource = readFileSync(resolve(TEST_DIR, "../server/viteCodexApi.mjs"), "utf8");
   const transactionSettingsSource = readFileSync(resolve(TEST_DIR, "../server/transactionSettings.mjs"), "utf8");
   const transactionDefaultsSource = readFileSync(resolve(TEST_DIR, "../../config/transaction-status.defaults.json"), "utf8");
-  const stylesSource = readFileSync(resolve(TEST_DIR, "../src/styles.css"), "utf8");
+  const stylesSource = [
+    "../src/styles.css",
+    "../src/transactions/transaction-status.css",
+  ].map((sourcePath) => readFileSync(resolve(TEST_DIR, sourcePath), "utf8")).join("\n");
 
   assert.match(source, /\/api\/tossinvest\/investment-status/);
   assert.match(standaloneServerSource, /\/api\/tossinvest\/investment-status/);
@@ -1402,7 +1414,7 @@ test("transaction status view reads the live Toss API endpoint and does not expo
   assert.match(source, /refreshSettledKey/);
   assert.match(source, /setRefreshSettledKey\(\(current\) => current \+ 1\)/);
   assert.match(source, /retryAfterMsFromRateLimit/);
-  assert.match(source, /response\.status === 429 \? transactionTossRateLimitFallbackMs : 0/);
+  assert.match(source, /fetchError\.status === 429 \? transactionTossRateLimitFallbackMs : 0/);
   assert.match(source, /liveRetryUntilRef\.current = retryAfterMs \? Date\.now\(\) \+ retryAfterMs : 0/);
   assert.match(source, /retryRemainingMs = Math\.max\(0, liveRetryUntilRef\.current - Date\.now\(\)\)/);
   assert.match(source, /Math\.min\(300_000, Math\.max\(recommendedIntervalMs, liveRetryAfterMs \|\| 0\)\)/);
@@ -1422,7 +1434,7 @@ test("transaction status view reads the live Toss API endpoint and does not expo
   assert.match(source, /liveRefreshBusy/);
   assert.match(source, /liveFetchGate\.ready && liveRefreshBusyRef\.current/);
   assert.doesNotMatch(source, /currency,\s*liveFetchGate,\s*refreshKey/);
-  assert.match(appSource, /void loadTossInvestStatus\(\);/);
+  assert.match(appSource, /onReload: \(\) => void loadTossInvestStatus\(\)/);
   assert.doesNotMatch(appSource, /activeView === "transaction-status"[\s\S]{0,900}onProbeConnection=\{probeTossInvestConnection\}/);
   assert.match(source, /hasCurrentPayload/);
   assert.match(source, /loading && !payload/);
@@ -1511,7 +1523,7 @@ test("transaction status view reads the live Toss API endpoint and does not expo
   assert.match(source, /statusBannerError = sectionError \|\| currencySettingsError \|\| tossError/);
   assert.match(source, /liveErrorCode/);
   assert.match(source, /watchlistPriceErrorCode/);
-  assert.match(source, /responseError\.errorCode = body\?\.errorCode \|\| ""/);
+  assert.match(source, /error\.errorCode = payload\?\.errorCode \|\| ""/);
   assert.match(source, /setLiveErrorCode\(fetchError\.errorCode \|\| ""\)/);
   assert.match(source, /statusBannerErrorCode = sectionError \? sectionErrorCode : statusBannerError \? tossErrorCode : ""/);
   assert.match(source, /fetchTransactionWatchlistPrices/);
@@ -1612,6 +1624,7 @@ test("transaction status view reads the live Toss API endpoint and does not expo
   assert.match(source, /handleScroll: true/);
   assert.match(source, /handleScale: true/);
   assert.match(source, /tickMarkType === TickMarkType\.Time \|\| tickMarkType === TickMarkType\.TimeWithSeconds/);
+  assert.equal(formatTransactionChartTickMark("2026-07-22", TickMarkType.DayOfMonth), "7월 22일");
   assert.match(source, /const chartShowsIntradayTime = transactionInvestmentIntervalIsIntraday\(intervalMode\)/);
   assert.match(source, /timeVisible: chartShowsIntradayTime/);
   assert.match(source, /chartOptionsKey = `\$\{displayUnit\}\|\$\{volumeVisible \? "volume" : "price"\}\|\$\{chartShowsIntradayTime \? "intraday" : "calendar"\}`/);
@@ -1761,10 +1774,10 @@ test("transaction status view reads the live Toss API endpoint and does not expo
   assert.match(source, /transaction-watchlist-title-rename-form/);
   assert.match(source, /onRequestRenameGroup\(groupId, "sidebar"\)/);
   assert.match(source, /onRequestRenameGroup\(selectedGroup\.id, "main"\)/);
-  assert.match(source, /void saveTransactionCurrencySettings\(\{ sidebarValueMode: normalizedMode \}\)/);
-  assert.match(source, /void saveTransactionCurrencySettings\(\{ investmentChartMode: normalizedMode \}\)/);
-  assert.match(source, /void saveTransactionCurrencySettings\(\{ investmentChartIntervalMode: normalizedInterval \}\)/);
-  assert.match(source, /void saveTransactionCurrencySettings\(\{ investmentChartVolumeVisible: normalizedVisible \}\)/);
+  assert.match(source, /void saveSettings\(\{ sidebarValueMode: normalizedMode \}\)/);
+  assert.match(source, /void saveSettings\(\{ investmentChartMode: normalizedMode \}\)/);
+  assert.match(source, /void saveSettings\(\{ investmentChartIntervalMode: normalizedInterval \}\)/);
+  assert.match(source, /void saveSettings\(\{ investmentChartVolumeVisible: normalizedVisible \}\)/);
   assert.match(source, /void saveTransactionCurrencySettings\(\{ watchlistGroups: nextGroups \}\)/);
   assert.match(source, /reorderTransactionWatchlistInstruments/);
   assert.match(source, /watchlistSymbolOrderEditing/);

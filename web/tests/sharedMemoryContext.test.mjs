@@ -4,10 +4,137 @@ import assert from "node:assert/strict";
 import {
   buildDailyUserMemoryRollup,
   buildExternalNewsBriefing,
+  externalMarketSummaryInputFingerprint,
+  externalMarketSummaryPrompt,
   extractExternalMarketSummaryFromBriefingText,
   normalizeExternalMarketSummaryCandidate,
+  runExternalMarketSummarySingleFlight,
   sanitizeWorldMemoryReportText,
 } from "../server/sharedMemoryStore.mjs";
+
+test("external market summary fingerprint ignores wall-clock time and tracks exact semantic inputs", () => {
+  const worldReport = {
+    generatedAt: "2026-07-23T00:00:00.000Z",
+    view: { summary: "기준 시장은 혼재 국면이다." },
+  };
+  const items = [{
+    id: "news-1",
+    publishedAt: "2026-07-23T00:10:00.000Z",
+    feedTitle: "FinancialJuice",
+    translatedTitle: "미국 장기금리가 상승했다",
+    translatedText: "기술주에는 부담으로 작용했다.",
+  }];
+  const modelInfo = { provider: "codex-cli", model: "gpt-5.6-luna", reasoning: "low" };
+  const base = {
+    worldReport,
+    items,
+    worldMemoryCutoffAt: "2026-07-23T00:05:00.000Z",
+    modelInfo,
+  };
+
+  const first = externalMarketSummaryInputFingerprint(base);
+  const same = externalMarketSummaryInputFingerprint({ ...base, builtAt: "2026-07-23T01:00:00.000Z" });
+  const changedNews = externalMarketSummaryInputFingerprint({
+    ...base,
+    items: [{ ...items[0], translatedTitle: "미국 장기금리가 하락했다" }],
+  });
+  const changedModel = externalMarketSummaryInputFingerprint({
+    ...base,
+    modelInfo: { ...modelInfo, reasoning: "medium" },
+  });
+
+  assert.match(first, /^[a-f0-9]{64}$/);
+  assert.equal(same, first);
+  assert.notEqual(changedNews, first);
+  assert.notEqual(changedModel, first);
+});
+
+test("external market summary prompt keeps a stable provider-cache prefix", () => {
+  const input = {
+    worldReport: {
+      generatedAt: "2026-07-23T00:00:00.000Z",
+      view: { summary: "기준 시장은 혼재 국면이다." },
+    },
+    items: [{
+      id: "news-1",
+      publishedAt: "2026-07-23T00:10:00.000Z",
+      translatedTitle: "새로운 시장 뉴스",
+      translatedText: "변동 입력이다.",
+    }],
+    worldMemoryCutoffAt: "2026-07-23T00:05:00.000Z",
+  };
+  const first = externalMarketSummaryPrompt({ ...input, builtAt: "2026-07-23T00:15:00.000Z" });
+  const later = externalMarketSummaryPrompt({ ...input, builtAt: "2026-07-23T00:30:00.000Z" });
+
+  assert.equal(later, first);
+  assert.equal(first.includes("builtAt"), false);
+  assert.ok(first.indexOf("기준 World Memory:") < first.indexOf("변동 뉴스:"));
+  assert.ok(first.indexOf("반환 형식:") < first.indexOf("기준 World Memory:"));
+});
+
+test("external market summary single-flight reuses exact cache and joins an active generation", () => {
+  let generateCount = 0;
+  const cachedValue = { marketSummaryResult: { text: "기존 요약" }, persisted: false };
+  const exactHit = runExternalMarketSummarySingleFlight({
+    fingerprint: "a".repeat(64),
+    readCached: () => cachedValue,
+    generateAndPersist: () => {
+      generateCount += 1;
+      return null;
+    },
+  });
+  assert.equal(exactHit.cacheStatus, "exact-hit");
+  assert.equal(exactHit.value, cachedValue);
+  assert.equal(generateCount, 0);
+
+  let joinedCache = null;
+  let nowMs = 0;
+  const joined = runExternalMarketSummarySingleFlight({
+    fingerprint: "b".repeat(64),
+    readCached: () => joinedCache,
+    generateAndPersist: () => {
+      generateCount += 1;
+      return null;
+    },
+    acquireLease: () => ({ acquired: false, release: () => false }),
+    now: () => nowMs,
+    wait: () => {
+      nowMs += 25;
+      joinedCache = cachedValue;
+    },
+    waitTimeoutMs: 100,
+  });
+  assert.equal(joined.cacheStatus, "single-flight");
+  assert.equal(joined.waitedForInFlight, true);
+  assert.equal(joined.value, cachedValue);
+  assert.equal(generateCount, 0);
+});
+
+test("external market summary single-flight persists only the winning cache miss", () => {
+  let released = false;
+  let generateCount = 0;
+  const generatedValue = { marketSummaryResult: { text: "새 요약" }, persisted: true };
+  const result = runExternalMarketSummarySingleFlight({
+    fingerprint: "c".repeat(64),
+    readCached: () => null,
+    generateAndPersist: () => {
+      generateCount += 1;
+      return generatedValue;
+    },
+    acquireLease: () => ({
+      acquired: true,
+      release: () => {
+        released = true;
+        return true;
+      },
+    }),
+  });
+
+  assert.equal(result.cacheStatus, "miss");
+  assert.equal(result.value, generatedValue);
+  assert.equal(generateCount, 1);
+  assert.equal(released, true);
+});
 
 test("world memory context strips memory change suggestions", () => {
   const text = sanitizeWorldMemoryReportText({

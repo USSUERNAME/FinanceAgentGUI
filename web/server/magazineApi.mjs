@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from "node:crypto";
+import { createHash, randomInt, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -6,6 +6,7 @@ import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCodexOptions, runCodexChat, sendJson } from "./codexProbe.mjs";
 import { spawnObservedLlm, waitForLlmObservation } from "./llmProcessObserver.mjs";
+import { runIsolatedCodexJsonPrompt } from "../../scripts/magazine_generate_simple.mjs";
 import {
   isMagazineEnabled,
   publicMagazineSettingsSnapshot,
@@ -24,6 +25,11 @@ const MAGAZINE_GENERATION_LOCK_PATH = join(DATA_MAGAZINE_DIR, ".generation.lock"
 const MAGAZINE_PREFERENCES_PATH = join(DATA_MAGAZINE_DIR, "editorial-preferences.json");
 const MAGAZINE_EDITORIAL_BIAS_PATH = join(DATA_MAGAZINE_DIR, "editorial-bias.json");
 const MAGAZINE_TOPICS_PATH = join(GUIBUILD_ROOT, "config", "magazine-topics.json");
+const MAGAZINE_ARTICLE_COUNT_SCHEMA_PATH = join(
+  GUIBUILD_ROOT,
+  "config",
+  "magazine-article-count-decision.schema.json",
+);
 const MAGAZINE_CODEX_GENERATOR = join(GUIBUILD_ROOT, "scripts", "magazine_generate_with_codex.mjs");
 const NEWS_FEED_STORE_PATH = join(GUIBUILD_ROOT, "data", "news-feed.json");
 const WORLD_MEMORY_STATE_PATH = join(GUIBUILD_ROOT, "data", "world-memory", "collector-state.json");
@@ -87,7 +93,11 @@ const magazineSchedulerRuntime = previousMagazineSchedulerRuntime || {
   lastCycle: null,
   lastError: "",
   manualStartRequestedAt: "",
+  articleCountDecisionCache: null,
 };
+if (!("articleCountDecisionCache" in magazineSchedulerRuntime)) {
+  magazineSchedulerRuntime.articleCountDecisionCache = null;
+}
 globalThis[MAGAZINE_SCHEDULER_RUNTIME_KEY] = magazineSchedulerRuntime;
 
 const mimeTypes = {
@@ -1953,6 +1963,42 @@ async function buildMagazineArticleCountDecisionContext(options = {}) {
   };
 }
 
+export function magazineArticleCountEvidenceFingerprint(context = {}, agent = {}) {
+  const { now: _volatileNow, ...evidence } = context && typeof context === "object" && !Array.isArray(context)
+    ? context
+    : {};
+  const payload = {
+    evidence,
+    agent: {
+      provider: cleanText(agent.provider || ""),
+      model: cleanText(agent.model || ""),
+      reasoning: cleanText(agent.reasoning || ""),
+      speed: cleanText(agent.speed || ""),
+    },
+  };
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+export function reuseMagazineArticleCountDecision(cache = null, evidenceFingerprint = "") {
+  if (
+    !cache ||
+    cache.evidenceFingerprint !== evidenceFingerprint ||
+    !cache.decision?.schemaOk ||
+    cache.decision?.fallback
+  ) {
+    return null;
+  }
+  return {
+    ...cache.decision,
+    basis: "llm-editorial-judgment-cache-reuse",
+    cacheHit: true,
+    evidenceFingerprint,
+    reusedAt: nowIso(),
+    reuseCount: Number(cache.reuseCount || 0) + 1,
+    elapsedMs: 0,
+  };
+}
+
 export function compactPostCutoffNewsFeedItemsForDecision(newsItems = [], cutoffMs = 0) {
   if (!cutoffMs) return [];
   const items = Array.isArray(newsItems) ? newsItems : [];
@@ -2238,7 +2284,7 @@ function normalizeMagazineDecisionAngle(value) {
     storyFamily: scrubMagazineDecisionText(source.storyFamily || "", 160),
     editorialAngle: scrubMagazineDecisionText(source.editorialAngle || "", 120),
     primaryEvent: scrubMagazineDecisionText(source.primaryEvent || source.event || "", 300),
-    newsFeedIds: uniqueStrings(source.newsFeedIds || source.sourceIds || []).filter((id) => /^nf_[A-Za-z0-9]+$/.test(id)).slice(0, 8),
+    newsFeedIds: uniqueStrings(source.newsFeedIds || source.sourceIds || []).filter((id) => /^nf_[A-Za-z0-9]+$/.test(id)),
     researchQueries: uniqueStrings(source.researchQueries || []).map((query) => truncateSchedulerText(query, 180)).slice(0, 5),
   };
 }
@@ -2345,14 +2391,20 @@ async function decideScheduledMagazineArticleCount({ scheduledAt = "", topicDisc
       perArticleSlotMode: !normalizedTopicDiscoveryLane,
       maxTargetCount: maxCount,
     });
-    const result = await runCodexChat({
-      provider: agent.provider,
-      model: agent.model,
-      reasoning: agent.reasoning,
-      speed: agent.speed,
-      approval: agent.provider === MAGAZINE_ANTIGRAVITY_PROVIDER_ID ? agent.approval : "never",
-      personaMode: "none",
-      prompt: buildMagazineArticleCountDecisionPrompt({
+    const evidenceFingerprint = magazineArticleCountEvidenceFingerprint(context, agent);
+    const reusedDecision = reuseMagazineArticleCountDecision(
+      magazineSchedulerRuntime.articleCountDecisionCache,
+      evidenceFingerprint,
+    );
+    if (reusedDecision) {
+      magazineSchedulerRuntime.articleCountDecisionCache = {
+        ...magazineSchedulerRuntime.articleCountDecisionCache,
+        reusedAt: reusedDecision.reusedAt,
+        reuseCount: reusedDecision.reuseCount,
+      };
+      return { agent, decision: reusedDecision };
+    }
+    const decisionPrompt = buildMagazineArticleCountDecisionPrompt({
         ...context,
         scheduledAt,
         selectedAgent: {
@@ -2360,29 +2412,75 @@ async function decideScheduledMagazineArticleCount({ scheduledAt = "", topicDisc
           model: agent.model,
           reasoning: agent.reasoning,
         },
+      });
+    const result =
+      agent.provider === MAGAZINE_CODEX_PROVIDER_ID
+        ? await runIsolatedCodexJsonPrompt({
+            prompt: decisionPrompt,
+            outputSchemaPath: MAGAZINE_ARTICLE_COUNT_SCHEMA_PATH,
+            feature: "magazine-article-count-decision",
+            model: agent.model,
+            reasoning: agent.reasoning,
+            speed: agent.speed,
+            timeoutMs: 10 * 60 * 1_000,
+            label: "Magazine 전체 후보 기사 수·소재 선정기",
+          })
+        : await runCodexChat({
+            provider: agent.provider,
+            model: agent.model,
+            reasoning: agent.reasoning,
+            speed: agent.speed,
+            approval: agent.approval,
+            personaMode: "none",
+            prompt: decisionPrompt,
+            messages: [],
+            screen: "magazine",
+            includeSharedMemory: false,
+            includeWorldMemoryContext: false,
+            includeWorldMemorySearchContext: false,
+            includeNewsFeedContext: false,
+            includeNewsFeedSearchContext: false,
+            requireWebSearch: false,
+            observationFeature: "magazine-article-count-decision",
+          });
+    const parsedDecision =
+      agent.provider === MAGAZINE_CODEX_PROVIDER_ID
+        ? result.value
+        : parseJsonObjectFromText(result.answer || "");
+    const decision = {
+      ...normalizeMagazineArticleCountDecision(parsedDecision, {
+        maxCount,
+        provider: agent.provider,
+        model: agent.model,
+        reasoning: agent.reasoning,
+        elapsedMs: result.telemetry?.durationMs ?? result.elapsedMs,
+        topicDiscoveryLane: normalizedTopicDiscoveryLane,
+        topicDiscoveryPolicy,
       }),
-      messages: [],
-      screen: "magazine",
-      includeSharedMemory: false,
-      includeWorldMemoryContext: false,
-      includeWorldMemorySearchContext: false,
-      includeNewsFeedContext: false,
-      includeNewsFeedSearchContext: false,
-      requireWebSearch: false,
-      observationFeature: "magazine-article-count-decision",
-    });
-    const decision = normalizeMagazineArticleCountDecision(parseJsonObjectFromText(result.answer || ""), {
-      maxCount,
-      provider: result.provider || agent.provider,
-      model: result.model || agent.model,
-      reasoning: result.reasoning || agent.reasoning,
-      elapsedMs: result.elapsedMs,
-      topicDiscoveryLane: normalizedTopicDiscoveryLane,
-      topicDiscoveryPolicy,
-    });
+      cacheHit: false,
+      evidenceFingerprint,
+      selectionPipeline:
+        agent.provider === MAGAZINE_CODEX_PROVIDER_ID
+          ? "isolated-one-turn-all-candidates"
+          : "provider-chat",
+      ...(result.telemetry
+        ? {
+            turnCount: result.telemetry.turnCount,
+            toolCallCount: result.telemetry.toolCallCount,
+            tokenUsage: result.telemetry.tokenUsage,
+          }
+        : {}),
+    };
     if (!decision.schemaOk) {
       throw new Error("article count decision response did not include a numeric targetCount");
     }
+    magazineSchedulerRuntime.articleCountDecisionCache = {
+      evidenceFingerprint,
+      cachedAt: nowIso(),
+      reusedAt: "",
+      reuseCount: 0,
+      decision,
+    };
     return { agent, decision };
   } catch (error) {
     return {
@@ -2416,6 +2514,11 @@ function runMagazineGenerator(body = {}, action = "generateWithCodex") {
   const approval = safeGeneratorCliValue(body.approval || (useAntigravity ? "turbo" : "never"), useAntigravity ? "turbo" : "never", /^[A-Za-z-]+$/);
   const speed = safeGeneratorCliValue(body.speed || "standard", "standard", /^[A-Za-z-]+$/);
   const harness = safeGeneratorCliValue(body.harness || "v2", "v2", /^(?:v2|legacy)$/);
+  const pipeline = safeGeneratorCliValue(
+    body.pipeline || (useAntigravity ? "agentic" : "simple"),
+    useAntigravity ? "agentic" : "simple",
+    /^(?:simple|agentic)$/,
+  );
   const extraPrompt = cleanText(body.prompt || body.extraPrompt || "");
   const lockedTopic = body.lockedTopic && typeof body.lockedTopic === "object" && !Array.isArray(body.lockedTopic)
     ? body.lockedTopic
@@ -2428,6 +2531,7 @@ function runMagazineGenerator(body = {}, action = "generateWithCodex") {
   if (reasoning) args.push("--reasoning", reasoning);
   if (!useAntigravity && speed) args.push("--speed", speed);
   args.push("--harness", harness);
+  args.push("--pipeline", pipeline);
   if (sandbox) args.push("--sandbox", sandbox);
   if (project) args.push("--project", project);
   if (location) args.push("--location", location);
@@ -2553,6 +2657,15 @@ function publicMagazineSchedulerState() {
     activeCycle: magazineSchedulerRuntime.activeCycle,
     lastCycle: magazineSchedulerRuntime.lastCycle,
     lastError: magazineSchedulerRuntime.lastError,
+    articleCountDecisionCache: magazineSchedulerRuntime.articleCountDecisionCache
+      ? {
+          evidenceFingerprint: magazineSchedulerRuntime.articleCountDecisionCache.evidenceFingerprint,
+          cachedAt: magazineSchedulerRuntime.articleCountDecisionCache.cachedAt,
+          reusedAt: magazineSchedulerRuntime.articleCountDecisionCache.reusedAt,
+          reuseCount: magazineSchedulerRuntime.articleCountDecisionCache.reuseCount,
+          targetCount: magazineSchedulerRuntime.articleCountDecisionCache.decision?.targetCount,
+        }
+      : null,
     generationLock,
     generationInFlight: Boolean(generationLock),
     manualStartRequestedAt: magazineSchedulerRuntime.manualStartRequestedAt,

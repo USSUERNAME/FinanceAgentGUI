@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "targetCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "reason": {
+      "type": "string"
+    },
+    "candidateAngles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "urgency": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "storyFamily": {
+            "type": "string"
+          },
+          "editorialAngle": {
+            "type": "string"
+          },
+          "primaryEvent": {
+            "type": "string"
+          },
+          "newsFeedIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "researchQueries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "title",
+          "reason",
+          "urgency",
+          "storyFamily",
+          "editorialAngle",
+          "primaryEvent",
+          "newsFeedIds",
+          "researchQueries"
+        ]
+      }
+    }
+  },
+  "required": ["targetCount", "confidence", "reason", "candidateAngles"]
+}

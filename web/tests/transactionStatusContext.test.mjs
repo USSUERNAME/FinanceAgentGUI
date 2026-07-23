@@ -171,10 +171,15 @@ test("chart context keeps the summary direct and retrieves matching full candle 
 
 test("transaction status runtime wires all four rendered modes into the sidebar request", () => {
   const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
-  const viewSource = readFileSync(new URL("../src/transactions/TransactionStatusView.jsx", import.meta.url), "utf8");
+  const routesSource = readFileSync(new URL("../src/shell/AppRoutes.jsx", import.meta.url), "utf8");
+  const viewSource = [
+    "../src/transactions/TransactionStatusView.jsx",
+    "../src/transactions/TransactionStatusViews.jsx",
+  ].map((sourcePath) => readFileSync(new URL(sourcePath, import.meta.url), "utf8")).join("\n");
 
   assert.match(appSource, /transactionStatusContextRef = useRef\(null\)/);
-  assert.match(appSource, /onContextChange=\{handleTransactionStatusContextChange\}/);
+  assert.match(appSource, /onContextChange: handleTransactionStatusContextChange/);
+  assert.match(routesSource, /<TransactionStatusView \{\.\.\.model\}/);
   assert.match(appSource, /transactionStatusContext: transactionStatusContextForMessage/);
   assert.match(appSource, /transactionStatusRetrievalQuery: screenForMessage === "transaction-status" \? promptTextForAgent : ""/);
 

@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import "./portfolio.css";
 import ArrowUp from "lucide-react/dist/esm/icons/arrow-up.js";
 import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check-big.js";
 import ChevronsRight from "lucide-react/dist/esm/icons/chevrons-right.js";

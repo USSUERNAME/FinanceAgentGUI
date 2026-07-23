@@ -60,6 +60,23 @@ the bridge between formal World Memory updates.
   event loop responsive while the translation model runs; opening News Feed or
   sending a chat message is not required to keep the schedule alive.
 - It is overwritten in place rather than accumulated as an endless digest log.
+- Before a translation-model call, the worker canonicalizes the selected News
+  Feed rows, sanitized World Memory baseline and cutoff, provider/model/reasoning,
+  and prompt contract version into one SHA-256 input fingerprint. A successful
+  summary with the same fingerprint is reused without launching an LLM; volatile
+  wall-clock fields such as the briefing check time are not part of the prompt or
+  fingerprint. Failed or degraded summaries are never reused as successful cache
+  entries.
+- A runtime file lease under ignored `data/shared-memory/` provides single-flight
+  ownership across the server thread, background worker, and hot-reloaded module
+  copies. Concurrent refreshes for the same fingerprint wait for and reuse the
+  winner's persisted summary instead of starting duplicate LLM processes. Stale
+  leases are recoverable and never become tracked product state.
+- The model prompt keeps its byte-stable instructions and output contract first,
+  then the relatively stable World Memory baseline, and finally the changing News
+  Feed rows. This maximizes provider-side prefix-cache reuse when the selected CLI
+  and model support it; the application SHA-256 cache remains the authoritative
+  no-call path.
 - It uses the latest World Memory report as the narrative baseline and strips the
   `월드 메모리 변경 제안` section before entering prompt context.
 - It then asks the same provider-specific translation model used by News Feed
@@ -112,7 +129,9 @@ The response also includes `contextMemory.marketSummary`, a display-safe view
 of the current translation-model market summary used by the News Feed screen.
 The visible summary text includes a trailing `심각성 평가` block, and the object
 also exposes the parsed `alertLevel`, `severityKo`, `shouldCreateReport`, and
-`pushSummary`. `GET /api/memory` is a cached, non-blocking status read; the
+`pushSummary`. Cache diagnostics include `inputFingerprint`, `cacheStatus`,
+`summaryGeneratedAt`, and `lastReusedAt`; the fingerprint is a one-way SHA-256
+digest rather than raw prompt data. `GET /api/memory` is a cached, non-blocking status read; the
 server-owned maintenance worker runs the automatic urgent/critical hook.
 
 Append a record:

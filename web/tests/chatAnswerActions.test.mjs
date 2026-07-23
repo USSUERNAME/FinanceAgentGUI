@@ -164,6 +164,7 @@ test("the shared chat renderer wires copy and report actions across both chat su
   const sidebarSource = readFileSync(new URL("../src/agent/AgentSidebar.jsx", import.meta.url), "utf8");
   const canvasSource = readFileSync(new URL("../src/agent/ChatCanvas.jsx", import.meta.url), "utf8");
   const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const routesSource = readFileSync(new URL("../src/shell/AppRoutes.jsx", import.meta.url), "utf8");
 
   assert.match(messagesSource, /"답변 복사"/);
   assert.match(messagesSource, /"답변을 보고서에 저장"/);
@@ -171,5 +172,7 @@ test("the shared chat renderer wires copy and report actions across both chat su
   assert.match(messagesSource, /reportState === "success" \? Check/);
   assert.match(sidebarSource, /onSaveAnswerToReports=\{onSaveAnswerToReports\}/);
   assert.match(canvasSource, /onSaveAnswerToReports=\{onSaveAnswerToReports\}/);
-  assert.equal((appSource.match(/onSaveAnswerToReports=\{saveChatAnswerToReports\}/g) || []).length, 2);
+  assert.match(appSource, /onSaveAnswerToReports=\{saveChatAnswerToReports\}/);
+  assert.match(appSource, /chat: \(\) => \(\{[\s\S]*?onSaveAnswerToReports: saveChatAnswerToReports,/);
+  assert.match(routesSource, /<ChatCanvas \{\.\.\.models\.chat\(\)\} \/>/);
 });

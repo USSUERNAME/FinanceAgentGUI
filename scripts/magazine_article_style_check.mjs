@@ -74,6 +74,10 @@ const QUOTE_FLOW_ALLOWED_CLASSIFICATIONS = new Set([
   "source_attribution_without_repetition",
   "no_verified_statement_available",
 ]);
+const COVER_DECISION_POLICY = "world-memory-cover-v1";
+const COVER_DECISION_METHOD = "LLM_CLASSIFICATION_ONLY";
+const COVER_DECISION_GATE = "magazine-cover-classifier-v2";
+const COVER_REBUILD_MODE = "recent-cover-rebuild";
 
 const ATTRIBUTION_PATTERNS = [
   /에 따르면/g,
@@ -828,9 +832,11 @@ function checkCoverDecision(metadata) {
   const issues = [];
   const isCoverStory = Boolean(metadata.isCoverStory);
   const decision = metadata.coverDecision && typeof metadata.coverDecision === "object" ? metadata.coverDecision : null;
+  const requiresClassifier = metadata.coverDecisionGate === COVER_DECISION_GATE;
   const scorePolicy = String(decision?.scorePolicy || "").trim();
   const mode = String(decision?.mode || "").trim();
   const isBootstrapCoverFill = mode === "bootstrap-cover-fill" || scorePolicy === "not-scored-total-articles-lte-5";
+  const isRecentCoverRebuild = mode === COVER_REBUILD_MODE;
 
   if (isCoverStory && !String(metadata.coverRegisteredAt || "").trim()) {
     issues.push({
@@ -840,22 +846,32 @@ function checkCoverDecision(metadata) {
     });
   }
 
-  if (isCoverStory && !decision) {
+  if ((isCoverStory || requiresClassifier) && !decision) {
     issues.push({
       level: "error",
       code: "cover-decision-missing",
-      message: "cover stories must include metadata.coverDecision explaining why the article beat the recent upload comparison window",
+      message: requiresClassifier
+        ? "Magazine v2 articles must include the independent LLM cover classification result"
+        : "cover stories must include metadata.coverDecision explaining why the article beat the recent upload comparison window",
     });
     return issues;
   }
 
   if (!decision) return issues;
 
-  if (decision.policy !== "world-memory-cover-v1") {
+  if (decision.policy !== COVER_DECISION_POLICY) {
     issues.push({
       level: "error",
       code: "cover-decision-policy-invalid",
-      message: "coverDecision.policy must be world-memory-cover-v1",
+      message: `coverDecision.policy must be ${COVER_DECISION_POLICY}`,
+    });
+  }
+
+  if (requiresClassifier && !isBootstrapCoverFill && decision.method !== COVER_DECISION_METHOD) {
+    issues.push({
+      level: "error",
+      code: "cover-decision-method-invalid",
+      message: `Magazine v2 cover decisions must use method=${COVER_DECISION_METHOD}`,
     });
   }
 
@@ -892,13 +908,24 @@ function checkCoverDecision(metadata) {
   }
 
   const comparisonWindow = decision.comparisonWindow && typeof decision.comparisonWindow === "object" ? decision.comparisonWindow : {};
-  if (comparisonWindow.basis !== "upload-time" || Number(comparisonWindow.articleLimit) !== 5 || !Array.isArray(comparisonWindow.articleIds)) {
+  const comparisonWindowValid = isRecentCoverRebuild
+    ? comparisonWindow.basis === "recent-upload-window" &&
+      Number(comparisonWindow.articleLimit) >= 5 &&
+      Number(comparisonWindow.articleLimit) <= 50 &&
+      Array.isArray(comparisonWindow.articleIds) &&
+      comparisonWindow.articleIds.length <= Number(comparisonWindow.articleLimit)
+    : comparisonWindow.basis === "upload-time" &&
+      Number(comparisonWindow.articleLimit) === 5 &&
+      Array.isArray(comparisonWindow.articleIds);
+  if (!comparisonWindowValid) {
     issues.push({
       level: "error",
       code: "cover-comparison-window-invalid",
-      message: "coverDecision.comparisonWindow must use basis=upload-time, articleLimit=5, and articleIds[]",
+      message: isRecentCoverRebuild
+        ? "cover rebuild decisions must use basis=recent-upload-window with a bounded articleIds[] window"
+        : "coverDecision.comparisonWindow must use basis=upload-time, articleLimit=5, and articleIds[]",
     });
-  } else if (comparisonWindow.articleIds.length > 5) {
+  } else if (!isRecentCoverRebuild && comparisonWindow.articleIds.length > 5) {
     issues.push({
       level: "error",
       code: "cover-comparison-window-too-large",
@@ -907,7 +934,7 @@ function checkCoverDecision(metadata) {
   }
 
   const totalArticleCount = Number(comparisonWindow.totalArticleCount);
-  if (isBootstrapCoverFill && (!Number.isFinite(totalArticleCount) || totalArticleCount > 5)) {
+  if (isBootstrapCoverFill && !isRecentCoverRebuild && (!Number.isFinite(totalArticleCount) || totalArticleCount > 5)) {
     issues.push({
       level: "error",
       code: "cover-bootstrap-total-invalid",

@@ -41,6 +41,16 @@ Cover stories are ordered by newest `coverRegisteredAt` first. The first item be
 
 Cover promotion uses `world-memory-cover-v1`. While the total article count including the new article is five or fewer, promote the new article without scoring so the cover story pool is filled first. Starting with the sixth article, compare the new article with the latest uploaded article window by upload time: use the previous five articles. Promote the new article only if it is the strongest item in that window against the current World Memory signal: closeness to the most important issue or the most recent issue. This is an LLM editorial judgment, not text matching.
 
+Magazine v2 does not trust the article writer to self-select the cover. After
+the article files exist, a separate low-reasoning LLM classification pass reads
+the candidate, the previous five uploaded articles, and the current market
+signals. It must return exactly one of `promote` or `do-not-promote` with
+comparable scores and a rationale. The generator writes
+`coverDecisionGate: "magazine-cover-classifier-v2"` before validation, so a
+missing or malformed classification blocks publication instead of silently
+becoming `isCoverStory: false`. Every classifier process uses the shared
+installed-conditional astop observation gate.
+
 Promoted articles must set:
 
 ```json
@@ -75,6 +85,29 @@ Promoted articles must set:
 In scored mode, omit `mode`/`scorePolicy` or use a scoring-specific note, and set `candidateScore` to a 0-100 score. Bootstrap cover fill must keep `candidateScore` and `bestPreviousScore` null or omitted.
 
 Non-promoted articles should set `isCoverStory: false` and `coverRegisteredAt: null`. They may omit `coverDecision`; if they include one, `coverDecision.result` must be `do-not-promote`.
+
+That omission allowance is for legacy articles only. New Magazine v2 articles
+with `coverDecisionGate: "magazine-cover-classifier-v2"` must retain the
+independent LLM result even when the result is `do-not-promote`.
+
+If a historical classifier regression leaves the visible cover stale, rebuild
+only the cover metadata from a bounded recent upload window:
+
+```bash
+node scripts/magazine_generate_with_codex.mjs \
+  --rebuild-covers \
+  --candidate-limit 24 \
+  --provider codex-cli \
+  --model gpt-5.6-sol \
+  --reasoning low \
+  --approval never
+```
+
+The command above is a dry run. Add `--apply` only after reviewing the five
+ranked article ids. Apply mode backs up every touched `metadata.json` under
+ignored `data/backups/`, keeps article bodies and publication timestamps
+unchanged, and assigns a shared `coverRegisteredAt` plus `coverRank` 1-5 so the
+API renders the selected order deterministically.
 
 When an article uses World Memory, vector search evidence is mandatory. Store it in:
 
@@ -143,17 +176,19 @@ Magazine v2's default commission is the original Korean longform standard in `co
 
 Natural Korean is part of publication integrity, not an optional polish pass. After research, the writer first converts evidence into a Korean semantic map of confirmed facts, actors, actions, causal links, counterargument, uncertainty, and conclusion, then drafts from that map without preserving source-language sentence order or rhetorical images. Repeated abstract personification, noun-phrase chains, omitted semantic relations used only for symmetry, manufactured aphorisms, and headlines that require mental back-translation are a blocking `pervasive-unidiomatic-korean` failure when they shape the article as a whole. The repair path is a full rewrite from the semantic map, not keyword replacement or sentence-by-sentence humanizing. A separate generic Korean-humanize layer is not part of Magazine generation. Clear, restrained explanatory Korean is valid Magazine prose; report-like cadence, limited warmth, missing scenes, or consolidatable repetition remain advisory unless unsupported padding prevents the argument from advancing.
 
-Approved Korean few-shot exemplars are local runtime assets under `data/magazine/editorial-exemplars/<exemplar-id>/`. Each exemplar contains `article.md`, `metadata.json`, and `editorial-map.json`; only metadata with `approved:true` is eligible. `config/magazine-editorial-exemplars.json` controls the root, count, and prompt-size limits. The full approved articles and their editorial maps are supplied only to the v2 writer. The independent reviewer receives the shorter editorial maps, while topic preflight and image sourcing receive neither. Exemplar facts and source lists are never evidence for a new article, and the writer is explicitly prohibited from copying their wording, metaphors, title patterns, named entities, or section order. The active exemplar ids are recorded in `metadata.generationAgent.editorialExemplars`. The runtime directory remains gitignored because these exemplars may be derived from the user's private World Memory and are not release assets by default.
+Approved Korean few-shot exemplars are local runtime assets under `data/magazine/editorial-exemplars/<exemplar-id>/`. Each exemplar contains `article.md`, `metadata.json`, and `editorial-map.json`; only metadata with `approved:true` is eligible. `config/magazine-editorial-exemplars.json` controls the root, count, and prompt-size limits. The default Codex writer receives exactly three approved article bodies, not their editorial maps or repository instructions. Exemplar facts and source lists are never evidence for a new article, and the writer is explicitly prohibited from copying their wording, metaphors, title patterns, named entities, or section order. The active exemplar ids are recorded in `metadata.generationAgent.editorialExemplars`. The runtime directory remains gitignored because these exemplars may be derived from the user's private World Memory and are not release assets by default.
 
 Run `node scripts/magazine_editorial_exemplar_check.mjs --strict` before setting or retaining `approved:true`. The checker verifies the local package contract and reports the longform scope as an advisory; factual accuracy, argumentative quality, and originality still require semantic editorial review.
 
 The previous exhaustive contract remains unchanged as the `legacy` profile in `config/magazine-article-style.prompt.md` and `scripts/magazine_article_style_check.mjs`. Use `--harness legacy` or `MAGAZINE_HARNESS_PROFILE=legacy` for compatibility or comparison runs. Legacy reader-tone and quote-flow self-classification metadata remains readable but is not required by v2.
 
-After body-first title finalization, v2 stores one `metadata.editorialReviewDecision` with `policy:"magazine-editorial-review-v2"`, `method:"LLM_SEMANTIC_REVIEW"`, and concrete `issues[]`. The schema does not prefill pass booleans. Only issues explicitly classified as `blocking` stop publication; advisory review findings remain visible without forcing repair. Individual word choice, optional wit, and minor rhythm remain advisory, but pervasive unidiomatic Korean is blocking even when every sentence is grammatically possible.
+The default Codex writer performs its semantic editorial check inside the same structured one-shot response. It stores `metadata.editorialReviewDecision` with `policy:"magazine-editorial-review-v2"`, `method:"LLM_INTEGRATED_ONE_SHOT_REVIEW"`, `publicationReady`, and concrete `issues[]`. A false readiness value or any blocking issue stops the cycle without an LLM repair call. Advisory findings remain visible without forcing repair. The opt-in agentic comparison path retains the independent `method:"LLM_SEMANTIC_REVIEW"` reviewer.
 
-The v2 fast path separates editorial work from operations without changing the prose contract. News-feed-primary scheduler slots reuse the candidate angle already chosen by the article-count decision instead of making a second slot-selection LLM call. Direct CLI runs use a short topic preflight. The selected angle is passed as a locked topic; the writer must stop with `topic-reselect-required` instead of switching subjects after research has begun. For a one-article run, image sourcing starts from that locked topic at the same time as the writer, so image search and download normally sit behind body generation instead of extending the critical path. After the body is available, the independent semantic reviewer proposes the final body-first title while the generator installs the prepared image patch. If early image preparation fails, only the image worker falls back to the post-write retry path. Separate patches are merged centrally to prevent concurrent lost updates.
+The default Codex v2 path separates editorial work from operations without changing the prose contract. The scheduler sends every eligible post-update News Feed candidate to one isolated structured decision turn; there is no candidate-count cap. That decision chooses the cycle count and locked article angles. Each actual writer receives only its locked topic, all semantically selected evidence ids, and exactly three approved prose exemplars in one isolated turn. The writer cannot use tools or load repository instructions. For a one-article generator run, the existing image worker starts from the locked topic at the same time as the writer. If early image preparation fails, only the image worker retries after writing.
 
-Codex v2 writer sessions are persisted so their explicit session id can be used for blocking-content repair through `codex exec resume <session-id>`. The pipeline never uses `--last`. The independent reviewer stays in a separate session so writer context does not turn review into self-certification. Image failure retries only the image worker; embedding/index infrastructure failures abort without asking the writer to rewrite the article.
+The default Codex v2 writer is ephemeral and must complete in exactly one turn with zero tool calls. It never uses `codex exec resume`, `--last`, an independent reviewer, or a writer repair loop. Local quality, novelty, embedding, or integrated-review failures stop the cycle; only image failure may retry the image worker. The previous multi-turn implementation remains available only for an explicit comparison run with `--pipeline agentic`.
+
+Codex Magazine passes request JSON events and log the prompt character/byte count plus provider-reported input, cached-input, and output token usage when the CLI exposes it. This telemetry is diagnostic only and never changes the editorial decision or article contract.
 
 The detailed rules below document the legacy profile and historical editorial preferences. For v2 generation, the shorter v2 prompt is authoritative where the two profiles differ.
 
@@ -226,13 +261,35 @@ Run the unchanged legacy checker only for a legacy comparison:
 node scripts/magazine_article_style_check.mjs --strict
 ```
 
-Generate a fresh issue through the connected Codex CLI:
+Generate a fresh issue through the connected Codex CLI. `simple` is the default:
 
 ```bash
-node scripts/magazine_generate_with_codex.mjs --count 1 --harness v2
+node scripts/magazine_generate_with_codex.mjs --count 1 --harness v2 --pipeline simple
 ```
 
-The generator runs Codex CLI from the standalone `GuiBuild/` root, reads the selected magazine harness, and edits only local magazine runtime article folders. The default one-article v2 path locks the topic, runs body writing and early image sourcing concurrently, installs the verified image patch, runs independent semantic review, uses the reviewer's body-first title, and then runs `node scripts/magazine_article_quality_check.mjs --strict`; advisory items do not fail the run. Multi-article and early-image-failure cases retain the safe post-write image worker. The legacy path retains the separate title, reader-tone, and quote-flow passes plus `node scripts/magazine_article_style_check.mjs --strict`.
+The generator edits only local Magazine runtime folders. The default path locks the topic, runs one-turn structured writing and existing image sourcing concurrently, installs the verified bitmap and rights metadata, applies the existing cover classifier, then runs `node scripts/magazine_article_quality_check.mjs --strict` and the event-signature embedding check. It does not run an independent title, review, or repair LLM. The scheduler invokes one generator process per article. Use `--pipeline agentic` only for a deliberate legacy-cost comparison; `--harness legacy` retains the older legacy contract.
+
+For a non-publishing comparison, `scripts/magazine_generate_simple.mjs` runs the same isolated structured writer without image, cover, quality, embedding, or publish finalizers. Any tool call or stage turn count other than one fails the experiment. It writes `article.md`, `metadata.json`, and `generation-telemetry.json` below `data/magazine/simple-tests/`:
+
+```bash
+node scripts/magazine_generate_simple.mjs \
+  --topic-file data/magazine/simple-tests/example-input.json \
+  --output-dir data/magazine/simple-tests/example-output \
+  --model gpt-5.6-sol \
+  --reasoning medium
+```
+
+Use `--discover-all` instead of `--topic-file` to test the complete candidate path. This reads every News Feed item after `data/world-memory/collector-state.json` `collector.lastSuccessfulAt` without a candidate-count cap, submits the complete compact candidate set to one semantic LLM selection turn, and passes only the selected evidence ids to the one-turn three-exemplar writer. Telemetry records the eligibility cutoff, complete candidate count, selected evidence count, and both stages separately:
+
+```bash
+node scripts/magazine_generate_simple.mjs \
+  --discover-all \
+  --output-dir data/magazine/simple-tests/all-candidates-output \
+  --model gpt-5.6-sol \
+  --reasoning medium
+```
+
+The scheduler and production generator now reuse this bounded writer contract. Do not copy test output into `data/magazine/articles/`; production still has to pass the image, cover, local quality, and event-signature gates.
 
 For staged scheduler runs, the generator sets `MAGAZINE_BASELINE_ARTICLES_DIR=data/magazine/articles` and `MAGAZINE_BASELINE_ARTICLE_LIMIT=12` so the strict checker can compare candidates with recently uploaded articles before publish.
 
@@ -266,7 +323,7 @@ Default behavior:
 - retry window: if a cycle still cannot complete before its next regular update slot, that cycle is closed and no longer carries work forward
 - deadline policy: if a cycle reaches the next regular update slot before its planned article count is filled, the article already being generated may finish, but any not-yet-started articles are canceled; the next new writing attempt waits 15 minutes after the slot or after the in-flight article is sent
 
-The scheduler asks the selected local agent provider for an `articleCountDecision` JSON object before a new regular cycle starts. The decision must include `targetCount`, `confidence`, `reason`, and optional `candidateAngles`. `targetCount=0` is valid only when the model judges that there is no clearly article-worthy new angle after checking the evidence bundle, recent magazine articles, and reader preference/bias signals. `targetCount` must not exceed the configured maximum article count, but that maximum never forces the scheduler to create that many articles. If the count-decision model call fails, the scheduler records a fallback decision and conservatively attempts one article rather than silently skipping the cycle.
+The scheduler asks the selected local agent provider for an `articleCountDecision` JSON object before a new regular cycle starts. The decision must include `targetCount`, `confidence`, `reason`, and optional `candidateAngles`. `targetCount=0` is valid only when the model judges that there is no clearly article-worthy new angle after checking the evidence bundle, recent magazine articles, and reader preference/bias signals. `targetCount` must not exceed the configured maximum article count, but that maximum never forces the scheduler to create that many articles. A successful non-fallback decision is reused only when a SHA-256 fingerprint of the complete decision evidence and selected agent settings is identical; the volatile wall-clock field is excluded, while News Feed items, World Memory/scout context, recent articles, preferences, bias, lane, maximum count, provider, model, reasoning, and speed remain part of the fingerprint. Any evidence or agent change invalidates the cache. Failed/fallback decisions are never cached. If the count-decision model call fails, the scheduler records a fallback decision and conservatively attempts one article rather than silently skipping the cycle.
 
 Runtime scheduler state is stored in:
 

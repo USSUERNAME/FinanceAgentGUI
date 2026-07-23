@@ -12,6 +12,7 @@ const USER_SETTINGS_PATH = join(CONFIG_DIR, "world-memory.user.json");
 const fallbackSettings = {
   version: 1,
   enabled: false,
+  autopilotEnabled: false,
   managementProvider: "default",
   managementModel: "",
   managementReasoning: "",
@@ -51,11 +52,12 @@ export function normalizeWorldMemoryManagementSpeed(value, fallback = fallbackSe
   return normalizeCodexSpeed(value, fallback);
 }
 
-function normalizeWorldMemorySettings(raw = {}) {
+export function normalizeWorldMemorySettings(raw = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
   return {
     version: 1,
     enabled: source.enabled === true,
+    autopilotEnabled: source.enabled === true && source.autopilotEnabled === true,
     managementProvider: MODEL_PROVIDER_IDS.has(source.managementProvider)
       ? source.managementProvider
       : fallbackSettings.managementProvider,
@@ -85,17 +87,19 @@ export function writeWorldMemorySettingsPatch(patch = {}) {
   ensureConfigDir();
   const source = patch && typeof patch === "object" ? patch : {};
   const hasEnabled = Object.prototype.hasOwnProperty.call(source, "enabled");
+  const hasAutopilotEnabled = Object.prototype.hasOwnProperty.call(source, "autopilotEnabled");
   const hasManagementProvider = Object.prototype.hasOwnProperty.call(source, "managementProvider");
   const hasManagementModel = Object.prototype.hasOwnProperty.call(source, "managementModel");
   const hasManagementReasoning = Object.prototype.hasOwnProperty.call(source, "managementReasoning");
   const hasManagementSpeed = Object.prototype.hasOwnProperty.call(source, "managementSpeed");
-  if (!hasEnabled && !hasManagementProvider && !hasManagementModel && !hasManagementReasoning && !hasManagementSpeed) {
-    throw new Error("enabled, managementProvider, managementModel, managementReasoning, or managementSpeed is required");
+  if (!hasEnabled && !hasAutopilotEnabled && !hasManagementProvider && !hasManagementModel && !hasManagementReasoning && !hasManagementSpeed) {
+    throw new Error("enabled, autopilotEnabled, managementProvider, managementModel, managementReasoning, or managementSpeed is required");
   }
 
   const nextSettings = normalizeWorldMemorySettings({
     ...readWorldMemorySettings(),
     ...(hasEnabled ? { enabled: source.enabled === true } : {}),
+    ...(hasAutopilotEnabled ? { autopilotEnabled: source.autopilotEnabled === true } : {}),
     ...(hasManagementProvider ? { managementProvider: source.managementProvider } : {}),
     ...(hasManagementModel ? { managementModel: source.managementModel } : {}),
     ...(hasManagementReasoning ? { managementReasoning: source.managementReasoning } : {}),
@@ -113,6 +117,7 @@ export function publicWorldMemorySettingsSnapshot() {
     configPath: "config/world-memory.user.json",
     defaultConfigPath: "config/world-memory.defaults.json",
     enabled: settings.enabled,
+    autopilotEnabled: settings.autopilotEnabled,
     managementProvider: settings.managementProvider,
     managementModel: settings.managementModel,
     managementReasoning: settings.managementReasoning,

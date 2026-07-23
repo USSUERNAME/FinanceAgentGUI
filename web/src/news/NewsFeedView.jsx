@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import "./news-feed.css";
 import AlertTriangle from "lucide-react/dist/esm/icons/alert-triangle.js";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.js";

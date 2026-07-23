@@ -9,7 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +21,7 @@ import {
 import { selectCodexTranslationModel } from "../src/agent/codexTranslationModelSelection.js";
 import { antigravityPrintInvocation } from "./antigravityCliCompatibility.mjs";
 import { spawnSyncObservedLlm } from "./llmProcessObserver.mjs";
+import { acquireRuntimeFileLease } from "./runtimeFileLease.mjs";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const GUIBUILD_ROOT = resolve(WEB_ROOT, "..");
@@ -32,6 +33,7 @@ const USER_MEMORY_NOTEBOOK_PATH = join(MEMORY_DIR, "user_memory_notebook.md");
 const USER_MEMORY_STATE_PATH = join(MEMORY_DIR, "user_memory_state.json");
 const EXTERNAL_MEMORY_BRIEFING_PATH = join(MEMORY_DIR, "external_memory_briefing.md");
 const EXTERNAL_MEMORY_STATE_PATH = join(MEMORY_DIR, "external_memory_state.json");
+const EXTERNAL_MARKET_SUMMARY_LOCK_PATH = join(MEMORY_DIR, "external-market-summary.lock");
 const NEWS_FEED_DATA_PATH = join(GUIBUILD_ROOT, "data", "news-feed.json");
 const WORLD_MEMORY_STATE_PATH = join(GUIBUILD_ROOT, "data", "world-memory", "collector-state.json");
 const AGENT_SETTINGS_USER_PATH = join(GUIBUILD_ROOT, "config", "agent-settings.user.json");
@@ -45,6 +47,9 @@ const EXTERNAL_BRIEFING_INTERVAL_MS = 15 * 60 * 1000;
 const EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT = 30;
 const EXTERNAL_BRIEFING_SELECTION_POLICY = "post-world-memory-update-all-then-minimum-30-recent-backfill";
 const EXTERNAL_BRIEFING_MODEL_TIMEOUT_MS = 60 * 1000;
+const EXTERNAL_MARKET_SUMMARY_SINGLE_FLIGHT_STALE_MS = EXTERNAL_BRIEFING_MODEL_TIMEOUT_MS + 30 * 1000;
+const EXTERNAL_MARKET_SUMMARY_SINGLE_FLIGHT_WAIT_MS = EXTERNAL_BRIEFING_MODEL_TIMEOUT_MS + 45 * 1000;
+const EXTERNAL_MARKET_SUMMARY_PROMPT_VERSION = "finance-agent-gui.external-market-summary.v2";
 const MEMORY_TIME_ZONE = process.env.FINANCE_AGENT_GUI_MEMORY_TZ || "Asia/Seoul";
 const MEMORY_SUMMARY_TEXT_LIMIT = 16000;
 const USER_MEMORY_LAYER_LIMIT = 7000;
@@ -112,9 +117,13 @@ function readJsonFile(path) {
 
 function writeTextAtomic(path, value) {
   ensureMemoryDir();
-  const tempPath = `${path}.tmp`;
-  writeFileSync(tempPath, String(value || ""));
-  renameSync(tempPath, path);
+  const tempPath = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  try {
+    writeFileSync(tempPath, String(value || ""));
+    renameSync(tempPath, path);
+  } finally {
+    rmSync(tempPath, { force: true });
+  }
 }
 
 function writeJsonAtomic(path, value) {
@@ -312,12 +321,18 @@ function parseAntigravityModels(output = "") {
       const name = line.replace(/^[-*\s]+/, "").trim();
       if (!name || /^(available|models|model)\b/i.test(name)) return null;
       const reasoningMatch = name.match(/\(([^)]+)\)\s*$/);
-      const reasoningLevel = reasoningMatch ? reasoningMatch[1] : "";
+      const slugSuffix = name.match(/[-_\s]+(low|medium|high)\s*$/i);
+      const reasoningLevel = reasoningMatch
+        ? reasoningMatch[1]
+        : slugSuffix?.[1]?.toLowerCase() || "";
       return {
         id: name,
         name,
         displayName: name,
-        baseModel: name.replace(/\s*\([^)]+\)\s*$/, "").trim(),
+        baseModel: name
+          .replace(/\s*\([^)]+\)\s*$/, "")
+          .replace(/[-_\s]+(?:low|medium|high)\s*$/i, "")
+          .trim(),
         reasoningLevel,
         selectable: true,
         rank: index,
@@ -363,7 +378,9 @@ function readAntigravityVersion(path = findAntigravityCliPath()) {
 function antigravityTranslationModelInfo(settings = readAgentSettings()) {
   const path = findAntigravityCliPath();
   if (!path) throw new Error("Antigravity CLI(agy)를 찾지 못했습니다.");
+  const cliVersion = readAntigravityVersion(path);
   const model = selectAntigravityModelForReasoning(readAntigravityModels(path), {
+    cliVersion,
     currentModel:
       settings.providers?.[ANTIGRAVITY_PROVIDER_ID]?.model ||
       process.env.ANTIGRAVITY_CLI_MODEL ||
@@ -376,7 +393,7 @@ function antigravityTranslationModelInfo(settings = readAgentSettings()) {
     modelLabel: `Antigravity CLI · ${model}`,
     reasoning: ANTIGRAVITY_TRANSLATION_REASONING,
     path,
-    cliVersion: readAntigravityVersion(path),
+    cliVersion,
   };
 }
 
@@ -540,6 +557,13 @@ function defaultExternalMemoryState() {
       basedOnWorldMemoryCollectionAt: "",
       selectionPolicy: "",
       newsItemsConsidered: 0,
+      newsItemsSummarized: 0,
+      inputFingerprint: "",
+      inputFingerprintAlgorithm: "sha256",
+      promptVersion: EXTERNAL_MARKET_SUMMARY_PROMPT_VERSION,
+      cacheStatus: "none",
+      summaryGeneratedAt: "",
+      lastReusedAt: "",
       alertLevel: "none",
       severityKo: "",
       shouldCreateReport: false,
@@ -564,6 +588,72 @@ function writeExternalMemoryState(state) {
   const next = { ...state, updatedAt: nowIso() };
   writeJsonAtomic(EXTERNAL_MEMORY_STATE_PATH, next);
   return next;
+}
+
+function waitBriefly(milliseconds = 25) {
+  const buffer = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
+}
+
+export function runExternalMarketSummarySingleFlight({
+  fingerprint,
+  readCached,
+  generateAndPersist,
+  lockPath = EXTERNAL_MARKET_SUMMARY_LOCK_PATH,
+  acquireLease = acquireRuntimeFileLease,
+  now = () => Date.now(),
+  wait = waitBriefly,
+  waitTimeoutMs = EXTERNAL_MARKET_SUMMARY_SINGLE_FLIGHT_WAIT_MS,
+  staleAfterMs = EXTERNAL_MARKET_SUMMARY_SINGLE_FLIGHT_STALE_MS,
+} = {}) {
+  const safeFingerprint = cleanText(fingerprint || "", 80);
+  if (!safeFingerprint) throw new Error("시장 요약 입력 지문이 비어 있습니다.");
+  if (typeof readCached !== "function") throw new Error("시장 요약 캐시 판독기가 필요합니다.");
+  if (typeof generateAndPersist !== "function") throw new Error("시장 요약 생성기가 필요합니다.");
+
+  const immediate = readCached(safeFingerprint);
+  if (immediate) {
+    return { value: immediate, cacheStatus: "exact-hit", waitedForInFlight: false };
+  }
+
+  const deadline = now() + Math.max(1, Number(waitTimeoutMs) || 1);
+  let waitedForInFlight = false;
+  while (now() <= deadline) {
+    const cached = readCached(safeFingerprint);
+    if (cached) {
+      return {
+        value: cached,
+        cacheStatus: waitedForInFlight ? "single-flight" : "exact-hit",
+        waitedForInFlight,
+      };
+    }
+
+    const lease = acquireLease(lockPath, { staleAfterMs, now });
+    if (lease.acquired) {
+      try {
+        const cachedAfterLease = readCached(safeFingerprint);
+        if (cachedAfterLease) {
+          return {
+            value: cachedAfterLease,
+            cacheStatus: waitedForInFlight ? "single-flight" : "exact-hit",
+            waitedForInFlight,
+          };
+        }
+        return {
+          value: generateAndPersist(safeFingerprint),
+          cacheStatus: "miss",
+          waitedForInFlight,
+        };
+      } finally {
+        lease.release();
+      }
+    }
+
+    waitedForInFlight = true;
+    wait(25);
+  }
+
+  throw new Error("동일 시장 요약 생성 작업이 제한 시간 안에 완료되지 않았습니다.");
 }
 
 function ensureNotebook() {
@@ -896,13 +986,48 @@ function newsItemForMarketSummary(item = {}, { cutoffMs = 0 } = {}) {
   };
 }
 
-function externalMarketSummaryPrompt({ worldReport = null, items = [], builtAt = nowIso(), worldMemoryCutoffAt = "" } = {}) {
+function externalMarketSummaryInputs({ worldReport = null, items = [], worldMemoryCutoffAt = "" } = {}) {
   const report = worldReport || {};
-  const reportAt = report.generatedAt || "";
+  const reportAt = cleanText(report.generatedAt || "", 80);
   const cutoffAt = cleanText(worldMemoryCutoffAt || "", 80);
   const cutoffMs = timestampMs(cutoffAt);
   const worldText = sanitizeWorldMemoryReportText(report);
   const inputItems = items.map((item) => newsItemForMarketSummary(item, { cutoffMs }));
+  return {
+    worldMemory: {
+      worldMemoryReportAt: reportAt,
+      worldMemoryCollectionAt: cutoffAt,
+      selectionPolicy: EXTERNAL_BRIEFING_SELECTION_POLICY,
+      minimumNewsItemsWhenAvailable: EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT,
+      worldMemoryBaseline: clampText(worldText, 1800),
+    },
+    news: {
+      items: inputItems,
+    },
+  };
+}
+
+export function externalMarketSummaryInputFingerprint({
+  worldReport = null,
+  items = [],
+  worldMemoryCutoffAt = "",
+  modelInfo = {},
+} = {}) {
+  const inputs = externalMarketSummaryInputs({ worldReport, items, worldMemoryCutoffAt });
+  const fingerprintInput = {
+    promptVersion: EXTERNAL_MARKET_SUMMARY_PROMPT_VERSION,
+    model: {
+      provider: cleanText(modelInfo.provider || "", 80),
+      model: cleanText(modelInfo.model || "", 160),
+      reasoning: cleanText(modelInfo.reasoning || "", 80),
+    },
+    ...inputs,
+  };
+  return createHash("sha256").update(JSON.stringify(fingerprintInput)).digest("hex");
+}
+
+export function externalMarketSummaryPrompt({ worldReport = null, items = [], worldMemoryCutoffAt = "" } = {}) {
+  const inputs = externalMarketSummaryInputs({ worldReport, items, worldMemoryCutoffAt });
   return [
     "너는 FinanceAgentGUI의 컨텍스트 메모리에 들어갈 짧은 시장 브리핑을 작성하는 번역/요약 모델이다.",
     "입력 보도는 최신 World Memory 수집 성공 시각 이후 항목을 우선한다.",
@@ -936,20 +1061,11 @@ function externalMarketSummaryPrompt({ worldReport = null, items = [], builtAt =
       pushSummary: "긴급 알림용 한 줄 요약 또는 빈 문자열",
     }),
     "",
-    "기준 정보:",
-    JSON.stringify(
-      {
-        builtAt,
-        worldMemoryReportAt: reportAt,
-        worldMemoryCollectionAt: cutoffAt,
-        selectionPolicy: EXTERNAL_BRIEFING_SELECTION_POLICY,
-        minimumNewsItemsWhenAvailable: EXTERNAL_BRIEFING_MIN_NEWS_ITEM_COUNT,
-        worldMemoryBaseline: clampText(worldText, 1800),
-        items: inputItems,
-      },
-      null,
-      2
-    ),
+    "기준 World Memory:",
+    JSON.stringify(inputs.worldMemory, null, 2),
+    "",
+    "변동 뉴스:",
+    JSON.stringify(inputs.news, null, 2),
   ].join("\n");
 }
 
@@ -1179,6 +1295,12 @@ function publicExternalMarketSummary() {
     intervalMs: Number(briefing.intervalMs || EXTERNAL_BRIEFING_INTERVAL_MS),
     newsItemsConsidered: Number(briefing.newsItemsConsidered ?? parsed.newsItemsConsidered ?? 0),
     newsItemsSummarized: Number(briefing.newsItemsSummarized ?? briefing.newsItemsConsidered ?? parsed.newsItemsConsidered ?? 0),
+    inputFingerprint: cleanText(briefing.inputFingerprint || "", 80),
+    inputFingerprintAlgorithm: cleanText(briefing.inputFingerprintAlgorithm || "", 24),
+    promptVersion: cleanText(briefing.promptVersion || "", 120),
+    cacheStatus: cleanText(briefing.cacheStatus || "none", 40),
+    summaryGeneratedAt: cleanText(briefing.summaryGeneratedAt || "", 80),
+    lastReusedAt: cleanText(briefing.lastReusedAt || "", 80),
     summaryMode: cleanText(briefing.summaryMode || parsed.summaryMode || "", 80),
     provider: cleanText(briefing.summaryProvider || parsed.provider || "", 120),
     model: cleanText(briefing.summaryModel || parsed.model || "", 120),
@@ -1196,8 +1318,10 @@ function publicExternalMarketSummary() {
 export function buildMarketSummaryWithTranslationModel({
   worldReport = null,
   items = [],
-  builtAt = nowIso(),
   worldMemoryCutoffAt = "",
+  modelInfo = null,
+  runCodexModel = runCodexJsonModel,
+  runAntigravityModel = runAntigravityJsonModel,
 } = {}) {
   if (!items.length) {
     const candidate = {
@@ -1228,27 +1352,78 @@ export function buildMarketSummaryWithTranslationModel({
       error: "",
     };
   }
-  const modelInfo = chooseSharedMemoryTranslationModel();
-  const prompt = externalMarketSummaryPrompt({ worldReport, items, builtAt, worldMemoryCutoffAt });
+  const selectedModelInfo = modelInfo || chooseSharedMemoryTranslationModel();
+  const prompt = externalMarketSummaryPrompt({ worldReport, items, worldMemoryCutoffAt });
   const payload =
-    modelInfo.provider === ANTIGRAVITY_PROVIDER_ID
-      ? runAntigravityJsonModel(prompt, modelInfo)
-      : runCodexJsonModel(prompt, externalMarketSummarySchema(), modelInfo);
+    selectedModelInfo.provider === ANTIGRAVITY_PROVIDER_ID
+      ? runAntigravityModel(prompt, selectedModelInfo)
+      : runCodexModel(prompt, externalMarketSummarySchema(), selectedModelInfo);
   const candidate = normalizeExternalMarketSummaryCandidate(payload);
   if (!candidate.ok) throw new Error(candidate.error);
   return {
     ok: true,
     status: "translation-model",
     text: formatExternalMarketSummary(candidate),
-    model: modelInfo.modelLabel || modelInfo.model,
-    provider: modelInfo.providerLabel || modelInfo.provider,
-    reasoning: modelInfo.reasoning,
+    model: selectedModelInfo.modelLabel || selectedModelInfo.model,
+    provider: selectedModelInfo.providerLabel || selectedModelInfo.provider,
+    reasoning: selectedModelInfo.reasoning,
     alertLevel: candidate.alertLevel,
     severityKo: candidate.severityKo,
     shouldCreateReport: candidate.shouldCreateReport,
     pushSummary: candidate.pushSummary,
     detection: marketSummaryDetection(candidate),
     error: "",
+  };
+}
+
+function cachedExternalMarketSummaryForFingerprint(fingerprint = "") {
+  const briefing = readExternalMemoryState().briefing || {};
+  if (
+    briefing.status !== "ready" ||
+    briefing.inputFingerprint !== fingerprint ||
+    briefing.promptVersion !== EXTERNAL_MARKET_SUMMARY_PROMPT_VERSION ||
+    !briefing.summaryText ||
+    !["translation-model", "no-new-items"].includes(briefing.summaryMode)
+  ) {
+    return null;
+  }
+  return {
+    ok: true,
+    status: briefing.summaryMode,
+    text: cleanText(briefing.summaryText, EXTERNAL_MARKET_SUMMARY_DISPLAY_LIMIT),
+    model: cleanText(briefing.summaryModel || "", 120),
+    provider: cleanText(briefing.summaryProvider || "", 120),
+    reasoning: cleanText(briefing.summaryReasoning || "", 80),
+    alertLevel: normalizeMarketAlertLevel(briefing.alertLevel || "none"),
+    severityKo: cleanText(briefing.severityKo || "", 700),
+    shouldCreateReport: Boolean(briefing.shouldCreateReport),
+    pushSummary: cleanText(briefing.pushSummary || "", 110),
+    detection: marketSummaryDetection(briefing),
+    summaryGeneratedAt: cleanText(briefing.summaryGeneratedAt || briefing.lastBuiltAt || "", 80),
+    error: "",
+  };
+}
+
+function failedExternalMarketSummaryResult({ itemCount = 0, error = "" } = {}) {
+  const severityKo = "시장 요약 생성 실패로 심각성을 신뢰 있게 평가하지 못했습니다.";
+  return {
+    ok: false,
+    status: "model-failed-no-list",
+    text: fallbackExternalMarketSummaryText({ itemCount, error }),
+    model: "",
+    provider: "",
+    reasoning: "",
+    alertLevel: "none",
+    severityKo,
+    shouldCreateReport: false,
+    pushSummary: "",
+    detection: {
+      alertLevel: "none",
+      shouldCreateReport: false,
+      rationaleKo: severityKo,
+      signals: ["시장 요약 생성 실패"],
+    },
+    error: cleanText(error, 500),
   };
 }
 
@@ -1315,6 +1490,70 @@ export function buildExternalNewsBriefing({
   };
 }
 
+function persistExternalMemoryBriefing({
+  now,
+  worldReport,
+  newsStore,
+  worldMemoryCutoffAt,
+  summaryItems,
+  marketSummaryResult,
+  inputFingerprint,
+  cacheStatus,
+} = {}) {
+  const built = buildExternalNewsBriefing({
+    worldReport,
+    newsStore,
+    builtAt: now,
+    worldMemoryCutoffAt,
+    marketSummary: marketSummaryResult.text,
+    marketSummaryStatus: marketSummaryResult.status,
+    marketSummaryModel: marketSummaryResult.model,
+    marketSummaryProvider: marketSummaryResult.provider,
+    marketSummaryReasoning: marketSummaryResult.reasoning,
+    marketSummaryError: marketSummaryResult.error,
+  });
+  writeTextAtomic(EXTERNAL_MEMORY_BRIEFING_PATH, `${built.text.trim()}\n`);
+
+  const state = readExternalMemoryState();
+  const briefing = state.briefing || {};
+  const reused = cacheStatus === "exact-hit" || cacheStatus === "single-flight";
+  const summaryGeneratedAt = reused
+    ? marketSummaryResult.summaryGeneratedAt || briefing.summaryGeneratedAt || briefing.lastBuiltAt || now
+    : now;
+  writeExternalMemoryState({
+    ...state,
+    briefing: {
+      ...briefing,
+      status: marketSummaryResult.ok ? "ready" : "degraded",
+      intervalMs: EXTERNAL_BRIEFING_INTERVAL_MS,
+      lastBuiltAt: now,
+      nextBuildAt: addMs(now, EXTERNAL_BRIEFING_INTERVAL_MS),
+      basedOnWorldMemoryReportAt: built.reportAt || "",
+      basedOnWorldMemoryCollectionAt: built.collectionAt || "",
+      selectionPolicy: EXTERNAL_BRIEFING_SELECTION_POLICY,
+      newsItemsConsidered: built.consideredCount,
+      newsItemsSummarized: summaryItems.length,
+      inputFingerprint,
+      inputFingerprintAlgorithm: "sha256",
+      promptVersion: EXTERNAL_MARKET_SUMMARY_PROMPT_VERSION,
+      cacheStatus,
+      summaryGeneratedAt,
+      lastReusedAt: reused ? now : "",
+      summaryMode: marketSummaryResult.status,
+      summaryProvider: marketSummaryResult.provider,
+      summaryModel: marketSummaryResult.model,
+      summaryReasoning: marketSummaryResult.reasoning,
+      summaryText: cleanText(marketSummaryResult.text, EXTERNAL_MARKET_SUMMARY_DISPLAY_LIMIT),
+      alertLevel: marketSummaryResult.alertLevel || "none",
+      severityKo: cleanText(marketSummaryResult.severityKo || "", 700),
+      shouldCreateReport: Boolean(marketSummaryResult.shouldCreateReport),
+      pushSummary: cleanText(marketSummaryResult.pushSummary || "", 110),
+      lastError: marketSummaryResult.error,
+    },
+  });
+  return built.text;
+}
+
 function refreshExternalMemoryBriefingIfDue(date = new Date()) {
   const now = date.toISOString();
   const state = readExternalMemoryState();
@@ -1338,82 +1577,75 @@ function refreshExternalMemoryBriefingIfDue(date = new Date()) {
       newsStore,
       worldMemoryCutoffAt,
     });
-    let marketSummaryResult = null;
-    try {
-      marketSummaryResult = buildMarketSummaryWithTranslationModel({
-        worldReport,
-        items: summaryItems,
-        builtAt: now,
-        worldMemoryCutoffAt,
-      });
-    } catch (error) {
-      marketSummaryResult = {
-        ok: false,
-        status: "model-failed-no-list",
-        text: fallbackExternalMarketSummaryText({
-          itemCount: summaryItems.length,
-          error: error.message,
-        }),
-        model: "",
-        provider: "",
-        reasoning: "",
-        alertLevel: "none",
-        severityKo: "시장 요약 생성 실패로 심각성을 신뢰 있게 평가하지 못했습니다.",
-        shouldCreateReport: false,
-        pushSummary: "",
-        detection: {
-          alertLevel: "none",
-          shouldCreateReport: false,
-          rationaleKo: "시장 요약 생성 실패로 심각성을 신뢰 있게 평가하지 못했습니다.",
-          signals: ["시장 요약 생성 실패"],
-        },
-        error: cleanText(error.message, 500),
-      };
+    let modelInfo = { provider: "none", model: "none", reasoning: "none" };
+    let modelSelectionError = null;
+    if (summaryItems.length) {
+      try {
+        modelInfo = chooseSharedMemoryTranslationModel();
+      } catch (error) {
+        modelSelectionError = error;
+        modelInfo = { provider: "unavailable", model: "unavailable", reasoning: "unavailable" };
+      }
     }
-    const built = buildExternalNewsBriefing({
+    const inputFingerprint = externalMarketSummaryInputFingerprint({
       worldReport,
-      newsStore,
-      builtAt: now,
+      items: summaryItems,
       worldMemoryCutoffAt,
-      marketSummary: marketSummaryResult.text,
-      marketSummaryStatus: marketSummaryResult.status,
-      marketSummaryModel: marketSummaryResult.model,
-      marketSummaryProvider: marketSummaryResult.provider,
-      marketSummaryReasoning: marketSummaryResult.reasoning,
-      marketSummaryError: marketSummaryResult.error,
+      modelInfo,
     });
-    writeTextAtomic(EXTERNAL_MEMORY_BRIEFING_PATH, `${built.text.trim()}\n`);
-    writeExternalMemoryState({
-      ...state,
-      briefing: {
-        ...briefing,
-        status: marketSummaryResult.ok ? "ready" : "degraded",
-        intervalMs: EXTERNAL_BRIEFING_INTERVAL_MS,
-        lastBuiltAt: now,
-        nextBuildAt: addMs(now, EXTERNAL_BRIEFING_INTERVAL_MS),
-        basedOnWorldMemoryReportAt: built.reportAt || "",
-        basedOnWorldMemoryCollectionAt: built.collectionAt || "",
-        selectionPolicy: EXTERNAL_BRIEFING_SELECTION_POLICY,
-        newsItemsConsidered: built.consideredCount,
-        newsItemsSummarized: summaryItems.length,
-        summaryMode: marketSummaryResult.status,
-        summaryProvider: marketSummaryResult.provider,
-        summaryModel: marketSummaryResult.model,
-        summaryReasoning: marketSummaryResult.reasoning,
-        summaryText: cleanText(marketSummaryResult.text, EXTERNAL_MARKET_SUMMARY_DISPLAY_LIMIT),
-        alertLevel: marketSummaryResult.alertLevel || "none",
-        severityKo: cleanText(marketSummaryResult.severityKo || "", 700),
-        shouldCreateReport: Boolean(marketSummaryResult.shouldCreateReport),
-        pushSummary: cleanText(marketSummaryResult.pushSummary || "", 110),
-        lastError: marketSummaryResult.error,
+    const flight = runExternalMarketSummarySingleFlight({
+      fingerprint: inputFingerprint,
+      readCached: (fingerprint) => {
+        const cached = cachedExternalMarketSummaryForFingerprint(fingerprint);
+        return cached ? { marketSummaryResult: cached, persisted: false } : null;
+      },
+      generateAndPersist: () => {
+        let marketSummaryResult = null;
+        try {
+          if (modelSelectionError) throw modelSelectionError;
+          marketSummaryResult = buildMarketSummaryWithTranslationModel({
+            worldReport,
+            items: summaryItems,
+            worldMemoryCutoffAt,
+            modelInfo,
+          });
+        } catch (error) {
+          marketSummaryResult = failedExternalMarketSummaryResult({
+            itemCount: summaryItems.length,
+            error: error.message,
+          });
+        }
+        const text = persistExternalMemoryBriefing({
+          now,
+          worldReport,
+          newsStore,
+          worldMemoryCutoffAt,
+          summaryItems,
+          marketSummaryResult,
+          inputFingerprint,
+          cacheStatus: "miss",
+        });
+        return { marketSummaryResult, text, persisted: true };
       },
     });
-    return built.text;
+    if (flight.value.persisted) return flight.value.text;
+    return persistExternalMemoryBriefing({
+      now,
+      worldReport,
+      newsStore,
+      worldMemoryCutoffAt,
+      summaryItems,
+      marketSummaryResult: flight.value.marketSummaryResult,
+      inputFingerprint,
+      cacheStatus: flight.cacheStatus,
+    });
   } catch (error) {
+    const latestState = readExternalMemoryState();
+    const latestBriefing = latestState.briefing || {};
     writeExternalMemoryState({
-      ...state,
+      ...latestState,
       briefing: {
-        ...briefing,
+        ...latestBriefing,
         status: "failed",
         lastAttemptAt: now,
         nextBuildAt: addMs(now, EXTERNAL_BRIEFING_INTERVAL_MS),

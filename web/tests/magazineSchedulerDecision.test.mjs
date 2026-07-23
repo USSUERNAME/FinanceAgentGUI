@@ -11,8 +11,10 @@ import {
   compactWorldMemoryScoutCandidatesForDecision,
   decideMagazineArticleSlotTopic,
   fallbackMagazineArticleCountDecision,
+  magazineArticleCountEvidenceFingerprint,
   normalizeMagazineSchedulerNextRunAt,
   normalizeMagazineArticleCountDecision,
+  reuseMagazineArticleCountDecision,
 } from "../server/magazineApi.mjs";
 import {
   normalizeMagazineSchedulerIntervalHours,
@@ -38,10 +40,16 @@ import {
 import {
   buildCodexArgs,
   buildCodexResumeArgs,
+  buildCoverClassificationPrompt,
+  buildCoverRebuildPrompt,
   buildEditorialReviewPrompt,
+  buildV2Prompt,
   extractCodexSessionId,
+  extractCodexTokenUsage,
   htmlForEditorialReview,
   installPreparedHero,
+  normalizeCoverClassificationDecision,
+  normalizeCoverRebuildDecision,
   normalizeGeneratedResearchMode,
   normalizeLockedTopic,
 } from "../../scripts/magazine_generate_with_codex.mjs";
@@ -90,6 +98,33 @@ test("magazine scheduler clamps model count decisions to the configured maximum"
   assert.equal(decision.candidateAngles[0].urgency, "high");
 });
 
+test("magazine scheduler preserves every semantically selected evidence id without a fixed cap", () => {
+  const newsFeedIds = Array.from({ length: 15 }, (_, index) => `nf_${index + 1}`);
+  const decision = normalizeMagazineArticleCountDecision(
+    {
+      targetCount: 1,
+      confidence: 0.9,
+      reason: "직접 연결된 정책 발언과 가격 반응을 한 기사로 묶습니다.",
+      candidateAngles: [{
+        title: "에너지 충격과 금리",
+        reason: "각 근거가 서로 다른 정책 또는 시장 역할을 맡습니다.",
+        urgency: "high",
+        storyFamily: "에너지와 통화정책",
+        editorialAngle: "공급 충격이 금리로 번지는 경로",
+        primaryEvent: "중앙은행이 에너지 충격 속에서 금리를 동결했다",
+        newsFeedIds,
+        researchQueries: [],
+      }],
+    },
+    { maxCount: 1 },
+  );
+  assert.deepEqual(decision.candidateAngles[0].newsFeedIds, newsFeedIds);
+  assert.deepEqual(normalizeLockedTopic({
+    title: "에너지 충격과 금리",
+    newsFeedIds,
+  }).newsFeedIds, newsFeedIds);
+});
+
 test("magazine scheduler fallback is explicit and never random", () => {
   const decision = fallbackMagazineArticleCountDecision({
     maxCount: 3,
@@ -104,6 +139,37 @@ test("magazine scheduler fallback is explicit and never random", () => {
   assert.equal(decision.basis, "fallback-after-model-decision-failure");
   assert.match(decision.reason, /1건/);
   assert.match(decision.error, /model unavailable/);
+});
+
+test("magazine scheduler reuses only exact non-fallback evidence decisions", () => {
+  const agent = { provider: "codex-cli", model: "gpt-5.6-sol", reasoning: "medium", speed: "standard" };
+  const firstContext = {
+    now: "2026-07-23T01:00:00.000Z",
+    maxTargetCount: 2,
+    newsFeed: { storeUpdatedAt: "2026-07-23T00:55:00.000Z", postCutoffItems: [{ id: "nf_1" }] },
+    recentArticles: [{ id: "article-a" }],
+  };
+  const sameEvidenceLater = { ...firstContext, now: "2026-07-23T02:00:00.000Z" };
+  const changedEvidence = {
+    ...sameEvidenceLater,
+    newsFeed: { ...sameEvidenceLater.newsFeed, postCutoffItems: [{ id: "nf_1" }, { id: "nf_2" }] },
+  };
+  const fingerprint = magazineArticleCountEvidenceFingerprint(firstContext, agent);
+
+  assert.equal(magazineArticleCountEvidenceFingerprint(sameEvidenceLater, agent), fingerprint);
+  assert.notEqual(magazineArticleCountEvidenceFingerprint(changedEvidence, agent), fingerprint);
+  const reused = reuseMagazineArticleCountDecision({
+    evidenceFingerprint: fingerprint,
+    reuseCount: 0,
+    decision: { schemaOk: true, fallback: false, targetCount: 1, basis: "llm-editorial-judgment" },
+  }, fingerprint);
+  assert.equal(reused.targetCount, 1);
+  assert.equal(reused.cacheHit, true);
+  assert.equal(reused.reuseCount, 1);
+  assert.equal(reuseMagazineArticleCountDecision({
+    evidenceFingerprint: fingerprint,
+    decision: { schemaOk: true, fallback: true, targetCount: 1 },
+  }, fingerprint), null);
 });
 
 test("magazine scheduler includes every post-cutoff News Feed item in decision context", () => {
@@ -368,6 +434,24 @@ test("Magazine v2 writer persists a resumable Codex session without using --last
   assert.equal(resumeArgs.includes("--last"), false);
 });
 
+test("Magazine v2 keeps invariant editorial context before per-run prompt data", () => {
+  const articleDirectory = "/tmp/magazine-dynamic-stage";
+  const prompt = buildV2Prompt({
+    count: 1,
+    replace: false,
+    articleDirectory,
+    staged: true,
+    lockedTopic: { title: "테스트 소재", reason: "독립 근거", researchQueries: ["공식 자료"] },
+  });
+
+  const exemplarIndex = prompt.indexOf("승인된 한국어 장문 퓨샷:");
+  const runIndex = prompt.indexOf("이번 실행:");
+  const dynamicPathIndex = prompt.indexOf(articleDirectory);
+  assert.equal(exemplarIndex >= 0, true);
+  assert.equal(runIndex > exemplarIndex, true);
+  assert.equal(dynamicPathIndex > runIndex, true);
+});
+
 test("Magazine v2 extracts explicit Codex session ids and normalizes locked topics", () => {
   const sessionId = "019f4d60-31df-7912-a647-6a98fdd017ef";
   assert.equal(
@@ -388,6 +472,18 @@ test("Magazine v2 extracts explicit Codex session ids and normalizes locked topi
     newsFeedIds: ["nf_1", "nf_2"],
     researchQueries: [],
   });
+});
+
+test("Magazine v2 extracts Codex cached-input token telemetry", () => {
+  assert.deepEqual(
+    extractCodexTokenUsage({
+      stdout: `${JSON.stringify({
+        type: "turn.completed",
+        usage: { input_tokens: 12000, cached_input_tokens: 9000, output_tokens: 1800 },
+      })}\n`,
+    }),
+    { inputTokens: 12000, cachedInputTokens: 9000, outputTokens: 1800 },
+  );
 });
 
 test("Magazine v2 editorial review preserves article heading and paragraph boundaries", () => {
@@ -425,6 +521,85 @@ test("Magazine v2 semantic review blocks pervasive unidiomatic Korean instead of
   assert.match(prompt, /자연스러운 한국어 제목/);
   assert.match(prompt, /명료한 설명형·분석형 한국어는 허용/);
   assert.match(prompt, /보고서형 호흡.*advisory/);
+});
+
+test("Magazine v2 cover classification is an explicit semantic LLM contract", () => {
+  const prompt = buildCoverClassificationPrompt({
+    candidate: { articleId: "candidate", title: "새 정책 집행" },
+    comparisonArticles: [{ articleId: "previous", title: "기존 시장 신호" }],
+    worldMemorySignals: "- 가장 최근 이슈: 새 정책 집행",
+  });
+
+  assert.match(prompt, /독립 커버스토리 분류기/);
+  assert.match(prompt, /텍스트 키워드 일치.*정규식으로 판정하지 않는다/);
+  assert.match(prompt, /LLM_CLASSIFICATION_ONLY/);
+  assert.match(prompt, /promote \| do-not-promote/);
+});
+
+test("Magazine v2 normalizes a complete cover classification and rejects omissions", () => {
+  const normalized = normalizeCoverClassificationDecision({
+    result: "promote",
+    confidence: 0.91,
+    candidateScore: 93,
+    bestPreviousScore: 88,
+    worldMemorySignals: {
+      mostImportantIssue: "AI 전력망 투자",
+      mostRecentIssue: "새 전력 조달 계약",
+      query: "AI 전력 조달",
+      hitIds: ["wm-1"],
+    },
+    rationale: "새 계약이 기존 비교창보다 최근성과 파급 범위에서 앞섭니다.",
+  }, {
+    comparisonArticleIds: ["previous-1", "previous-2"],
+    evaluatedAt: "2026-07-23T16:00:00+09:00",
+    totalArticleCount: 400,
+    classifier: { provider: "codex-cli", model: "gpt-5.6-sol", reasoning: "low" },
+  });
+
+  assert.equal(normalized.policy, "world-memory-cover-v1");
+  assert.equal(normalized.method, "LLM_CLASSIFICATION_ONLY");
+  assert.equal(normalized.result, "promote");
+  assert.deepEqual(normalized.comparisonWindow.articleIds, ["previous-1", "previous-2"]);
+  assert.throws(
+    () => normalizeCoverClassificationDecision({ result: "do-not-promote" }),
+    /candidateScore/,
+  );
+});
+
+test("Magazine cover rebuild selects exactly five known articles in rank order", () => {
+  const candidateArticleIds = ["a", "b", "c", "d", "e", "f"];
+  const source = {
+    confidence: 0.89,
+    worldMemorySignals: {
+      mostImportantIssue: "중동 운송 위험",
+      mostRecentIssue: "새 해운 보험료",
+      query: "운송 위험 보험료",
+      hitIds: [],
+    },
+    coverStories: ["a", "b", "c", "d", "e"].map((articleId, index) => ({
+      articleId,
+      rank: index + 1,
+      score: 95 - index,
+      rationale: `${articleId}를 현재 커버에 포함할 근거`,
+    })),
+  };
+  const normalized = normalizeCoverRebuildDecision(source, {
+    candidateArticleIds,
+    evaluatedAt: "2026-07-23T16:00:00+09:00",
+  });
+  const prompt = buildCoverRebuildPrompt({
+    candidates: candidateArticleIds.map((articleId) => ({ articleId })),
+    worldMemorySignals: "- 중동 운송 위험",
+  });
+
+  assert.deepEqual(normalized.coverStories.map((item) => item.articleId), ["a", "b", "c", "d", "e"]);
+  assert.match(prompt, /정확히 5건/);
+  assert.throws(
+    () => normalizeCoverRebuildDecision({ ...source, coverStories: source.coverStories.slice(0, 4) }, {
+      candidateArticleIds,
+    }),
+    /exactly 5/,
+  );
 });
 
 test("Magazine v2 normalizes improvised research mode labels from actual evidence", () => {

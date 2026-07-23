@@ -621,6 +621,106 @@ test("magazine style check accepts a cover story with world-memory comparison de
   assert.equal(output.errors.length, 0);
 });
 
+test("magazine style check rejects a v2 non-cover article when the independent classification is missing", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-cover-gate-missing-"));
+  writeArticle(articleRoot, {
+    body: makeArticleBody(),
+    metadataPatch: {
+      coverDecisionGate: "magazine-cover-classifier-v2",
+      isCoverStory: false,
+      coverRegisteredAt: null,
+    },
+  });
+
+  assert.throws(
+    () => runCheck(articleRoot),
+    (error) => {
+      const output = JSON.parse(error.stdout);
+      assert.equal(output.ok, false);
+      assert.ok(output.errors.some((issue) => issue.code === "cover-decision-missing"));
+      return true;
+    },
+  );
+});
+
+test("magazine style check accepts an explicit LLM do-not-promote classification", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-cover-gate-complete-"));
+  writeArticle(articleRoot, {
+    body: makeArticleBody(),
+    metadataPatch: {
+      coverDecisionGate: "magazine-cover-classifier-v2",
+      isCoverStory: false,
+      coverRegisteredAt: null,
+      coverDecision: {
+        policy: "world-memory-cover-v1",
+        method: "LLM_CLASSIFICATION_ONLY",
+        result: "do-not-promote",
+        evaluatedAt: "2026-07-23T16:00:00+09:00",
+        comparisonWindow: {
+          basis: "upload-time",
+          articleLimit: 5,
+          articleIds: ["older-article-1", "older-article-2"],
+          totalArticleCount: 400,
+        },
+        worldMemorySignals: {
+          mostImportantIssue: "중동 운송 위험",
+          mostRecentIssue: "새 해운 보험료",
+          query: "운송 위험 보험료",
+          hitIds: [],
+        },
+        candidateScore: 78,
+        bestPreviousScore: 91,
+        rationale: "비교창의 기존 기사가 현재 이슈와 더 직접 연결됩니다.",
+      },
+    },
+  });
+
+  const output = JSON.parse(runCheck(articleRoot));
+
+  assert.equal(output.ok, true);
+  assert.equal(output.errors.length, 0);
+});
+
+test("magazine style check accepts an LLM-ranked recent cover rebuild decision", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-cover-rebuild-"));
+  writeArticle(articleRoot, {
+    body: makeArticleBody(),
+    metadataPatch: {
+      coverDecisionGate: "magazine-cover-classifier-v2",
+      isCoverStory: true,
+      coverRegisteredAt: "2026-07-23T16:00:00+09:00",
+      coverRank: 1,
+      coverDecision: {
+        policy: "world-memory-cover-v1",
+        method: "LLM_CLASSIFICATION_ONLY",
+        mode: "recent-cover-rebuild",
+        result: "promote",
+        evaluatedAt: "2026-07-23T16:00:00+09:00",
+        comparisonWindow: {
+          basis: "recent-upload-window",
+          articleLimit: 6,
+          articleIds: ["a", "b", "c", "d", "e", "f"],
+          totalArticleCount: 400,
+        },
+        worldMemorySignals: {
+          mostImportantIssue: "중동 운송 위험",
+          mostRecentIssue: "새 해운 보험료",
+          query: "운송 위험 보험료",
+          hitIds: [],
+        },
+        candidateScore: 95,
+        bestPreviousScore: 94,
+        rationale: "최근 후보 가운데 파급 범위와 긴급성이 가장 높습니다.",
+      },
+    },
+  });
+
+  const output = JSON.parse(runCheck(articleRoot));
+
+  assert.equal(output.ok, true);
+  assert.equal(output.errors.length, 0);
+});
+
 test("magazine style check rejects News Feed items before the World Memory cutoff", () => {
   const articleRoot = mkdtempSync(join(tmpdir(), "magazine-style-news-feed-cutoff-bad-"));
   writeArticle(articleRoot, {
@@ -930,4 +1030,26 @@ test("magazine v2 quality check blocks only explicit semantic publication issues
       return true;
     },
   );
+});
+
+test("magazine v2 quality check accepts an integrated one-shot editorial review", () => {
+  const articleRoot = mkdtempSync(join(tmpdir(), "magazine-v2-integrated-review-"));
+  writeArticle(articleRoot, {
+    body: makeArticleBody(),
+    metadataPatch: {
+      editorialReviewDecision: {
+        policy: "magazine-editorial-review-v2",
+        method: "LLM_INTEGRATED_ONE_SHOT_REVIEW",
+        reviewer: "magazine-simple-writer-integrated-review",
+        suggestedTitle: "에너지 충격에 갇힌 ECB의 선택",
+        publicationReady: true,
+        summary: "근거와 시장 메커니즘을 같은 생성 턴에서 검토했습니다.",
+        issues: [],
+      },
+    },
+  });
+
+  const output = JSON.parse(runV2Check(articleRoot));
+  assert.equal(output.ok, true);
+  assert.equal(output.errors.length, 0);
 });

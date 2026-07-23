@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "brief": {
+      "type": "string"
+    },
+    "articleType": {
+      "type": "string",
+      "enum": ["analysis", "fact-brief", "essay", "review"]
+    },
+    "topics": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {
+        "type": "string",
+        "enum": ["시장", "금융", "경제", "산업", "테크", "정치", "AI", "기후", "크립토"]
+      }
+    },
+    "storyFamily": {
+      "type": "string"
+    },
+    "editorialAngle": {
+      "type": "string"
+    },
+    "primaryEvent": {
+      "type": "string"
+    },
+    "marketMechanism": {
+      "type": "string"
+    },
+    "selectionReason": {
+      "type": "string"
+    },
+    "newsFeedIds": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "title",
+    "brief",
+    "articleType",
+    "topics",
+    "storyFamily",
+    "editorialAngle",
+    "primaryEvent",
+    "marketMechanism",
+    "selectionReason",
+    "newsFeedIds"
+  ]
+}

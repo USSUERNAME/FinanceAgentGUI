@@ -1,6 +1,7 @@
 {
   "version": 1,
   "enabled": false,
+  "autopilotEnabled": false,
   "managementProvider": "default",
   "managementModel": "",
   "managementReasoning": "",

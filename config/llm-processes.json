@@ -59,6 +59,24 @@
       "providers": ["codex-cli", "antigravity-cli"],
       "entrypoint": "scripts/magazine_generate_with_codex.mjs",
       "launcher": "spawnObservedLlm"
+    },
+    {
+      "id": "magazine-simple-writer",
+      "providers": ["codex-cli"],
+      "entrypoint": "scripts/magazine_generate_simple.mjs",
+      "launcher": "spawnObservedLlm"
+    },
+    {
+      "id": "magazine-simple-topic-selector",
+      "providers": ["codex-cli"],
+      "entrypoint": "scripts/magazine_generate_simple.mjs",
+      "launcher": "spawnObservedLlm"
+    },
+    {
+      "id": "magazine-article-count-decision",
+      "providers": ["codex-cli"],
+      "entrypoint": "web/server/magazineApi.mjs",
+      "launcher": "runIsolatedCodexJsonPrompt"
     }
   ]
 }

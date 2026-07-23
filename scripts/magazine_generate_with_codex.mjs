@@ -2,11 +2,16 @@
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codexServiceTierArgs, normalizeCodexSpeed } from "../web/server/agentSpeed.mjs";
 import { antigravityPrintInvocation } from "../web/server/antigravityCliCompatibility.mjs";
 import { spawnObservedLlm, waitForLlmObservation } from "../web/server/llmProcessObserver.mjs";
+import {
+  articleMarkdownToHtml,
+  discoverSimpleTopicFromAllCandidates,
+  generateSimpleDraftFromLockedTopic,
+} from "./magazine_generate_simple.mjs";
 
 const SCRIPT_DIR = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const GUIBUILD_ROOT = resolve(SCRIPT_DIR, "..");
@@ -29,6 +34,10 @@ const READER_TONE_POLICY = "magazine-reader-tone-v1";
 const READER_TONE_METHOD = "LLM_CLASSIFICATION_ONLY";
 const QUOTE_FLOW_POLICY = "magazine-quote-flow-v1";
 const QUOTE_FLOW_METHOD = "LLM_CLASSIFICATION_ONLY";
+const COVER_DECISION_POLICY = "world-memory-cover-v1";
+const COVER_DECISION_METHOD = "LLM_CLASSIFICATION_ONLY";
+const COVER_DECISION_GATE = "magazine-cover-classifier-v2";
+const COVER_REBUILD_MODE = "recent-cover-rebuild";
 const LEGACY_HARNESS_PROFILE = "legacy";
 const DEFAULT_HARNESS_PROFILE = "v2";
 const EDITORIAL_REVIEW_POLICY = "magazine-editorial-review-v2";
@@ -131,6 +140,7 @@ export function approvedEditorialExemplars() {
   const maxEditorialMapChars = Math.max(1000, Math.min(12000, Number.parseInt(config.maxEditorialMapChars, 10) || 6000));
   return readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
+    .sort((left, right) => left.name.localeCompare(right.name))
     .map((entry) => {
       const exemplarDir = join(root, entry.name);
       const metadata = readJsonFile(join(exemplarDir, "metadata.json"));
@@ -377,9 +387,252 @@ function recentArticleWindowSummary(limit = 5) {
     .join("\n");
 }
 
+function compactCoverArticle(
+  articleId,
+  metadata = {},
+  articleDirectory = ARTICLES_DIR,
+  bodyExcerptLimit = 4200,
+) {
+  const articleDir = join(articleDirectory, articleId);
+  const bodyPath = join(articleDir, "article.html");
+  const bodyText = existsSync(bodyPath)
+    ? compactPromptText(stripHtmlForTitle(readFileSync(bodyPath, "utf8")), bodyExcerptLimit)
+    : "";
+  return {
+    articleId,
+    title: compactPromptText(metadata.title || articleId, 240),
+    deck: compactPromptText(metadata.deck || "", 700),
+    summary: compactPromptText(metadata.summary || "", 1400),
+    topics: Array.isArray(metadata.topics) ? metadata.topics.slice(0, MAX_ARTICLE_TOPICS) : [],
+    publishedAt: compactPromptText(metadata.publishedAt || metadata.createdAt || metadata.updatedAt || "", 100),
+    storyFamily: compactPromptText(metadata.storyFamily || metadata.storyKey || "", 180),
+    editorialAngle: compactPromptText(metadata.editorialAngle || "", 320),
+    noveltyNote: compactPromptText(metadata.noveltyNote || "", 600),
+    eventSignature: metadata.eventSignature || null,
+    sourceBasis: Array.isArray(metadata.sourceBasis)
+      ? metadata.sourceBasis.slice(0, 8).map((item) => compactPromptText(item, 240))
+      : [],
+    bodyExcerpt: bodyText,
+  };
+}
+
+function coverArticleById(articleId, stagedArticleDirectory = "") {
+  for (const articleDirectory of [stagedArticleDirectory, ARTICLES_DIR].filter(Boolean)) {
+    const metadata = readJsonFile(join(articleDirectory, articleId, "metadata.json"));
+    if (metadata) return compactCoverArticle(articleId, metadata, articleDirectory);
+  }
+  return null;
+}
+
+export function buildCoverClassificationPrompt({
+  candidate,
+  comparisonArticles = [],
+  worldMemorySignals = "",
+}) {
+  return [
+    "너는 FinanceAgentGUI Magazine의 독립 커버스토리 분류기다.",
+    "기사 작성자가 남긴 isCoverStory나 coverDecision은 신뢰하지 않고, 아래 후보와 직전 업로드 비교창을 직접 의미적으로 평가한다.",
+    "텍스트 키워드 일치, 제목의 자극성, 특정 토픽 존재 여부, 정규식으로 판정하지 않는다.",
+    "현재 시장에서 가장 중요한 이슈 또는 가장 최근의 실질적 이슈에 대한 근접성, 사건의 새로움, 시장 파급 범위와 긴급성을 종합한다.",
+    "후보가 직전 비교창의 모든 기사보다 커버 가치가 높을 때만 result=promote로 둔다. 그렇지 않으면 반드시 result=do-not-promote로 둔다.",
+    "candidateScore와 bestPreviousScore는 같은 0~100 척도여야 한다. 비교 기사가 있으면 bestPreviousScore를 반드시 숫자로 반환한다.",
+    "mostImportantIssue와 mostRecentIssue는 아래 현재 시장 신호에서 실제로 확인한 내용을 간결하게 적는다. 내부 저장소나 도구 이름을 rationale에 노출하지 않는다.",
+    "모든 후보는 promote 또는 do-not-promote 중 하나로 분류되어야 하며 필드를 생략해서는 안 된다.",
+    "반드시 JSON 객체 하나만 출력하고 마크다운이나 설명 문장을 붙이지 않는다.",
+    JSON.stringify({
+      policy: COVER_DECISION_POLICY,
+      method: COVER_DECISION_METHOD,
+      result: "promote | do-not-promote",
+      confidence: 0.0,
+      candidateScore: 0,
+      bestPreviousScore: 0,
+      worldMemorySignals: {
+        mostImportantIssue: "현재 가장 중요한 이슈",
+        mostRecentIssue: "현재 가장 최근의 실질적 이슈",
+        query: "판단에 사용한 의미 질의",
+        hitIds: [],
+      },
+      rationale: "후보가 비교창보다 강한지 또는 약한지를 사건·파급·최근성 기준으로 설명",
+    }, null, 2),
+    "",
+    "[candidate article]",
+    JSON.stringify(candidate, null, 2),
+    "",
+    "[previous uploaded comparison window]",
+    JSON.stringify(comparisonArticles, null, 2),
+    "",
+    "[current market signals]",
+    worldMemorySignals || "- 현재 시장 신호 없음",
+  ].join("\n");
+}
+
+export function normalizeCoverClassificationDecision(source, {
+  comparisonArticleIds = [],
+  evaluatedAt = nowKstIso(),
+  totalArticleCount = 0,
+  classifier = {},
+} = {}) {
+  const decision = source && typeof source === "object" && !Array.isArray(source) ? source : null;
+  if (!decision) throw new Error("cover classifier returned no JSON object");
+  const result = String(decision.result || "").trim();
+  if (!["promote", "do-not-promote"].includes(result)) {
+    throw new Error("cover classifier result must be promote or do-not-promote");
+  }
+  const candidateScore = Number(decision.candidateScore);
+  if (!Number.isFinite(candidateScore) || candidateScore < 0 || candidateScore > 100) {
+    throw new Error("cover classifier candidateScore must be between 0 and 100");
+  }
+  const bestPreviousScore = comparisonArticleIds.length ? Number(decision.bestPreviousScore) : null;
+  if (
+    comparisonArticleIds.length &&
+    (!Number.isFinite(bestPreviousScore) || bestPreviousScore < 0 || bestPreviousScore > 100)
+  ) {
+    throw new Error("cover classifier bestPreviousScore must be between 0 and 100");
+  }
+  const signals = decision.worldMemorySignals && typeof decision.worldMemorySignals === "object"
+    ? decision.worldMemorySignals
+    : {};
+  const mostImportantIssue = compactPromptText(signals.mostImportantIssue || "", 500);
+  const mostRecentIssue = compactPromptText(signals.mostRecentIssue || "", 500);
+  if (!mostImportantIssue && !mostRecentIssue) {
+    throw new Error("cover classifier must identify the most important or most recent issue");
+  }
+  const rationale = compactPromptText(decision.rationale || "", 1200);
+  if (!rationale) throw new Error("cover classifier rationale is required");
+  const confidence = Number(decision.confidence);
+  return {
+    policy: COVER_DECISION_POLICY,
+    method: COVER_DECISION_METHOD,
+    classifier: {
+      provider: compactPromptText(classifier.provider || "", 80),
+      model: compactPromptText(classifier.model || "", 160),
+      reasoning: compactPromptText(classifier.reasoning || "", 40),
+    },
+    result,
+    evaluatedAt,
+    comparisonWindow: {
+      basis: "upload-time",
+      articleLimit: 5,
+      articleIds: comparisonArticleIds.slice(0, 5),
+      totalArticleCount,
+    },
+    worldMemorySignals: {
+      mostImportantIssue,
+      mostRecentIssue,
+      query: compactPromptText(signals.query || "", 500),
+      hitIds: identityList(Array.isArray(signals.hitIds) ? signals.hitIds : []).slice(0, 12),
+    },
+    confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : null,
+    candidateScore,
+    bestPreviousScore,
+    rationale,
+  };
+}
+
+export function buildCoverRebuildPrompt({
+  candidates = [],
+  worldMemorySignals = "",
+  coverCount = 5,
+}) {
+  return [
+    "너는 FinanceAgentGUI Magazine의 커버 편집장이다.",
+    "7월 11일 이후 커버 분류 메타데이터 누락으로 고정된 상단 커버를 복구한다.",
+    "아래 최근 업로드 후보 안에서 현재 시점의 대형 헤드라인 1건과 피처드 카드 4건을 의미적으로 선정한다.",
+    "텍스트 키워드, 토픽 개수, 제목 길이, 특정 단어 포함 여부, 정규식으로 순위를 매기지 않는다.",
+    "현재 시장에서의 중요도, 최근성, 파급 범위, 사건의 독립성, 후보 사이의 주제 다양성을 종합한다.",
+    "rank=1은 대형 헤드라인이며, 나머지는 서로 다른 시장 축을 보완하는 순서다.",
+    `candidate articleId만 사용해 정확히 ${coverCount}건을 고르고 중복하지 않는다.`,
+    "모든 선정 항목에는 0~100 score와 구체적인 rationale을 남긴다.",
+    "반드시 JSON 객체 하나만 출력하고 마크다운이나 설명 문장을 붙이지 않는다.",
+    JSON.stringify({
+      policy: COVER_DECISION_POLICY,
+      method: COVER_DECISION_METHOD,
+      mode: COVER_REBUILD_MODE,
+      confidence: 0.0,
+      worldMemorySignals: {
+        mostImportantIssue: "현재 가장 중요한 이슈",
+        mostRecentIssue: "현재 가장 최근의 실질적 이슈",
+        query: "판단에 사용한 의미 질의",
+        hitIds: [],
+      },
+      coverStories: Array.from({ length: coverCount }, (_, index) => ({
+        articleId: `후보 articleId ${index + 1}`,
+        rank: index + 1,
+        score: 0,
+        rationale: "현재 커버에 포함할 이유",
+      })),
+    }, null, 2),
+    "",
+    "[recent uploaded candidates]",
+    JSON.stringify(candidates, null, 2),
+    "",
+    "[current market signals]",
+    worldMemorySignals || "- 현재 시장 신호 없음",
+  ].join("\n");
+}
+
+export function normalizeCoverRebuildDecision(source, {
+  candidateArticleIds = [],
+  coverCount = 5,
+  evaluatedAt = nowKstIso(),
+  classifier = {},
+} = {}) {
+  const decision = source && typeof source === "object" && !Array.isArray(source) ? source : null;
+  if (!decision) throw new Error("cover rebuild classifier returned no JSON object");
+  const allowedIds = new Set(candidateArticleIds);
+  const rows = Array.isArray(decision.coverStories) ? decision.coverStories : [];
+  if (rows.length !== coverCount) {
+    throw new Error(`cover rebuild classifier must select exactly ${coverCount} stories`);
+  }
+  const seenIds = new Set();
+  const coverStories = rows.map((row, index) => {
+    const articleId = String(row?.articleId || "").trim();
+    if (!allowedIds.has(articleId)) throw new Error(`cover rebuild selected an unknown articleId: ${articleId}`);
+    if (seenIds.has(articleId)) throw new Error(`cover rebuild selected a duplicate articleId: ${articleId}`);
+    seenIds.add(articleId);
+    const rank = Number(row?.rank);
+    if (rank !== index + 1) throw new Error("cover rebuild ranks must be consecutive and ordered");
+    const score = Number(row?.score);
+    if (!Number.isFinite(score) || score < 0 || score > 100) {
+      throw new Error(`cover rebuild score must be between 0 and 100 for ${articleId}`);
+    }
+    const rationale = compactPromptText(row?.rationale || "", 1200);
+    if (!rationale) throw new Error(`cover rebuild rationale is required for ${articleId}`);
+    return { articleId, rank, score, rationale };
+  });
+  const signals = decision.worldMemorySignals && typeof decision.worldMemorySignals === "object"
+    ? decision.worldMemorySignals
+    : {};
+  const mostImportantIssue = compactPromptText(signals.mostImportantIssue || "", 500);
+  const mostRecentIssue = compactPromptText(signals.mostRecentIssue || "", 500);
+  if (!mostImportantIssue && !mostRecentIssue) {
+    throw new Error("cover rebuild must identify the most important or most recent issue");
+  }
+  const confidence = Number(decision.confidence);
+  return {
+    policy: COVER_DECISION_POLICY,
+    method: COVER_DECISION_METHOD,
+    mode: COVER_REBUILD_MODE,
+    evaluatedAt,
+    classifier: {
+      provider: compactPromptText(classifier.provider || "", 80),
+      model: compactPromptText(classifier.model || "", 160),
+      reasoning: compactPromptText(classifier.reasoning || "", 40),
+    },
+    confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : null,
+    worldMemorySignals: {
+      mostImportantIssue,
+      mostRecentIssue,
+      query: compactPromptText(signals.query || "", 500),
+      hitIds: identityList(Array.isArray(signals.hitIds) ? signals.hitIds : []).slice(0, 12),
+    },
+    coverStories,
+  };
+}
+
 function bootstrapCoverDecision({ comparisonArticleIds, timestampIso, totalArticleCount }) {
   return {
-    policy: "world-memory-cover-v1",
+    policy: COVER_DECISION_POLICY,
     result: "promote",
     mode: "bootstrap-cover-fill",
     scorePolicy: "not-scored-total-articles-lte-5",
@@ -446,6 +699,7 @@ export function normalizeGeneratedResearchMode(metadata = {}) {
 function normalizeGeneratedArticleMetadata(articleDirectory, timestampIso, { existingArticleCount = articleCountIn(ARTICLES_DIR), previousArticleIds = recentArticleIds(5), generationAgent = {} } = {}) {
   const generatedArticleIds = articleIdsIn(articleDirectory);
   const normalizedGenerationAgent = normalizeGenerationAgent(generationAgent);
+  const requiresCoverClassifier = normalizedGenerationAgent.harnessProfile === DEFAULT_HARNESS_PROFILE;
   for (const [articleIndex, articleId] of generatedArticleIds.entries()) {
     const metadataPath = join(articleDirectory, articleId, "metadata.json");
     if (!existsSync(metadataPath)) continue;
@@ -455,9 +709,20 @@ function normalizeGeneratedArticleMetadata(articleDirectory, timestampIso, { exi
     const bootstrapCover = totalArticleCount <= 5;
     const stagedPreviousIds = generatedArticleIds.slice(0, articleIndex).reverse();
     const comparisonArticleIds = [...stagedPreviousIds, ...previousArticleIds].slice(0, 5);
-    const isCoverStory = bootstrapCover ? true : Boolean(metadata.isCoverStory);
+    const classifiedCoverDecision =
+      metadata.coverDecision?.policy === COVER_DECISION_POLICY &&
+      metadata.coverDecision?.method === COVER_DECISION_METHOD
+        ? metadata.coverDecision
+        : null;
+    const isCoverStory = bootstrapCover
+      ? true
+      : requiresCoverClassifier
+        ? classifiedCoverDecision?.result === "promote"
+        : Boolean(metadata.isCoverStory);
     const coverDecision = bootstrapCover
       ? bootstrapCoverDecision({ comparisonArticleIds, timestampIso, totalArticleCount })
+      : requiresCoverClassifier
+        ? classifiedCoverDecision || undefined
       : metadata.coverDecision && typeof metadata.coverDecision === "object" && !Array.isArray(metadata.coverDecision)
         ? { ...metadata.coverDecision, evaluatedAt: timestampIso }
         : metadata.coverDecision;
@@ -474,6 +739,7 @@ function normalizeGeneratedArticleMetadata(articleDirectory, timestampIso, { exi
       generationAgent: Object.keys(normalizedGenerationAgent).length
         ? normalizedGenerationAgent
         : metadata.generationAgent,
+      ...(requiresCoverClassifier ? { coverDecisionGate: COVER_DECISION_GATE } : {}),
       coverRegisteredAt: isCoverStory ? timestampIso : null,
       coverDecision,
     };
@@ -932,9 +1198,6 @@ function buildHeroImageWorkerPrompt({ articleId, articleDir, metadata, bodyText,
   return [
     "너는 FinanceAgentGUI Magazine v2의 히어로 이미지 소싱 전담 worker다.",
     "기사 본문과 metadata.json은 절대 수정하지 않는다.",
-    `작업 대상 article-id는 ${articleId}이고 고정 기사 디렉터리는 ${articleDir} 이다.`,
-    `이미지 파일은 ${join(articleDir, "assets")} 아래에만 저장한다.`,
-    `최종 이미지 메타데이터는 ${join(articleDir, "hero-image.json")} 한 파일에 JSON 객체로 저장한다.`,
     "무료/오픈 이미지, 공식 이미지, 개인 열람용 공개 보도사진 순으로 후보를 검토한다.",
     "검색은 최대 2회로 제한한다. 실제 관련성이 있는 후보를 찾으면 즉시 원본 이미지 확보와 검증으로 넘어간다.",
     "jpg, jpeg, png, webp만 허용한다. SVG, AVIF, 생성 이미지, placeholder, HTML 응답을 이미지 확장자로 저장한 파일은 금지한다.",
@@ -943,6 +1206,9 @@ function buildHeroImageWorkerPrompt({ articleId, articleDir, metadata, bodyText,
     "개인 열람용 보도사진이면 usageNote에 editorial-private-use; local personal reading only와 원출처를 남긴다.",
     "hero-image.json 형식은 {\"heroImage\":{\"src\":\"assets/file.jpg\",\"alt\":\"...\",\"credit\":\"...\",\"sourceUrl\":\"https://...\",\"license\":\"...\"},\"selection\":{\"query\":\"...\",\"rationale\":\"...\"}} 이다.",
     "성공하지 못하면 빈 파일이나 가짜 메타데이터를 만들지 말고 오류를 최종 답변에 보고한다.",
+    `작업 대상 article-id는 ${articleId}이고 고정 기사 디렉터리는 ${articleDir} 이다.`,
+    `이미지 파일은 ${join(articleDir, "assets")} 아래에만 저장한다.`,
+    `최종 이미지 메타데이터는 ${join(articleDir, "hero-image.json")} 한 파일에 JSON 객체로 저장한다.`,
     diagnostic ? `직전 검증 오류: ${diagnostic}` : "",
     "",
     "[article metadata excerpt]",
@@ -1129,7 +1395,7 @@ export function normalizeLockedTopic(source = {}) {
     storyFamily: compactPromptText(topic.storyFamily || "", 160),
     editorialAngle: compactPromptText(topic.editorialAngle || "", 120),
     primaryEvent: compactPromptText(topic.primaryEvent || topic.event || "", 300),
-    newsFeedIds: identityList(Array.isArray(topic.newsFeedIds) ? topic.newsFeedIds : topic.sourceIds || []).slice(0, 8),
+    newsFeedIds: identityList(Array.isArray(topic.newsFeedIds) ? topic.newsFeedIds : topic.sourceIds || []),
     researchQueries: identityList(Array.isArray(topic.researchQueries) ? topic.researchQueries : []).slice(0, 5),
   };
 }
@@ -1225,7 +1491,7 @@ async function selectV2LockedTopic({ provider, codex, approval, model, speed, ti
   return lockedTopic;
 }
 
-function buildV2Prompt({ count, replace, articleDirectory, staged, agentLabel = "Codex CLI", lockedTopic }) {
+export function buildV2Prompt({ count, replace, articleDirectory, staged, agentLabel = "Codex CLI", lockedTopic }) {
   const extraPrompt = String(process.env.MAGAZINE_EXTRA_PROMPT || process.env.MAGAZINE_CODEX_EXTRA_PROMPT || "").trim();
   const recentArticles = recentArticleWindowSummary(8);
   const normalizedLockedTopic = normalizeLockedTopic(lockedTopic);
@@ -1234,18 +1500,6 @@ function buildV2Prompt({ count, replace, articleDirectory, staged, agentLabel = 
   const worldMemorySignals = worldMemoryCurrentSignalSummary(8);
   return [
     `너는 FinanceAgentGUI 배포본 안에서 실행되는 ${agentLabel} 금융 매거진 기자 겸 편집자다.`,
-    "작업 루트는 GuiBuild이며 지정된 staging 기사 디렉터리만 수정한다.",
-    "",
-    "목표:",
-    `- 매거진 기사 정확히 ${count}개를 생성한다.`,
-    staged
-      ? `- 출력 디렉터리는 ${articleDirectory} 이다. production data/magazine/articles/는 직접 수정하지 않는다.`
-      : replace
-        ? "- 기존 기사를 대체하는 실행이다."
-        : "- 기존 기사와 충돌하지 않는 article-id로 추가한다.",
-    `- 기사별로 ${articleDirectory}/<article-id>/metadata.json, article.html, 필요하면 assets/를 만든다.`,
-    "- 초안 metadata.title은 빈 문자열로 둔다. 생성기가 완성된 본문만 읽고 제목을 별도 확정한다.",
-    "",
     "먼저 읽을 계약:",
     "- AGENTS.md",
     "- config/magazine-article-style-v2.prompt.md",
@@ -1288,6 +1542,20 @@ function buildV2Prompt({ count, replace, articleDirectory, staged, agentLabel = 
     "- writer는 이미지 검색이나 다운로드를 하지 않는다. 대신 metadata.heroImageRequest에 subject, query, preferredSourceType, rationale를 짧게 남긴다. 별도 image worker가 본문 작성과 분리되어 실제 이미지를 확보한다.",
     "- 생성 과정에서 production 전체를 대상으로 legacy checker를 실행하지 않는다. 저장을 마치면 생성기의 v2 review/check 단계가 처리한다.",
     "",
+    "승인된 한국어 장문 퓨샷:",
+    editorialExemplarWriterPrompt(),
+    "",
+    "이번 실행:",
+    "- 작업 루트는 GuiBuild이며 지정된 staging 기사 디렉터리만 수정한다.",
+    `- 매거진 기사 정확히 ${count}개를 생성한다.`,
+    staged
+      ? `- 출력 디렉터리는 ${articleDirectory} 이다. production data/magazine/articles/는 직접 수정하지 않는다.`
+      : replace
+        ? "- 기존 기사를 대체하는 실행이다."
+        : "- 기존 기사와 충돌하지 않는 article-id로 추가한다.",
+    `- 기사별로 ${articleDirectory}/<article-id>/metadata.json, article.html, 필요하면 assets/를 만든다.`,
+    "- 초안 metadata.title은 빈 문자열로 둔다. 생성기가 완성된 본문만 읽고 제목을 별도 확정한다.",
+    "",
     "확정 소재:",
     JSON.stringify(normalizedLockedTopic, null, 2),
     "",
@@ -1298,9 +1566,6 @@ function buildV2Prompt({ count, replace, articleDirectory, staged, agentLabel = 
     "",
     "최근 업로드 기사 비교창:",
     recentArticles,
-    "",
-    "승인된 한국어 장문 퓨샷:",
-    editorialExemplarWriterPrompt(),
     "",
     "출력:",
     "- 실제 기사 파일을 저장한 뒤 article-id와 저장 여부만 짧게 보고한다.",
@@ -1656,8 +1921,37 @@ export function extractCodexSessionId({ stdout = "", stderr = "" } = {}) {
   return humanMatch ? humanMatch[1] : "";
 }
 
+function finiteTokenCount(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+export function extractCodexTokenUsage({ stdout = "" } = {}) {
+  let usage = null;
+  for (const line of String(stdout || "").split(/\r?\n/)) {
+    try {
+      const event = JSON.parse(line);
+      const candidate = event?.usage || event?.token_usage || event?.tokenUsage;
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+      usage = {
+        inputTokens: finiteTokenCount(candidate.input_tokens ?? candidate.inputTokens),
+        cachedInputTokens: finiteTokenCount(
+          candidate.cached_input_tokens ??
+            candidate.cachedInputTokens ??
+            candidate.input_tokens_details?.cached_tokens ??
+            candidate.inputTokensDetails?.cachedTokens,
+        ),
+        outputTokens: finiteTokenCount(candidate.output_tokens ?? candidate.outputTokens),
+      };
+    } catch {
+      // Non-JSON progress output is allowed.
+    }
+  }
+  return usage;
+}
+
 async function runCodexPrompt({ codex, approval, sandbox, model, reasoning, speed, outputPath, prompt, timeoutMs, persistSession = false, resumeSessionId = "" }) {
-  const jsonEvents = persistSession || Boolean(resumeSessionId);
+  const jsonEvents = true;
   const args = resumeSessionId
     ? buildCodexResumeArgs({ sessionId: resumeSessionId, model, reasoning, speed, outputPath, prompt, jsonEvents })
     : buildCodexArgs({ approval, sandbox, model, reasoning, speed, outputPath, prompt, persistSession, jsonEvents });
@@ -1676,9 +1970,16 @@ async function runCodexPrompt({ codex, approval, sandbox, model, reasoning, spee
     console.log("\n--- Codex final answer ---");
     console.log(finalAnswer);
   }
+  const tokenUsage = extractCodexTokenUsage(commandResult);
+  if (tokenUsage) {
+    console.log(
+      `Magazine Codex token usage: input=${tokenUsage.inputTokens}, cachedInput=${tokenUsage.cachedInputTokens}, output=${tokenUsage.outputTokens}`,
+    );
+  }
   return {
     ...commandResult,
     sessionId: resumeSessionId || extractCodexSessionId(commandResult),
+    tokenUsage,
   };
 }
 
@@ -1785,6 +2086,10 @@ async function runAntigravityPrompt({
 }
 
 async function runAgentPrompt({ provider, ...options }) {
+  const prompt = String(options.prompt || "");
+  console.log(
+    `Magazine LLM prompt input: stage=${basename(options.outputPath || "prompt")}, chars=${[...prompt].length}, bytes=${Buffer.byteLength(prompt, "utf8")}`,
+  );
   if (isAntigravityProvider(provider)) {
     return runAntigravityPrompt(options);
   }
@@ -1864,6 +2169,95 @@ function blockingEditorialReviewIssues(decisions) {
   return blockers;
 }
 
+async function finalizeCoverClassificationDecisions({
+  provider,
+  codex,
+  approval,
+  model,
+  speed,
+  timeoutMs,
+  tempDir,
+  articleDirectory,
+  existingArticleCount,
+  previousArticleIds,
+  generationAgent,
+  evaluatedAt,
+  agentLabel,
+}) {
+  const articleIds = articleIdsIn(articleDirectory);
+  const worldMemorySignals = worldMemoryCurrentSignalSummary(8);
+  for (const [index, articleId] of articleIds.entries()) {
+    const metadataPath = join(articleDirectory, articleId, "metadata.json");
+    const metadata = readJsonFile(metadataPath);
+    if (!metadata) continue;
+    const totalArticleCount = existingArticleCount + index + 1;
+    if (totalArticleCount <= 5) continue;
+    const stagedPreviousIds = articleIds.slice(0, index).reverse();
+    const comparisonArticleIds = [...stagedPreviousIds, ...previousArticleIds].slice(0, 5);
+    const comparisonArticles = comparisonArticleIds
+      .map((candidateId) => coverArticleById(candidateId, articleDirectory))
+      .filter(Boolean);
+    const candidate = compactCoverArticle(articleId, metadata, articleDirectory);
+    const outputPath = join(tempDir, `${provider}-cover-classification-${index + 1}.json`);
+    const classifierReasoning = cleanCliValue(process.env.MAGAZINE_COVER_REASONING || "low", "low");
+    let normalizedDecision = null;
+    let lastError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      console.log(`\nClassifying Magazine cover eligibility with LLM harness: ${articleId} (${attempt + 1}/2)`);
+      try {
+        await runAgentPrompt({
+          provider,
+          codex,
+          approval,
+          sandbox: "read-only",
+          model,
+          reasoning: classifierReasoning,
+          speed,
+          outputPath,
+          prompt: buildCoverClassificationPrompt({
+            candidate,
+            comparisonArticles,
+            worldMemorySignals,
+          }),
+          timeoutMs,
+          tempDir,
+        });
+        const rawDecision = extractJsonObject(existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "");
+        normalizedDecision = normalizeCoverClassificationDecision(rawDecision, {
+          comparisonArticleIds,
+          evaluatedAt,
+          totalArticleCount,
+          classifier: {
+            provider: generationAgent.provider || provider,
+            model: generationAgent.model || model,
+            reasoning: classifierReasoning,
+          },
+        });
+        break;
+      } catch (error) {
+        lastError = error;
+        console.warn(`${agentLabel} cover classifier contract failed for ${articleId}: ${error.message}`);
+      }
+    }
+    if (!normalizedDecision) {
+      throw new Error(
+        `${agentLabel} cover classifier failed closed for ${articleId}: ${lastError?.message || "invalid decision"}`,
+      );
+    }
+    writeFileSync(
+      metadataPath,
+      `${JSON.stringify({
+        ...metadata,
+        coverDecisionGate: COVER_DECISION_GATE,
+        isCoverStory: normalizedDecision.result === "promote",
+        coverRegisteredAt: normalizedDecision.result === "promote" ? evaluatedAt : null,
+        coverDecision: normalizedDecision,
+      }, null, 2)}\n`,
+      "utf8",
+    );
+  }
+}
+
 async function runWriterRepairRound({ provider, codex, approval, sandbox, model, reasoning, speed, outputPath, prompt, timeoutMs, tempDir, writerSessionId }) {
   return runAgentPrompt({
     provider,
@@ -1888,6 +2282,21 @@ async function runV2QualityWithRepair({ provider, codex, approval, sandbox, mode
   for (let attempt = 0; attempt <= repairRounds; attempt += 1) {
     console.log(`\nRunning Magazine v2 editorial review and hero-image finalization (attempt ${attempt + 1}/${repairRounds + 1})...`);
     normalizeGeneratedArticleMetadata(articleDirectory, publishedAt, { existingArticleCount, previousArticleIds, generationAgent });
+    await finalizeCoverClassificationDecisions({
+      provider,
+      codex,
+      approval,
+      model,
+      speed,
+      timeoutMs,
+      tempDir,
+      articleDirectory,
+      existingArticleCount,
+      previousArticleIds,
+      generationAgent,
+      evaluatedAt: publishedAt,
+      agentLabel,
+    });
     const parallelStartedAt = Date.now();
     const [reviewBundle, heroPatches] = await Promise.all([
       collectEditorialReviewDecisions({
@@ -2111,6 +2520,233 @@ function publishGeneratedArticles({ stagingArticlesDir, replace }) {
   }
 }
 
+function availableSimpleArticleId(requestedId, stagingArticlesDir) {
+  const base = String(requestedId || "").trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]{5,119}$/.test(base)) {
+    throw new Error(`simple Magazine article id is invalid: ${base}`);
+  }
+  if (!existsSync(join(stagingArticlesDir, base)) && !existsSync(join(ARTICLES_DIR, base))) return base;
+  const suffix = nowKstIso().replace(/\D/g, "").slice(0, 14);
+  const trimmed = base.slice(0, Math.max(6, 119 - suffix.length - 1)).replace(/-+$/, "");
+  const candidate = `${trimmed}-${suffix}`;
+  if (existsSync(join(stagingArticlesDir, candidate)) || existsSync(join(ARTICLES_DIR, candidate))) {
+    throw new Error(`simple Magazine article id still collides after timestamp suffix: ${candidate}`);
+  }
+  return candidate;
+}
+
+function writeSimpleDraftPackage({
+  draft,
+  lockedTopic,
+  stagingArticlesDir,
+  discoveryTelemetry = null,
+}) {
+  const article = draft?.article;
+  if (!article) throw new Error("simple Magazine draft is missing article output");
+  const articleId = availableSimpleArticleId(article.articleId, stagingArticlesDir);
+  const articleDir = join(stagingArticlesDir, articleId);
+  mkdirSync(articleDir, { recursive: true });
+  const cutoff = worldMemoryLastSuccessfulAt();
+  const metadata = {
+    title: article.title,
+    deck: article.deck,
+    summary: article.summary,
+    topics: article.topics,
+    articleType: article.articleType,
+    researchMode: "news-feed-first",
+    storyFamily: article.storyFamily,
+    editorialAngle: article.editorialAngle,
+    noveltyNote: lockedTopic.reason || lockedTopic.primaryEvent || article.summary,
+    eventSignature: article.eventSignature,
+    newsFeed: {
+      selectionPolicy: "post-world-memory-update-only",
+      worldMemoryLastSuccessfulAt: cutoff.iso,
+      items: draft.evidence.map((item) => ({
+        id: item.id,
+        feedTitle: item.source,
+        title: item.headline,
+        publishedAt: item.publishedAt,
+        sourceUrl: item.url,
+      })),
+    },
+    worldMemory: null,
+    sourceBasis: article.sourceBasis,
+    chartBlocks: [],
+    followupOptions: [],
+    editorialReviewDecision: article.editorialReviewDecision,
+    heroImageRequest: {
+      subject: article.eventSignature.actor || lockedTopic.primaryEvent || lockedTopic.title,
+      query: lockedTopic.title,
+      preferredSourceType: "open-or-official-then-private-editorial",
+      rationale: article.editorialAngle || article.summary,
+    },
+  };
+  const telemetry = {
+    pipeline: "simple-production-one-shot-v1",
+    articleId,
+    writer: draft.telemetry,
+    discovery: discoveryTelemetry,
+    totalTokenUsage: {
+      inputTokens:
+        Number(draft.telemetry?.tokenUsage?.inputTokens || 0) +
+        Number(discoveryTelemetry?.tokenUsage?.inputTokens || 0),
+      cachedInputTokens:
+        Number(draft.telemetry?.tokenUsage?.cachedInputTokens || 0) +
+        Number(discoveryTelemetry?.tokenUsage?.cachedInputTokens || 0),
+      outputTokens:
+        Number(draft.telemetry?.tokenUsage?.outputTokens || 0) +
+        Number(discoveryTelemetry?.tokenUsage?.outputTokens || 0),
+    },
+  };
+  writeFileSync(join(articleDir, "article.html"), articleMarkdownToHtml(article.articleMarkdown), "utf8");
+  writeFileSync(join(articleDir, "metadata.json"), `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+  writeFileSync(
+    join(articleDir, "generation-telemetry.json"),
+    `${JSON.stringify(telemetry, null, 2)}\n`,
+    "utf8",
+  );
+  console.log(
+    `Simple Magazine draft materialized: ${articleId} / writer input=${draft.telemetry?.tokenUsage?.inputTokens || 0} / output=${draft.telemetry?.tokenUsage?.outputTokens || 0}`,
+  );
+  return articleId;
+}
+
+async function runSimpleProductionPipeline({
+  count,
+  configuredLockedTopic,
+  provider,
+  codex,
+  approval,
+  sandbox,
+  model,
+  reasoning,
+  speed,
+  timeoutMs,
+  tempDir,
+  stagingRoot,
+  stagingArticlesDir,
+  agentLabel,
+  publishedAt,
+  existingArticleCount,
+  previousArticleIds,
+  generationAgent,
+}) {
+  if (count !== 1) {
+    throw new Error("simple Magazine production pipeline accepts exactly one article per generator run");
+  }
+  let lockedTopic = configuredLockedTopic;
+  let discoveryTelemetry = null;
+  if (!lockedTopic) {
+    const discovery = await discoverSimpleTopicFromAllCandidates({
+      model,
+      reasoning,
+      speed,
+      timeoutMs,
+    });
+    discoveryTelemetry = discovery.telemetry;
+    lockedTopic = normalizeLockedTopic({
+      title: discovery.topic.title,
+      reason: discovery.topic.selectionReason || discovery.topic.brief,
+      storyFamily: discovery.topic.storyFamily,
+      editorialAngle: discovery.topic.editorialAngle,
+      primaryEvent: discovery.topic.eventSignature?.action,
+      newsFeedIds: discovery.topic.newsFeedIds,
+      researchQueries: [],
+    });
+  }
+  if (!lockedTopic) throw new Error("simple Magazine production pipeline could not lock a topic");
+
+  const writerPromise = generateSimpleDraftFromLockedTopic({
+    topic: lockedTopic,
+    model,
+    reasoning,
+    speed,
+    timeoutMs,
+  });
+  const preparedHeroPromise = prepareLockedTopicHero({
+    provider,
+    codex,
+    approval,
+    sandbox,
+    model,
+    speed,
+    timeoutMs,
+    tempDir,
+    stagingRoot,
+    agentLabel,
+    lockedTopic,
+  }).catch((error) => {
+    console.warn(`Simple Magazine early hero preparation failed; retrying after writing: ${error.message}`);
+    return null;
+  });
+  const [draft, preparedHero] = await Promise.all([writerPromise, preparedHeroPromise]);
+  writeSimpleDraftPackage({
+    draft,
+    lockedTopic,
+    stagingArticlesDir,
+    discoveryTelemetry,
+  });
+  assertArticleCount(stagingArticlesDir, 1);
+
+  normalizeGeneratedArticleMetadata(stagingArticlesDir, publishedAt, {
+    existingArticleCount,
+    previousArticleIds,
+    generationAgent,
+  });
+  await finalizeCoverClassificationDecisions({
+    provider,
+    codex,
+    approval,
+    model,
+    speed,
+    timeoutMs,
+    tempDir,
+    articleDirectory: stagingArticlesDir,
+    existingArticleCount,
+    previousArticleIds,
+    generationAgent,
+    evaluatedAt: publishedAt,
+    agentLabel,
+  });
+
+  let heroPatches = installPreparedHero({
+    preparedHero,
+    articleDirectory: stagingArticlesDir,
+  });
+  if (!heroPatches.size) {
+    heroPatches = await collectHeroImagePatches({
+      provider,
+      codex,
+      approval,
+      sandbox,
+      model,
+      reasoning: cleanCliValue(process.env.MAGAZINE_IMAGE_REASONING || "low", "low"),
+      speed,
+      timeoutMs,
+      tempDir,
+      articleDirectory: stagingArticlesDir,
+      agentLabel,
+    });
+  }
+  mergeV2FinalizerResults(stagingArticlesDir, new Map(), heroPatches);
+
+  console.log("\nRunning local Magazine v2 quality check without an LLM repair loop...");
+  await runCommand(process.execPath, ["scripts/magazine_article_quality_check.mjs", "--strict", "--json"], {
+    cwd: GUIBUILD_ROOT,
+    env: qualityCheckEnvironment({
+      articleDirectory: stagingArticlesDir,
+      staged: true,
+      existingArticleCount,
+    }),
+    timeoutMs: 120000,
+  });
+  await runEventSignatureEmbeddingCheck({
+    articleDirectory: stagingArticlesDir,
+    staged: true,
+    existingArticleCount,
+  });
+}
+
 function processIsAlive(pid) {
   if (!pid) return false;
   try {
@@ -2151,9 +2787,140 @@ function releaseGenerationLock() {
   rmSync(LOCK_PATH, { force: true });
 }
 
+async function rebuildMagazineCovers({
+  provider,
+  codex,
+  approval,
+  model,
+  speed,
+  timeoutMs,
+  tempDir,
+  agentLabel,
+  apply,
+  candidateLimit = 24,
+  coverCount = 5,
+}) {
+  const recentRecords = uploadedArticleRecords(ARTICLES_DIR).slice(0, candidateLimit);
+  if (recentRecords.length < coverCount) {
+    throw new Error(`cover rebuild needs at least ${coverCount} readable articles`);
+  }
+  const candidates = recentRecords.map(({ articleId, metadata }) =>
+    compactCoverArticle(articleId, metadata, ARTICLES_DIR, 900)
+  );
+  const candidateArticleIds = candidates.map((candidate) => candidate.articleId);
+  const worldMemorySignals = worldMemoryCurrentSignalSummary(10);
+  const evaluatedAt = nowKstIso();
+  const outputPath = join(tempDir, `${provider}-cover-rebuild.json`);
+  const classifierReasoning = cleanCliValue(process.env.MAGAZINE_COVER_REASONING || "low", "low");
+  let plan = null;
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    console.log(`\nRebuilding Magazine cover with LLM classification (${attempt + 1}/2)...`);
+    try {
+      await runAgentPrompt({
+        provider,
+        codex,
+        approval,
+        sandbox: "read-only",
+        model,
+        reasoning: classifierReasoning,
+        speed,
+        outputPath,
+        prompt: buildCoverRebuildPrompt({
+          candidates,
+          worldMemorySignals,
+          coverCount,
+        }),
+        timeoutMs,
+        tempDir,
+      });
+      const rawDecision = extractJsonObject(existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "");
+      plan = normalizeCoverRebuildDecision(rawDecision, {
+        candidateArticleIds,
+        coverCount,
+        evaluatedAt,
+        classifier: { provider, model, reasoning: classifierReasoning },
+      });
+      break;
+    } catch (error) {
+      lastError = error;
+      console.warn(`${agentLabel} cover rebuild contract failed: ${error.message}`);
+    }
+  }
+  if (!plan) {
+    throw new Error(`${agentLabel} cover rebuild failed closed: ${lastError?.message || "invalid decision"}`);
+  }
+  console.log(JSON.stringify({
+    mode: COVER_REBUILD_MODE,
+    apply,
+    evaluatedAt,
+    coverStories: plan.coverStories,
+  }, null, 2));
+  if (!apply) return plan;
+
+  const backupName = `magazine-cover-rebuild-${evaluatedAt.replace(/[^0-9A-Za-z]+/g, "-")}`;
+  const backupDir = join(GUIBUILD_ROOT, "data", "backups", backupName);
+  mkdirSync(backupDir, { recursive: true });
+  const written = [];
+  try {
+    for (const row of plan.coverStories) {
+      const metadataPath = join(ARTICLES_DIR, row.articleId, "metadata.json");
+      const metadata = readJsonFile(metadataPath);
+      if (!metadata) throw new Error(`cover rebuild metadata missing: ${row.articleId}`);
+      const backupPath = join(backupDir, `${row.articleId}.metadata.json`);
+      copyFileSync(metadataPath, backupPath);
+      const otherScores = plan.coverStories
+        .filter((item) => item.articleId !== row.articleId)
+        .map((item) => item.score);
+      const coverDecision = {
+        policy: COVER_DECISION_POLICY,
+        method: COVER_DECISION_METHOD,
+        mode: COVER_REBUILD_MODE,
+        classifier: plan.classifier,
+        result: "promote",
+        evaluatedAt,
+        comparisonWindow: {
+          basis: "recent-upload-window",
+          articleLimit: candidateArticleIds.length,
+          articleIds: candidateArticleIds,
+          totalArticleCount: articleCountIn(ARTICLES_DIR),
+        },
+        worldMemorySignals: plan.worldMemorySignals,
+        confidence: plan.confidence,
+        candidateScore: row.score,
+        bestPreviousScore: otherScores.length ? Math.max(...otherScores) : null,
+        rationale: row.rationale,
+      };
+      const tempMetadataPath = `${metadataPath}.cover-rebuild-${process.pid}.tmp`;
+      writeFileSync(
+        tempMetadataPath,
+        `${JSON.stringify({
+          ...metadata,
+          coverDecisionGate: COVER_DECISION_GATE,
+          isCoverStory: true,
+          coverRegisteredAt: evaluatedAt,
+          coverRank: row.rank,
+          coverDecision,
+        }, null, 2)}\n`,
+        "utf8",
+      );
+      renameSync(tempMetadataPath, metadataPath);
+      written.push({ metadataPath, backupPath });
+    }
+  } catch (error) {
+    for (const item of written.reverse()) {
+      copyFileSync(item.backupPath, item.metadataPath);
+    }
+    throw error;
+  }
+  console.log(`Applied Magazine cover rebuild with ${written.length} stories; backup=${join("data", "backups", backupName)}`);
+  return plan;
+}
+
 async function main() {
   const count = Number.parseInt(argValue("--count", "1"), 10) || 1;
   const replace = hasArg("--replace");
+  const rebuildCovers = hasArg("--rebuild-covers");
   const provider = cleanCliValue(argValue("--provider", process.env.MAGAZINE_AGENT_PROVIDER || CODEX_PROVIDER_ID), CODEX_PROVIDER_ID);
   const antigravity = isAntigravityProvider(provider);
   const agentLabel = agentLabelForProvider(provider);
@@ -2186,10 +2953,46 @@ async function main() {
   const timeoutMs = Number.parseInt(argValue("--timeout-ms", process.env.MAGAZINE_CODEX_TIMEOUT_MS || "1800000"), 10) || 1800000;
   const repairRounds = Number.parseInt(argValue("--repair-rounds", process.env.MAGAZINE_CODEX_REPAIR_ROUNDS || "2"), 10) || 2;
   const harnessProfile = normalizeHarnessProfile(argValue("--harness", process.env.MAGAZINE_HARNESS_PROFILE || DEFAULT_HARNESS_PROFILE));
+  const pipelineMode = cleanCliValue(
+    argValue(
+      "--pipeline",
+      process.env.MAGAZINE_PIPELINE || (antigravity ? "agentic" : "simple"),
+    ),
+    antigravity ? "agentic" : "simple",
+    /^(?:simple|agentic)$/,
+  );
+  const simpleProductionPipeline =
+    harnessProfile === DEFAULT_HARNESS_PROFILE &&
+    !antigravity &&
+    pipelineMode === "simple";
   const sequential = !hasArg("--batch") && process.env.MAGAZINE_CODEX_BATCH !== "1";
   const codex = antigravity ? "" : findCodexCommand();
   const tempDir = mkdtempSync(join(tmpdir(), `finance-agent-magazine-${antigravity ? "antigravity-cli" : "codex"}-`));
   const outputPath = join(tempDir, `${antigravity ? "antigravity-cli" : "codex"}-final.txt`);
+  if (rebuildCovers) {
+    let lockAcquired = false;
+    try {
+      acquireGenerationLock();
+      lockAcquired = true;
+      await rebuildMagazineCovers({
+        provider,
+        codex,
+        approval,
+        model,
+        speed,
+        timeoutMs,
+        tempDir,
+        agentLabel,
+        apply: hasArg("--apply"),
+        candidateLimit: Math.max(5, Math.min(50, Number.parseInt(argValue("--candidate-limit", "24"), 10) || 24)),
+        coverCount: 5,
+      });
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      if (lockAcquired) releaseGenerationLock();
+    }
+    return;
+  }
   const stagingRoot = mkdtempSync(join(MAGAZINE_DATA_DIR, ".generation-stage-"));
   const stagingArticlesDir = join(stagingRoot, "articles");
   const publishedAt = nowKstIso();
@@ -2201,7 +3004,12 @@ async function main() {
     reasoning,
     speed,
     harnessProfile,
-    pipeline: harnessProfile === LEGACY_HARNESS_PROFILE ? "legacy-sequential" : "v2-locked-topic-parallel-finalizers",
+    pipeline:
+      harnessProfile === LEGACY_HARNESS_PROFILE
+        ? "legacy-sequential"
+        : simpleProductionPipeline
+          ? "simple-two-stage-with-existing-image-v1"
+          : "v2-locked-topic-parallel-finalizers",
     label: agentLabel,
     editorialExemplars: harnessProfile === LEGACY_HARNESS_PROFILE
       ? []
@@ -2218,44 +3026,13 @@ async function main() {
   try {
     console.log(`Staging magazine articles in ${stagingArticlesDir}`);
 
-    console.log(`Starting ${agentLabel} magazine generation: count=${count}, replace=${replace}, model=${model}, reasoning=${reasoning}, speed=${speed}, harness=${harnessProfile}, approval=${approval}, repairRounds=${repairRounds}, sequential=${sequential}, publishedAt=${publishedAt}`);
+    console.log(`Starting ${agentLabel} magazine generation: count=${count}, replace=${replace}, model=${model}, reasoning=${reasoning}, speed=${speed}, harness=${harnessProfile}, pipeline=${pipelineMode}, approval=${approval}, repairRounds=${repairRounds}, sequential=${sequential}, publishedAt=${publishedAt}`);
     const legacyHarness = harnessProfile === LEGACY_HARNESS_PROFILE;
     const configuredLockedTopic = legacyHarness ? null : lockedTopicFromEnvironment();
-    let writerSessionId = "";
-    let initialHeroPatches = new Map();
-    if (sequential && count > 1) {
-      for (let articleIndex = 1; articleIndex <= count; articleIndex += 1) {
-        const articleLockedTopic = legacyHarness
-          ? null
-          : articleIndex === 1 && configuredLockedTopic
-            ? configuredLockedTopic
-            : await selectV2LockedTopic({ provider, codex, approval, model, speed, timeoutMs, tempDir, agentLabel });
-        const sequentialOutputPath = join(tempDir, `${provider}-article-${articleIndex}.txt`);
-        console.log(`\nStarting sequential article generation ${articleIndex}/${count}`);
-        const writerResult = await runAgentPrompt({
-          provider,
-          codex,
-          approval,
-          sandbox,
-          model,
-          reasoning,
-          speed,
-          outputPath: sequentialOutputPath,
-          prompt: buildSequentialPrompt({ articleIndex, count, articleDirectory: stagingArticlesDir, agentLabel, harnessProfile, lockedTopic: articleLockedTopic }),
-          timeoutMs,
-          tempDir,
-          persistSession: !legacyHarness && !writerSessionId,
-          resumeSessionId: !legacyHarness ? writerSessionId : "",
-        });
-        writerSessionId = writerResult?.sessionId || writerSessionId;
-        assertArticleCount(stagingArticlesDir, articleIndex);
-      }
-    } else {
-      const articleLockedTopic = legacyHarness
-        ? null
-        : configuredLockedTopic || await selectV2LockedTopic({ provider, codex, approval, model, speed, timeoutMs, tempDir, agentLabel });
-      const prompt = buildPrompt({ count, replace, articleDirectory: stagingArticlesDir, staged: true, agentLabel, harnessProfile, lockedTopic: articleLockedTopic });
-      const writerPromise = runAgentPrompt({
+    if (simpleProductionPipeline) {
+      await runSimpleProductionPipeline({
+        count,
+        configuredLockedTopic,
         provider,
         codex,
         approval,
@@ -2263,59 +3040,113 @@ async function main() {
         model,
         reasoning,
         speed,
-        outputPath,
-        prompt,
         timeoutMs,
         tempDir,
-        persistSession: !legacyHarness,
+        stagingRoot,
+        stagingArticlesDir,
+        agentLabel,
+        publishedAt,
+        existingArticleCount,
+        previousArticleIds,
+        generationAgent,
       });
-      const preparedHeroPromise = !legacyHarness && count === 1
-        ? prepareLockedTopicHero({
+    } else {
+      let writerSessionId = "";
+      let initialHeroPatches = new Map();
+      if (sequential && count > 1) {
+        for (let articleIndex = 1; articleIndex <= count; articleIndex += 1) {
+          const articleLockedTopic = legacyHarness
+            ? null
+            : articleIndex === 1 && configuredLockedTopic
+              ? configuredLockedTopic
+              : await selectV2LockedTopic({ provider, codex, approval, model, speed, timeoutMs, tempDir, agentLabel });
+          const sequentialOutputPath = join(tempDir, `${provider}-article-${articleIndex}.txt`);
+          console.log(`\nStarting sequential article generation ${articleIndex}/${count}`);
+          const writerResult = await runAgentPrompt({
             provider,
             codex,
             approval,
             sandbox,
             model,
+            reasoning,
             speed,
+            outputPath: sequentialOutputPath,
+            prompt: buildSequentialPrompt({ articleIndex, count, articleDirectory: stagingArticlesDir, agentLabel, harnessProfile, lockedTopic: articleLockedTopic }),
             timeoutMs,
             tempDir,
-            stagingRoot,
-            agentLabel,
-            lockedTopic: articleLockedTopic,
-          }).catch((error) => {
-            console.warn(`Magazine v2 early hero preparation failed; falling back after writing: ${error.message}`);
-            return null;
-          })
-        : Promise.resolve(null);
-      const [writerResult, preparedHero] = await Promise.all([writerPromise, preparedHeroPromise]);
-      writerSessionId = writerResult?.sessionId || "";
-      initialHeroPatches = installPreparedHero({ preparedHero, articleDirectory: stagingArticlesDir });
+            persistSession: !legacyHarness && !writerSessionId,
+            resumeSessionId: !legacyHarness ? writerSessionId : "",
+          });
+          writerSessionId = writerResult?.sessionId || writerSessionId;
+          assertArticleCount(stagingArticlesDir, articleIndex);
+        }
+      } else {
+        const articleLockedTopic = legacyHarness
+          ? null
+          : configuredLockedTopic || await selectV2LockedTopic({ provider, codex, approval, model, speed, timeoutMs, tempDir, agentLabel });
+        const prompt = buildPrompt({ count, replace, articleDirectory: stagingArticlesDir, staged: true, agentLabel, harnessProfile, lockedTopic: articleLockedTopic });
+        const writerPromise = runAgentPrompt({
+          provider,
+          codex,
+          approval,
+          sandbox,
+          model,
+          reasoning,
+          speed,
+          outputPath,
+          prompt,
+          timeoutMs,
+          tempDir,
+          persistSession: !legacyHarness,
+        });
+        const preparedHeroPromise = !legacyHarness && count === 1
+          ? prepareLockedTopicHero({
+              provider,
+              codex,
+              approval,
+              sandbox,
+              model,
+              speed,
+              timeoutMs,
+              tempDir,
+              stagingRoot,
+              agentLabel,
+              lockedTopic: articleLockedTopic,
+            }).catch((error) => {
+              console.warn(`Magazine v2 early hero preparation failed; falling back after writing: ${error.message}`);
+              return null;
+            })
+          : Promise.resolve(null);
+        const [writerResult, preparedHero] = await Promise.all([writerPromise, preparedHeroPromise]);
+        writerSessionId = writerResult?.sessionId || "";
+        initialHeroPatches = installPreparedHero({ preparedHero, articleDirectory: stagingArticlesDir });
+      }
+      assertArticleCount(stagingArticlesDir, count);
+      normalizeGeneratedArticleMetadata(stagingArticlesDir, publishedAt, { existingArticleCount, previousArticleIds, generationAgent });
+      await runStrictCheckWithRepair({
+        provider,
+        codex,
+        approval,
+        sandbox,
+        model,
+        reasoning,
+        speed,
+        timeoutMs,
+        tempDir,
+        count,
+        repairRounds,
+        articleDirectory: stagingArticlesDir,
+        staged: true,
+        agentLabel,
+        publishedAt,
+        existingArticleCount,
+        previousArticleIds,
+        generationAgent,
+        harnessProfile,
+        writerSessionId,
+        initialHeroPatches,
+      });
     }
-    assertArticleCount(stagingArticlesDir, count);
-    normalizeGeneratedArticleMetadata(stagingArticlesDir, publishedAt, { existingArticleCount, previousArticleIds, generationAgent });
-    await runStrictCheckWithRepair({
-      provider,
-      codex,
-      approval,
-      sandbox,
-      model,
-      reasoning,
-      speed,
-      timeoutMs,
-      tempDir,
-      count,
-      repairRounds,
-      articleDirectory: stagingArticlesDir,
-      staged: true,
-      agentLabel,
-      publishedAt,
-      existingArticleCount,
-      previousArticleIds,
-      generationAgent,
-      harnessProfile,
-      writerSessionId,
-      initialHeroPatches,
-    });
     publishGeneratedArticles({ stagingArticlesDir, replace });
     console.log(`Published magazine articles to ${ARTICLES_DIR}`);
   } finally {

@@ -54,6 +54,10 @@ const DOWNGRADED_LEGACY_ERROR_CODES = new Set([
 ]);
 
 const EDITORIAL_REVIEW_POLICY = "magazine-editorial-review-v2";
+const EDITORIAL_REVIEW_METHODS = new Set([
+  "LLM_SEMANTIC_REVIEW",
+  "LLM_INTEGRATED_ONE_SHOT_REVIEW",
+]);
 
 function runLegacyChecker() {
   const result = spawnSync(process.execPath, [LEGACY_CHECKER, "--json", "--warn-only"], {
@@ -114,12 +118,23 @@ async function readEditorialReviewIssues() {
       });
       continue;
     }
-    if (review.policy !== EDITORIAL_REVIEW_POLICY || review.method !== "LLM_SEMANTIC_REVIEW") {
+    if (review.policy !== EDITORIAL_REVIEW_POLICY || !EDITORIAL_REVIEW_METHODS.has(review.method)) {
       errors.push({
         articleId,
         level: "error",
         code: "editorial-review-contract-invalid",
-        message: `editorial review must use policy=${EDITORIAL_REVIEW_POLICY} and method=LLM_SEMANTIC_REVIEW`,
+        message: `editorial review must use policy=${EDITORIAL_REVIEW_POLICY} and an approved LLM review method`,
+      });
+    }
+    if (
+      review.method === "LLM_INTEGRATED_ONE_SHOT_REVIEW" &&
+      review.publicationReady !== true
+    ) {
+      errors.push({
+        articleId,
+        level: "error",
+        code: "integrated-editorial-review-not-ready",
+        message: "integrated one-shot editorial review must explicitly set publicationReady=true",
       });
     }
     const issues = Array.isArray(review.issues) ? review.issues : [];
