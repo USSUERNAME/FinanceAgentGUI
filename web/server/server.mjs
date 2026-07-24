@@ -14,6 +14,7 @@ import { handleMemoryEndpoint, startSharedMemoryMaintenanceScheduler } from "./m
 import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mjs";
 import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
 import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
+import { handlePbDailyIntelligenceEndpoint } from "./pbDailyIntelligenceApi.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
 import { handleTossInvestEndpoint } from "./tossInvestApi.mjs";
@@ -399,6 +400,11 @@ const server = createServer(async (req, res) => {
 
   if (req.url?.startsWith("/api/reports")) {
     await handleReportsEndpoint("list", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/pb-daily-intelligence")) {
+    await handlePbDailyIntelligenceEndpoint(req, res);
     return;
   }
 

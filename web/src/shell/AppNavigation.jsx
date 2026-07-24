@@ -27,6 +27,7 @@ const leftSidebarSections = [
       { label: "Earning Calendar", icon: CalendarDays, view: "earning-calendar" },
       { label: "Economic Calendar", icon: Landmark, view: "economic-calendar" },
       { label: "채팅", icon: MessageSquare, view: "chat" },
+      { label: "Daily Intelligence", icon: TrendingUp, view: "daily-intelligence" },
       { label: "보고서", icon: FileText, view: "reports" },
       { label: "포트폴리오", icon: PieChart, view: "portfolio" },
     ],

@@ -114,6 +114,7 @@ const featureStyleOwners = [
   ["../src/agent/AgentSidebar.jsx", "agent-shell.css"],
   ["../src/arca/StockChannelView.jsx", "stock-channel.css"],
   ["../src/calendars/CalendarViews.jsx", "calendars.css"],
+  ["../src/dailyIntelligence/DailyIntelligenceView.jsx", "daily-intelligence.css"],
   ["../src/magazine/MagazineWorkspace.jsx", "magazine.css"],
   ["../src/news/NewsFeedView.jsx", "news-feed.css"],
   ["../src/portfolio/PortfolioWorkspace.jsx", "portfolio.css"],
@@ -125,6 +126,7 @@ const featureStyleOwners = [
 const responsiveFeatureStyles = [
   ["../src/arca/stock-channel.css", ".stock-board-header"],
   ["../src/calendars/calendars.css", ".economic-calendar-header"],
+  ["../src/dailyIntelligence/daily-intelligence.css", ".daily-intelligence-grid"],
   ["../src/magazine/magazine.css", ".magazine-reader-modal"],
   ["../src/news/news-feed.css", ".news-feed-header"],
   ["../src/portfolio/portfolio.css", ".portfolio-guide-hero"],
@@ -287,6 +289,7 @@ test("responsive feature rules stay out of the always-loaded agent shell stylesh
     ".arca-notification-",
     ".board-index-",
     ".calendar-",
+    ".daily-intelligence-",
     ".earning-",
     ".economic-",
     ".magazine-",
