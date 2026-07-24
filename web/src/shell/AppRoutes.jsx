@@ -11,6 +11,9 @@ import {
 } from "../portfolio/workspaceReferenceContent.js";
 
 const SettingsView = React.lazy(() => import("../settings/SettingsView.jsx"));
+const DailyIntelligenceView = React.lazy(() =>
+  import("../dailyIntelligence/DailyIntelligenceView.jsx")
+);
 const ReportsView = React.lazy(() => import("../reports/ReportsView.jsx"));
 const NewsFeedView = React.lazy(() => import("../news/NewsFeedView.jsx"));
 const TransactionStatusView = React.lazy(() => import("../transactions/TransactionStatusView.jsx"));
@@ -180,6 +183,16 @@ function ReportsRoute({ model }) {
   );
 }
 
+function DailyIntelligenceRoute() {
+  return (
+    <section className="workspace-canvas daily-intelligence-canvas" aria-label="Daily Intelligence">
+      <React.Suspense fallback={<RouteLoading label="Daily Intelligence 불러오는 중" />}>
+        <DailyIntelligenceView />
+      </React.Suspense>
+    </section>
+  );
+}
+
 function TransactionStatusRoute({ model }) {
   return (
     <React.Suspense fallback={<RouteLoading label="거래현황 불러오는 중" />}>
@@ -283,6 +296,7 @@ function StockChannelRoute({ model }) {
 export function AppRoutes({ activeView, models }) {
   if (activeView === "settings") return <SettingsRoute model={models.settings()} />;
   if (activeView === "chat") return <ChatCanvas {...models.chat()} />;
+  if (activeView === "daily-intelligence") return <DailyIntelligenceRoute />;
   if (activeView === "reports") return <ReportsRoute model={models.reports()} />;
   if (activeView === "transaction-status") {
     return <TransactionStatusRoute model={models.transactionStatus()} />;

@@ -24,6 +24,7 @@ stored locally and excluded from Git.
 - Magazine generation and novelty indexing
 - Portfolio workspaces, widgets, and backtest helpers
 - Report browsing and saved report artifacts
+- Optional read-only PB Daily Intelligence workspace bridge
 - Local agent chat surfaces for operational workflows
 
 ## License
