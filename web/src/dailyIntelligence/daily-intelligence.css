@@ -571,6 +571,136 @@
   color: #7c899b !important;
 }
 
+.daily-intelligence-broker-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.daily-intelligence-broker-summary article,
+.daily-intelligence-broker-grid > article {
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.26);
+}
+
+.daily-intelligence-broker-summary article {
+  display: grid;
+  gap: 5px;
+}
+
+.daily-intelligence-broker-summary span,
+.daily-intelligence-broker-summary small,
+.daily-intelligence-broker-grid header span,
+.daily-intelligence-broker-grid footer {
+  color: var(--daily-muted);
+}
+
+.daily-intelligence-broker-summary strong {
+  font-size: 24px;
+}
+
+.daily-intelligence-broker-disagreements {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.daily-intelligence-broker-disagreements span {
+  padding: 7px 10px;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 999px;
+  color: #b7791f;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.daily-intelligence-broker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.daily-intelligence-broker-grid header,
+.daily-intelligence-broker-grid footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.daily-intelligence-broker-grid header span,
+.daily-intelligence-broker-grid footer {
+  font-size: 12px;
+}
+
+.daily-intelligence-broker-grid h3 {
+  margin: 4px 0 0;
+  font-size: 17px;
+}
+
+.daily-intelligence-broker-grid em {
+  height: fit-content;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--daily-muted);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.daily-intelligence-broker-grid em.is-positive {
+  color: #059669;
+  background: rgba(52, 211, 153, 0.1);
+}
+
+.daily-intelligence-broker-grid em.is-cautious,
+.daily-intelligence-broker-grid em.is-negative {
+  color: #b7791f;
+  background: rgba(251, 191, 36, 0.1);
+}
+
+.daily-intelligence-broker-grid p,
+.daily-intelligence-broker-grid li {
+  line-height: 1.55;
+}
+
+.daily-intelligence-broker-grid footer {
+  align-items: center;
+  margin-top: 14px;
+}
+
+.daily-intelligence-broker-grid footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--daily-accent);
+}
+
+.daily-intelligence-broker-telegram {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.daily-intelligence-broker-telegram strong {
+  font-size: 11px;
+  color: var(--daily-muted);
+}
+
+.daily-intelligence-broker-telegram a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--daily-accent);
+  font-size: 12px;
+}
+
 .daily-intelligence-review-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -911,6 +1041,208 @@
   white-space: pre-wrap;
 }
 
+.daily-intelligence-telegram-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.daily-intelligence-telegram-summary article {
+  display: grid;
+  gap: 4px;
+  min-height: 88px;
+  border: 1px solid #dfe7ef;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 13px;
+}
+
+.daily-intelligence-telegram-summary span,
+.daily-intelligence-telegram-summary small {
+  color: #75869a;
+  font-size: 11px;
+}
+
+.daily-intelligence-telegram-summary strong {
+  color: #263c56;
+  font-size: 20px;
+}
+
+.daily-intelligence-telegram-ready {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+  border: 1px solid #cde4d6;
+  border-radius: 12px;
+  background: #f3faf6;
+  color: #337052;
+  padding: 12px 14px;
+  font-size: 12px;
+}
+
+.daily-intelligence-telegram-events {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  border-top: 1px solid #e3e9f0;
+  padding-top: 16px;
+}
+
+.daily-intelligence-telegram-events-title,
+.daily-intelligence-telegram-channel-title {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.daily-intelligence-telegram-events-title > div {
+  display: grid;
+  gap: 3px;
+}
+
+.daily-intelligence-telegram-events-title span {
+  color: #8492a3;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+}
+
+.daily-intelligence-telegram-events-title strong,
+.daily-intelligence-telegram-channel-title strong {
+  color: #2f435a;
+  font-size: 13px;
+}
+
+.daily-intelligence-telegram-events-title small,
+.daily-intelligence-telegram-channel-title span {
+  color: #7b8b9e;
+  font-size: 10px;
+}
+
+.daily-intelligence-telegram-event-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  max-height: 470px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.daily-intelligence-telegram-event-grid article {
+  border: 1px solid #dce5ee;
+  border-radius: 12px;
+  background: #fbfcfe;
+  padding: 13px;
+}
+
+.daily-intelligence-telegram-event-grid header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #74869a;
+  font-size: 10px;
+}
+
+.daily-intelligence-telegram-event-grid header strong {
+  color: #366b5a;
+}
+
+.daily-intelligence-telegram-event-grid h3 {
+  margin: 8px 0 5px;
+  color: #2f4057;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.daily-intelligence-telegram-event-grid p {
+  margin: 0;
+  color: #7a899b;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.daily-intelligence-telegram-event-grid article > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.daily-intelligence-telegram-event-grid a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #386c91;
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.daily-intelligence-telegram-channel-title {
+  margin-top: 18px;
+}
+
+.daily-intelligence-telegram-channels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.daily-intelligence-telegram-channels a {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #e0e7ef;
+  border-radius: 11px;
+  background: #fff;
+  color: #4d6077;
+  padding: 11px 12px;
+  text-decoration: none;
+}
+
+.daily-intelligence-telegram-channels a:hover {
+  border-color: #9db4cb;
+  background: #f8fbfe;
+}
+
+.daily-intelligence-telegram-channels a.is-disabled {
+  opacity: 0.48;
+}
+
+.daily-intelligence-telegram-channels a > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.daily-intelligence-telegram-channels strong {
+  overflow: hidden;
+  color: #2f4259;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daily-intelligence-telegram-channels small {
+  overflow: hidden;
+  color: #8290a1;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daily-intelligence-telegram-channels em {
+  color: #73869a;
+  font-size: 10px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
 .is-spinning {
   animation: daily-intelligence-spin 0.9s linear infinite;
 }
@@ -928,6 +1260,8 @@
   .daily-intelligence-review-list,
   .daily-intelligence-scoreboard-grid,
   .daily-intelligence-sector-metrics,
+  .daily-intelligence-broker-summary,
+  .daily-intelligence-telegram-summary,
   .daily-intelligence-operation-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -957,6 +1291,11 @@
   .daily-intelligence-sector-columns,
   .daily-intelligence-sector-metrics,
   .daily-intelligence-stock-list,
+  .daily-intelligence-broker-summary,
+  .daily-intelligence-broker-grid,
+  .daily-intelligence-telegram-summary,
+  .daily-intelligence-telegram-event-grid,
+  .daily-intelligence-telegram-channels,
   .daily-intelligence-operation-actions {
     grid-template-columns: 1fr;
   }
@@ -999,6 +1338,11 @@
   .daily-intelligence-sector-metrics,
   .daily-intelligence-stock-list,
   .daily-intelligence-review-list,
+  .daily-intelligence-broker-summary,
+  .daily-intelligence-broker-grid,
+  .daily-intelligence-telegram-summary,
+  .daily-intelligence-telegram-event-grid,
+  .daily-intelligence-telegram-channels,
   .daily-intelligence-operation-actions {
     grid-template-columns: 1fr;
   }

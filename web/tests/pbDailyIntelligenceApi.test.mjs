@@ -180,3 +180,178 @@ test("PB Daily Intelligence selects the newest valid reader artifact", async () 
   assert.equal(snapshot.report.title, "Latest");
   assert.equal(snapshot.connection.readerDate, "2026-07-24");
 });
+
+test("PB Daily Intelligence reports Telegram readiness and event consolidation without exposing secrets", async () => {
+  const reportDate = "2026-07-24";
+  await writeJson(
+    join(tempRoot, "v2_reader_reports", reportDate, "reader_report.json"),
+    { schema_version: "v2_reader_report.v1", report_date: reportDate, title: "Telegram monitor" }
+  );
+  await writeJson(
+    join(tempRoot, "telegram_channels.json"),
+    {
+      schema_version: "telegram_channel_registry.v1",
+      collection_policy: {},
+      channels: [
+        {
+          username: "pb_channel_one",
+          name: "PB 채널 1",
+          category: "market_commentary",
+          origin: "user_supplied",
+          priority: 1,
+          enabled: true,
+          publication_policy: "internal_summary_with_attribution",
+        },
+        {
+          username: "pb_channel_two",
+          name: "PB 채널 2",
+          category: "broker_research",
+          origin: "user_supplied",
+          priority: 2,
+          enabled: true,
+          publication_policy: "link_only_bounded_summary",
+        },
+      ],
+    }
+  );
+  await writeFile(
+    join(tempRoot, ".env"),
+    [
+      "TELEGRAM_API_ID=12345",
+      "TELEGRAM_API_HASH=secret-hash",
+      "TELEGRAM_SESSION_STRING=secret-session",
+    ].join("\n"),
+    "utf8"
+  );
+  await writeJson(
+    join(tempRoot, "source_status", reportDate, "source_status_090000.json"),
+    {
+      report_date: reportDate,
+      sources: [{ source_id: "telegram_channels", status: "ok", item_count: 3 }],
+    }
+  );
+  await writeJson(
+    join(tempRoot, "triaged", reportDate, "triaged_inbox.json"),
+    [
+      {
+        id: "tg-1",
+        title: "같은 시장 사건 첫 관점",
+        url: "https://t.me/pb_channel_one/1",
+        published_at: "2026-07-24T01:00:00Z",
+        source_id: "telegram_pb_channel_one",
+        source_type: "telegram_commentary",
+        telegram: { channel_username: "pb_channel_one", channel_name: "PB 채널 1" },
+        event_cluster: { event_id: "event-shared", event_type: "macro_policy" },
+      },
+      {
+        id: "tg-2",
+        title: "같은 시장 사건 두 번째 관점",
+        url: "https://t.me/pb_channel_two/2",
+        published_at: "2026-07-24T02:00:00Z",
+        source_id: "telegram_pb_channel_two",
+        source_type: "telegram_commentary",
+        telegram: { channel_username: "pb_channel_two", channel_name: "PB 채널 2" },
+        event_cluster: { event_id: "event-shared", event_type: "macro_policy" },
+      },
+      {
+        id: "tg-3",
+        title: "별도 시장 사건",
+        url: "https://t.me/pb_channel_one/3",
+        published_at: "2026-07-24T03:00:00Z",
+        source_id: "telegram_pb_channel_one",
+        source_type: "telegram_commentary",
+        telegram: { channel_username: "pb_channel_one", channel_name: "PB 채널 1" },
+        event_cluster: { event_id: "event-other" },
+      },
+    ]
+  );
+
+  const snapshot = await loadPbDailyIntelligenceSnapshot({
+    env: {
+      PB_DAILY_INTELLIGENCE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+    },
+  });
+  assert.equal(snapshot.telegramSources.channelCount, 2);
+  assert.equal(snapshot.telegramSources.credentials.ready, true);
+  assert.equal(snapshot.telegramSources.collection.itemCount, 3);
+  assert.equal(snapshot.telegramSources.deduplication.rawPostCount, 3);
+  assert.equal(snapshot.telegramSources.deduplication.eventClusterCount, 2);
+  assert.equal(snapshot.telegramSources.deduplication.consolidatedPostCount, 1);
+  assert.equal(snapshot.telegramSources.clusters[0].eventId, "event-shared");
+  assert.equal(snapshot.telegramSources.clusters[0].postCount, 2);
+  assert.deepEqual(snapshot.telegramSources.clusters[0].channels, ["PB 채널 1", "PB 채널 2"]);
+  assert.equal(JSON.stringify(snapshot.telegramSources).includes("secret-session"), false);
+  assert.equal(JSON.stringify(snapshot.telegramSources).includes("secret-hash"), false);
+});
+
+test("PB Daily Intelligence exposes a rights-safe analyst research digest", async () => {
+  const reportDate = "2026-07-24";
+  await writeJson(
+    join(tempRoot, "v2_reader_reports", reportDate, "reader_report.json"),
+    { schema_version: "v2_reader_report.v1", report_date: reportDate, title: "Research monitor" }
+  );
+  await writeJson(
+    join(tempRoot, "broker_research_digest", reportDate, "broker_research_digest.json"),
+    {
+      schema_version: "broker_research_digest.v1",
+      report_date: reportDate,
+      generated_at: "2026-07-24T08:00:00+09:00",
+      summary: {
+        archived_report_count: 2,
+        selected_report_count: 2,
+        structured_report_count: 1,
+        awaiting_analysis_count: 1,
+        publisher_count: 2,
+        analysis_status: "complete",
+        telegram_linked_report_count: 1,
+        stance_counts: { positive: 1, cautious: 1 },
+      },
+      consensus: {
+        top_tickers: [{ ticker: "NVDA", report_count: 2 }],
+        disagreements: [
+          { topic: "NVDA", stances: ["positive", "cautious"], report_count: 2 },
+        ],
+      },
+      reports: [
+        {
+          report_id: "research-1",
+          publisher: "Example Securities",
+          analyst: "A. Analyst",
+          title: "NVDA earnings review",
+          published_at: "2026-07-24T07:00:00+09:00",
+          report_type: "earnings",
+          stance: "positive",
+          tickers: ["NVDA"],
+          sectors: ["semiconductor"],
+          summary: "Demand remains constructive.",
+          key_claims: ["Estimate direction improved."],
+          catalysts: [],
+          risks: ["Valuation"],
+          source: { reference: "REF-1", url: "https://example.com/research-1" },
+          processing: { structured_analysis_available: true, status: "ready" },
+          linked_telegram_events: [
+            {
+              event_id: "event-nvda",
+              title: "NVDA demand update",
+              score: 5,
+              match_reasons: ["ticker:NVDA"],
+              telegram_url: "https://t.me/pb/1",
+              channel: "PB Channel",
+            },
+          ],
+        },
+      ],
+    }
+  );
+
+  const snapshot = await loadPbDailyIntelligenceSnapshot({
+    env: { PB_DAILY_INTELLIGENCE_DIR: tempRoot },
+  });
+  assert.equal(snapshot.brokerResearch.summary.selectedReportCount, 2);
+  assert.equal(snapshot.brokerResearch.reports[0].publisher, "Example Securities");
+  assert.equal(snapshot.brokerResearch.consensus.disagreements[0].topic, "NVDA");
+  assert.equal(snapshot.brokerResearch.summary.analysisStatus, "complete");
+  assert.equal(snapshot.brokerResearch.reports[0].linkedTelegramEvents[0].eventId, "event-nvda");
+  assert.equal(JSON.stringify(snapshot.brokerResearch).includes("raw_text"), false);
+});

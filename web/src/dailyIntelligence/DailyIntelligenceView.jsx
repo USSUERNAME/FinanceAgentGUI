@@ -5,6 +5,7 @@ import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check-big.js";
 import CircleDashed from "lucide-react/dist/esm/icons/circle-dashed.js";
 import Database from "lucide-react/dist/esm/icons/database.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
+import Radio from "lucide-react/dist/esm/icons/radio.js";
 import Play from "lucide-react/dist/esm/icons/play.js";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
 import Send from "lucide-react/dist/esm/icons/send.js";
@@ -420,6 +421,250 @@ function OperationsPanel({
   );
 }
 
+function TelegramSourceMonitor({ telegramSources }) {
+  if (!telegramSources?.configured) {
+    return (
+      <section className="daily-intelligence-panel daily-intelligence-wide">
+        <div className="daily-intelligence-panel-title">
+          <div>
+            <span>TELEGRAM INTELLIGENCE</span>
+            <h2>텔레그램 정보 채널</h2>
+          </div>
+          <AlertTriangle size={20} />
+        </div>
+        <p className="daily-intelligence-muted">
+          Telegram 채널 레지스트리를 찾지 못했습니다. PB 리포트 엔진 경로와 telegram_channels.json을 확인하세요.
+        </p>
+      </section>
+    );
+  }
+
+  const credentials = telegramSources.credentials || {};
+  const collection = telegramSources.collection || {};
+  const deduplication = telegramSources.deduplication || {};
+  const collectionReady = credentials.ready === true;
+  const collectionLabels = {
+    ok: "수집 완료",
+    skipped_or_notice: "설정 확인",
+    not_run: "미실행",
+  };
+  return (
+    <section className="daily-intelligence-panel daily-intelligence-telegram daily-intelligence-wide">
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>TELEGRAM INTELLIGENCE</span>
+          <h2>PB 텔레그램 정보 채널</h2>
+        </div>
+        <span className={`daily-intelligence-run-status is-${collectionReady ? "succeeded" : "failed"}`}>
+          {collectionReady ? "인증 준비" : "인증 필요"}
+        </span>
+      </div>
+
+      <div className="daily-intelligence-telegram-summary">
+        <article>
+          <span>활성 채널</span>
+          <strong>{telegramSources.enabledCount}/{telegramSources.channelCount}</strong>
+          <small>공개 채널 레지스트리</small>
+        </article>
+        <article>
+          <span>최근 수집</span>
+          <strong>{collection.itemCount || 0}건</strong>
+          <small>{collectionLabels[collection.status] || collection.status}</small>
+        </article>
+        <article>
+          <span>사건 통합</span>
+          <strong>{deduplication.eventClusterCount || 0}건</strong>
+          <small>원문 {deduplication.rawPostCount || 0}건에서 통합</small>
+        </article>
+        <article>
+          <span>중복 절감</span>
+          <strong>{deduplication.consolidatedPostCount || 0}건</strong>
+          <small>동일 사건 반복 제거</small>
+        </article>
+      </div>
+
+      {!collectionReady ? (
+        <div className="daily-intelligence-operation-notice">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>Telegram 사용자 세션 연결이 필요합니다.</strong>
+            <p>
+              누락: {(credentials.missing || []).join(", ") || "인증 상태 확인 필요"}.
+              값은 화면에 표시하거나 저장하지 않습니다.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="daily-intelligence-telegram-ready">
+          <ShieldCheck size={17} />
+          <span>API ID·API Hash·사용자 세션이 준비됐습니다. 다음 수집부터 채널 글이 사건 파이프라인에 들어갑니다.</span>
+        </div>
+      )}
+
+      {telegramSources.clusters?.length ? (
+        <div className="daily-intelligence-telegram-events">
+          <div className="daily-intelligence-telegram-events-title">
+            <div>
+              <span>DEDUPLICATED EVENTS</span>
+              <strong>중복 제거된 최신 사건</strong>
+            </div>
+            <small>상위 {telegramSources.clusters.length}건</small>
+          </div>
+          <div className="daily-intelligence-telegram-event-grid">
+            {telegramSources.clusters.map((cluster) => (
+              <article key={cluster.eventId}>
+                <header>
+                  <span>{eventTypeLabels[cluster.eventType] || cluster.eventType || "시장 관점"}</span>
+                  <strong>{cluster.postCount}개 글 통합</strong>
+                </header>
+                <h3>{cluster.title || "제목 없는 사건"}</h3>
+                <p>
+                  {cluster.channels.join(" · ") || "채널 미확인"}
+                  {cluster.latestPublishedAt ? ` · ${formatGeneratedAt(cluster.latestPublishedAt)}` : ""}
+                </p>
+                <div>
+                  {cluster.postUrls.map((url, index) => (
+                    <a key={url} href={url} target="_blank" rel="noreferrer">
+                      원문 {index + 1} <ArrowUpRight size={12} />
+                    </a>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="daily-intelligence-muted">
+          최근 수집 결과에 사건 클러스터가 없습니다. 후보 데이터 수집 후 드라이런 또는 사건 분류를 실행하세요.
+        </p>
+      )}
+
+      <div className="daily-intelligence-telegram-channel-title">
+        <strong>수집 대상 채널</strong>
+        <span>{telegramSources.enabledCount}개 활성</span>
+      </div>
+      <div className="daily-intelligence-telegram-channels">
+        {(telegramSources.channels || []).map((channel) => (
+          <a
+            key={channel.username}
+            href={`https://t.me/${channel.username}`}
+            target="_blank"
+            rel="noreferrer"
+            className={channel.enabled ? "" : "is-disabled"}
+          >
+            <Radio size={15} />
+            <span>
+              <strong>{channel.name}</strong>
+              <small>
+                @{channel.username} · {channel.category.replaceAll("_", " ")}
+              </small>
+            </span>
+            <em>우선순위 {channel.priority}</em>
+          </a>
+        ))}
+      </div>
+
+      <p className="daily-intelligence-panel-note">
+        텔레그램 글은 발견·관점 자료로만 수집합니다. 같은 사건은 하나로 묶고, 공식자료로 확인되기 전에는 독자용 사실로 승격하지 않습니다.
+      </p>
+    </section>
+  );
+}
+
+function BrokerResearchMonitor({ brokerResearch }) {
+  if (!brokerResearch) {
+    return (
+      <section className="daily-intelligence-panel daily-intelligence-wide">
+        <div className="daily-intelligence-panel-title">
+          <div>
+            <span>ANALYST RESEARCH</span>
+            <h2>애널리스트 리포트</h2>
+          </div>
+          <CircleDashed size={20} />
+        </div>
+        <p className="daily-intelligence-muted">
+          권한이 확인된 리포트가 아직 없습니다. Google Drive 또는 로컬 리서치 inbox에
+          리포트와 권한 메타데이터를 함께 넣으면 이곳에서 가공 결과를 확인할 수 있습니다.
+        </p>
+      </section>
+    );
+  }
+  const summary = brokerResearch.summary || {};
+  const stanceCounts = summary.stanceCounts || {};
+  return (
+    <section className="daily-intelligence-panel daily-intelligence-broker daily-intelligence-wide">
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>ANALYST RESEARCH</span>
+          <h2>애널리스트 리포트 컨센서스</h2>
+        </div>
+        <span className="daily-intelligence-count">{summary.selectedReportCount || 0}</span>
+      </div>
+
+      <div className="daily-intelligence-broker-summary">
+        <article><span>수집 리포트</span><strong>{summary.selectedReportCount || 0}</strong><small>{summary.publisherCount || 0}개 발행사</small></article>
+        <article><span>구조화 완료</span><strong>{summary.structuredReportCount || 0}</strong><small>{summary.analysisStatus || "요약·논거·촉매·위험"}</small></article>
+        <article><span>긍정 / 중립</span><strong>{stanceCounts.positive || 0} / {stanceCounts.neutral || 0}</strong><small>리포트 관점 기준</small></article>
+        <article><span>경계 / 부정</span><strong>{stanceCounts.cautious || 0} / {stanceCounts.negative || 0}</strong><small>반대 논리 확인</small></article>
+      </div>
+
+      {brokerResearch.consensus?.disagreements?.length ? (
+        <div className="daily-intelligence-broker-disagreements">
+          <strong>의견이 갈리는 주제</strong>
+          {brokerResearch.consensus.disagreements.map((item) => (
+            <span key={item.topic}>
+              {item.topic} · {item.stances.join(" / ")} · {item.reportCount}건
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="daily-intelligence-broker-grid">
+        {(brokerResearch.reports || []).map((report) => (
+          <article key={report.reportId || `${report.publisher}-${report.title}`}>
+            <header>
+              <div>
+                <span>{report.publisher}{report.analyst ? ` · ${report.analyst}` : ""}</span>
+                <h3>{report.title}</h3>
+              </div>
+              <em className={`is-${report.stance}`}>{report.stance.replaceAll("_", " ")}</em>
+            </header>
+            <p>
+              {report.summary || "구조화 분석 대기 중 — 원문은 보관하되 화면에는 재배포하지 않습니다."}
+            </p>
+            {report.keyClaims.length ? (
+              <ul>{report.keyClaims.slice(0, 3).map((claim) => <li key={claim}>{claim}</li>)}</ul>
+            ) : null}
+            {report.linkedTelegramEvents.length ? (
+              <div className="daily-intelligence-broker-telegram">
+                <strong>텔레그램 교차 연결</strong>
+                {report.linkedTelegramEvents.map((event) => (
+                  <a key={event.eventId} href={event.url} target="_blank" rel="noreferrer">
+                    {event.channel || "Telegram"} · {event.title} <ArrowUpRight size={11} />
+                  </a>
+                ))}
+              </div>
+            ) : null}
+            <footer>
+              <span>{[...report.tickers, ...report.sectors].slice(0, 5).join(" · ") || report.reportType}</span>
+              {report.source.url ? (
+                <a href={report.source.url} target="_blank" rel="noreferrer">
+                  원문 링크 <ArrowUpRight size={12} />
+                </a>
+              ) : <small>{report.source.reference}</small>}
+            </footer>
+          </article>
+        ))}
+      </div>
+
+      <p className="daily-intelligence-panel-note">
+        원문·표·이미지는 재배포하지 않습니다. 운영자가 분석 권한을 확인한 자료만 내부 가공하며,
+        공개 리포트에는 요약과 출처 링크만 사용합니다.
+      </p>
+    </section>
+  );
+}
+
 export default function DailyIntelligenceView() {
   const {
     snapshot,
@@ -440,6 +685,8 @@ export default function DailyIntelligenceView() {
   const marketInternals = snapshot?.marketInternals;
   const sectorMetrics = snapshot?.sectorMetrics;
   const stockCandidates = snapshot?.stockCandidates;
+  const telegramSources = snapshot?.telegramSources;
+  const brokerResearch = snapshot?.brokerResearch;
 
   if (busy && !snapshot) {
     return (
@@ -515,6 +762,10 @@ export default function DailyIntelligenceView() {
           onExecute={executePendingPlan}
           onCancel={cancelPendingPlan}
         />
+
+        <TelegramSourceMonitor telegramSources={telegramSources} />
+
+        <BrokerResearchMonitor brokerResearch={brokerResearch} />
 
         <section className="daily-intelligence-panel daily-intelligence-wide">
           <div className="daily-intelligence-panel-title">

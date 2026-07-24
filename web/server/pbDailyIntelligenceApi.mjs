@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { sendJson } from "./codexProbe.mjs";
 
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
@@ -9,6 +9,8 @@ const INTELLIGENCE_SCHEMA = "daily_market_intelligence.v2";
 const MARKET_INTERNALS_SCHEMA = "us_market_internals.v1";
 const SECTOR_METRICS_SCHEMA = "sector_metric_observations.v1";
 const STOCK_CANDIDATES_SCHEMA = "us_equity_candidate_screen.v1";
+const TELEGRAM_REGISTRY_SCHEMA = "telegram_channel_registry.v1";
+const BROKER_RESEARCH_SCHEMA = "broker_research_digest.v1";
 
 function cleanText(value, maxLength = 1000) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -32,6 +34,14 @@ function configuredRoot(env = process.env) {
     configured: true,
     root: isAbsolute(raw) ? resolve(raw) : resolve(process.cwd(), raw),
   };
+}
+
+function configuredEngineRoot(env = process.env, workspaceRoot = "") {
+  const raw = cleanText(env.PB_DAILY_INTELLIGENCE_ENGINE_DIR || "", 4000);
+  if (raw) {
+    return isAbsolute(raw) ? resolve(raw) : resolve(process.cwd(), raw);
+  }
+  return workspaceRoot ? dirname(workspaceRoot) : "";
 }
 
 async function readJsonFile(filePath) {
@@ -70,6 +80,218 @@ async function latestArtifact(root, folderName, fileName, expectedSchema, prefer
     }
   }
   return null;
+}
+
+async function latestJsonInDateFolder(root, folderName, preferredDate, filePattern) {
+  const parent = join(root, folderName);
+  const dates = await dateFolders(parent);
+  const orderedDates =
+    preferredDate && dates.includes(preferredDate)
+      ? [preferredDate, ...dates.filter((date) => date !== preferredDate)]
+      : dates;
+  for (const date of orderedDates) {
+    const dateRoot = join(parent, date);
+    const entries = await readdir(dateRoot, { withFileTypes: true }).catch(() => []);
+    const names = entries
+      .filter((entry) => entry.isFile() && filePattern.test(entry.name))
+      .map((entry) => entry.name)
+      .sort()
+      .reverse();
+    for (const name of names) {
+      try {
+        return { date, payload: await readJsonFile(join(dateRoot, name)) };
+      } catch {
+        // Continue to an older valid artifact when a runtime write is incomplete.
+      }
+    }
+  }
+  return null;
+}
+
+function parseDotEnvPresence(text = "") {
+  const values = new Map();
+  for (const line of String(text).split(/\r?\n/)) {
+    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!match) continue;
+    const value = match[2].replace(/^['"]|['"]$/g, "").trim();
+    values.set(match[1], Boolean(value));
+  }
+  return values;
+}
+
+async function telegramCredentialReadiness(engineRoot, env = process.env) {
+  let dotenv = new Map();
+  const envPath = engineRoot ? join(engineRoot, ".env") : "";
+  if (envPath && existsSync(envPath)) {
+    try {
+      const info = await stat(envPath);
+      if (info.isFile() && info.size <= 1024 * 1024) {
+        dotenv = parseDotEnvPresence(await readFile(envPath, "utf8"));
+      }
+    } catch {
+      // Credential readiness remains process-environment-only when .env is unreadable.
+    }
+  }
+  const ready = (name) => Boolean(String(env[name] || "").trim()) || dotenv.get(name) === true;
+  const apiId = ready("TELEGRAM_API_ID");
+  const apiHash = ready("TELEGRAM_API_HASH");
+  let localSession = false;
+  const localSessionPath = engineRoot
+    ? join(engineRoot, "workspace", "local_secrets", "telegram_session_string.txt")
+    : "";
+  if (localSessionPath && existsSync(localSessionPath)) {
+    try {
+      const info = await stat(localSessionPath);
+      localSession = info.isFile() && info.size > 0 && info.size <= 16_384;
+    } catch {
+      localSession = false;
+    }
+  }
+  const session = ready("TELEGRAM_SESSION_STRING") || localSession;
+  return {
+    apiId,
+    apiHash,
+    session,
+    sessionSource: ready("TELEGRAM_SESSION_STRING")
+      ? "environment"
+      : localSession
+        ? "local_secret_file"
+        : "missing",
+    ready: apiId && apiHash && session,
+    missing: [
+      !apiId ? "TELEGRAM_API_ID" : "",
+      !apiHash ? "TELEGRAM_API_HASH" : "",
+      !session ? "TELEGRAM_SESSION_STRING" : "",
+    ].filter(Boolean),
+  };
+}
+
+async function loadTelegramOverview({ root, reportDate, engineRoot, env }) {
+  const registryPath = engineRoot ? join(engineRoot, "telegram_channels.json") : "";
+  let registry = null;
+  if (registryPath && existsSync(registryPath)) {
+    try {
+      const payload = await readJsonFile(registryPath);
+      if (payload?.schema_version === TELEGRAM_REGISTRY_SCHEMA && Array.isArray(payload.channels)) {
+        registry = payload;
+      }
+    } catch {
+      registry = null;
+    }
+  }
+
+  const sourceStatusArtifact = await latestJsonInDateFolder(
+    root,
+    "source_status",
+    reportDate,
+    /^source_status_.*\.json$/i
+  );
+  const telegramSource = cleanList(sourceStatusArtifact?.payload?.sources, 100)
+    .find((source) => source?.source_id === "telegram_channels");
+
+  const triagedPath = join(root, "triaged", reportDate, "triaged_inbox.json");
+  let telegramRecords = [];
+  if (existsSync(triagedPath)) {
+    try {
+      const records = await readJsonFile(triagedPath);
+      telegramRecords = Array.isArray(records)
+        ? records.filter((record) =>
+          String(record?.source_id || "").startsWith("telegram_") ||
+          record?.source_type === "telegram_commentary"
+        )
+        : [];
+    } catch {
+      telegramRecords = [];
+    }
+  }
+  const clusteredRecords = telegramRecords.filter((record) => record?.event_cluster?.event_id);
+  const clusterIds = new Set(clusteredRecords.map((record) => record.event_cluster.event_id));
+  const channelsRepresented = new Set(
+    telegramRecords
+      .map((record) => record?.telegram?.channel_username || record?.publisher)
+      .filter(Boolean)
+  );
+  const clusterMap = new Map();
+  for (const record of clusteredRecords) {
+    const eventId = cleanText(record.event_cluster.event_id, 120);
+    if (!eventId) continue;
+    const current = clusterMap.get(eventId) || {
+      eventId,
+      title: "",
+      eventType: cleanText(record.event_cluster.event_type || record?.triage?.event_type, 80),
+      verificationStatus: cleanText(record.event_cluster.verification_status, 80),
+      latestPublishedAt: "",
+      postCount: 0,
+      channels: new Set(),
+      postUrls: [],
+    };
+    current.postCount += 1;
+    if (!current.title) current.title = cleanText(record.title, 240);
+    const publishedAt = cleanText(record.published_at, 80);
+    if (publishedAt > current.latestPublishedAt) {
+      current.latestPublishedAt = publishedAt;
+      current.title = cleanText(record.title, 240) || current.title;
+    }
+    const channel = cleanText(
+      record?.telegram?.channel_name || record?.telegram?.channel_username || record?.publisher,
+      160
+    );
+    if (channel) current.channels.add(channel);
+    const postUrl = String(record.url || "");
+    if (/^https:\/\/t\.me\//i.test(postUrl) && !current.postUrls.includes(postUrl)) {
+      current.postUrls.push(postUrl);
+    }
+    clusterMap.set(eventId, current);
+  }
+  const clusters = [...clusterMap.values()]
+    .sort((left, right) =>
+      right.postCount - left.postCount ||
+      right.latestPublishedAt.localeCompare(left.latestPublishedAt)
+    )
+    .slice(0, 20)
+    .map((cluster) => ({
+      eventId: cluster.eventId,
+      title: cluster.title,
+      eventType: cluster.eventType,
+      verificationStatus: cluster.verificationStatus,
+      latestPublishedAt: cluster.latestPublishedAt,
+      postCount: cluster.postCount,
+      channels: [...cluster.channels].slice(0, 8),
+      postUrls: cluster.postUrls.slice(0, 4),
+    }));
+
+  const channels = cleanList(registry?.channels, 100).map((channel) => ({
+    username: cleanText(channel?.username, 80),
+    name: cleanText(channel?.name || channel?.username, 160),
+    category: cleanText(channel?.category, 100),
+    origin: cleanText(channel?.origin, 40),
+    priority: Number(channel?.priority || 3),
+    enabled: channel?.enabled !== false,
+    publicationPolicy: cleanText(channel?.publication_policy, 80),
+  }));
+  const credentials = await telegramCredentialReadiness(engineRoot, env);
+  return {
+    configured: Boolean(registry),
+    registryValid: Boolean(registry),
+    enabledCount: channels.filter((channel) => channel.enabled).length,
+    channelCount: channels.length,
+    channels,
+    credentials,
+    collection: {
+      reportDate: sourceStatusArtifact?.date || reportDate,
+      status: cleanText(telegramSource?.status, 80) || "not_run",
+      itemCount: Number(telegramSource?.item_count || 0),
+      noticeCategory: cleanText(telegramSource?.notice_category, 120),
+    },
+    deduplication: {
+      rawPostCount: telegramRecords.length,
+      clusteredPostCount: clusteredRecords.length,
+      eventClusterCount: clusterIds.size,
+      consolidatedPostCount: Math.max(0, clusteredRecords.length - clusterIds.size),
+      representedChannelCount: channelsRepresented.size,
+    },
+    clusters,
+  };
 }
 
 function normalizeFinding(item = {}) {
@@ -368,6 +590,72 @@ function normalizeStockCandidates(payload = {}) {
   };
 }
 
+function normalizeBrokerResearch(payload = {}) {
+  const summary = payload.summary || {};
+  const consensus = payload.consensus || {};
+  return {
+    reportDate: cleanText(payload.report_date, 20),
+    generatedAt: cleanText(payload.generated_at, 80),
+    summary: {
+      archivedReportCount: Number(summary.archived_report_count || 0),
+      selectedReportCount: Number(summary.selected_report_count || 0),
+      structuredReportCount: Number(summary.structured_report_count || 0),
+      awaitingAnalysisCount: Number(summary.awaiting_analysis_count || 0),
+      publisherCount: Number(summary.publisher_count || 0),
+      analysisStatus: cleanText(summary.analysis_status, 80) || "not_available",
+      telegramLinkedReportCount: Number(summary.telegram_linked_report_count || 0),
+      stanceCounts: summary.stance_counts || {},
+    },
+    consensus: {
+      topTickers: cleanList(consensus.top_tickers, 10).map((item) => ({
+        ticker: cleanText(item?.ticker, 20),
+        reportCount: Number(item?.report_count || 0),
+      })),
+      topSectors: cleanList(consensus.top_sectors, 10).map((item) => ({
+        sector: cleanText(item?.sector, 120),
+        reportCount: Number(item?.report_count || 0),
+      })),
+      disagreements: cleanList(consensus.disagreements, 10).map((item) => ({
+        topic: cleanText(item?.topic, 120),
+        stances: cleanList(item?.stances, 8).map((value) => cleanText(value, 20)),
+        reportCount: Number(item?.report_count || 0),
+      })),
+    },
+    reports: cleanList(payload.reports, 20).map((item) => ({
+      reportId: cleanText(item?.report_id, 120),
+      publisher: cleanText(item?.publisher, 160),
+      analyst: cleanText(item?.analyst, 120),
+      title: cleanText(item?.title, 240),
+      publishedAt: cleanText(item?.published_at, 80),
+      reportType: cleanText(item?.report_type, 80),
+      stance: cleanText(item?.stance, 20) || "not_stated",
+      tickers: cleanList(item?.tickers, 12).map((value) => cleanText(value, 20)),
+      sectors: cleanList(item?.sectors, 8).map((value) => cleanText(value, 120)),
+      summary: cleanText(item?.summary, 1200),
+      keyClaims: cleanList(item?.key_claims, 8).map((value) => cleanText(value, 500)),
+      catalysts: cleanList(item?.catalysts, 6).map((value) => cleanText(value, 300)),
+      risks: cleanList(item?.risks, 6).map((value) => cleanText(value, 300)),
+      opinionChange: item?.opinion_change || {},
+      source: {
+        reference: cleanText(item?.source?.reference, 240),
+        url: /^https?:\/\//i.test(String(item?.source?.url || "")) ? String(item.source.url) : "",
+      },
+      processingStatus: cleanText(item?.processing?.status, 80),
+      structuredAnalysisAvailable: item?.processing?.structured_analysis_available === true,
+      linkedTelegramEvents: cleanList(item?.linked_telegram_events, 3).map((event) => ({
+        eventId: cleanText(event?.event_id, 120),
+        title: cleanText(event?.title, 240),
+        score: Number(event?.score || 0),
+        matchReasons: cleanList(event?.match_reasons, 8).map((value) => cleanText(value, 120)),
+        url: /^https:\/\/t\.me\//i.test(String(event?.telegram_url || ""))
+          ? String(event.telegram_url)
+          : "",
+        channel: cleanText(event?.channel, 160),
+      })),
+    })),
+  };
+}
+
 export async function loadPbDailyIntelligenceSnapshot({ env = process.env } = {}) {
   const config = configuredRoot(env);
   if (!config.configured) {
@@ -427,6 +715,19 @@ export async function loadPbDailyIntelligenceSnapshot({ env = process.env } = {}
     STOCK_CANDIDATES_SCHEMA,
     readerArtifact.date
   );
+  const brokerResearchArtifact = await latestArtifact(
+    config.root,
+    "broker_research_digest",
+    "broker_research_digest.json",
+    BROKER_RESEARCH_SCHEMA,
+    readerArtifact.date
+  );
+  const telegramSources = await loadTelegramOverview({
+    root: config.root,
+    reportDate: readerArtifact.date,
+    engineRoot: configuredEngineRoot(env, config.root),
+    env,
+  });
   return {
     connection: {
       configured: true,
@@ -448,6 +749,10 @@ export async function loadPbDailyIntelligenceSnapshot({ env = process.env } = {}
     stockCandidates: stockCandidatesArtifact
       ? normalizeStockCandidates(stockCandidatesArtifact.payload)
       : null,
+    brokerResearch: brokerResearchArtifact
+      ? normalizeBrokerResearch(brokerResearchArtifact.payload)
+      : null,
+    telegramSources,
   };
 }
 
