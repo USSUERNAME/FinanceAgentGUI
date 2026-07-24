@@ -5,8 +5,11 @@ import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check-big.js";
 import CircleDashed from "lucide-react/dist/esm/icons/circle-dashed.js";
 import Database from "lucide-react/dist/esm/icons/database.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
+import Play from "lucide-react/dist/esm/icons/play.js";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
+import Send from "lucide-react/dist/esm/icons/send.js";
 import ShieldCheck from "lucide-react/dist/esm/icons/shield-check.js";
+import X from "lucide-react/dist/esm/icons/x.js";
 import { MarkdownText } from "../utils/MarkdownText.jsx";
 import { useDailyIntelligenceController } from "./useDailyIntelligenceController.js";
 import "./daily-intelligence.css";
@@ -314,8 +317,123 @@ function ReviewQueue({ items = [] }) {
   );
 }
 
+function OperationsPanel({
+  jobStatus,
+  jobBusy,
+  jobError,
+  pendingPlan,
+  onPlan,
+  onExecute,
+  onCancel,
+}) {
+  const connection = jobStatus?.connection || {};
+  const run = jobStatus?.run || {};
+  const running = run.status === "running";
+  const runLabels = {
+    idle: "대기",
+    running: "실행 중",
+    succeeded: "완료",
+    failed: "실패",
+  };
+  return (
+    <section className="daily-intelligence-panel daily-intelligence-operations daily-intelligence-wide">
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>PIPELINE OPERATIONS</span>
+          <h2>리포트 실행 제어</h2>
+        </div>
+        <span className={`daily-intelligence-run-status is-${run.status || "idle"}`}>
+          {runLabels[run.status] || run.status || "대기"}
+        </span>
+      </div>
+
+      {!connection.available ? (
+        <div className="daily-intelligence-operation-notice">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>실행 연결이 준비되지 않았습니다.</strong>
+            <p>{connection.reason || "PB 리포트 엔진 경로와 Python 실행 파일을 설정하세요."}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="daily-intelligence-operation-actions">
+          {(jobStatus?.jobs || []).map((job) => (
+            <button
+              type="button"
+              key={job.id}
+              className={job.publish ? "is-publish" : ""}
+              onClick={() => onPlan(job.id)}
+              disabled={jobBusy || running}
+            >
+              {job.publish ? <Send size={16} /> : <Play size={16} />}
+              <span>
+                <strong>{job.label}</strong>
+                <small>{job.description}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {jobError ? <p className="daily-intelligence-operation-error">{jobError}</p> : null}
+
+      {pendingPlan ? (
+        <div className={`daily-intelligence-confirmation ${pendingPlan.job?.publish ? "is-publish" : ""}`}>
+          <div>
+            <span>실행 전 확인</span>
+            <h3>{pendingPlan.job?.label}</h3>
+            <p>{pendingPlan.job?.effect}</p>
+            <dl>
+              <div><dt>실행</dt><dd>{pendingPlan.commandPreview}</dd></div>
+              <div><dt>대상</dt><dd>{pendingPlan.target}</dd></div>
+            </dl>
+          </div>
+          <div className="daily-intelligence-confirmation-actions">
+            <button type="button" onClick={onCancel} disabled={jobBusy}>
+              <X size={15} /> 취소
+            </button>
+            <button
+              type="button"
+              className={pendingPlan.job?.publish ? "is-publish" : ""}
+              onClick={onExecute}
+              disabled={jobBusy}
+            >
+              {jobBusy ? <LoaderCircle size={15} className="is-spinning" /> : <Play size={15} />}
+              확인 후 실행
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {run.status && run.status !== "idle" ? (
+        <div className="daily-intelligence-run-detail">
+          <div>
+            <strong>{run.label || "PB 파이프라인"}</strong>
+            <span>{run.message || runLabels[run.status]}</span>
+          </div>
+          {run.logTail?.length ? (
+            <pre>{run.logTail.slice(-12).join("\n")}</pre>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export default function DailyIntelligenceView() {
-  const { snapshot, busy, error, reload } = useDailyIntelligenceController();
+  const {
+    snapshot,
+    busy,
+    error,
+    reload,
+    jobStatus,
+    jobBusy,
+    jobError,
+    pendingPlan,
+    requestJobPlan,
+    executePendingPlan,
+    cancelPendingPlan,
+  } = useDailyIntelligenceController();
   const report = snapshot?.report;
   const pipeline = snapshot?.pipeline;
   const scoreboard = snapshot?.scoreboard;
@@ -388,6 +506,16 @@ export default function DailyIntelligenceView() {
       </section>
 
       <main className="daily-intelligence-grid">
+        <OperationsPanel
+          jobStatus={jobStatus}
+          jobBusy={jobBusy}
+          jobError={jobError}
+          pendingPlan={pendingPlan}
+          onPlan={requestJobPlan}
+          onExecute={executePendingPlan}
+          onCancel={cancelPendingPlan}
+        />
+
         <section className="daily-intelligence-panel daily-intelligence-wide">
           <div className="daily-intelligence-panel-title">
             <div>

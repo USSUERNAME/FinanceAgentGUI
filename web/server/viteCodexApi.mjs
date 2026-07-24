@@ -8,6 +8,8 @@ import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mj
 import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
 import { handleMemoryEndpoint, startSharedMemoryMaintenanceScheduler } from "./memoryApi.mjs";
 import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
+import { handlePbDailyIntelligenceEndpoint } from "./pbDailyIntelligenceApi.mjs";
+import { handlePbDailyIntelligenceJobsEndpoint } from "./pbDailyIntelligenceJobs.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
 import { handleTossInvestEndpoint } from "./tossInvestApi.mjs";
@@ -319,6 +321,14 @@ export function codexApiPlugin() {
 
       server.middlewares.use("/api/reports", async (req, res) => {
         await handleReportsEndpoint("list", req, res);
+      });
+
+      server.middlewares.use("/api/pb-daily-intelligence/jobs", async (req, res) => {
+        await handlePbDailyIntelligenceJobsEndpoint(req, res);
+      });
+
+      server.middlewares.use("/api/pb-daily-intelligence", async (req, res) => {
+        await handlePbDailyIntelligenceEndpoint(req, res);
       });
 
       server.middlewares.use("/api/magazine/assets", async (req, res) => {

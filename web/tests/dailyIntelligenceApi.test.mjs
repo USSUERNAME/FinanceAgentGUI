@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fetchDailyIntelligence } from "../src/dailyIntelligence/dailyIntelligenceApi.js";
+import {
+  executeDailyIntelligenceJob,
+  fetchDailyIntelligence,
+  fetchDailyIntelligenceJobStatus,
+  planDailyIntelligenceJob,
+} from "../src/dailyIntelligence/dailyIntelligenceApi.js";
 
 function response(payload, { ok = true, status = 200 } = {}) {
   return {
@@ -31,4 +36,26 @@ test("Daily Intelligence API client surfaces backend errors", async () => {
       ),
     /bridge failed/
   );
+});
+
+test("Daily Intelligence job client uses plan and execute confirmation flow", async () => {
+  const calls = [];
+  const fetchImpl = async (path, options = {}) => {
+    calls.push({ path, options });
+    return response({ ok: true, run: { status: "idle" } });
+  };
+  await fetchDailyIntelligenceJobStatus(fetchImpl);
+  await planDailyIntelligenceJob("dry_run", fetchImpl);
+  await executeDailyIntelligenceJob("confirmation-token", fetchImpl);
+
+  assert.equal(calls[0].path, "/api/pb-daily-intelligence/jobs");
+  assert.equal(calls[0].options.method, "GET");
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    action: "plan",
+    jobId: "dry_run",
+  });
+  assert.deepEqual(JSON.parse(calls[2].options.body), {
+    action: "execute",
+    token: "confirmation-token",
+  });
 });

@@ -1,0 +1,94 @@
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import test from "node:test";
+import { createPbDailyIntelligenceJobService } from "../server/pbDailyIntelligenceJobs.mjs";
+
+const tempRoot = join(process.cwd(), "data", ".test-pb-daily-intelligence-jobs");
+
+async function createEngine() {
+  await mkdir(tempRoot, { recursive: true });
+  await writeFile(join(tempRoot, "collect_all.py"), "print('collect')\n", "utf8");
+  await writeFile(join(tempRoot, "run_daily_report.py"), "print('report')\n", "utf8");
+}
+
+function fakeChild({ code = 0, output = "" } = {}) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  queueMicrotask(() => {
+    if (output) child.stdout.emit("data", Buffer.from(output));
+    child.emit("close", code);
+  });
+  return child;
+}
+
+test.afterEach(async () => {
+  await rm(tempRoot, { recursive: true, force: true });
+});
+
+test("PB job service fails closed when the engine is not configured", () => {
+  const service = createPbDailyIntelligenceJobService({ env: {} });
+  const status = service.status();
+  assert.equal(status.connection.configured, false);
+  assert.equal(status.connection.available, false);
+  assert.throws(() => service.plan("dry_run"), /설정되지 않았습니다/);
+});
+
+test("PB job service creates an allowlisted confirmation plan without executing", async () => {
+  await createEngine();
+  let spawnCount = 0;
+  const service = createPbDailyIntelligenceJobService({
+    env: {
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_PYTHON: "python-test",
+    },
+    uuid: () => "plan-token",
+    spawnImpl() {
+      spawnCount += 1;
+      return fakeChild();
+    },
+  });
+
+  const plan = service.plan("dry_run");
+  assert.equal(plan.token, "plan-token");
+  assert.equal(plan.job.id, "dry_run");
+  assert.equal(plan.commandPreview, "python-test run_daily_report.py --dry-run");
+  assert.equal(spawnCount, 0);
+  assert.throws(() => service.plan("arbitrary-command"), /허용되지 않은/);
+});
+
+test("PB job service executes only a confirmed plan and redacts log secrets", async () => {
+  await createEngine();
+  const calls = [];
+  let sequence = 0;
+  const service = createPbDailyIntelligenceJobService({
+    env: {
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_PYTHON: "python-test",
+    },
+    uuid: () => `id-${++sequence}`,
+    spawnImpl(command, args, options) {
+      calls.push({ command, args, options });
+      return fakeChild({
+        output: "OPENAI_API_KEY=do-not-show\nDry run complete\n",
+      });
+    },
+  });
+
+  const plan = service.plan("dry_run");
+  const run = service.execute(plan.token);
+  assert.equal(run.status, "running");
+  assert.equal(calls[0].command, "python-test");
+  assert.match(calls[0].args[0], /run_daily_report\.py$/);
+  assert.deepEqual(calls[0].args.slice(1), ["--dry-run"]);
+  assert.equal(calls[0].options.shell, false);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const status = service.status();
+  assert.equal(status.run.status, "succeeded");
+  assert.equal(status.run.logTail.some((line) => line.includes("do-not-show")), false);
+  assert.equal(status.run.logTail.some((line) => line.includes("[REDACTED]")), true);
+  assert.throws(() => service.execute(plan.token), /만료됐거나 유효하지/);
+});
