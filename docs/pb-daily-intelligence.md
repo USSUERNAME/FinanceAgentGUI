@@ -29,8 +29,10 @@ $env:PB_DAILY_INTELLIGENCE_PYTHON = "C:\path\to\python.exe"
 ```
 
 When installing the durable local service, set these three variables in the
-same PowerShell window. The service persists only these connection paths in its
-OS service definition. API keys, Telegram sessions, tokens, and the external
+same PowerShell window. If the background service cannot discover Codex from
+`PATH`, also set `CODEX_CLI_PATH` to the local Codex executable. The service
+persists only these allowlisted executable and connection paths in its OS
+service definition. API keys, Telegram sessions, tokens, and the external
 engine's `.env` contents are never copied into the FinanceAgentGUI service.
 
 The GUI exposes only three fixed actions:

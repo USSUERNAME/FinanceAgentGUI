@@ -2,6 +2,7 @@ param(
   [string]$NodeBin = "",
   [string]$HostName = "",
   [int]$Port = 0,
+  [string]$CodexCliPath = "",
   [string]$PbDailyIntelligenceDir = "",
   [string]$PbDailyIntelligenceEngineDir = "",
   [string]$PbDailyIntelligencePython = ""
@@ -43,6 +44,9 @@ if (-not $Port) {
 
 if ($PbDailyIntelligenceDir) {
   $env:PB_DAILY_INTELLIGENCE_DIR = $PbDailyIntelligenceDir
+}
+if ($CodexCliPath) {
+  $env:CODEX_CLI_PATH = $CodexCliPath
 }
 if ($PbDailyIntelligenceEngineDir) {
   $env:PB_DAILY_INTELLIGENCE_ENGINE_DIR = $PbDailyIntelligenceEngineDir

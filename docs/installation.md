@@ -237,6 +237,9 @@ Local user configuration should live under `config` or `data`.
 
 Common environment variables:
 
+- `CODEX_CLI_PATH`: optional absolute Codex CLI executable path for a durable
+  background service whose `PATH` does not include the desktop Codex install.
+
 - `FINANCE_AGENT_GUI_HOST`: local bind host, default `127.0.0.1`
 - `FINANCE_AGENT_GUI_PORT` or `PORT`: local server port
 - `FINANCE_AGENT_GUI_SERVICE_LABEL`: macOS LaunchAgent label override, default `com.financeagentgui.devserver`

@@ -37,7 +37,7 @@ const READ_STATE_PATH = join(DATA_DIR, "news-feed-read-state.json");
 const VIEW_STATE_PATH = join(DATA_DIR, "news-feed-view-state.json");
 const DEFAULT_POLL_INTERVAL_SECONDS = 180;
 const DEFAULT_RETENTION_HOURS = 24;
-const DEFAULT_TRANSLATION_BATCH_SIZE = 2;
+const DEFAULT_TRANSLATION_BATCH_SIZE = 12;
 const DEFAULT_MAX_ITEMS_PER_FEED = 500;
 const TRANSLATION_TIMEOUT_MS = 60000;
 const FETCH_TIMEOUT_MS = 20000;
@@ -389,7 +389,7 @@ function normalizeNewsFeedConfig(config = {}) {
     maxItemsPerFeed: Math.max(50, Number(raw.maxItemsPerFeed || DEFAULT_MAX_ITEMS_PER_FEED)),
     translationBatchSize: Math.max(
       1,
-      Math.min(3, Number(raw.translationBatchSize || DEFAULT_TRANSLATION_BATCH_SIZE))
+      Math.min(20, Number(raw.translationBatchSize || DEFAULT_TRANSLATION_BATCH_SIZE))
     ),
     feeds: feeds.length ? feeds : fallbackConfig.feeds,
   };
@@ -986,6 +986,10 @@ function codexTranslationModel(options) {
   return {
     provider: "codex-cli",
     providerLabel: "Codex CLI",
+    command: options.codex?.command || options.codex?.path || "codex",
+    argsPrefix: Array.isArray(options.codex?.argsPrefix)
+      ? options.codex.argsPrefix
+      : [],
     ...selection,
   };
 }
@@ -1165,7 +1169,10 @@ function runCodexTranslationBatch(items, modelInfo) {
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const child = spawnObservedLlm("codex", args, {
+    const child = spawnObservedLlm(modelInfo.command || "codex", [
+      ...(Array.isArray(modelInfo.argsPrefix) ? modelInfo.argsPrefix : []),
+      ...args,
+    ], {
       cwd: WEB_ROOT,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -1382,12 +1389,15 @@ function startPendingNewsFeedTranslation(batchSize) {
   runtime.translationInFlight = (async () => {
     let translatedTotal = 0;
     let modelInfo = null;
+    const deferredTranslationIds = new Set();
 
     while (true) {
       let store = readStore();
-      const pendingItems = pendingTranslationItems(store);
+      const pendingItems = pendingTranslationItems(store).filter(
+        (item) => !deferredTranslationIds.has(String(item.id)),
+      );
       if (!pendingItems.length) break;
-      const batch = selectPendingNewsFeedTranslationBatch(store.items, batchSize);
+      const batch = pendingItems.slice(0, Math.max(1, Number(batchSize) || 1));
 
       store.collector = {
         ...store.collector,
@@ -1402,6 +1412,16 @@ function startPendingNewsFeedTranslation(batchSize) {
         store = readStore();
         const applied = applyNewsFeedTranslationBatch(store, batch, translated);
         store = applied.store;
+        if (applied.retryCount) {
+          const pendingIds = new Set(
+            pendingTranslationItems(store).map((item) => String(item.id)),
+          );
+          for (const item of batch) {
+            if (pendingIds.has(String(item.id))) {
+              deferredTranslationIds.add(String(item.id));
+            }
+          }
+        }
         translatedTotal += applied.translatedCount;
         store.collector = {
           ...store.collector,
@@ -1418,7 +1438,6 @@ function startPendingNewsFeedTranslation(batchSize) {
           lastPollFinishedAt: nowIso(),
         };
         store = writeStore(store);
-        if (applied.retryCount) break;
       } catch (error) {
         store = readStore();
         store.collector = {
@@ -1432,6 +1451,18 @@ function startPendingNewsFeedTranslation(batchSize) {
         writeStore(store);
         break;
       }
+    }
+
+    if (deferredTranslationIds.size) {
+      let store = readStore();
+      store.collector = {
+        ...store.collector,
+        lastAction: `${translatedTotal}개 번역 저장 완료 · ${deferredTranslationIds.size}개 다음 주기 재시도`,
+        lastTranslatedCount: translatedTotal,
+        translationLastError: `${deferredTranslationIds.size}개 항목 번역 검증 보류`,
+        lastPollFinishedAt: nowIso(),
+      };
+      writeStore(store);
     }
 
     return publicSnapshot({ limit: 0 });

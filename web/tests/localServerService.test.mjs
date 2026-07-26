@@ -38,9 +38,10 @@ test("macOS service recognizes launchd EX_CONFIG and preserves stale logs", () =
   );
 });
 
-test("durable service forwards only configured PB workspace connection paths", () => {
+test("durable service forwards only allowlisted executable and PB connection paths", () => {
   const excludedCredentialValue = ["must", "not", "be", "forwarded"].join("-");
   const environment = pbServiceEnvironment({
+    CODEX_CLI_PATH: "C:\\Tools\\codex.exe",
     PB_DAILY_INTELLIGENCE_DIR: "C:\\pb\\workspace",
     PB_DAILY_INTELLIGENCE_ENGINE_DIR: "C:\\pb",
     PB_DAILY_INTELLIGENCE_PYTHON: "C:\\Python\\python.exe",
@@ -51,6 +52,7 @@ test("durable service forwards only configured PB workspace connection paths", (
   assert.deepEqual(
     environment.map((item) => item.name),
     [
+      "CODEX_CLI_PATH",
       "PB_DAILY_INTELLIGENCE_DIR",
       "PB_DAILY_INTELLIGENCE_ENGINE_DIR",
       "PB_DAILY_INTELLIGENCE_PYTHON",
@@ -61,10 +63,12 @@ test("durable service forwards only configured PB workspace connection paths", (
 
 test("Windows scheduled task includes configured PB connection parameters", () => {
   const previous = {
+    codex: process.env.CODEX_CLI_PATH,
     workspace: process.env.PB_DAILY_INTELLIGENCE_DIR,
     engine: process.env.PB_DAILY_INTELLIGENCE_ENGINE_DIR,
     python: process.env.PB_DAILY_INTELLIGENCE_PYTHON,
   };
+  process.env.CODEX_CLI_PATH = "C:\\Tools\\codex.exe";
   process.env.PB_DAILY_INTELLIGENCE_DIR = "C:\\pb path\\workspace";
   process.env.PB_DAILY_INTELLIGENCE_ENGINE_DIR = "C:\\pb path";
   process.env.PB_DAILY_INTELLIGENCE_PYTHON = "C:\\Python\\python.exe";
@@ -75,6 +79,8 @@ test("Windows scheduled task includes configured PB connection parameters", () =
     assert.match(args, /-PbDailyIntelligencePython "C:\\Python\\python.exe"/);
     assert.equal(windowsRunCommand(), `powershell.exe ${args}`);
   } finally {
+    if (previous.codex === undefined) delete process.env.CODEX_CLI_PATH;
+    else process.env.CODEX_CLI_PATH = previous.codex;
     if (previous.workspace === undefined) delete process.env.PB_DAILY_INTELLIGENCE_DIR;
     else process.env.PB_DAILY_INTELLIGENCE_DIR = previous.workspace;
     if (previous.engine === undefined) delete process.env.PB_DAILY_INTELLIGENCE_ENGINE_DIR;

@@ -23,6 +23,7 @@ const windowsTaskName = process.env.FINANCE_AGENT_GUI_SERVICE_TASK_NAME || "Fina
 const windowsRunName = process.env.FINANCE_AGENT_GUI_SERVICE_RUN_NAME || "FinanceAgentGUI Dev Server";
 const windowsRunKey = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const PB_SERVICE_ENVIRONMENT = Object.freeze([
+  ["CODEX_CLI_PATH", "CodexCliPath"],
   ["PB_DAILY_INTELLIGENCE_DIR", "PbDailyIntelligenceDir"],
   ["PB_DAILY_INTELLIGENCE_ENGINE_DIR", "PbDailyIntelligenceEngineDir"],
   ["PB_DAILY_INTELLIGENCE_PYTHON", "PbDailyIntelligencePython"],
@@ -51,6 +52,7 @@ Commands:
 Environment:
   FINANCE_AGENT_GUI_HOST=127.0.0.1
   FINANCE_AGENT_GUI_PORT=5173
+  CODEX_CLI_PATH=<Codex CLI executable>
   PB_DAILY_INTELLIGENCE_DIR=<external workspace path>
   PB_DAILY_INTELLIGENCE_ENGINE_DIR=<external engine path>
   PB_DAILY_INTELLIGENCE_PYTHON=<python executable>
