@@ -27,6 +27,16 @@ const JOB_CATALOG = Object.freeze({
     effect: "로컬 산출물 생성·검증, 외부 발행 없음",
     publish: false,
   }),
+  verification_dry_run: Object.freeze({
+    id: "verification_dry_run",
+    label: "공식 근거 검증 실행",
+    description:
+      "공식 원문과 구조화 분석을 실제로 확인하되 Notion·Telegram에는 발행하지 않습니다.",
+    script: "run_daily_report.py",
+    args: ["--verification-dry-run"],
+    effect: "공식 근거·사건 분석 산출물 갱신 · 외부 발행 없음",
+    publish: false,
+  }),
   publish: Object.freeze({
     id: "publish",
     label: "실제 리포트 발행",

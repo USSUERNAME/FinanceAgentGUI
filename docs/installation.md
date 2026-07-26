@@ -80,6 +80,11 @@ This command uses the native per-user service manager for the current OS:
 | Linux | systemd user service | `~/.config/systemd/user/finance-agent-gui-devserver.service` |
 | Windows | Task Scheduler | `FinanceAgentGUI Dev Server` scheduled task |
 
+On Windows, some managed accounts deny Scheduled Task registration. In that
+case the installer falls back to the current user's
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry and starts the same
+hidden PowerShell runner. This fallback does not require administrator rights.
+
 The service still runs the app from this project folder and writes runtime logs
 under `logs/`:
 

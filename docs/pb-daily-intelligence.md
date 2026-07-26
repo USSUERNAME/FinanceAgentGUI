@@ -28,10 +28,18 @@ $env:PB_DAILY_INTELLIGENCE_ENGINE_DIR = "C:\path\to\pb-daily-market-brief"
 $env:PB_DAILY_INTELLIGENCE_PYTHON = "C:\path\to\python.exe"
 ```
 
+When installing the durable local service, set these three variables in the
+same PowerShell window. The service persists only these connection paths in its
+OS service definition. API keys, Telegram sessions, tokens, and the external
+engine's `.env` contents are never copied into the FinanceAgentGUI service.
+
 The GUI exposes only three fixed actions:
 
 - `collect`: runs `collect_all.py`
 - `dry_run`: runs `run_daily_report.py --dry-run`
+- `verification_dry_run`: runs `run_daily_report.py --verification-dry-run`;
+  it fetches allowlisted official evidence and performs structured event
+  analysis while blocking Notion publication and Telegram delivery
 - `publish`: runs `run_daily_report.py`
 
 The browser cannot submit a command, script path, argument list, or working
@@ -85,5 +93,6 @@ the stricter reader-report publication gate.
 - Snapshot reads remain read-only.
 - Local writes and Notion/Telegram publication require the separate configured
   job runner plus the explicit plan-and-confirm flow.
-- `dry_run` never publishes to Notion or Telegram; `publish` uses the external
+- `dry_run` and `verification_dry_run` never publish to Notion or Telegram;
+  `publish` uses the external
   pipeline's existing credentials, quality gates, and destinations.

@@ -4,6 +4,7 @@ import ArrowUpRight from "lucide-react/dist/esm/icons/arrow-up-right.js";
 import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check-big.js";
 import CircleDashed from "lucide-react/dist/esm/icons/circle-dashed.js";
 import Database from "lucide-react/dist/esm/icons/database.js";
+import FileText from "lucide-react/dist/esm/icons/file-text.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
 import Radio from "lucide-react/dist/esm/icons/radio.js";
 import Play from "lucide-react/dist/esm/icons/play.js";
@@ -424,7 +425,10 @@ function OperationsPanel({
 function TelegramSourceMonitor({ telegramSources }) {
   if (!telegramSources?.configured) {
     return (
-      <section className="daily-intelligence-panel daily-intelligence-wide">
+      <section
+        id="telegram-intelligence"
+        className="daily-intelligence-panel daily-intelligence-wide"
+      >
         <div className="daily-intelligence-panel-title">
           <div>
             <span>TELEGRAM INTELLIGENCE</span>
@@ -449,7 +453,10 @@ function TelegramSourceMonitor({ telegramSources }) {
     not_run: "미실행",
   };
   return (
-    <section className="daily-intelligence-panel daily-intelligence-telegram daily-intelligence-wide">
+    <section
+      id="telegram-intelligence"
+      className="daily-intelligence-panel daily-intelligence-telegram daily-intelligence-wide"
+    >
       <div className="daily-intelligence-panel-title">
         <div>
           <span>TELEGRAM INTELLIGENCE</span>
@@ -574,7 +581,10 @@ function TelegramSourceMonitor({ telegramSources }) {
 function BrokerResearchMonitor({ brokerResearch }) {
   if (!brokerResearch) {
     return (
-      <section className="daily-intelligence-panel daily-intelligence-wide">
+      <section
+        id="broker-research-analysis"
+        className="daily-intelligence-panel daily-intelligence-wide"
+      >
         <div className="daily-intelligence-panel-title">
           <div>
             <span>ANALYST RESEARCH</span>
@@ -592,7 +602,10 @@ function BrokerResearchMonitor({ brokerResearch }) {
   const summary = brokerResearch.summary || {};
   const stanceCounts = summary.stanceCounts || {};
   return (
-    <section className="daily-intelligence-panel daily-intelligence-broker daily-intelligence-wide">
+    <section
+      id="broker-research-analysis"
+      className="daily-intelligence-panel daily-intelligence-broker daily-intelligence-wide"
+    >
       <div className="daily-intelligence-panel-title">
         <div>
           <span>ANALYST RESEARCH</span>
@@ -662,6 +675,33 @@ function BrokerResearchMonitor({ brokerResearch }) {
         공개 리포트에는 요약과 출처 링크만 사용합니다.
       </p>
     </section>
+  );
+}
+
+function ResearchIntelligenceShortcuts({ telegramSources, brokerResearch }) {
+  const telegramPosts = telegramSources?.deduplication?.rawPostCount || 0;
+  const telegramClusters = telegramSources?.deduplication?.eventClusterCount || 0;
+  const brokerReports = brokerResearch?.summary?.selectedReportCount || 0;
+  const brokerStructured = brokerResearch?.summary?.structuredReportCount || 0;
+  return (
+    <nav className="daily-intelligence-research-shortcuts" aria-label="리서치 분석 바로가기">
+      <a href="#broker-research-analysis">
+        <FileText size={19} />
+        <span>
+          <small>PDF RESEARCH</small>
+          <strong>증권사 PDF 리포트 분석</strong>
+          <em>{brokerReports}건 수집 · {brokerStructured}건 구조화</em>
+        </span>
+      </a>
+      <a href="#telegram-intelligence">
+        <Radio size={19} />
+        <span>
+          <small>TELEGRAM INTELLIGENCE</small>
+          <strong>텔레그램 사건 분석</strong>
+          <em>{telegramPosts}개 글 · {telegramClusters}개 사건</em>
+        </span>
+      </a>
+    </nav>
   );
 }
 
@@ -752,7 +792,16 @@ export default function DailyIntelligenceView() {
         />
       </section>
 
+      <ResearchIntelligenceShortcuts
+        telegramSources={telegramSources}
+        brokerResearch={brokerResearch}
+      />
+
       <main className="daily-intelligence-grid">
+        <BrokerResearchMonitor brokerResearch={brokerResearch} />
+
+        <TelegramSourceMonitor telegramSources={telegramSources} />
+
         <OperationsPanel
           jobStatus={jobStatus}
           jobBusy={jobBusy}
@@ -762,10 +811,6 @@ export default function DailyIntelligenceView() {
           onExecute={executePendingPlan}
           onCancel={cancelPendingPlan}
         />
-
-        <TelegramSourceMonitor telegramSources={telegramSources} />
-
-        <BrokerResearchMonitor brokerResearch={brokerResearch} />
 
         <section className="daily-intelligence-panel daily-intelligence-wide">
           <div className="daily-intelligence-panel-title">

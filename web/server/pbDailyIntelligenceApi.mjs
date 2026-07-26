@@ -719,8 +719,7 @@ export async function loadPbDailyIntelligenceSnapshot({ env = process.env } = {}
     config.root,
     "broker_research_digest",
     "broker_research_digest.json",
-    BROKER_RESEARCH_SCHEMA,
-    readerArtifact.date
+    BROKER_RESEARCH_SCHEMA
   );
   const telegramSources = await loadTelegramOverview({
     root: config.root,

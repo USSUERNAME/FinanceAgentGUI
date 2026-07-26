@@ -59,6 +59,29 @@ test("PB job service creates an allowlisted confirmation plan without executing"
   assert.throws(() => service.plan("arbitrary-command"), /허용되지 않은/);
 });
 
+test("PB job service exposes an unpublished official-evidence verification run", async () => {
+  await createEngine();
+  const service = createPbDailyIntelligenceJobService({
+    env: {
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_PYTHON: "python-test",
+    },
+    uuid: () => "verification-plan",
+    spawnImpl() {
+      return fakeChild();
+    },
+  });
+
+  const plan = service.plan("verification_dry_run");
+  assert.equal(plan.token, "verification-plan");
+  assert.equal(plan.job.id, "verification_dry_run");
+  assert.equal(plan.job.publish, false);
+  assert.equal(
+    plan.commandPreview,
+    "python-test run_daily_report.py --verification-dry-run"
+  );
+});
+
 test("PB job service executes only a confirmed plan and redacts log secrets", async () => {
   await createEngine();
   const calls = [];

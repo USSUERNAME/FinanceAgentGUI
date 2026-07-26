@@ -355,3 +355,45 @@ test("PB Daily Intelligence exposes a rights-safe analyst research digest", asyn
   assert.equal(snapshot.brokerResearch.reports[0].linkedTelegramEvents[0].eventId, "event-nvda");
   assert.equal(JSON.stringify(snapshot.brokerResearch).includes("raw_text"), false);
 });
+
+test("PB Daily Intelligence shows newer analyst research independently of the reader date", async () => {
+  const readerDate = "2026-07-24";
+  const researchDate = "2026-07-25";
+  await writeJson(
+    join(tempRoot, "v2_reader_reports", readerDate, "reader_report.json"),
+    { schema_version: "v2_reader_report.v1", report_date: readerDate, title: "Prior reader report" }
+  );
+  await writeJson(
+    join(tempRoot, "broker_research_digest", readerDate, "broker_research_digest.json"),
+    {
+      schema_version: "broker_research_digest.v1",
+      report_date: readerDate,
+      summary: { selected_report_count: 0, analysis_status: "no_eligible_reports" },
+      consensus: {},
+      reports: [],
+    }
+  );
+  await writeJson(
+    join(tempRoot, "broker_research_digest", researchDate, "broker_research_digest.json"),
+    {
+      schema_version: "broker_research_digest.v1",
+      report_date: researchDate,
+      summary: {
+        selected_report_count: 3,
+        structured_report_count: 3,
+        publisher_count: 1,
+        analysis_status: "complete",
+      },
+      consensus: {},
+      reports: [],
+    }
+  );
+
+  const snapshot = await loadPbDailyIntelligenceSnapshot({
+    env: { PB_DAILY_INTELLIGENCE_DIR: tempRoot },
+  });
+  assert.equal(snapshot.connection.readerDate, readerDate);
+  assert.equal(snapshot.brokerResearch.reportDate, researchDate);
+  assert.equal(snapshot.brokerResearch.summary.selectedReportCount, 3);
+  assert.equal(snapshot.brokerResearch.summary.analysisStatus, "complete");
+});

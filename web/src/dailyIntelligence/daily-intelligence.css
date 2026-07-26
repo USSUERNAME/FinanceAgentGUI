@@ -70,6 +70,64 @@
   margin-bottom: 16px;
 }
 
+.daily-intelligence-research-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.daily-intelligence-research-shortcuts a {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+  border: 1px solid #d8e2ed;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #315f9d;
+  padding: 14px 16px;
+  text-decoration: none;
+  box-shadow: 0 7px 18px rgba(34, 52, 78, 0.04);
+}
+
+.daily-intelligence-research-shortcuts a:hover {
+  border-color: #8fa9c7;
+  transform: translateY(-1px);
+}
+
+.daily-intelligence-research-shortcuts a > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.daily-intelligence-research-shortcuts small {
+  color: #8190a2;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+}
+
+.daily-intelligence-research-shortcuts strong {
+  overflow: hidden;
+  color: #263c56;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daily-intelligence-research-shortcuts em {
+  color: #77879a;
+  font-size: 11px;
+  font-style: normal;
+}
+
+#broker-research-analysis,
+#telegram-intelligence {
+  scroll-margin-top: 18px;
+}
+
 .daily-intelligence-metric {
   display: flex;
   align-items: center;
@@ -1262,6 +1320,7 @@
   .daily-intelligence-sector-metrics,
   .daily-intelligence-broker-summary,
   .daily-intelligence-telegram-summary,
+  .daily-intelligence-research-shortcuts,
   .daily-intelligence-operation-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1296,6 +1355,7 @@
   .daily-intelligence-telegram-summary,
   .daily-intelligence-telegram-event-grid,
   .daily-intelligence-telegram-channels,
+  .daily-intelligence-research-shortcuts,
   .daily-intelligence-operation-actions {
     grid-template-columns: 1fr;
   }
@@ -1343,6 +1403,7 @@
   .daily-intelligence-telegram-summary,
   .daily-intelligence-telegram-event-grid,
   .daily-intelligence-telegram-channels,
+  .daily-intelligence-research-shortcuts,
   .daily-intelligence-operation-actions {
     grid-template-columns: 1fr;
   }

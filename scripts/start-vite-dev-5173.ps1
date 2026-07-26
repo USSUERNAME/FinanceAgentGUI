@@ -1,7 +1,10 @@
 param(
   [string]$NodeBin = "",
   [string]$HostName = "",
-  [int]$Port = 0
+  [int]$Port = 0,
+  [string]$PbDailyIntelligenceDir = "",
+  [string]$PbDailyIntelligenceEngineDir = "",
+  [string]$PbDailyIntelligencePython = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,6 +39,16 @@ if (-not $Port) {
   } else {
     $Port = 5173
   }
+}
+
+if ($PbDailyIntelligenceDir) {
+  $env:PB_DAILY_INTELLIGENCE_DIR = $PbDailyIntelligenceDir
+}
+if ($PbDailyIntelligenceEngineDir) {
+  $env:PB_DAILY_INTELLIGENCE_ENGINE_DIR = $PbDailyIntelligenceEngineDir
+}
+if ($PbDailyIntelligencePython) {
+  $env:PB_DAILY_INTELLIGENCE_PYTHON = $PbDailyIntelligencePython
 }
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
