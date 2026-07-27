@@ -15,6 +15,7 @@ import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mj
 import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
 import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
 import { handlePbDailyIntelligenceEndpoint } from "./pbDailyIntelligenceApi.mjs";
+import { handlePbDailyIntelligenceJobsEndpoint } from "./pbDailyIntelligenceJobs.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
 import { handleTossInvestEndpoint } from "./tossInvestApi.mjs";
@@ -116,6 +117,11 @@ const server = createServer(async (req, res) => {
 
   if (req.url?.startsWith("/api/news-feed/status")) {
     await handleNewsFeedEndpoint("status", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/news-feed/daily-digest")) {
+    await handleNewsFeedEndpoint("daily-digest", req, res);
     return;
   }
 
@@ -400,6 +406,11 @@ const server = createServer(async (req, res) => {
 
   if (req.url?.startsWith("/api/reports")) {
     await handleReportsEndpoint("list", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/pb-daily-intelligence/jobs")) {
+    await handlePbDailyIntelligenceJobsEndpoint(req, res);
     return;
   }
 

@@ -2,11 +2,18 @@ import React from "react";
 import AlertTriangle from "lucide-react/dist/esm/icons/alert-triangle.js";
 import ArrowUpRight from "lucide-react/dist/esm/icons/arrow-up-right.js";
 import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check-big.js";
+import ChevronLeft from "lucide-react/dist/esm/icons/chevron-left.js";
+import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.js";
 import CircleDashed from "lucide-react/dist/esm/icons/circle-dashed.js";
 import Database from "lucide-react/dist/esm/icons/database.js";
+import FileText from "lucide-react/dist/esm/icons/file-text.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
+import Radio from "lucide-react/dist/esm/icons/radio.js";
+import Play from "lucide-react/dist/esm/icons/play.js";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
+import Send from "lucide-react/dist/esm/icons/send.js";
 import ShieldCheck from "lucide-react/dist/esm/icons/shield-check.js";
+import X from "lucide-react/dist/esm/icons/x.js";
 import { MarkdownText } from "../utils/MarkdownText.jsx";
 import { useDailyIntelligenceController } from "./useDailyIntelligenceController.js";
 import "./daily-intelligence.css";
@@ -24,6 +31,34 @@ const statusLabels = {
   selective_rotation: "선별적 순환매",
   mild_risk_off: "완만한 위험회피",
   risk_off: "위험회피",
+  ready: "정상",
+  partial: "일부 수집",
+  blocked: "수집 차단",
+  broadening: "확산",
+  narrowing: "축소",
+  mixed_rotation: "혼합 순환매",
+};
+
+const stylePairLabels = {
+  growth_vs_value: "성장주 / 가치주",
+  large_vs_small: "대형주 / 소형주",
+  large_vs_mid: "대형주 / 중형주",
+  momentum_vs_low_volatility: "모멘텀 / 저변동성",
+  equal_weight_vs_cap_weight: "동일가중 / 시총가중",
+};
+
+const sectorLabels = {
+  XLC: "커뮤니케이션",
+  XLY: "경기소비재",
+  XLP: "필수소비재",
+  XLE: "에너지",
+  XLF: "금융",
+  XLV: "헬스케어",
+  XLI: "산업재",
+  XLB: "소재",
+  XLRE: "부동산",
+  XLK: "기술",
+  XLU: "유틸리티",
 };
 
 const eventTypeLabels = {
@@ -40,6 +75,29 @@ const extractionStatusLabels = {
   not_run: "본문 추출 대기",
   not_available: "본문 미확보",
   failed: "본문 추출 실패",
+};
+
+const researchStanceLabels = {
+  positive: "긍정",
+  neutral: "중립",
+  cautious: "경계",
+  negative: "부정",
+  not_stated: "명시적 의견 없음",
+};
+
+const sectorSignalLabels = {
+  positive: "긍정 의견 우세",
+  neutral: "중립 의견",
+  cautious: "경계 의견 우세",
+  mixed: "의견 혼재",
+  evidence_only: "방향성 미제시",
+};
+
+const researchAnalysisStatusLabels = {
+  complete: "분석 완료",
+  partial: "일부 분석",
+  no_eligible_reports: "분석 대상 없음",
+  not_available: "분석 대기",
 };
 
 function formatGeneratedAt(value) {
@@ -102,6 +160,12 @@ function signed(value, digits = 2, suffix = "") {
   return `${number > 0 ? "+" : ""}${number.toFixed(digits)}${suffix}`;
 }
 
+function metricTone(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return number >= 0 ? "is-positive" : "is-negative";
+}
+
 function Scoreboard({ scoreboard }) {
   if (!scoreboard?.cards?.length) {
     return <p className="daily-intelligence-muted">시장 스코어보드 데이터가 없습니다.</p>;
@@ -151,14 +215,34 @@ function Scoreboard({ scoreboard }) {
 }
 
 function SectorLeadership({ marketInternals }) {
-  const periods = [
-    ["1d", "1일"],
-    ["5d", "5일"],
-    ["20d", "20일"],
-  ];
   if (!marketInternals) {
     return <p className="daily-intelligence-muted">섹터 리더십 데이터가 없습니다.</p>;
   }
+  const constituent = marketInternals.constituentBreadth;
+  const sectorBreadth = marketInternals.sectorBreadth;
+  const breadthCards = constituent ? [
+    ["상승 종목", constituent.advancePct, "%"],
+    ["상승 거래량", constituent.upVolumePct, "%"],
+    ["50일선 상회", constituent.above50dPct, "%"],
+    ["200일선 상회", constituent.above200dPct, "%"],
+  ].filter(([, value]) => value !== null) : [];
+  const returnRows = new Map();
+  ["1d", "5d", "20d"].forEach((period) => {
+    (marketInternals.sectors[period] || []).forEach((sector) => {
+      const row = returnRows.get(sector.ticker) || {
+        ticker: sector.ticker,
+        sector: sector.sector,
+      };
+      row[period] = sector.returnPct;
+      returnRows.set(sector.ticker, row);
+    });
+  });
+  const breadthByTicker = new Map(
+    (sectorBreadth?.sectors || []).map((row) => [row.ticker, row])
+  );
+  const sectorRows = [...returnRows.values()]
+    .map((row) => ({ ...row, breadth: breadthByTicker.get(row.ticker) || null }))
+    .sort((first, second) => Number(second["5d"] || 0) - Number(first["5d"] || 0));
   return (
     <>
       <div className="daily-intelligence-coverage">
@@ -174,23 +258,144 @@ function SectorLeadership({ marketInternals }) {
           />
         </div>
       </div>
-      <div className="daily-intelligence-sector-columns">
-        {periods.map(([period, label]) => (
-          <section key={period}>
-            <h3>{label} 리더십</h3>
-            {(marketInternals.sectors[period] || []).map((sector) => (
-              <div className="daily-intelligence-sector-row" key={`${period}-${sector.ticker}`}>
-                <span><strong>{sector.ticker}</strong>{sector.sector}</span>
-                <span>{signed(sector.returnPct, 2, "%")}</span>
-                <strong className={sector.vsSpyPctPoint >= 0 ? "is-positive" : "is-negative"}>
-                  {signed(sector.vsSpyPctPoint, 2, "%p")}
+      {constituent ? (
+        <div className="daily-intelligence-constituent-breadth">
+          <div className="daily-intelligence-constituent-heading">
+            <div>
+              <span>실제 구성종목 브레드스</span>
+              <strong>
+                {constituent.membershipScope === "fund_holdings_proxy"
+                  ? "SPY 보유종목 프록시"
+                  : "S&P 500 구성종목"}
+              </strong>
+            </div>
+            <StatusPill status={constituent.status} />
+          </div>
+          {breadthCards.length ? (
+            <div className="daily-intelligence-constituent-grid">
+              {breadthCards.map(([label, value, suffix]) => (
+                <article key={label}>
+                  <span>{label}</span>
+                  <strong>{Number(value).toFixed(1)}{suffix}</strong>
+                </article>
+              ))}
+              <article>
+                <span>52주 신고가 / 신저가</span>
+                <strong>
+                  {constituent.newHighs ?? "-"} / {constituent.newLows ?? "-"}
                 </strong>
-              </div>
-            ))}
-          </section>
-        ))}
+              </article>
+            </div>
+          ) : (
+            <p className="daily-intelligence-inline-warning">
+              구성종목 유니버스는 준비됐지만 일봉 가격 수집이 아직 완료되지 않았습니다.
+            </p>
+          )}
+          <small>
+            가격 커버리지 {constituent.coveragePct?.toFixed(1) || "0.0"}%
+            {constituent.asOf ? ` · 기준 ${constituent.asOf}` : ""}
+          </small>
+        </div>
+      ) : null}
+      {marketInternals.stylePairs?.length ? (
+        <div className="daily-intelligence-style-matrix">
+          <div className="daily-intelligence-subsection-heading">
+            <div>
+              <span>STYLE MATRIX</span>
+              <strong>스타일 상대강도</strong>
+            </div>
+            <small>각 행 첫 번째 ETF의 두 번째 ETF 대비 격차</small>
+          </div>
+          <div className="daily-intelligence-table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>스타일</th>
+                  <th>5일 우위</th>
+                  <th>1일</th>
+                  <th>5일</th>
+                  <th>20일</th>
+                </tr>
+              </thead>
+              <tbody>
+                {marketInternals.stylePairs.map((pair) => (
+                  <tr key={pair.id}>
+                    <th>
+                      <strong>{stylePairLabels[pair.id] || pair.id}</strong>
+                      <small>{pair.firstTicker} / {pair.secondTicker}</small>
+                    </th>
+                    <td>{pair.leader5d === "tie" ? "보합" : pair.leader5d}</td>
+                    <td className={metricTone(pair.relative1d)}>
+                      {signed(pair.relative1d, 2, "%p")}
+                    </td>
+                    <td className={metricTone(pair.relative5d)}>
+                      {signed(pair.relative5d, 2, "%p")}
+                    </td>
+                    <td className={metricTone(pair.relative20d)}>
+                      {signed(pair.relative20d, 2, "%p")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+      <div className="daily-intelligence-sector-matrix">
+        <div className="daily-intelligence-subsection-heading">
+          <div>
+            <span>SECTOR PRICE + INTERNAL BREADTH</span>
+            <strong>11개 섹터 가격과 내부 확산</strong>
+          </div>
+          <small>
+            내부 브레드스 {sectorBreadth?.readyCount || 0}/
+            {sectorBreadth?.requiredCount || 11}
+          </small>
+        </div>
+        <div className="daily-intelligence-table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>섹터</th>
+                <th>1일</th>
+                <th>5일</th>
+                <th>20일</th>
+                <th>상승 종목</th>
+                <th>50일선</th>
+                <th>200일선</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sectorRows.map((row) => (
+                <tr key={row.ticker}>
+                  <th>
+                    <strong>{row.ticker}</strong>
+                    <small>{sectorLabels[row.ticker] || row.sector}</small>
+                  </th>
+                  <td className={metricTone(row["1d"])}>
+                    {signed(row["1d"], 2, "%")}
+                  </td>
+                  <td className={metricTone(row["5d"])}>
+                    {signed(row["5d"], 2, "%")}
+                  </td>
+                  <td className={metricTone(row["20d"])}>
+                    {signed(row["20d"], 2, "%")}
+                  </td>
+                  <td>{signed(row.breadth?.advancePct, 1, "%")}</td>
+                  <td>{signed(row.breadth?.above50dPct, 1, "%")}</td>
+                  <td>{signed(row.breadth?.above200dPct, 1, "%")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!sectorBreadth?.sectors?.length ? (
+          <p className="daily-intelligence-inline-warning">
+            섹터 ETF 가격은 표시되지만 구성종목 내부 브레드스는 아직 수집 대기입니다.
+          </p>
+        ) : null}
       </div>
-      {marketInternals.gaps.length ? (
+      {marketInternals.coverage.missingTickers.length ? (
         <p className="daily-intelligence-inline-warning">
           현재 일부 섹터만 수집됨: 누락 {marketInternals.coverage.missingTickers.join(", ")}
         </p>
@@ -314,14 +519,745 @@ function ReviewQueue({ items = [] }) {
   );
 }
 
+function OperationsPanel({
+  jobStatus,
+  jobBusy,
+  jobError,
+  pendingPlan,
+  onPlan,
+  onExecute,
+  onCancel,
+}) {
+  const connection = jobStatus?.connection || {};
+  const run = jobStatus?.run || {};
+  const running = run.status === "running";
+  const runLabels = {
+    idle: "대기",
+    running: "실행 중",
+    succeeded: "완료",
+    failed: "실패",
+  };
+  return (
+    <section className="daily-intelligence-panel daily-intelligence-operations daily-intelligence-wide">
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>PIPELINE OPERATIONS</span>
+          <h2>리포트 실행 제어</h2>
+        </div>
+        <span className={`daily-intelligence-run-status is-${run.status || "idle"}`}>
+          {runLabels[run.status] || run.status || "대기"}
+        </span>
+      </div>
+
+      {!connection.available ? (
+        <div className="daily-intelligence-operation-notice">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>실행 연결이 준비되지 않았습니다.</strong>
+            <p>{connection.reason || "PB 리포트 엔진 경로와 Python 실행 파일을 설정하세요."}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="daily-intelligence-operation-actions">
+          {(jobStatus?.jobs || []).filter((job) => job.id !== "telegram_refresh").map((job) => (
+            <button
+              type="button"
+              key={job.id}
+              className={job.publish ? "is-publish" : ""}
+              onClick={() => onPlan(job.id)}
+              disabled={jobBusy || running}
+            >
+              {job.publish ? <Send size={16} /> : <Play size={16} />}
+              <span>
+                <strong>{job.label}</strong>
+                <small>{job.description}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {jobError ? <p className="daily-intelligence-operation-error">{jobError}</p> : null}
+
+      {pendingPlan && pendingPlan.job?.id !== "telegram_refresh" ? (
+        <div className={`daily-intelligence-confirmation ${pendingPlan.job?.publish ? "is-publish" : ""}`}>
+          <div>
+            <span>실행 전 확인</span>
+            <h3>{pendingPlan.job?.label}</h3>
+            <p>{pendingPlan.job?.effect}</p>
+            <dl>
+              <div><dt>실행</dt><dd>{pendingPlan.commandPreview}</dd></div>
+              <div><dt>대상</dt><dd>{pendingPlan.target}</dd></div>
+            </dl>
+          </div>
+          <div className="daily-intelligence-confirmation-actions">
+            <button type="button" onClick={onCancel} disabled={jobBusy}>
+              <X size={15} /> 취소
+            </button>
+            <button
+              type="button"
+              className={pendingPlan.job?.publish ? "is-publish" : ""}
+              onClick={onExecute}
+              disabled={jobBusy}
+            >
+              {jobBusy ? <LoaderCircle size={15} className="is-spinning" /> : <Play size={15} />}
+              확인 후 실행
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {run.status && run.status !== "idle" ? (
+        <div className="daily-intelligence-run-detail">
+          <div>
+            <strong>{run.label || "PB 파이프라인"}</strong>
+            <span>{run.message || runLabels[run.status]}</span>
+          </div>
+          {run.logTail?.length ? (
+            <pre>{run.logTail.slice(-12).join("\n")}</pre>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function TelegramSourceMonitor({
+  telegramSources,
+  jobStatus,
+  jobBusy,
+  jobError,
+  pendingPlan,
+  onPlan,
+  onExecute,
+  onCancel,
+}) {
+  if (!telegramSources?.configured) {
+    return (
+      <section
+        id="telegram-intelligence"
+        className="daily-intelligence-panel daily-intelligence-wide"
+      >
+        <div className="daily-intelligence-panel-title">
+          <div>
+            <span>TELEGRAM INTELLIGENCE</span>
+            <h2>텔레그램 정보 채널</h2>
+          </div>
+          <AlertTriangle size={20} />
+        </div>
+        <p className="daily-intelligence-muted">
+          Telegram 채널 레지스트리를 찾지 못했습니다. PB 리포트 엔진 경로와 telegram_channels.json을 확인하세요.
+        </p>
+      </section>
+    );
+  }
+
+  const credentials = telegramSources.credentials || {};
+  const collection = telegramSources.collection || {};
+  const deduplication = telegramSources.deduplication || {};
+  const collectionReady = credentials.ready === true;
+  const telegramRun = jobStatus?.run?.jobId === "telegram_refresh"
+    ? jobStatus.run
+    : null;
+  const refreshing = telegramRun?.status === "running";
+  const telegramPlanPending = pendingPlan?.job?.id === "telegram_refresh";
+  const collectionLabels = {
+    ok: "수집 완료",
+    skipped_or_notice: "설정 확인",
+    not_run: "미실행",
+  };
+  return (
+    <section
+      id="telegram-intelligence"
+      className="daily-intelligence-panel daily-intelligence-telegram daily-intelligence-wide"
+    >
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>TELEGRAM INTELLIGENCE</span>
+          <h2>PB 텔레그램 정보 채널</h2>
+        </div>
+        <div className="daily-intelligence-telegram-actions">
+          <span className={`daily-intelligence-run-status is-${collectionReady ? "succeeded" : "failed"}`}>
+            {collectionReady ? "인증 준비" : "인증 필요"}
+          </span>
+          <button
+            type="button"
+            onClick={() => onPlan("telegram_refresh")}
+            disabled={!collectionReady || jobBusy || refreshing}
+          >
+            {refreshing
+              ? <LoaderCircle size={15} className="is-spinning" />
+              : <RefreshCw size={15} />}
+            {refreshing ? "수집 중" : "텔레그램 지금 수집"}
+          </button>
+        </div>
+      </div>
+
+      <div className="daily-intelligence-telegram-summary">
+        <article>
+          <span>활성 채널</span>
+          <strong>{telegramSources.enabledCount}/{telegramSources.channelCount}</strong>
+          <small>공개 채널 레지스트리</small>
+        </article>
+        <article>
+          <span>최근 수집</span>
+          <strong>{collection.itemCount || 0}건</strong>
+          <small>
+            {collectionLabels[collection.status] || collection.status}
+            {collection.lastCollectedAt
+              ? ` · ${formatGeneratedAt(collection.lastCollectedAt)}`
+              : ""}
+          </small>
+        </article>
+        <article>
+          <span>사건 통합</span>
+          <strong>{deduplication.eventClusterCount || 0}건</strong>
+          <small>원문 {deduplication.rawPostCount || 0}건에서 통합</small>
+        </article>
+        <article>
+          <span>중복 절감</span>
+          <strong>{deduplication.consolidatedPostCount || 0}건</strong>
+          <small>동일 사건 반복 제거</small>
+        </article>
+      </div>
+
+      {!collectionReady ? (
+        <div className="daily-intelligence-operation-notice">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>Telegram 사용자 세션 연결이 필요합니다.</strong>
+            <p>
+              누락: {(credentials.missing || []).join(", ") || "인증 상태 확인 필요"}.
+              값은 화면에 표시하거나 저장하지 않습니다.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="daily-intelligence-telegram-ready">
+          <ShieldCheck size={17} />
+          <span>API ID·API Hash·사용자 세션이 준비됐습니다. 다음 수집부터 채널 글이 사건 파이프라인에 들어갑니다.</span>
+        </div>
+      )}
+
+      {telegramPlanPending ? (
+        <div className="daily-intelligence-confirmation">
+          <div>
+            <span>텔레그램 수집 실행 확인</span>
+            <h3>{pendingPlan.job?.label}</h3>
+            <p>{pendingPlan.job?.effect}</p>
+            <dl>
+              <div><dt>실행</dt><dd>{pendingPlan.commandPreview}</dd></div>
+              <div><dt>외부 발행</dt><dd>없음 · 로컬 화면만 갱신</dd></div>
+            </dl>
+          </div>
+          <div className="daily-intelligence-confirmation-actions">
+            <button type="button" onClick={onCancel} disabled={jobBusy}>
+              <X size={15} /> 취소
+            </button>
+            <button type="button" onClick={onExecute} disabled={jobBusy}>
+              {jobBusy
+                ? <LoaderCircle size={15} className="is-spinning" />
+                : <Play size={15} />}
+              확인 후 수집
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {jobError && (telegramPlanPending || telegramRun) ? (
+        <p className="daily-intelligence-operation-error">{jobError}</p>
+      ) : null}
+
+      {telegramRun && telegramRun.status !== "idle" ? (
+        <div className="daily-intelligence-telegram-run-detail">
+          <strong>{telegramRun.message || "텔레그램 수집 상태 확인 중"}</strong>
+          {telegramRun.finishedAt ? (
+            <span>완료 {formatGeneratedAt(telegramRun.finishedAt)}</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {telegramSources.clusters?.length ? (
+        <div className="daily-intelligence-telegram-events">
+          <div className="daily-intelligence-telegram-events-title">
+            <div>
+              <span>DEDUPLICATED EVENTS</span>
+              <strong>중복 제거된 최신 사건</strong>
+            </div>
+            <small>상위 {telegramSources.clusters.length}건</small>
+          </div>
+          <div className="daily-intelligence-telegram-event-grid">
+            {telegramSources.clusters.map((cluster) => (
+              <article key={cluster.eventId}>
+                <header>
+                  <span>{eventTypeLabels[cluster.eventType] || cluster.eventType || "시장 관점"}</span>
+                  <strong>{cluster.postCount}개 글 통합</strong>
+                </header>
+                <h3>{cluster.title || "제목 없는 사건"}</h3>
+                <p>
+                  {cluster.channels.join(" · ") || "채널 미확인"}
+                  {cluster.latestPublishedAt ? ` · ${formatGeneratedAt(cluster.latestPublishedAt)}` : ""}
+                </p>
+                <div>
+                  {cluster.postUrls.map((url, index) => (
+                    <a key={url} href={url} target="_blank" rel="noreferrer">
+                      원문 {index + 1} <ArrowUpRight size={12} />
+                    </a>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="daily-intelligence-muted">
+          최근 수집 결과에 사건 클러스터가 없습니다. 후보 데이터 수집 후 드라이런 또는 사건 분류를 실행하세요.
+        </p>
+      )}
+
+      <div className="daily-intelligence-telegram-channel-title">
+        <strong>수집 대상 채널</strong>
+        <span>{telegramSources.enabledCount}개 활성</span>
+      </div>
+      <div className="daily-intelligence-telegram-channels">
+        {(telegramSources.channels || []).map((channel) => (
+          <a
+            key={channel.username}
+            href={`https://t.me/${channel.username}`}
+            target="_blank"
+            rel="noreferrer"
+            className={channel.enabled ? "" : "is-disabled"}
+          >
+            <Radio size={15} />
+            <span>
+              <strong>{channel.name}</strong>
+              <small>
+                @{channel.username} · {channel.category.replaceAll("_", " ")}
+              </small>
+            </span>
+            <em>우선순위 {channel.priority}</em>
+          </a>
+        ))}
+      </div>
+
+      <p className="daily-intelligence-panel-note">
+        텔레그램 글은 발견·관점 자료로만 수집합니다. 같은 사건은 하나로 묶고, 공식자료로 확인되기 전에는 독자용 사실로 승격하지 않습니다.
+      </p>
+    </section>
+  );
+}
+
+function formatResearchDate(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[1]}.${match[2]}.${match[3]}` : value;
+}
+
+function BrokerResearchMonitor({
+  brokerResearch,
+  history,
+  busy,
+  error,
+  onDateChange,
+}) {
+  const availableDates = history?.availableDates || [];
+  const selectedDate = history?.selectedDate || brokerResearch?.reportDate || "";
+  const selectedIndex = availableDates.indexOf(selectedDate);
+  const newerDate = selectedIndex > 0 ? availableDates[selectedIndex - 1] : "";
+  const olderDate =
+    selectedIndex >= 0 && selectedIndex < availableDates.length - 1
+      ? availableDates[selectedIndex + 1]
+      : "";
+  const dateControls = availableDates.length ? (
+    <div className="daily-intelligence-research-date-controls">
+      <button
+        type="button"
+        onClick={() => onDateChange(olderDate)}
+        disabled={!olderDate || busy}
+        aria-label="이전 날짜 리포트"
+        title="이전 날짜"
+      >
+        <ChevronLeft size={15} />
+      </button>
+      <label>
+        <span className="sr-only">애널리스트 리포트 날짜</span>
+        <select
+          value={selectedDate}
+          onChange={(event) => onDateChange(event.target.value)}
+          disabled={busy}
+          aria-label="애널리스트 리포트 날짜"
+        >
+          {availableDates.map((date) => (
+            <option key={date} value={date}>
+              {formatResearchDate(date)}
+              {date === history?.latestDate ? " · 최신" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+        type="button"
+        onClick={() => onDateChange(newerDate)}
+        disabled={!newerDate || busy}
+        aria-label="다음 날짜 리포트"
+        title="다음 날짜"
+      >
+        <ChevronRight size={15} />
+      </button>
+      {busy ? <LoaderCircle size={15} className="is-spinning" /> : null}
+    </div>
+  ) : null;
+
+  if (!brokerResearch) {
+    return (
+      <section
+        id="broker-research-results"
+        className="daily-intelligence-panel daily-intelligence-wide"
+      >
+        <div className="daily-intelligence-panel-title">
+          <div>
+            <span>ANALYST RESEARCH</span>
+            <h2>애널리스트 리포트</h2>
+          </div>
+          {dateControls || <CircleDashed size={20} />}
+        </div>
+        {error ? <p className="daily-intelligence-research-date-error">{error}</p> : null}
+        <p className="daily-intelligence-muted">
+          권한이 확인된 리포트가 아직 없습니다. Google Drive 또는 로컬 리서치 inbox에
+          리포트와 권한 메타데이터를 함께 넣으면 이곳에서 가공 결과를 확인할 수 있습니다.
+        </p>
+      </section>
+    );
+  }
+  const summary = brokerResearch.summary || {};
+  const stanceCounts = summary.stanceCounts || {};
+  return (
+    <section
+      id="broker-research-results"
+      className="daily-intelligence-panel daily-intelligence-broker daily-intelligence-wide"
+    >
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>ANALYST RESEARCH</span>
+          <h2>애널리스트 리포트 컨센서스</h2>
+        </div>
+        <div className="daily-intelligence-research-title-actions">
+          {dateControls}
+          <span className="daily-intelligence-count">{summary.selectedReportCount || 0}</span>
+        </div>
+      </div>
+      {error ? <p className="daily-intelligence-research-date-error">{error}</p> : null}
+
+      <div className="daily-intelligence-broker-summary">
+        <article><span>수집 리포트</span><strong>{summary.selectedReportCount || 0}</strong><small>{summary.publisherCount || 0}개 발행사</small></article>
+        <article><span>구조화 완료</span><strong>{summary.structuredReportCount || 0}</strong><small>{researchAnalysisStatusLabels[summary.analysisStatus] || summary.analysisStatus || "요약·논거·촉매·위험"}</small></article>
+        <article><span>긍정 / 중립</span><strong>{stanceCounts.positive || 0} / {stanceCounts.neutral || 0}</strong><small>리포트 관점 기준</small></article>
+        <article><span>명시적 의견 없음</span><strong>{stanceCounts.not_stated || 0}</strong><small>촉매·위험은 별도 평가</small></article>
+      </div>
+
+      {brokerResearch.consensus?.sectorAssessments?.length ? (
+        <div className="daily-intelligence-sector-assessments">
+          <div className="daily-intelligence-broker-subtitle">
+            <strong>섹터별 리서치 평가</strong>
+            <span>저자 의견과 구조화된 촉매·위험을 분리해 집계합니다.</span>
+          </div>
+          <div className="daily-intelligence-sector-assessment-grid">
+            {brokerResearch.consensus.sectorAssessments.map((item) => (
+              <article key={item.sector}>
+                <header>
+                  <div>
+                    <span>{item.reportCount}개 리포트</span>
+                    <h3>{item.sector}</h3>
+                  </div>
+                  <em className={`is-${item.signal}`}>
+                    {sectorSignalLabels[item.signal] || item.signal}
+                  </em>
+                </header>
+                {item.catalysts.length ? (
+                  <div className="is-catalyst">
+                    <strong>상승 촉매</strong>
+                    <p>{item.catalysts[0]}</p>
+                  </div>
+                ) : null}
+                {item.risks.length ? (
+                  <div className="is-risk">
+                    <strong>핵심 위험</strong>
+                    <p>{item.risks[0]}</p>
+                  </div>
+                ) : null}
+                {item.monitoringConditions.length ? (
+                  <small>확인 조건 · {item.monitoringConditions[0]}</small>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {brokerResearch.consensus?.disagreements?.length ? (
+        <div className="daily-intelligence-broker-disagreements">
+          <strong>의견이 갈리는 주제</strong>
+          {brokerResearch.consensus.disagreements.map((item) => (
+            <span key={item.topic}>
+              {item.topic} · {item.stances.map((stance) => researchStanceLabels[stance] || stance).join(" / ")} · {item.reportCount}건
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="daily-intelligence-broker-grid">
+        {(brokerResearch.reports || []).map((report) => (
+          <article key={report.reportId || `${report.publisher}-${report.title}`}>
+            <header>
+              <div>
+                <span>{report.publisher}{report.analyst ? ` · ${report.analyst}` : ""}</span>
+                <h3>{report.title}</h3>
+              </div>
+              <em className={`is-${report.stance}`}>
+                저자 의견 · {researchStanceLabels[report.stance] || report.stance}
+              </em>
+            </header>
+            <p>
+              {report.summary || "구조화 분석 대기 중 — 원문은 보관하되 화면에는 재배포하지 않습니다."}
+            </p>
+            {report.keyClaims.length ? (
+              <ul>{report.keyClaims.slice(0, 3).map((claim) => <li key={claim}>{claim}</li>)}</ul>
+            ) : null}
+            {report.catalysts.length || report.risks.length || report.monitoringConditions.length ? (
+              <div className="daily-intelligence-broker-evaluation">
+                {report.catalysts.length ? (
+                  <section className="is-catalyst">
+                    <strong>상승 촉매</strong>
+                    <ul>{report.catalysts.slice(0, 2).map((item) => <li key={item}>{item}</li>)}</ul>
+                  </section>
+                ) : null}
+                {report.risks.length ? (
+                  <section className="is-risk">
+                    <strong>핵심 위험</strong>
+                    <ul>{report.risks.slice(0, 2).map((item) => <li key={item}>{item}</li>)}</ul>
+                  </section>
+                ) : null}
+                {report.monitoringConditions.length ? (
+                  <section className="is-monitor">
+                    <strong>확인 조건</strong>
+                    <ul>{report.monitoringConditions.slice(0, 2).map((item) => <li key={item}>{item}</li>)}</ul>
+                  </section>
+                ) : null}
+              </div>
+            ) : null}
+            {report.linkedTelegramEvents.length ? (
+              <div className="daily-intelligence-broker-telegram">
+                <strong>텔레그램 교차 연결</strong>
+                {report.linkedTelegramEvents.map((event) => (
+                  <a key={event.eventId} href={event.url} target="_blank" rel="noreferrer">
+                    {event.channel || "Telegram"} · {event.title} <ArrowUpRight size={11} />
+                  </a>
+                ))}
+              </div>
+            ) : null}
+            <footer>
+              <span>{[...report.tickers, ...report.sectors].slice(0, 5).join(" · ") || report.reportType}</span>
+              {report.source.url ? (
+                <a href={report.source.url} target="_blank" rel="noreferrer">
+                  원문 링크 <ArrowUpRight size={12} />
+                </a>
+              ) : <small>{report.source.reference}</small>}
+            </footer>
+          </article>
+        ))}
+      </div>
+
+      <p className="daily-intelligence-panel-note">
+        원문·표·이미지는 재배포하지 않습니다. 운영자가 분석 권한을 확인한 자료만 내부 가공하며,
+        공개 리포트에는 요약과 출처 링크만 사용합니다.
+      </p>
+    </section>
+  );
+}
+
+function BrokerResearchApprovalQueue({
+  approvalQueue,
+  busy,
+  error,
+  onReload,
+  onDecide,
+}) {
+  const items = approvalQueue?.items || [];
+  const pendingItems = items.filter((item) => item.state === "pending");
+  const decidedItems = items.filter((item) => item.state === "approved" || item.state === "excluded");
+  const counts = approvalQueue?.counts || {};
+  return (
+    <section
+      id="broker-research-analysis"
+      className="daily-intelligence-panel daily-intelligence-approval-queue daily-intelligence-wide"
+    >
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>DRIVE APPROVAL QUEUE</span>
+          <h2>애널리스트 PDF 승인 대기</h2>
+        </div>
+        <div className="daily-intelligence-approval-title-actions">
+          <span className="daily-intelligence-count">{counts.pending || 0}</span>
+          <button type="button" onClick={onReload} disabled={busy} aria-label="승인 대기 새로고침">
+            <RefreshCw size={15} className={busy ? "is-spinning" : ""} />
+          </button>
+        </div>
+      </div>
+
+      {error ? <p className="daily-intelligence-approval-error">{error}</p> : null}
+      {busy && !approvalQueue ? (
+        <p className="daily-intelligence-muted">Drive 승인 대기 목록을 불러오는 중입니다.</p>
+      ) : pendingItems.length ? (
+        <div className="daily-intelligence-approval-list">
+          {pendingItems.map((item) => (
+            <article key={item.fileId}>
+              <div>
+                <span>{item.inferred.publisher} · {item.inferred.published_at.slice(0, 10)}</span>
+                <h3>{item.inferred.title}</h3>
+                <small>{item.fileName}</small>
+              </div>
+              <div className="daily-intelligence-approval-actions">
+                <a href={item.driveUrl} target="_blank" rel="noreferrer">
+                  원문 <ArrowUpRight size={12} />
+                </a>
+                <button
+                  type="button"
+                  className="is-approve"
+                  disabled={busy}
+                  onClick={() => onDecide(item.fileId, "approved")}
+                >
+                  <CheckCircle2 size={14} /> 분석 승인
+                </button>
+                <button
+                  type="button"
+                  className="is-exclude"
+                  disabled={busy}
+                  onClick={() => onDecide(item.fileId, "excluded")}
+                >
+                  <X size={14} /> 제외
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="daily-intelligence-muted">승인 대기 중인 Drive 리포트가 없습니다.</p>
+      )}
+
+      <div className="daily-intelligence-approval-status">
+        <span>메타파일 확인 {counts.ready || 0}</span>
+        <span>화면 승인 {counts.approved || 0}</span>
+        <span>제외 {counts.excluded || 0}</span>
+        {decidedItems.length ? <small>결정은 같은 파일에 대해 다시 변경할 수 있습니다.</small> : null}
+      </div>
+      <p className="daily-intelligence-panel-note">
+        분석 승인은 내부 요약·분석만 허용하며 원문 재배포는 허용하지 않습니다.
+        승인 후 <strong>공식 근거 검증 실행</strong>을 누르면 승인 자료를 최대 25건까지 5건 단위로
+        분석하며, 이미 분석한 PDF는 캐시에서 재사용합니다.
+      </p>
+    </section>
+  );
+}
+
+function ResearchIntelligenceShortcuts({ telegramSources, brokerResearch }) {
+  const telegramPosts = telegramSources?.deduplication?.rawPostCount || 0;
+  const telegramClusters = telegramSources?.deduplication?.eventClusterCount || 0;
+  const brokerReports = brokerResearch?.summary?.selectedReportCount || 0;
+  const brokerStructured = brokerResearch?.summary?.structuredReportCount || 0;
+  return (
+    <nav className="daily-intelligence-research-shortcuts" aria-label="리서치 분석 바로가기">
+      <a href="#broker-research-analysis">
+        <FileText size={19} />
+        <span>
+          <small>PDF RESEARCH</small>
+          <strong>증권사 PDF 리포트 분석</strong>
+          <em>{brokerReports}건 수집 · {brokerStructured}건 구조화</em>
+        </span>
+      </a>
+      <a href="#telegram-intelligence">
+        <Radio size={19} />
+        <span>
+          <small>TELEGRAM INTELLIGENCE</small>
+          <strong>텔레그램 사건 분석</strong>
+          <em>{telegramPosts}개 글 · {telegramClusters}개 사건</em>
+        </span>
+      </a>
+    </nav>
+  );
+}
+
 export default function DailyIntelligenceView() {
-  const { snapshot, busy, error, reload } = useDailyIntelligenceController();
+  const {
+    snapshot,
+    busy,
+    error,
+    reload,
+    brokerResearchBusy,
+    brokerResearchError,
+    selectBrokerResearchDate,
+    jobStatus,
+    jobBusy,
+    jobError,
+    pendingPlan,
+    requestJobPlan,
+    executePendingPlan,
+    cancelPendingPlan,
+  } = useDailyIntelligenceController();
   const report = snapshot?.report;
   const pipeline = snapshot?.pipeline;
   const scoreboard = snapshot?.scoreboard;
   const marketInternals = snapshot?.marketInternals;
   const sectorMetrics = snapshot?.sectorMetrics;
   const stockCandidates = snapshot?.stockCandidates;
+  const telegramSources = snapshot?.telegramSources;
+  const brokerResearch = snapshot?.brokerResearch;
+  const brokerResearchHistory = snapshot?.brokerResearchHistory;
+  const [brokerApprovalQueue, setBrokerApprovalQueue] = React.useState(null);
+  const [brokerApprovalBusy, setBrokerApprovalBusy] = React.useState(false);
+  const [brokerApprovalError, setBrokerApprovalError] = React.useState("");
+
+  const loadBrokerApprovalQueue = React.useCallback(async () => {
+    setBrokerApprovalBusy(true);
+    setBrokerApprovalError("");
+    try {
+      const response = await fetch("/api/pb-daily-intelligence/broker-approvals", {
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setBrokerApprovalQueue(payload);
+    } catch (approvalError) {
+      setBrokerApprovalError(approvalError.message || "승인 대기 목록을 불러오지 못했습니다.");
+    } finally {
+      setBrokerApprovalBusy(false);
+    }
+  }, []);
+
+  const decideBrokerReport = React.useCallback(async (fileId, decision) => {
+    setBrokerApprovalBusy(true);
+    setBrokerApprovalError("");
+    try {
+      const response = await fetch("/api/pb-daily-intelligence/broker-approvals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId, decision }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setBrokerApprovalQueue(payload);
+    } catch (approvalError) {
+      setBrokerApprovalError(approvalError.message || "승인 결정을 저장하지 못했습니다.");
+    } finally {
+      setBrokerApprovalBusy(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadBrokerApprovalQueue();
+  }, [loadBrokerApprovalQueue]);
 
   if (busy && !snapshot) {
     return (
@@ -387,7 +1323,49 @@ export default function DailyIntelligenceView() {
         />
       </section>
 
+      <ResearchIntelligenceShortcuts
+        telegramSources={telegramSources}
+        brokerResearch={brokerResearch}
+      />
+
       <main className="daily-intelligence-grid">
+        <BrokerResearchApprovalQueue
+          approvalQueue={brokerApprovalQueue}
+          busy={brokerApprovalBusy}
+          error={brokerApprovalError}
+          onReload={loadBrokerApprovalQueue}
+          onDecide={decideBrokerReport}
+        />
+
+        <BrokerResearchMonitor
+          brokerResearch={brokerResearch}
+          history={brokerResearchHistory}
+          busy={brokerResearchBusy}
+          error={brokerResearchError}
+          onDateChange={selectBrokerResearchDate}
+        />
+
+        <TelegramSourceMonitor
+          telegramSources={telegramSources}
+          jobStatus={jobStatus}
+          jobBusy={jobBusy}
+          jobError={jobError}
+          pendingPlan={pendingPlan}
+          onPlan={requestJobPlan}
+          onExecute={executePendingPlan}
+          onCancel={cancelPendingPlan}
+        />
+
+        <OperationsPanel
+          jobStatus={jobStatus}
+          jobBusy={jobBusy}
+          jobError={jobError}
+          pendingPlan={pendingPlan}
+          onPlan={requestJobPlan}
+          onExecute={executePendingPlan}
+          onCancel={cancelPendingPlan}
+        />
+
         <section className="daily-intelligence-panel daily-intelligence-wide">
           <div className="daily-intelligence-panel-title">
             <div>

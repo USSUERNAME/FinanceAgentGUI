@@ -3,6 +3,7 @@ import {
   fetchNewsFeedItems,
   fetchNewsFeedSettings,
   fetchNewsFeedStatus,
+  generateNewsFeedDailyDigest,
   markNewsFeedOpened,
   patchNewsFeedSettings,
   patchNewsFeedViewState,
@@ -18,6 +19,7 @@ export function useNewsFeedController({ activeView }) {
   const [newsFeedItems, setNewsFeedItems] = useState([]);
   const [newsFeedBusy, setNewsFeedBusy] = useState(false);
   const [newsFeedRefreshBusy, setNewsFeedRefreshBusy] = useState(false);
+  const [newsFeedDailyDigestBusy, setNewsFeedDailyDigestBusy] = useState(false);
   const [newsFeedLoadingMore, setNewsFeedLoadingMore] = useState(false);
   const [newsFeedHasMore, setNewsFeedHasMore] = useState(false);
   const [newsFeedError, setNewsFeedError] = useState("");
@@ -176,6 +178,37 @@ export function useNewsFeedController({ activeView }) {
     }
   }, []);
 
+  const generateDailyDigest = useCallback(async () => {
+    setNewsFeedDailyDigestBusy(true);
+    setNewsFeedError("");
+    setNewsFeedStatus((current) => ({
+      ...(current || {}),
+      dailyDigest: {
+        ...(current?.dailyDigest || {}),
+        inFlight: true,
+      },
+    }));
+    try {
+      const payload = await generateNewsFeedDailyDigest();
+      setNewsFeedStatus((current) => ({
+        ...(current || {}),
+        dailyDigest: payload.dailyDigest || null,
+      }));
+    } catch (error) {
+      setNewsFeedError(error.message);
+      setNewsFeedStatus((current) => ({
+        ...(current || {}),
+        dailyDigest: {
+          ...(current?.dailyDigest || {}),
+          inFlight: false,
+          error: error.message,
+        },
+      }));
+    } finally {
+      setNewsFeedDailyDigestBusy(false);
+    }
+  }, []);
+
   const updateNewsFeedMarketSummaryCollapsed = useCallback(async (collapsed) => {
     const nextCollapsed = Boolean(collapsed);
     setNewsFeedStatus((current) => ({
@@ -284,6 +317,7 @@ export function useNewsFeedController({ activeView }) {
     newsFeedItems,
     newsFeedBusy,
     newsFeedRefreshBusy,
+    newsFeedDailyDigestBusy,
     newsFeedLoadingMore,
     newsFeedHasMore,
     newsFeedError,
@@ -297,6 +331,7 @@ export function useNewsFeedController({ activeView }) {
     toggleNewsFeedSource,
     updateNewsFeedPollInterval,
     refreshNewsFeed,
+    generateDailyDigest,
     updateNewsFeedMarketSummaryCollapsed,
     handleNewsFeedScroll,
   };

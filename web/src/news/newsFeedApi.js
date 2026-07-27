@@ -41,6 +41,18 @@ export function fetchNewsFeedStatus(fetchImpl) {
   return requestNewsFeed("/api/news-feed/status", {}, fetchImpl);
 }
 
+export function generateNewsFeedDailyDigest(fetchImpl) {
+  return requestNewsFeed(
+    "/api/news-feed/daily-digest",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: true }),
+    },
+    fetchImpl
+  );
+}
+
 export function markNewsFeedOpened(fetchImpl) {
   return requestNewsFeed(
     "/api/news-feed/read-state",

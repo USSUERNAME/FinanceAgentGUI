@@ -302,15 +302,87 @@ function tryRun(command, args, options = {}) {
   };
 }
 
-function findCodexPath() {
+export function resolveCodexCommandPath({
+  platform = process.platform,
+  env = process.env,
+  execFile = execFileSync,
+  pathExists = existsSync,
+} = {}) {
+  const configuredPath = String(env?.CODEX_CLI_PATH || "").trim();
+  if (configuredPath) return configuredPath;
+
+  if (platform === "win32") {
+    const npmCodexEntrypoint = String(env?.APPDATA || "").trim()
+      ? join(
+          env.APPDATA,
+          "npm",
+          "node_modules",
+          "@openai",
+          "codex",
+          "bin",
+          "codex.js",
+        )
+      : "";
+    if (npmCodexEntrypoint && pathExists(npmCodexEntrypoint)) {
+      return npmCodexEntrypoint;
+    }
+  }
+
   try {
-    return execFileSync("sh", ["-lc", "command -v codex"], {
-      encoding: "utf8",
-      timeout: 3000,
-    }).trim();
+    const output =
+      platform === "win32"
+        ? execFile("where.exe", ["codex"], {
+            encoding: "utf8",
+            timeout: 3000,
+          })
+        : execFile("sh", ["-lc", "command -v codex"], {
+            encoding: "utf8",
+            timeout: 3000,
+          });
+    const candidates = String(output || "")
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (platform === "win32") {
+      return candidates.find((item) => /\.exe$/i.test(item)) || candidates[0] || "";
+    }
+    return candidates[0] || "";
   } catch {
     return "";
   }
+}
+
+export function codexCommandSpec(
+  path,
+  { platform = process.platform, nodePath = process.execPath } = {},
+) {
+  const normalizedPath = String(path || "").trim();
+  if (platform === "win32" && /\.m?js$/i.test(normalizedPath)) {
+    return {
+      command: nodePath,
+      argsPrefix: [normalizedPath],
+    };
+  }
+  return {
+    command: normalizedPath,
+    argsPrefix: [],
+  };
+}
+
+export function codexCommandInvocation(path, args = [], options = {}) {
+  const spec = codexCommandSpec(path, options);
+  return {
+    command: spec.command,
+    args: [...spec.argsPrefix, ...args],
+  };
+}
+
+function findCodexPath() {
+  return resolveCodexCommandPath({
+    platform: process.platform,
+    env: process.env,
+    execFile: execFileSync,
+  });
 }
 
 function findPythonCommand() {
@@ -3595,7 +3667,8 @@ export function runCodexChat(payload = {}) {
     let settled = false;
     const startedAt = Date.now();
     const requestTimeoutMs = chatTimeoutMsForPayload(payload);
-    const child = spawnObservedLlm(path, args, {
+    const invocation = codexCommandInvocation(path, args);
+    const child = spawnObservedLlm(invocation.command, invocation.args, {
       cwd: WEB_ROOT,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -4246,7 +4319,8 @@ export function streamCodexChat(payload = {}, res) {
 
   writeStreamEvent(res, "started", { model, reasoning, approval });
 
-  child = spawnObservedLlm(path, ["app-server", "--stdio"], {
+  const invocation = codexCommandInvocation(path, ["app-server", "--stdio"]);
+  child = spawnObservedLlm(invocation.command, invocation.args, {
     cwd: runtimeCwd,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"],
@@ -4707,9 +4781,13 @@ function makeModelOption(model, effort) {
   };
 }
 
-function readModelGroups(config) {
+function readModelGroups(config, commandSpec = { command: "codex", argsPrefix: [] }) {
   try {
-    const raw = run("codex", ["debug", "models"], { timeout: 20000 });
+    const raw = run(
+      commandSpec.command,
+      [...commandSpec.argsPrefix, "debug", "models"],
+      { timeout: 20000 },
+    );
     const catalog = JSON.parse(raw);
     const models = Array.isArray(catalog.models) ? catalog.models : [];
     return models
@@ -5038,11 +5116,20 @@ export function getCodexOptions() {
     };
   }
 
-  const version = run("codex", ["--version"], { timeout: 5000 });
-  const helpText = run("codex", ["--help"], { timeout: 5000 });
+  const commandSpec = codexCommandSpec(path);
+  const version = run(
+    commandSpec.command,
+    [...commandSpec.argsPrefix, "--version"],
+    { timeout: 5000 },
+  );
+  const helpText = run(
+    commandSpec.command,
+    [...commandSpec.argsPrefix, "--help"],
+    { timeout: 5000 },
+  );
   const approvalOptions = buildApprovalOptions(helpText);
   const sandboxOptions = buildSandboxOptions(helpText);
-  const modelGroups = readModelGroups(config);
+  const modelGroups = readModelGroups(config, commandSpec);
   const modelOptions = flattenModelOptions(modelGroups);
   const selected = selectedAgentOptions({
     agentSettings,
@@ -5060,6 +5147,8 @@ export function getCodexOptions() {
   const codex = {
     available: true,
     path,
+    command: commandSpec.command,
+    argsPrefix: commandSpec.argsPrefix,
     version,
     config,
     probedAt: new Date().toISOString(),

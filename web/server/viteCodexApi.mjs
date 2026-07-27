@@ -8,6 +8,9 @@ import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mj
 import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
 import { handleMemoryEndpoint, startSharedMemoryMaintenanceScheduler } from "./memoryApi.mjs";
 import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
+import { handlePbBrokerResearchApprovalsEndpoint } from "./pbBrokerResearchApprovals.mjs";
+import { handlePbDailyIntelligenceEndpoint } from "./pbDailyIntelligenceApi.mjs";
+import { handlePbDailyIntelligenceJobsEndpoint } from "./pbDailyIntelligenceJobs.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
 import { handleTossInvestEndpoint } from "./tossInvestApi.mjs";
@@ -84,6 +87,10 @@ export function codexApiPlugin() {
 
       server.middlewares.use("/api/news-feed/status", async (req, res) => {
         await handleNewsFeedEndpoint("status", req, res);
+      });
+
+      server.middlewares.use("/api/news-feed/daily-digest", async (req, res) => {
+        await handleNewsFeedEndpoint("daily-digest", req, res);
       });
 
       server.middlewares.use("/api/news-feed/read-state", async (req, res) => {
@@ -321,6 +328,18 @@ export function codexApiPlugin() {
         await handleReportsEndpoint("list", req, res);
       });
 
+      server.middlewares.use("/api/pb-daily-intelligence/jobs", async (req, res) => {
+        await handlePbDailyIntelligenceJobsEndpoint(req, res);
+      });
+
+      server.middlewares.use("/api/pb-daily-intelligence/broker-approvals", async (req, res) => {
+        await handlePbBrokerResearchApprovalsEndpoint(req, res);
+      });
+
+      server.middlewares.use("/api/pb-daily-intelligence", async (req, res) => {
+        await handlePbDailyIntelligenceEndpoint(req, res);
+      });
+
       server.middlewares.use("/api/magazine/assets", async (req, res) => {
         await handleMagazineEndpoint("assets", req, res);
       });
@@ -402,6 +421,10 @@ export function codexApiPlugin() {
           const payload = await readJsonBody(req);
           streamCodexChat(payload, res);
         } catch (error) {
+          if (res.headersSent) {
+            if (!res.writableEnded) res.end();
+            return;
+          }
           sendJson(res, { error: error.message }, 500);
         }
       });

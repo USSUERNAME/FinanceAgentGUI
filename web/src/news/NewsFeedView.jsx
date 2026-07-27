@@ -52,6 +52,15 @@ function displayMarketSummaryText(value) {
     .trim();
 }
 
+function dailyDigestVerificationLabel(status) {
+  return status === "multi_source" ? "복수 피드 포착" : "단일 속보·추가 확인 필요";
+}
+
+function dailyDigestWindowLabel(digest) {
+  if (!digest?.windowStartAt || !digest?.windowEndAt) return "전날 07:30 ~ 오늘 07:30 KST";
+  return `${formatDateTime(digest.windowStartAt)} ~ ${formatDateTime(digest.windowEndAt)} KST`;
+}
+
 function newsFeedBlobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -359,8 +368,11 @@ export default function NewsFeedView({
   hasMore,
   translationModelLabel,
   marketSummary,
+  dailyDigest,
+  dailyDigestBusy = false,
   marketSummaryCollapsed = true,
   onMarketSummaryCollapsedChange,
+  onGenerateDailyDigest,
   onRefresh,
 }) {
   const [copyState, setCopyState] = useState({ itemId: "", status: "idle", error: "" });
@@ -400,6 +412,7 @@ export default function NewsFeedView({
           : summaryCopyStatus === "error"
             ? "복사 실패"
             : "복사";
+  const digestInFlight = Boolean(dailyDigestBusy || dailyDigest?.inFlight);
 
   useEffect(() => {
     return () => {
@@ -581,6 +594,96 @@ export default function NewsFeedView({
             ) : null}
           </section>
         ) : null}
+
+        <section className="news-feed-daily-digest" aria-label="전일 뉴스 요약">
+          <div className="news-feed-daily-digest-header">
+            <div>
+              <span className="news-feed-daily-digest-eyebrow">DAILY DIGEST</span>
+              <h2>전일 뉴스 요약</h2>
+              <p>{dailyDigestWindowLabel(dailyDigest)}</p>
+            </div>
+            <div className="news-feed-daily-digest-actions">
+              {dailyDigest?.available ? (
+                <span>
+                  {formatNewsFeedCount(dailyDigest.itemCount)}건 → 사건{" "}
+                  {formatNewsFeedCount(dailyDigest.events?.length || 0)}건
+                </span>
+              ) : null}
+              <button
+                className={["board-refresh-button", digestInFlight ? "is-loading" : ""]
+                  .filter(Boolean)
+                  .join(" ")}
+                type="button"
+                onClick={onGenerateDailyDigest}
+                disabled={digestInFlight}
+              >
+                {digestInFlight ? (
+                  <LoaderCircle size={15} strokeWidth={2.2} />
+                ) : (
+                  <RefreshCw size={15} strokeWidth={2.2} />
+                )}
+                <span>{digestInFlight ? "요약 생성 중" : dailyDigest?.available ? "다시 생성" : "지금 생성"}</span>
+              </button>
+            </div>
+          </div>
+
+          {dailyDigest?.status === "failed" || dailyDigest?.error ? (
+            <div className="news-feed-daily-digest-error">
+              <AlertTriangle size={15} strokeWidth={2.2} />
+              <span>{dailyDigest.error || "전일 뉴스 요약 생성에 실패했습니다."}</span>
+            </div>
+          ) : null}
+
+          {dailyDigest?.summaryKo ? (
+            <p className="news-feed-daily-digest-summary">{dailyDigest.summaryKo}</p>
+          ) : !digestInFlight ? (
+            <p className="news-feed-daily-digest-empty">
+              전일 수집분을 사건별로 합쳐 최대 8개의 핵심 뉴스로 정리합니다.
+            </p>
+          ) : null}
+
+          {Array.isArray(dailyDigest?.events) && dailyDigest.events.length ? (
+            <div className="news-feed-daily-digest-events">
+              {dailyDigest.events.map((event, index) => (
+                <article key={`${dailyDigest.windowKey || "digest"}-${index}`}>
+                  <div className="news-feed-daily-digest-event-title">
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <h3>{event.titleKo}</h3>
+                  </div>
+                  <p>{event.summaryKo}</p>
+                  <p className="news-feed-daily-digest-impact">
+                    <strong>시장 의미</strong>
+                    {event.whyItMattersKo}
+                  </p>
+                  <div className="news-feed-daily-digest-event-meta">
+                    <span>{dailyDigestVerificationLabel(event.verificationStatus)}</span>
+                    {event.relatedAssets?.length ? <span>{event.relatedAssets.join(" · ")}</span> : null}
+                    {event.itemCount ? <span>통합 {formatNewsFeedCount(event.itemCount)}건</span> : null}
+                  </div>
+                  {event.sourceUrls?.length ? (
+                    <div className="news-feed-daily-digest-links">
+                      {event.sourceUrls.map((url, sourceIndex) => (
+                        <a href={url} target="_blank" rel="noreferrer" key={url}>
+                          원문 {sourceIndex + 1}
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          ) : null}
+
+          <footer>
+            <span>
+              {dailyDigest?.generatedAt
+                ? `생성 ${formatDateTime(dailyDigest.generatedAt)}`
+                : `다음 자동 생성 ${formatDateTime(dailyDigest?.nextRunAt)}`}
+            </span>
+            {dailyDigest?.model ? <span>{dailyDigest.model}</span> : null}
+            <span>속보 피드는 후보 탐지용이며 공식 원문 확인을 대신하지 않습니다.</span>
+          </footer>
+        </section>
 
         <div className="news-feed-list" aria-label="수집된 News Feed 항목">
           {items.map((item) => {

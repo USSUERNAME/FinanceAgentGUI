@@ -15,8 +15,40 @@ $env:PB_DAILY_INTELLIGENCE_DIR = "C:\path\to\pb-daily-market-brief\workspace"
 npm --prefix web run dev
 ```
 
-The external folder is read-only. FinanceAgentGUI does not modify, delete, or
-publish its files.
+The artifact folder remains read-only. FinanceAgentGUI does not modify or
+delete files through the snapshot endpoint.
+
+## Optional job runner
+
+To enable the operator controls, also configure the external pipeline root and
+its Python executable:
+
+```powershell
+$env:PB_DAILY_INTELLIGENCE_ENGINE_DIR = "C:\path\to\pb-daily-market-brief"
+$env:PB_DAILY_INTELLIGENCE_PYTHON = "C:\path\to\python.exe"
+```
+
+When installing the durable local service, set these three variables in the
+same PowerShell window. If the background service cannot discover Codex from
+`PATH`, also set `CODEX_CLI_PATH` to the local Codex executable. The service
+persists only these allowlisted executable and connection paths in its OS
+service definition. API keys, Telegram sessions, tokens, and the external
+engine's `.env` contents are never copied into the FinanceAgentGUI service.
+
+The GUI exposes only three fixed actions:
+
+- `collect`: runs `collect_all.py`
+- `dry_run`: runs `run_daily_report.py --dry-run`
+- `verification_dry_run`: runs `run_daily_report.py --verification-dry-run`;
+  it fetches allowlisted official evidence and performs structured event
+  analysis while blocking Notion publication and Telegram delivery
+- `publish`: runs `run_daily_report.py`
+
+The browser cannot submit a command, script path, argument list, or working
+directory. Every action first requests a short-lived server confirmation plan.
+The plan displays the executable preview, local/external effect, and target.
+Only the plan token can start the allowlisted action. One job may run at a
+time, logs are bounded and redacted, and there is no process-kill action.
 
 ## Expected artifacts
 
@@ -60,6 +92,9 @@ the stricter reader-report publication gate.
 
 - No external absolute path is shown in the browser response.
 - Missing or malformed artifacts fail closed and remain unpublished.
-- The connection is read-only.
-- Notion and Telegram publication continue to belong to the external pipeline
-  until an approved GUI publishing action is implemented.
+- Snapshot reads remain read-only.
+- Local writes and Notion/Telegram publication require the separate configured
+  job runner plus the explicit plan-and-confirm flow.
+- `dry_run` and `verification_dry_run` never publish to Notion or Telegram;
+  `publish` uses the external
+  pipeline's existing credentials, quality gates, and destinations.

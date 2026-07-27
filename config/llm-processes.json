@@ -25,6 +25,12 @@
       "launcher": "spawnObservedLlm/runAntigravityGenerate"
     },
     {
+      "id": "news-feed-daily-digest",
+      "providers": ["codex-cli", "antigravity-cli"],
+      "entrypoint": "web/server/newsFeedApi.mjs",
+      "launcher": "spawnObservedLlm/runAntigravityGenerate"
+    },
+    {
       "id": "economic-calendar-translation",
       "providers": ["codex-cli", "antigravity-cli"],
       "entrypoint": "web/server/economicCalendarApi.mjs",

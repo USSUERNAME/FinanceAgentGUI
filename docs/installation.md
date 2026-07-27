@@ -80,6 +80,11 @@ This command uses the native per-user service manager for the current OS:
 | Linux | systemd user service | `~/.config/systemd/user/finance-agent-gui-devserver.service` |
 | Windows | Task Scheduler | `FinanceAgentGUI Dev Server` scheduled task |
 
+On Windows, some managed accounts deny Scheduled Task registration. In that
+case the installer falls back to the current user's
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry and starts the same
+hidden PowerShell runner. This fallback does not require administrator rights.
+
 The service still runs the app from this project folder and writes runtime logs
 under `logs/`:
 
@@ -231,6 +236,9 @@ Shared UI/runtime helpers should stay outside `App.jsx` when multiple screens ne
 Local user configuration should live under `config` or `data`.
 
 Common environment variables:
+
+- `CODEX_CLI_PATH`: optional absolute Codex CLI executable path for a durable
+  background service whose `PATH` does not include the desktop Codex install.
 
 - `FINANCE_AGENT_GUI_HOST`: local bind host, default `127.0.0.1`
 - `FINANCE_AGENT_GUI_PORT` or `PORT`: local server port

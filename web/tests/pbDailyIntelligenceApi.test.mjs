@@ -97,6 +97,58 @@ test("PB Daily Intelligence separates verified reader content from review queue"
       collection_status: "partial_coverage",
       coverage: { available_ticker_count: 3, required_ticker_count: 11, missing_tickers: ["XLY"] },
       market_structure: { classification: "insufficient_data", reason: "partial" },
+      constituent_breadth: {
+        schema_version: "us_constituent_breadth.v1",
+        collection_status: "ready",
+        as_of: "2026-07-22",
+        universe: { membership_scope: "fund_holdings_proxy" },
+        coverage: { daily_price_pct: 96.4 },
+        breadth: {
+          advance_decline: { advance_pct: 61.2, decline_pct: 38.0, net_advances: 116 },
+          volume: { up_volume_pct: 58.3 },
+          moving_averages: {
+            "20d": { above_pct: 64.0 },
+            "50d": { above_pct: 59.0 },
+            "200d": { above_pct: 70.0 },
+          },
+          highs_lows_52w: { new_highs: 24, new_lows: 5 },
+        },
+        sector_breadth: {
+          collection_status: "partial",
+          coverage: {
+            required_sector_count: 11,
+            available_sector_count: 1,
+            ready_sector_count: 1,
+          },
+          sectors: [
+            {
+              sector_ticker: "XLE",
+              sector_name: "Energy",
+              collection_status: "ready",
+              membership_as_of: "2026-07-22",
+              coverage: { daily_price_pct: 100 },
+              breadth: {
+                advance_decline: { advance_pct: 68.2 },
+                volume: { up_volume_pct: 72.4 },
+                moving_averages: {
+                  "50d": { above_pct: 71.0 },
+                  "200d": { above_pct: 64.0 },
+                },
+                highs_lows_52w: { new_highs: 4, new_lows: 0 },
+              },
+            },
+          ],
+        },
+      },
+      style_pairs: [
+        {
+          pair_id: "growth_vs_value",
+          first_ticker: "IWF",
+          second_ticker: "IWD",
+          five_day_leader: "IWF",
+          relative_returns_pct_point: { "1d": 0.2, "5d": 1.1, "20d": 2.4 },
+        },
+      ],
       sector_leadership: {
         "5d": {
           all_sectors: [
@@ -161,6 +213,12 @@ test("PB Daily Intelligence separates verified reader content from review queue"
   assert.equal(snapshot.pipeline.reviewQueue[0].priorityScore, 42);
   assert.equal(snapshot.scoreboard.cards[0].label, "RSP/SPY");
   assert.equal(snapshot.marketInternals.sectors["5d"][0].ticker, "XLE");
+  assert.equal(snapshot.marketInternals.constituentBreadth.advancePct, 61.2);
+  assert.equal(snapshot.marketInternals.constituentBreadth.above200dPct, 70);
+  assert.equal(snapshot.marketInternals.sectorBreadth.readyCount, 1);
+  assert.equal(snapshot.marketInternals.sectorBreadth.sectors[0].advancePct, 68.2);
+  assert.equal(snapshot.marketInternals.stylePairs[0].relative1d, 0.2);
+  assert.equal(snapshot.marketInternals.stylePairs[0].relative20d, 2.4);
   assert.equal(snapshot.sectorMetrics.metrics[0].score, 89.4);
   assert.equal(snapshot.stockCandidates.candidates[0].ticker, "NVDA");
 });
@@ -179,4 +237,307 @@ test("PB Daily Intelligence selects the newest valid reader artifact", async () 
   });
   assert.equal(snapshot.report.title, "Latest");
   assert.equal(snapshot.connection.readerDate, "2026-07-24");
+});
+
+test("PB Daily Intelligence reports Telegram readiness and event consolidation without exposing secrets", async () => {
+  const reportDate = "2026-07-24";
+  await writeJson(
+    join(tempRoot, "v2_reader_reports", reportDate, "reader_report.json"),
+    { schema_version: "v2_reader_report.v1", report_date: reportDate, title: "Telegram monitor" }
+  );
+  await writeJson(
+    join(tempRoot, "telegram_channels.json"),
+    {
+      schema_version: "telegram_channel_registry.v1",
+      collection_policy: {},
+      channels: [
+        {
+          username: "pb_channel_one",
+          name: "PB 채널 1",
+          category: "market_commentary",
+          origin: "user_supplied",
+          priority: 1,
+          enabled: true,
+          publication_policy: "internal_summary_with_attribution",
+        },
+        {
+          username: "pb_channel_two",
+          name: "PB 채널 2",
+          category: "broker_research",
+          origin: "user_supplied",
+          priority: 2,
+          enabled: true,
+          publication_policy: "link_only_bounded_summary",
+        },
+      ],
+    }
+  );
+  await writeFile(
+    join(tempRoot, ".env"),
+    [
+      "TELEGRAM_API_ID=12345",
+      "TELEGRAM_API_HASH=secret-hash",
+      "TELEGRAM_SESSION_STRING=secret-session",
+    ].join("\n"),
+    "utf8"
+  );
+  await writeJson(
+    join(tempRoot, "source_status", reportDate, "source_status_090000.json"),
+    {
+      report_date: reportDate,
+      sources: [{ source_id: "telegram_channels", status: "ok", item_count: 3 }],
+    }
+  );
+  await writeJson(
+    join(tempRoot, "triaged", reportDate, "triaged_inbox.json"),
+    [
+      {
+        id: "tg-1",
+        title: "같은 시장 사건 첫 관점",
+        url: "https://t.me/pb_channel_one/1",
+        published_at: "2026-07-24T01:00:00Z",
+        source_id: "telegram_pb_channel_one",
+        source_type: "telegram_commentary",
+        telegram: { channel_username: "pb_channel_one", channel_name: "PB 채널 1" },
+        event_cluster: { event_id: "event-shared", event_type: "macro_policy" },
+      },
+      {
+        id: "tg-2",
+        title: "같은 시장 사건 두 번째 관점",
+        url: "https://t.me/pb_channel_two/2",
+        published_at: "2026-07-24T02:00:00Z",
+        source_id: "telegram_pb_channel_two",
+        source_type: "telegram_commentary",
+        telegram: { channel_username: "pb_channel_two", channel_name: "PB 채널 2" },
+        event_cluster: { event_id: "event-shared", event_type: "macro_policy" },
+      },
+      {
+        id: "tg-3",
+        title: "별도 시장 사건",
+        url: "https://t.me/pb_channel_one/3",
+        published_at: "2026-07-24T03:00:00Z",
+        source_id: "telegram_pb_channel_one",
+        source_type: "telegram_commentary",
+        telegram: { channel_username: "pb_channel_one", channel_name: "PB 채널 1" },
+        event_cluster: { event_id: "event-other" },
+      },
+    ]
+  );
+
+  const snapshot = await loadPbDailyIntelligenceSnapshot({
+    env: {
+      PB_DAILY_INTELLIGENCE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+    },
+  });
+  assert.equal(snapshot.telegramSources.channelCount, 2);
+  assert.equal(snapshot.telegramSources.credentials.ready, true);
+  assert.equal(snapshot.telegramSources.collection.itemCount, 3);
+  assert.equal(snapshot.telegramSources.deduplication.rawPostCount, 3);
+  assert.equal(snapshot.telegramSources.deduplication.eventClusterCount, 2);
+  assert.equal(snapshot.telegramSources.deduplication.consolidatedPostCount, 1);
+  assert.equal(snapshot.telegramSources.clusters[0].eventId, "event-shared");
+  assert.equal(snapshot.telegramSources.clusters[0].postCount, 2);
+  assert.deepEqual(snapshot.telegramSources.clusters[0].channels, ["PB 채널 1", "PB 채널 2"]);
+  assert.equal(JSON.stringify(snapshot.telegramSources).includes("secret-session"), false);
+  assert.equal(JSON.stringify(snapshot.telegramSources).includes("secret-hash"), false);
+});
+
+test("PB Daily Intelligence prefers the latest Telegram-only refresh artifact", async () => {
+  const reportDate = "2026-07-27";
+  await writeJson(
+    join(tempRoot, "v2_reader_reports", reportDate, "reader_report.json"),
+    { schema_version: "v2_reader_report.v1", report_date: reportDate, title: "Live Telegram" }
+  );
+  await writeJson(
+    join(tempRoot, "telegram_channels.json"),
+    {
+      schema_version: "telegram_channel_registry.v1",
+      collection_policy: {},
+      channels: [{
+        username: "pb_channel_one",
+        name: "PB 채널 1",
+        category: "market_commentary",
+        origin: "user_supplied",
+        priority: 1,
+        enabled: true,
+        publication_policy: "internal_summary_with_attribution",
+      }],
+    }
+  );
+  await writeJson(
+    join(tempRoot, "telegram_refresh", reportDate, "telegram_intelligence.json"),
+    {
+      schema_version: "telegram_intelligence_refresh.v1",
+      generated_at: "2026-07-27T12:34:56+09:00",
+      status: "ok",
+      raw_post_count: 12,
+      deduplicated_post_count: 9,
+      duplicate_post_count: 3,
+      event_cluster_count: 2,
+      represented_channel_count: 1,
+      clusters: [{
+        event_id: "event-live",
+        title: "실시간 텔레그램 사건",
+        event_type: "market_structure",
+        verification_status: "discovery_metadata_only",
+        latest_published_at: "2026-07-27T03:00:00Z",
+        post_count: 4,
+        channels: ["PB 채널 1"],
+        post_urls: ["https://t.me/pb_channel_one/10"],
+      }],
+    }
+  );
+
+  const snapshot = await loadPbDailyIntelligenceSnapshot({
+    env: {
+      PB_DAILY_INTELLIGENCE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+    },
+  });
+  assert.equal(snapshot.telegramSources.collection.lastCollectedAt, "2026-07-27T12:34:56+09:00");
+  assert.equal(snapshot.telegramSources.collection.itemCount, 12);
+  assert.equal(snapshot.telegramSources.deduplication.consolidatedPostCount, 3);
+  assert.equal(snapshot.telegramSources.clusters[0].eventId, "event-live");
+});
+
+test("PB Daily Intelligence exposes a rights-safe analyst research digest", async () => {
+  const reportDate = "2026-07-24";
+  await writeJson(
+    join(tempRoot, "v2_reader_reports", reportDate, "reader_report.json"),
+    { schema_version: "v2_reader_report.v1", report_date: reportDate, title: "Research monitor" }
+  );
+  await writeJson(
+    join(tempRoot, "broker_research_digest", reportDate, "broker_research_digest.json"),
+    {
+      schema_version: "broker_research_digest.v1",
+      report_date: reportDate,
+      generated_at: "2026-07-24T08:00:00+09:00",
+      summary: {
+        archived_report_count: 2,
+        selected_report_count: 2,
+        structured_report_count: 1,
+        awaiting_analysis_count: 1,
+        publisher_count: 2,
+        analysis_status: "complete",
+        telegram_linked_report_count: 1,
+        stance_counts: { positive: 1, cautious: 1 },
+      },
+      consensus: {
+        top_tickers: [{ ticker: "NVDA", report_count: 2 }],
+        sector_assessments: [
+          {
+            sector: "semiconductor",
+            report_count: 2,
+            signal: "mixed",
+            stance_counts: { positive: 1, cautious: 1 },
+            catalysts: ["AI demand"],
+            risks: ["Valuation"],
+            monitoring_conditions: ["Next earnings"],
+          },
+        ],
+        disagreements: [
+          { topic: "NVDA", stances: ["positive", "cautious"], report_count: 2 },
+        ],
+      },
+      reports: [
+        {
+          report_id: "research-1",
+          publisher: "Example Securities",
+          analyst: "A. Analyst",
+          title: "NVDA earnings review",
+          published_at: "2026-07-24T07:00:00+09:00",
+          report_type: "earnings",
+          stance: "positive",
+          tickers: ["NVDA"],
+          sectors: ["semiconductor"],
+          summary: "Demand remains constructive.",
+          key_claims: ["Estimate direction improved."],
+          catalysts: [],
+          risks: ["Valuation"],
+          monitoring_conditions: ["Next earnings"],
+          source: { reference: "REF-1", url: "https://example.com/research-1" },
+          processing: { structured_analysis_available: true, status: "ready" },
+          linked_telegram_events: [
+            {
+              event_id: "event-nvda",
+              title: "NVDA demand update",
+              score: 5,
+              match_reasons: ["ticker:NVDA"],
+              telegram_url: "https://t.me/pb/1",
+              channel: "PB Channel",
+            },
+          ],
+        },
+      ],
+    }
+  );
+
+  const snapshot = await loadPbDailyIntelligenceSnapshot({
+    env: { PB_DAILY_INTELLIGENCE_DIR: tempRoot },
+  });
+  assert.equal(snapshot.brokerResearch.summary.selectedReportCount, 2);
+  assert.equal(snapshot.brokerResearch.reports[0].publisher, "Example Securities");
+  assert.equal(snapshot.brokerResearch.consensus.disagreements[0].topic, "NVDA");
+  assert.equal(snapshot.brokerResearch.consensus.sectorAssessments[0].signal, "mixed");
+  assert.equal(
+    snapshot.brokerResearch.consensus.sectorAssessments[0].monitoringConditions[0],
+    "Next earnings"
+  );
+  assert.equal(snapshot.brokerResearch.reports[0].monitoringConditions[0], "Next earnings");
+  assert.equal(snapshot.brokerResearch.summary.analysisStatus, "complete");
+  assert.equal(snapshot.brokerResearch.reports[0].linkedTelegramEvents[0].eventId, "event-nvda");
+  assert.equal(JSON.stringify(snapshot.brokerResearch).includes("raw_text"), false);
+});
+
+test("PB Daily Intelligence shows newer analyst research independently of the reader date", async () => {
+  const readerDate = "2026-07-24";
+  const researchDate = "2026-07-25";
+  await writeJson(
+    join(tempRoot, "v2_reader_reports", readerDate, "reader_report.json"),
+    { schema_version: "v2_reader_report.v1", report_date: readerDate, title: "Prior reader report" }
+  );
+  await writeJson(
+    join(tempRoot, "broker_research_digest", readerDate, "broker_research_digest.json"),
+    {
+      schema_version: "broker_research_digest.v1",
+      report_date: readerDate,
+      summary: { selected_report_count: 0, analysis_status: "no_eligible_reports" },
+      consensus: {},
+      reports: [],
+    }
+  );
+  await writeJson(
+    join(tempRoot, "broker_research_digest", researchDate, "broker_research_digest.json"),
+    {
+      schema_version: "broker_research_digest.v1",
+      report_date: researchDate,
+      summary: {
+        selected_report_count: 3,
+        structured_report_count: 3,
+        publisher_count: 1,
+        analysis_status: "complete",
+      },
+      consensus: {},
+      reports: [],
+    }
+  );
+
+  const snapshot = await loadPbDailyIntelligenceSnapshot({
+    env: { PB_DAILY_INTELLIGENCE_DIR: tempRoot },
+  });
+  assert.equal(snapshot.connection.readerDate, readerDate);
+  assert.equal(snapshot.brokerResearch.reportDate, researchDate);
+  assert.equal(snapshot.brokerResearch.summary.selectedReportCount, 3);
+  assert.equal(snapshot.brokerResearch.summary.analysisStatus, "complete");
+  assert.deepEqual(snapshot.brokerResearchHistory.availableDates, [researchDate, readerDate]);
+  assert.equal(snapshot.brokerResearchHistory.selectedDate, researchDate);
+  assert.equal(snapshot.brokerResearchHistory.latestDate, researchDate);
+
+  const priorSnapshot = await loadPbDailyIntelligenceSnapshot({
+    env: { PB_DAILY_INTELLIGENCE_DIR: tempRoot },
+    brokerResearchDate: readerDate,
+  });
+  assert.equal(priorSnapshot.brokerResearch.reportDate, readerDate);
+  assert.equal(priorSnapshot.brokerResearchHistory.selectedDate, readerDate);
 });

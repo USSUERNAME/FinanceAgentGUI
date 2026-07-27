@@ -20,6 +20,14 @@ const nodeBin = process.env.NODE_BIN || process.execPath;
 const label = process.env.FINANCE_AGENT_GUI_SERVICE_LABEL || "com.financeagentgui.devserver";
 const linuxServiceName = process.env.FINANCE_AGENT_GUI_SERVICE_NAME || "finance-agent-gui-devserver.service";
 const windowsTaskName = process.env.FINANCE_AGENT_GUI_SERVICE_TASK_NAME || "FinanceAgentGUI Dev Server";
+const windowsRunName = process.env.FINANCE_AGENT_GUI_SERVICE_RUN_NAME || "FinanceAgentGUI Dev Server";
+const windowsRunKey = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+const PB_SERVICE_ENVIRONMENT = Object.freeze([
+  ["CODEX_CLI_PATH", "CodexCliPath"],
+  ["PB_DAILY_INTELLIGENCE_DIR", "PbDailyIntelligenceDir"],
+  ["PB_DAILY_INTELLIGENCE_ENGINE_DIR", "PbDailyIntelligenceEngineDir"],
+  ["PB_DAILY_INTELLIGENCE_PYTHON", "PbDailyIntelligencePython"],
+]);
 
 const outLog = join(logsDir, "service-5173.out.log");
 const errLog = join(logsDir, "service-5173.err.log");
@@ -44,6 +52,10 @@ Commands:
 Environment:
   FINANCE_AGENT_GUI_HOST=127.0.0.1
   FINANCE_AGENT_GUI_PORT=5173
+  CODEX_CLI_PATH=<Codex CLI executable>
+  PB_DAILY_INTELLIGENCE_DIR=<external workspace path>
+  PB_DAILY_INTELLIGENCE_ENGINE_DIR=<external engine path>
+  PB_DAILY_INTELLIGENCE_PYTHON=<python executable>
   NODE_BIN=${nodeBin}`);
 }
 
@@ -114,6 +126,16 @@ function powershellSingleQuote(value) {
 
 function windowsArgument(value) {
   return `"${String(value).replace(/"/g, '\\"')}"`;
+}
+
+export function pbServiceEnvironment(env = process.env) {
+  return PB_SERVICE_ENVIRONMENT
+    .map(([name, parameter]) => ({
+      name,
+      parameter,
+      value: String(env[name] || "").trim(),
+    }))
+    .filter((item) => item.value);
 }
 
 function sleep(ms) {
@@ -264,6 +286,7 @@ export function macLaunchArguments() {
     "-i",
     `FINANCE_AGENT_GUI_HOST=${host}`,
     `FINANCE_AGENT_GUI_PORT=${port}`,
+    ...pbServiceEnvironment().map((item) => `${item.name}=${item.value}`),
     `HOME=${homedir()}`,
     `PATH=${pathValue}`,
     `LANG=${process.env.LANG || "en_US.UTF-8"}`,
@@ -369,6 +392,9 @@ function linuxConfig() {
 }
 
 function linuxUnit() {
+  const pbEnvironment = pbServiceEnvironment()
+    .map((item) => `Environment=${item.name}=${systemdEscapeValue(item.value)}`)
+    .join("\n");
   return `[Unit]
 Description=FinanceAgentGUI local development server
 After=network.target
@@ -382,6 +408,7 @@ RestartSec=5
 Environment=FINANCE_AGENT_GUI_HOST=${host}
 Environment=FINANCE_AGENT_GUI_PORT=${port}
 Environment=NODE_ENV=development
+${pbEnvironment}
 StandardOutput=append:${systemdEscapeValue(outLog)}
 StandardError=append:${systemdEscapeValue(errLog)}
 
@@ -444,8 +471,8 @@ function windowsPowerShell(script) {
   return run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]);
 }
 
-function windowsTaskActionArgs() {
-  return [
+export function windowsTaskActionArgs() {
+  const args = [
     "-NoProfile",
     "-ExecutionPolicy",
     "Bypass",
@@ -457,7 +484,53 @@ function windowsTaskActionArgs() {
     windowsArgument(host),
     "-Port",
     String(port),
-  ].join(" ");
+  ];
+  for (const item of pbServiceEnvironment()) {
+    args.push(`-${item.parameter}`, windowsArgument(item.value));
+  }
+  return args.join(" ");
+}
+
+export function windowsRunCommand() {
+  return `powershell.exe ${windowsTaskActionArgs()}`;
+}
+
+function windowsTaskStatus() {
+  const script = [
+    `$task = Get-ScheduledTask -TaskName ${powershellSingleQuote(windowsTaskName)} -ErrorAction SilentlyContinue`,
+    "if ($task) { $task | Select-Object TaskName, State | ConvertTo-Json -Compress }",
+  ].join("\n");
+  return run("powershell.exe", ["-NoProfile", "-Command", script], { allowFailure: true });
+}
+
+function windowsRunValue() {
+  const script = [
+    `$value = Get-ItemPropertyValue -Path ${powershellSingleQuote(windowsRunKey)} -Name ${powershellSingleQuote(windowsRunName)} -ErrorAction SilentlyContinue`,
+    "if ($value) { $value }",
+  ].join("\n");
+  return run("powershell.exe", ["-NoProfile", "-Command", script], { allowFailure: true });
+}
+
+function installWindowsRunFallback() {
+  const commandValue = windowsRunCommand();
+  const script = [
+    `New-Item -Path ${powershellSingleQuote(windowsRunKey)} -Force | Out-Null`,
+    `Set-ItemProperty -Path ${powershellSingleQuote(windowsRunKey)} -Name ${powershellSingleQuote(windowsRunName)} -Value ${powershellSingleQuote(commandValue)}`,
+    `Start-Process -FilePath "powershell.exe" -ArgumentList ${powershellSingleQuote(windowsTaskActionArgs())} -WindowStyle Hidden`,
+  ].join("\n");
+  windowsPowerShell(script);
+  console.log(`installed: ${windowsRunKey}\\${windowsRunName}`);
+}
+
+function stopWindowsPortOwner() {
+  const script = [
+    `$connections = Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue`,
+    "foreach ($connection in $connections) {",
+    "  $process = Get-Process -Id $connection.OwningProcess -ErrorAction SilentlyContinue",
+    "  if ($process -and $process.ProcessName -eq 'node') { Stop-Process -Id $process.Id -Force }",
+    "}",
+  ].join("\n");
+  run("powershell.exe", ["-NoProfile", "-Command", script], { allowFailure: true });
 }
 
 const windowsHandler = {
@@ -471,36 +544,58 @@ const windowsHandler = {
       "Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Description 'FinanceAgentGUI local development server' -Force | Out-Null",
       "Start-ScheduledTask -TaskName $taskName",
     ].join("\n");
-    windowsPowerShell(script);
-    console.log(`installed: ${windowsTaskName}`);
+    try {
+      windowsPowerShell(script);
+      console.log(`installed: ${windowsTaskName}`);
+    } catch (error) {
+      if (!/Access is denied|0x80070005/i.test(String(error?.message || ""))) throw error;
+      console.log("Scheduled Task registration was denied; using the current-user Run key.");
+      installWindowsRunFallback();
+    }
   },
   start() {
-    const script = `Start-ScheduledTask -TaskName ${powershellSingleQuote(windowsTaskName)}`;
-    windowsPowerShell(script);
+    if (outputText(windowsTaskStatus())) {
+      const script = `Start-ScheduledTask -TaskName ${powershellSingleQuote(windowsTaskName)}`;
+      windowsPowerShell(script);
+      return;
+    }
+    if (outputText(windowsRunValue())) {
+      const script = `Start-Process -FilePath "powershell.exe" -ArgumentList ${powershellSingleQuote(windowsTaskActionArgs())} -WindowStyle Hidden`;
+      windowsPowerShell(script);
+      return;
+    }
+    this.install();
   },
   stop() {
     const script = `Stop-ScheduledTask -TaskName ${powershellSingleQuote(windowsTaskName)} -ErrorAction SilentlyContinue`;
-    windowsPowerShell(script);
+    run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], {
+      allowFailure: true,
+    });
+    stopWindowsPortOwner();
   },
   restart() {
     this.stop();
     this.start();
   },
   uninstall() {
-    const script = `Unregister-ScheduledTask -TaskName ${powershellSingleQuote(windowsTaskName)} -Confirm:$false -ErrorAction SilentlyContinue`;
-    windowsPowerShell(script);
+    const script = [
+      `Unregister-ScheduledTask -TaskName ${powershellSingleQuote(windowsTaskName)} -Confirm:$false -ErrorAction SilentlyContinue`,
+      `Remove-ItemProperty -Path ${powershellSingleQuote(windowsRunKey)} -Name ${powershellSingleQuote(windowsRunName)} -ErrorAction SilentlyContinue`,
+    ].join("\n");
+    run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], {
+      allowFailure: true,
+    });
+    stopWindowsPortOwner();
   },
   async status() {
-    const script = [
-      `$task = Get-ScheduledTask -TaskName ${powershellSingleQuote(windowsTaskName)} -ErrorAction SilentlyContinue`,
-      "if ($task) { $task | Select-Object TaskName, State | ConvertTo-Json -Compress }",
-    ].join("\n");
-    const status = run("powershell.exe", ["-NoProfile", "-Command", script], { allowFailure: true });
+    const taskStatus = outputText(windowsTaskStatus());
+    const runValue = outputText(windowsRunValue());
+    const installed = Boolean(taskStatus || runValue);
     await printCommonStatus({
-      target: windowsTaskName,
-      installed: Boolean(outputText(status)),
-      loaded: /Running|Ready/i.test(outputText(status)),
-      state: outputText(status) || "not registered",
+      target: taskStatus ? windowsTaskName : `${windowsRunKey}\\${windowsRunName}`,
+      installed,
+      loaded: taskStatus ? /Running|Ready/i.test(taskStatus) : installed,
+      state: taskStatus || (runValue ? "current-user startup" : "not registered"),
     });
   },
 };
