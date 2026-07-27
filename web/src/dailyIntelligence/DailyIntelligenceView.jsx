@@ -582,7 +582,7 @@ function BrokerResearchMonitor({ brokerResearch }) {
   if (!brokerResearch) {
     return (
       <section
-        id="broker-research-analysis"
+        id="broker-research-results"
         className="daily-intelligence-panel daily-intelligence-wide"
       >
         <div className="daily-intelligence-panel-title">
@@ -603,7 +603,7 @@ function BrokerResearchMonitor({ brokerResearch }) {
   const stanceCounts = summary.stanceCounts || {};
   return (
     <section
-      id="broker-research-analysis"
+      id="broker-research-results"
       className="daily-intelligence-panel daily-intelligence-broker daily-intelligence-wide"
     >
       <div className="daily-intelligence-panel-title">
@@ -678,6 +678,89 @@ function BrokerResearchMonitor({ brokerResearch }) {
   );
 }
 
+function BrokerResearchApprovalQueue({
+  approvalQueue,
+  busy,
+  error,
+  onReload,
+  onDecide,
+}) {
+  const items = approvalQueue?.items || [];
+  const pendingItems = items.filter((item) => item.state === "pending");
+  const decidedItems = items.filter((item) => item.state === "approved" || item.state === "excluded");
+  const counts = approvalQueue?.counts || {};
+  return (
+    <section
+      id="broker-research-analysis"
+      className="daily-intelligence-panel daily-intelligence-approval-queue daily-intelligence-wide"
+    >
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>DRIVE APPROVAL QUEUE</span>
+          <h2>애널리스트 PDF 승인 대기</h2>
+        </div>
+        <div className="daily-intelligence-approval-title-actions">
+          <span className="daily-intelligence-count">{counts.pending || 0}</span>
+          <button type="button" onClick={onReload} disabled={busy} aria-label="승인 대기 새로고침">
+            <RefreshCw size={15} className={busy ? "is-spinning" : ""} />
+          </button>
+        </div>
+      </div>
+
+      {error ? <p className="daily-intelligence-approval-error">{error}</p> : null}
+      {busy && !approvalQueue ? (
+        <p className="daily-intelligence-muted">Drive 승인 대기 목록을 불러오는 중입니다.</p>
+      ) : pendingItems.length ? (
+        <div className="daily-intelligence-approval-list">
+          {pendingItems.map((item) => (
+            <article key={item.fileId}>
+              <div>
+                <span>{item.inferred.publisher} · {item.inferred.published_at.slice(0, 10)}</span>
+                <h3>{item.inferred.title}</h3>
+                <small>{item.fileName}</small>
+              </div>
+              <div className="daily-intelligence-approval-actions">
+                <a href={item.driveUrl} target="_blank" rel="noreferrer">
+                  원문 <ArrowUpRight size={12} />
+                </a>
+                <button
+                  type="button"
+                  className="is-approve"
+                  disabled={busy}
+                  onClick={() => onDecide(item.fileId, "approved")}
+                >
+                  <CheckCircle2 size={14} /> 분석 승인
+                </button>
+                <button
+                  type="button"
+                  className="is-exclude"
+                  disabled={busy}
+                  onClick={() => onDecide(item.fileId, "excluded")}
+                >
+                  <X size={14} /> 제외
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="daily-intelligence-muted">승인 대기 중인 Drive 리포트가 없습니다.</p>
+      )}
+
+      <div className="daily-intelligence-approval-status">
+        <span>메타파일 확인 {counts.ready || 0}</span>
+        <span>화면 승인 {counts.approved || 0}</span>
+        <span>제외 {counts.excluded || 0}</span>
+        {decidedItems.length ? <small>결정은 같은 파일에 대해 다시 변경할 수 있습니다.</small> : null}
+      </div>
+      <p className="daily-intelligence-panel-note">
+        분석 승인은 내부 요약·분석만 허용하며 원문 재배포는 허용하지 않습니다.
+        승인 후 후보 데이터 수집 또는 드라이런을 실행하면 최신 리포트에 반영됩니다.
+      </p>
+    </section>
+  );
+}
+
 function ResearchIntelligenceShortcuts({ telegramSources, brokerResearch }) {
   const telegramPosts = telegramSources?.deduplication?.rawPostCount || 0;
   const telegramClusters = telegramSources?.deduplication?.eventClusterCount || 0;
@@ -727,6 +810,53 @@ export default function DailyIntelligenceView() {
   const stockCandidates = snapshot?.stockCandidates;
   const telegramSources = snapshot?.telegramSources;
   const brokerResearch = snapshot?.brokerResearch;
+  const [brokerApprovalQueue, setBrokerApprovalQueue] = React.useState(null);
+  const [brokerApprovalBusy, setBrokerApprovalBusy] = React.useState(false);
+  const [brokerApprovalError, setBrokerApprovalError] = React.useState("");
+
+  const loadBrokerApprovalQueue = React.useCallback(async () => {
+    setBrokerApprovalBusy(true);
+    setBrokerApprovalError("");
+    try {
+      const response = await fetch("/api/pb-daily-intelligence/broker-approvals", {
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setBrokerApprovalQueue(payload);
+    } catch (approvalError) {
+      setBrokerApprovalError(approvalError.message || "승인 대기 목록을 불러오지 못했습니다.");
+    } finally {
+      setBrokerApprovalBusy(false);
+    }
+  }, []);
+
+  const decideBrokerReport = React.useCallback(async (fileId, decision) => {
+    setBrokerApprovalBusy(true);
+    setBrokerApprovalError("");
+    try {
+      const response = await fetch("/api/pb-daily-intelligence/broker-approvals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId, decision }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setBrokerApprovalQueue(payload);
+    } catch (approvalError) {
+      setBrokerApprovalError(approvalError.message || "승인 결정을 저장하지 못했습니다.");
+    } finally {
+      setBrokerApprovalBusy(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadBrokerApprovalQueue();
+  }, [loadBrokerApprovalQueue]);
 
   if (busy && !snapshot) {
     return (
@@ -798,6 +928,14 @@ export default function DailyIntelligenceView() {
       />
 
       <main className="daily-intelligence-grid">
+        <BrokerResearchApprovalQueue
+          approvalQueue={brokerApprovalQueue}
+          busy={brokerApprovalBusy}
+          error={brokerApprovalError}
+          onReload={loadBrokerApprovalQueue}
+          onDecide={decideBrokerReport}
+        />
+
         <BrokerResearchMonitor brokerResearch={brokerResearch} />
 
         <TelegramSourceMonitor telegramSources={telegramSources} />

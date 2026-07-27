@@ -8,6 +8,7 @@ import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mj
 import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
 import { handleMemoryEndpoint, startSharedMemoryMaintenanceScheduler } from "./memoryApi.mjs";
 import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
+import { handlePbBrokerResearchApprovalsEndpoint } from "./pbBrokerResearchApprovals.mjs";
 import { handlePbDailyIntelligenceEndpoint } from "./pbDailyIntelligenceApi.mjs";
 import { handlePbDailyIntelligenceJobsEndpoint } from "./pbDailyIntelligenceJobs.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
@@ -331,6 +332,10 @@ export function codexApiPlugin() {
         await handlePbDailyIntelligenceJobsEndpoint(req, res);
       });
 
+      server.middlewares.use("/api/pb-daily-intelligence/broker-approvals", async (req, res) => {
+        await handlePbBrokerResearchApprovalsEndpoint(req, res);
+      });
+
       server.middlewares.use("/api/pb-daily-intelligence", async (req, res) => {
         await handlePbDailyIntelligenceEndpoint(req, res);
       });
@@ -416,6 +421,10 @@ export function codexApiPlugin() {
           const payload = await readJsonBody(req);
           streamCodexChat(payload, res);
         } catch (error) {
+          if (res.headersSent) {
+            if (!res.writableEnded) res.end();
+            return;
+          }
           sendJson(res, { error: error.message }, 500);
         }
       });

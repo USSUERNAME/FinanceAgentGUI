@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  codexCommandInvocation,
   codexCommandSpec,
   resolveCodexCommandPath,
 } from "../server/codexProbe.mjs";
@@ -78,6 +79,27 @@ test("Codex command spec runs a Windows JavaScript entrypoint through Node", () 
       command: "C:\\Program Files\\nodejs\\node.exe",
       argsPrefix: [
         "C:\\Users\\operator\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js",
+      ],
+    },
+  );
+});
+
+test("Codex chat invocation keeps the Windows JavaScript entrypoint as the first Node argument", () => {
+  assert.deepEqual(
+    codexCommandInvocation(
+      "C:\\Users\\operator\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js",
+      ["app-server", "--stdio"],
+      {
+        platform: "win32",
+        nodePath: "C:\\Program Files\\nodejs\\node.exe",
+      },
+    ),
+    {
+      command: "C:\\Program Files\\nodejs\\node.exe",
+      args: [
+        "C:\\Users\\operator\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js",
+        "app-server",
+        "--stdio",
       ],
     },
   );

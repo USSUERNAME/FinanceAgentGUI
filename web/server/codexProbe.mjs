@@ -369,6 +369,14 @@ export function codexCommandSpec(
   };
 }
 
+export function codexCommandInvocation(path, args = [], options = {}) {
+  const spec = codexCommandSpec(path, options);
+  return {
+    command: spec.command,
+    args: [...spec.argsPrefix, ...args],
+  };
+}
+
 function findCodexPath() {
   return resolveCodexCommandPath({
     platform: process.platform,
@@ -3659,7 +3667,8 @@ export function runCodexChat(payload = {}) {
     let settled = false;
     const startedAt = Date.now();
     const requestTimeoutMs = chatTimeoutMsForPayload(payload);
-    const child = spawnObservedLlm(path, args, {
+    const invocation = codexCommandInvocation(path, args);
+    const child = spawnObservedLlm(invocation.command, invocation.args, {
       cwd: WEB_ROOT,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -4310,7 +4319,8 @@ export function streamCodexChat(payload = {}, res) {
 
   writeStreamEvent(res, "started", { model, reasoning, approval });
 
-  child = spawnObservedLlm(path, ["app-server", "--stdio"], {
+  const invocation = codexCommandInvocation(path, ["app-server", "--stdio"]);
+  child = spawnObservedLlm(invocation.command, invocation.args, {
     cwd: runtimeCwd,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"],
