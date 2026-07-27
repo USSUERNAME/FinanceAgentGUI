@@ -120,6 +120,11 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.url?.startsWith("/api/news-feed/daily-digest")) {
+    await handleNewsFeedEndpoint("daily-digest", req, res);
+    return;
+  }
+
   if (req.url?.startsWith("/api/news-feed/read-state")) {
     await handleNewsFeedEndpoint("read-state", req, res);
     return;

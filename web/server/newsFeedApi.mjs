@@ -35,11 +35,19 @@ const LEGACY_CONFIG_PATH = join(CONFIG_DIR, "news-feeds.json");
 const STORE_PATH = join(DATA_DIR, "news-feed.json");
 const READ_STATE_PATH = join(DATA_DIR, "news-feed-read-state.json");
 const VIEW_STATE_PATH = join(DATA_DIR, "news-feed-view-state.json");
+const DAILY_DIGEST_PATH = join(DATA_DIR, "news-feed-daily-digest.json");
 const DEFAULT_POLL_INTERVAL_SECONDS = 180;
-const DEFAULT_RETENTION_HOURS = 24;
+const DEFAULT_RETENTION_HOURS = 48;
 const DEFAULT_TRANSLATION_BATCH_SIZE = 12;
 const DEFAULT_MAX_ITEMS_PER_FEED = 500;
 const TRANSLATION_TIMEOUT_MS = 60000;
+const DAILY_DIGEST_TIMEOUT_MS = 120000;
+const DAILY_DIGEST_HOUR_KST = 7;
+const DAILY_DIGEST_MINUTE_KST = 30;
+const DAILY_DIGEST_MAX_EVENTS = 8;
+const DAILY_DIGEST_HISTORY_LIMIT = 14;
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 20000;
 const FEED_FETCH_STAGGER_WINDOW_MS = 60000;
 const TRANSLATION_TEXT_MAX_CHARS = 1200;
@@ -385,7 +393,10 @@ function normalizeNewsFeedConfig(config = {}) {
       60,
       Math.min(600, Number(raw.pollIntervalSeconds || DEFAULT_POLL_INTERVAL_SECONDS))
     ),
-    retentionHours: Math.max(1, Number(raw.retentionHours || DEFAULT_RETENTION_HOURS)),
+    retentionHours: Math.max(
+      DEFAULT_RETENTION_HOURS,
+      Number(raw.retentionHours || DEFAULT_RETENTION_HOURS)
+    ),
     maxItemsPerFeed: Math.max(50, Number(raw.maxItemsPerFeed || DEFAULT_MAX_ITEMS_PER_FEED)),
     translationBatchSize: Math.max(
       1,
@@ -828,6 +839,9 @@ function runtimeState() {
       timer: null,
       inFlight: null,
       translationInFlight: null,
+      dailyDigestInFlight: null,
+      dailyDigestTimer: null,
+      nextDailyDigestAt: "",
       nextPollAt: "",
       startedAt: "",
     };
@@ -920,10 +934,208 @@ function publicSnapshot({ limit = 80, offset = 0, readState = null, viewState = 
     contentRevision,
     readState: readStateSnapshot,
     viewState: newsFeedViewStateSnapshot(snapshotViewState),
+    dailyDigest: publicDailyDigestSnapshot(),
     offset,
     limit,
     hasMore: offset + items.length < itemCount,
     items,
+  };
+}
+
+function emptyDailyDigestStore() {
+  return {
+    version: 1,
+    updatedAt: "",
+    latest: null,
+    history: [],
+  };
+}
+
+function readDailyDigestStore() {
+  ensureDirs();
+  const payload = readJsonFile(DAILY_DIGEST_PATH);
+  if (!payload || typeof payload !== "object") return emptyDailyDigestStore();
+  return {
+    ...emptyDailyDigestStore(),
+    ...payload,
+    latest: payload.latest && typeof payload.latest === "object" ? payload.latest : null,
+    history: toArray(payload.history).filter((item) => item && typeof item === "object"),
+  };
+}
+
+function writeDailyDigestStore(store) {
+  ensureDirs();
+  const next = {
+    ...emptyDailyDigestStore(),
+    ...store,
+    updatedAt: nowIso(),
+    history: toArray(store.history).slice(0, DAILY_DIGEST_HISTORY_LIMIT),
+  };
+  writeFileSync(DAILY_DIGEST_PATH, `${JSON.stringify(next, null, 2)}\n`);
+  return next;
+}
+
+function kstDateLabel(timestamp) {
+  const shifted = new Date(timestamp + KST_OFFSET_MS);
+  return [
+    shifted.getUTCFullYear(),
+    String(shifted.getUTCMonth() + 1).padStart(2, "0"),
+    String(shifted.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+export function completedNewsDigestWindow(date = new Date()) {
+  const nowMs = date instanceof Date ? date.getTime() : new Date(date).getTime();
+  const safeNowMs = Number.isFinite(nowMs) ? nowMs : Date.now();
+  const shifted = new Date(safeNowMs + KST_OFFSET_MS);
+  let shiftedEndMs = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate(),
+    DAILY_DIGEST_HOUR_KST,
+    DAILY_DIGEST_MINUTE_KST,
+  );
+  if (safeNowMs + KST_OFFSET_MS < shiftedEndMs) shiftedEndMs -= DAY_MS;
+  const endMs = shiftedEndMs - KST_OFFSET_MS;
+  const startMs = endMs - DAY_MS;
+  return {
+    key: kstDateLabel(endMs),
+    startAt: new Date(startMs).toISOString(),
+    endAt: new Date(endMs).toISOString(),
+    startMs,
+    endMs,
+  };
+}
+
+function nextNewsDigestCutoff(date = new Date()) {
+  const nowMs = date instanceof Date ? date.getTime() : new Date(date).getTime();
+  const current = completedNewsDigestWindow(new Date(nowMs));
+  return new Date(current.endMs + DAY_MS).toISOString();
+}
+
+function canonicalDigestUrl(value = "") {
+  try {
+    const url = new URL(String(value || "").trim());
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(utm_|fbclid$|gclid$|ref$|source$)/i.test(key)) url.searchParams.delete(key);
+    }
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
+const DAILY_DIGEST_STOP_WORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "from",
+  "at", "by", "as", "is", "are", "was", "were", "be", "has", "have", "had", "will",
+  "said", "says", "after", "before", "about", "over", "under", "into", "its", "it",
+  "this", "that", "these", "those", "new", "update", "breaking",
+  "및", "관련", "대한", "통해", "따라", "위해", "에서", "으로", "이다", "있다", "발표",
+]);
+
+function digestItemText(item = {}) {
+  return compactTranslationText(
+    item.translatedText ||
+      item.translatedTitle ||
+      item.originalText ||
+      item.title ||
+      "",
+  );
+}
+
+function digestTokens(value = "") {
+  return new Set(
+    String(value || "")
+      .toLocaleLowerCase("en-US")
+      .replace(/https?:\/\/\S+/g, " ")
+      .replace(/[^\p{L}\p{N}$%]+/gu, " ")
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 2 && !DAILY_DIGEST_STOP_WORDS.has(token)),
+  );
+}
+
+function tokenSimilarity(left, right) {
+  if (!left.size || !right.size) return 0;
+  let shared = 0;
+  for (const token of left) {
+    if (right.has(token)) shared += 1;
+  }
+  return shared / Math.min(left.size, right.size);
+}
+
+function digestItemsSameEvent(left, right) {
+  if (left.canonicalUrl && right.canonicalUrl && left.canonicalUrl === right.canonicalUrl) {
+    return true;
+  }
+  const similarity = tokenSimilarity(left.tokens, right.tokens);
+  if (similarity >= 0.72) return true;
+  const sharedTicker = [...left.tokens].some(
+    (token) => (token.startsWith("$") || /^[A-Z]{2,5}$/.test(token)) && right.tokens.has(token),
+  );
+  return sharedTicker && similarity >= 0.58;
+}
+
+export function clusterNewsDigestItems(items = [], window = completedNewsDigestWindow()) {
+  const eligible = toArray(items)
+    .filter((item) => {
+      const time = itemTimestampMs(item);
+      return time >= window.startMs && time < window.endMs && digestItemText(item);
+    })
+    .sort((a, b) => itemTimestampMs(b) - itemTimestampMs(a))
+    .map((item) => {
+      const text = digestItemText(item);
+      return {
+        item,
+        text,
+        tokens: digestTokens(text),
+        canonicalUrl: canonicalDigestUrl(item.sourceUrl),
+      };
+    });
+
+  const clusters = [];
+  for (const candidate of eligible) {
+    const existing = clusters.find((cluster) =>
+      cluster.members.some((member) => digestItemsSameEvent(member, candidate))
+    );
+    if (existing) {
+      existing.members.push(candidate);
+      continue;
+    }
+    clusters.push({ members: [candidate] });
+  }
+
+  return clusters.map((cluster, index) => {
+    const members = cluster.members;
+    const feedIds = [...new Set(members.map(({ item }) => item.feedId).filter(Boolean))];
+    const sourceUrls = [...new Set(members.map(({ item }) => item.sourceUrl).filter(Boolean))];
+    const representative = members[0];
+    return {
+      id: `event-${index + 1}`,
+      representativeText: representative.text,
+      latestAt: representative.item.publishedAt || representative.item.fetchedAt || "",
+      itemCount: members.length,
+      sourceCount: feedIds.length,
+      sources: [...new Set(members.map(({ item }) => item.feedTitle || item.feedId).filter(Boolean))],
+      sourceUrls: sourceUrls.slice(0, 3),
+      itemIds: members.map(({ item }) => item.id).filter(Boolean),
+      sampleTexts: members.slice(0, 3).map(({ text }) => text),
+      verificationStatus: feedIds.length >= 2 ? "multi_source" : "metadata_only",
+    };
+  });
+}
+
+function publicDailyDigestSnapshot() {
+  const runtime = runtimeState();
+  const store = readDailyDigestStore();
+  const latest = store.latest || null;
+  return {
+    ...(latest || {}),
+    available: Boolean(latest),
+    inFlight: Boolean(runtime.dailyDigestInFlight),
+    nextRunAt: runtime.nextDailyDigestAt || nextNewsDigestCutoff(),
+    dataPath: "data/news-feed-daily-digest.json",
   };
 }
 
@@ -1255,6 +1467,319 @@ async function translateBatch(items, modelInfo) {
     model: modelInfo.modelLabel || modelInfo.model,
     reasoning: modelInfo.reasoning,
   };
+}
+
+function dailyDigestPrompt({ window, clusters }) {
+  const input = clusters.map((cluster) => ({
+    id: cluster.id,
+    latestAt: cluster.latestAt,
+    itemCount: cluster.itemCount,
+    sourceCount: cluster.sourceCount,
+    sources: cluster.sources,
+    verificationStatus: cluster.verificationStatus,
+    representativeText: cluster.representativeText,
+    additionalTexts: cluster.sampleTexts.slice(1),
+  }));
+  return [
+    "너는 한국 PB가 다음 날 아침 읽는 전일 금융 뉴스 다이제스트 편집자다.",
+    "입력은 이미 URL과 문장 유사도로 1차 통합된 사건 후보다.",
+    "같은 사건이 여러 후보에 남아 있으면 하나로 합치고, 새 정보가 없는 반복 보도는 제외한다.",
+    `중요한 사건을 최대 ${DAILY_DIGEST_MAX_EVENTS}개만 선정한다.`,
+    "시장 영향 범위, 신규성, 여러 출처의 독립 확인, 금리·환율·지수·대형주·핵심 섹터 연관성을 우선한다.",
+    "입력에 없는 사실이나 수치, 가격 반응, 공식 확인 여부를 만들어내지 않는다.",
+    "metadata_only는 단일 속보성 출처이므로 확인된 사실처럼 단정하지 않는다.",
+    "multi_source는 복수 피드에서 포착했다는 뜻일 뿐 공식 원문 확인을 의미하지 않는다.",
+    "매매 추천, 목표가격, 확정적 미래 예측은 쓰지 않는다.",
+    "summaryKo에는 전일 뉴스 전체의 공통 흐름과 충돌 신호를 2-4문장으로 쓴다.",
+    "각 사건은 제목, 확인 가능한 내용, 왜 중요한지, 관련 자산·섹터, 확인 상태를 짧게 쓴다.",
+    "clusterIds에는 반드시 입력 id만 쓰고, 같은 id를 여러 사건에 중복 사용하지 않는다.",
+    "출력은 JSON 객체 하나만 반환한다.",
+    "",
+    "반환 형식:",
+    JSON.stringify({
+      summaryKo: "전일 핵심 흐름 2-4문장",
+      events: [
+        {
+          titleKo: "사건 제목",
+          summaryKo: "확인 가능한 내용",
+          whyItMattersKo: "시장에 중요한 이유",
+          relatedAssets: ["관련 자산 또는 섹터"],
+          verificationStatus: "metadata_only|multi_source",
+          clusterIds: ["event-1"],
+        },
+      ],
+    }),
+    "",
+    "수집 구간:",
+    JSON.stringify({ startAt: window.startAt, endAt: window.endAt, timezone: "Asia/Seoul" }),
+    "",
+    "사건 후보:",
+    JSON.stringify(input, null, 2),
+  ].join("\n");
+}
+
+function dailyDigestSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      summaryKo: { type: "string" },
+      events: {
+        type: "array",
+        maxItems: DAILY_DIGEST_MAX_EVENTS,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            titleKo: { type: "string" },
+            summaryKo: { type: "string" },
+            whyItMattersKo: { type: "string" },
+            relatedAssets: { type: "array", items: { type: "string" }, maxItems: 8 },
+            verificationStatus: {
+              type: "string",
+              enum: ["metadata_only", "multi_source"],
+            },
+            clusterIds: { type: "array", items: { type: "string" }, minItems: 1 },
+          },
+          required: [
+            "titleKo",
+            "summaryKo",
+            "whyItMattersKo",
+            "relatedAssets",
+            "verificationStatus",
+            "clusterIds",
+          ],
+        },
+      },
+    },
+    required: ["summaryKo", "events"],
+  };
+}
+
+function runCodexDailyDigest(clusters, window, modelInfo) {
+  return new Promise((resolveDigest, reject) => {
+    const tempDir = mkdtempSync(join(tmpdir(), "finance-agent-news-digest-"));
+    const outputPath = join(tempDir, "digest.json");
+    const schemaPath = join(tempDir, "schema.json");
+    writeFileSync(schemaPath, `${JSON.stringify(dailyDigestSchema(), null, 2)}\n`);
+    const args = [
+      "--ask-for-approval",
+      "never",
+      "exec",
+      "--skip-git-repo-check",
+      "--ephemeral",
+      "--ignore-rules",
+      "-C",
+      WEB_ROOT,
+      "-s",
+      "read-only",
+      "-m",
+      modelInfo.model,
+      "-c",
+      `model_reasoning_effort="${modelInfo.reasoning}"`,
+      "--output-schema",
+      schemaPath,
+      "-o",
+      outputPath,
+    ];
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const child = spawnObservedLlm(
+      modelInfo.command || "codex",
+      [...(Array.isArray(modelInfo.argsPrefix) ? modelInfo.argsPrefix : []), ...args],
+      {
+        cwd: WEB_ROOT,
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, NO_COLOR: "1" },
+      },
+      {
+        feature: "news-feed-daily-digest",
+        provider: "codex-cli",
+        model: modelInfo.model,
+        timeoutMs: DAILY_DIGEST_TIMEOUT_MS,
+      },
+    );
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdin.end(dailyDigestPrompt({ window, clusters }), "utf8");
+
+    const cleanup = () => rmSync(tempDir, { recursive: true, force: true });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGTERM");
+      cleanup();
+      reject(new Error("전일 뉴스 요약 시간이 초과되었습니다."));
+    }, DAILY_DIGEST_TIMEOUT_MS);
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cleanup();
+      reject(error);
+    });
+    child.on("close", async (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        await waitForLlmObservation(child);
+        const output = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : stdout;
+        if (code !== 0) throw new Error((stderr || output || `codex exited ${code}`).trim());
+        resolveDigest(parseJsonPayload(output));
+      } catch (error) {
+        reject(error);
+      } finally {
+        cleanup();
+      }
+    });
+  });
+}
+
+async function runDailyDigestModel(clusters, window, modelInfo) {
+  if (modelInfo.provider === ANTIGRAVITY_PROVIDER_ID) {
+    const result = await runAntigravityGenerate({
+      prompt: dailyDigestPrompt({ window, clusters }),
+      model: modelInfo.model,
+      approval: "default",
+      timeoutMs: DAILY_DIGEST_TIMEOUT_MS,
+      observationFeature: "news-feed-daily-digest",
+    });
+    return parseJsonPayload(result.answer);
+  }
+  return runCodexDailyDigest(clusters, window, modelInfo);
+}
+
+export function normalizeNewsDailyDigestCandidate(payload = {}, clusters = []) {
+  const clusterById = new Map(clusters.map((cluster) => [cluster.id, cluster]));
+  const used = new Set();
+  const events = [];
+  for (const event of toArray(payload.events).slice(0, DAILY_DIGEST_MAX_EVENTS)) {
+    const clusterIds = toArray(event?.clusterIds)
+      .map((id) => String(id || "").trim())
+      .filter((id) => clusterById.has(id) && !used.has(id));
+    if (!clusterIds.length) continue;
+    clusterIds.forEach((id) => used.add(id));
+    const sourceClusters = clusterIds.map((id) => clusterById.get(id));
+    const sourceUrls = [...new Set(sourceClusters.flatMap((cluster) => cluster.sourceUrls || []))].slice(0, 4);
+    const sourceCount = new Set(sourceClusters.flatMap((cluster) => cluster.sources || [])).size;
+    events.push({
+      titleKo: compactTranslationText(event.titleKo),
+      summaryKo: compactTranslationText(event.summaryKo),
+      whyItMattersKo: compactTranslationText(event.whyItMattersKo),
+      relatedAssets: [...new Set(toArray(event.relatedAssets).map(compactTranslationText).filter(Boolean))].slice(0, 8),
+      verificationStatus: sourceCount >= 2 ? "multi_source" : "metadata_only",
+      clusterIds,
+      sourceUrls,
+      sourceCount,
+      itemCount: sourceClusters.reduce((sum, cluster) => sum + Number(cluster.itemCount || 0), 0),
+    });
+  }
+  const summaryKo = compactTranslationText(payload.summaryKo);
+  const issues = [];
+  if (!summaryKo || !hasKoreanText(summaryKo)) issues.push("한국어 전체 요약이 없습니다");
+  if (!events.length && clusters.length) issues.push("선정된 사건이 없습니다");
+  for (const event of events) {
+    if (!event.titleKo || !event.summaryKo || !event.whyItMattersKo) {
+      issues.push("사건 카드의 필수 문장이 비어 있습니다");
+      break;
+    }
+  }
+  return {
+    ok: issues.length === 0,
+    summaryKo,
+    events,
+    error: issues.join(", "),
+  };
+}
+
+async function generateDailyNewsDigest({ force = false, date = new Date() } = {}) {
+  const runtime = runtimeState();
+  if (runtime.dailyDigestInFlight) return runtime.dailyDigestInFlight;
+  runtime.dailyDigestInFlight = (async () => {
+    const window = completedNewsDigestWindow(date);
+    const stored = readDailyDigestStore();
+    if (!force && stored.latest?.windowKey === window.key && stored.latest?.status === "ready") {
+      return publicDailyDigestSnapshot();
+    }
+
+    const newsStore = readStore();
+    const clusters = clusterNewsDigestItems(newsStore.items, window);
+    const itemCount = clusters.reduce((sum, cluster) => sum + cluster.itemCount, 0);
+    let record = {
+      windowKey: window.key,
+      windowStartAt: window.startAt,
+      windowEndAt: window.endAt,
+      generatedAt: nowIso(),
+      status: "ready",
+      summaryKo: "",
+      events: [],
+      itemCount,
+      clusterCount: clusters.length,
+      model: "",
+      reasoning: "",
+      error: "",
+    };
+
+    if (!clusters.length) {
+      record.summaryKo = "해당 수집 구간에 요약할 뉴스가 없습니다.";
+    } else {
+      try {
+        const modelInfo = chooseTranslationModel();
+        const payload = await runDailyDigestModel(clusters, window, modelInfo);
+        const candidate = normalizeNewsDailyDigestCandidate(payload, clusters);
+        if (!candidate.ok) throw new Error(candidate.error);
+        record = {
+          ...record,
+          summaryKo: candidate.summaryKo,
+          events: candidate.events,
+          model: modelInfo.modelLabel || modelInfo.model,
+          reasoning: modelInfo.reasoning,
+        };
+      } catch (error) {
+        record = {
+          ...record,
+          status: "failed",
+          summaryKo: "",
+          error: compactTranslationText(error.message || "전일 뉴스 요약 생성 실패"),
+        };
+      }
+    }
+
+    const previousHistory = toArray(stored.history).filter(
+      (item) => item.windowKey !== record.windowKey
+    );
+    writeDailyDigestStore({
+      ...stored,
+      latest: record,
+      history: [record, ...previousHistory],
+    });
+    return publicDailyDigestSnapshot();
+  })().finally(() => {
+    runtime.dailyDigestInFlight = null;
+  });
+  return runtime.dailyDigestInFlight;
+}
+
+function scheduleDailyNewsDigest() {
+  const runtime = runtimeState();
+  if (runtime.dailyDigestTimer) clearTimeout(runtime.dailyDigestTimer);
+  const nextAt = nextNewsDigestCutoff();
+  runtime.nextDailyDigestAt = nextAt;
+  const delayMs = Math.max(1000, timestampMs(nextAt) - Date.now());
+  runtime.dailyDigestTimer = setTimeout(() => {
+    runtime.dailyDigestTimer = null;
+    void generateDailyNewsDigest().finally(scheduleDailyNewsDigest);
+  }, delayMs);
 }
 
 export function applyNewsFeedTranslationBatch(store, pendingItems, translated) {
@@ -1616,8 +2141,10 @@ export function startNewsFeedCollector() {
 
   runtime.started = true;
   runtime.startedAt = nowIso();
+  scheduleDailyNewsDigest();
 
   void refreshNewsFeeds("startup").finally(() => {
+    void generateDailyNewsDigest();
     if (!newsFeedTranslationAutoRunEnabled()) return;
     const latestConfig = readNewsFeedConfig();
     void startPendingNewsFeedTranslation(latestConfig.translationBatchSize);
@@ -1689,6 +2216,21 @@ export async function handleNewsFeedEndpoint(kind, req, res) {
         return;
       }
       sendJson(res, publicSnapshot({ limit: 0 }));
+      return;
+    }
+
+    if (kind === "daily-digest") {
+      if (req.method === "GET") {
+        sendJson(res, { ok: true, dailyDigest: publicDailyDigestSnapshot() });
+        return;
+      }
+      if (req.method === "POST") {
+        const body = await readJsonBody(req);
+        await generateDailyNewsDigest({ force: body.force !== false });
+        sendJson(res, { ok: true, dailyDigest: publicDailyDigestSnapshot() });
+        return;
+      }
+      sendJson(res, { ok: false, error: "method not allowed" }, 405);
       return;
     }
 

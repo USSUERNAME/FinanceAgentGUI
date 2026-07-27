@@ -4,6 +4,7 @@ import {
   fetchNewsFeedItems,
   fetchNewsFeedSettings,
   fetchNewsFeedStatus,
+  generateNewsFeedDailyDigest,
   markNewsFeedOpened,
   patchNewsFeedSettings,
   patchNewsFeedViewState,
@@ -30,6 +31,7 @@ test("News Feed API client preserves endpoint and request contracts", async () =
   await fetchNewsFeedItems({ limit: 30, offset: 60 }, fetchImpl);
   await fetchNewsFeedSettings(fetchImpl);
   await fetchNewsFeedStatus(fetchImpl);
+  await generateNewsFeedDailyDigest(fetchImpl);
   await markNewsFeedOpened(fetchImpl);
   await patchNewsFeedSettings({ feedId: "feed-1", enabled: false }, fetchImpl);
   await requestNewsFeedRefresh(fetchImpl);
@@ -39,16 +41,19 @@ test("News Feed API client preserves endpoint and request contracts", async () =
     "/api/news-feed/items?limit=30&offset=60",
     "/api/news-feed/settings",
     "/api/news-feed/status",
+    "/api/news-feed/daily-digest",
     "/api/news-feed/read-state",
     "/api/news-feed/settings",
     "/api/news-feed/refresh",
     "/api/news-feed/view-state",
   ]);
   assert.equal(calls[3].options.method, "POST");
-  assert.equal(calls[4].options.method, "PATCH");
-  assert.deepEqual(JSON.parse(calls[4].options.body), { feedId: "feed-1", enabled: false });
-  assert.equal(calls[5].options.method, "POST");
-  assert.equal(calls[6].options.method, "PATCH");
+  assert.deepEqual(JSON.parse(calls[3].options.body), { force: true });
+  assert.equal(calls[4].options.method, "POST");
+  assert.equal(calls[5].options.method, "PATCH");
+  assert.deepEqual(JSON.parse(calls[5].options.body), { feedId: "feed-1", enabled: false });
+  assert.equal(calls[6].options.method, "POST");
+  assert.equal(calls[7].options.method, "PATCH");
 });
 
 test("News Feed API client surfaces structured server failures", async () => {

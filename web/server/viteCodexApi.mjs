@@ -88,6 +88,10 @@ export function codexApiPlugin() {
         await handleNewsFeedEndpoint("status", req, res);
       });
 
+      server.middlewares.use("/api/news-feed/daily-digest", async (req, res) => {
+        await handleNewsFeedEndpoint("daily-digest", req, res);
+      });
+
       server.middlewares.use("/api/news-feed/read-state", async (req, res) => {
         await handleNewsFeedEndpoint("read-state", req, res);
       });
