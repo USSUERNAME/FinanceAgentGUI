@@ -38,6 +38,18 @@ test("Daily Intelligence API client surfaces backend errors", async () => {
   );
 });
 
+test("Daily Intelligence API client requests a selected analyst research date", async () => {
+  const calls = [];
+  await fetchDailyIntelligence(async (path, options) => {
+    calls.push({ path, options });
+    return response({ ok: true });
+  }, { brokerResearchDate: "2026-07-25" });
+  assert.equal(
+    calls[0].path,
+    "/api/pb-daily-intelligence?brokerDate=2026-07-25"
+  );
+});
+
 test("Daily Intelligence job client uses plan and execute confirmation flow", async () => {
   const calls = [];
   const fetchImpl = async (path, options = {}) => {

@@ -10,6 +10,7 @@ const MARKET_INTERNALS_SCHEMA = "us_market_internals.v1";
 const SECTOR_METRICS_SCHEMA = "sector_metric_observations.v1";
 const STOCK_CANDIDATES_SCHEMA = "us_equity_candidate_screen.v1";
 const TELEGRAM_REGISTRY_SCHEMA = "telegram_channel_registry.v1";
+const TELEGRAM_REFRESH_SCHEMA = "telegram_intelligence_refresh.v1";
 const BROKER_RESEARCH_SCHEMA = "broker_research_digest.v1";
 
 function cleanText(value, maxLength = 1000) {
@@ -188,6 +189,13 @@ async function loadTelegramOverview({ root, reportDate, engineRoot, env }) {
   );
   const telegramSource = cleanList(sourceStatusArtifact?.payload?.sources, 100)
     .find((source) => source?.source_id === "telegram_channels");
+  const liveRefreshArtifact = await latestArtifact(
+    root,
+    "telegram_refresh",
+    "telegram_intelligence.json",
+    TELEGRAM_REFRESH_SCHEMA,
+    reportDate
+  );
 
   const triagedPath = join(root, "triaged", reportDate, "triaged_inbox.json");
   let telegramRecords = [];
@@ -243,7 +251,7 @@ async function loadTelegramOverview({ root, reportDate, engineRoot, env }) {
     }
     clusterMap.set(eventId, current);
   }
-  const clusters = [...clusterMap.values()]
+  let clusters = [...clusterMap.values()]
     .sort((left, right) =>
       right.postCount - left.postCount ||
       right.latestPublishedAt.localeCompare(left.latestPublishedAt)
@@ -259,6 +267,20 @@ async function loadTelegramOverview({ root, reportDate, engineRoot, env }) {
       channels: [...cluster.channels].slice(0, 8),
       postUrls: cluster.postUrls.slice(0, 4),
     }));
+  if (liveRefreshArtifact?.payload) {
+    clusters = cleanList(liveRefreshArtifact.payload.clusters, 20).map((cluster) => ({
+      eventId: cleanText(cluster?.event_id, 120),
+      title: cleanText(cluster?.title, 240),
+      eventType: cleanText(cluster?.event_type, 80),
+      verificationStatus: cleanText(cluster?.verification_status, 80),
+      latestPublishedAt: cleanText(cluster?.latest_published_at, 80),
+      postCount: Number(cluster?.post_count || 0),
+      channels: cleanList(cluster?.channels, 8).map((item) => cleanText(item, 160)),
+      postUrls: cleanList(cluster?.post_urls, 4)
+        .map((item) => String(item || ""))
+        .filter((item) => /^https:\/\/t\.me\//i.test(item)),
+    }));
+  }
 
   const channels = cleanList(registry?.channels, 100).map((channel) => ({
     username: cleanText(channel?.username, 80),
@@ -278,17 +300,45 @@ async function loadTelegramOverview({ root, reportDate, engineRoot, env }) {
     channels,
     credentials,
     collection: {
-      reportDate: sourceStatusArtifact?.date || reportDate,
-      status: cleanText(telegramSource?.status, 80) || "not_run",
-      itemCount: Number(telegramSource?.item_count || 0),
-      noticeCategory: cleanText(telegramSource?.notice_category, 120),
+      reportDate: liveRefreshArtifact?.date || sourceStatusArtifact?.date || reportDate,
+      status:
+        cleanText(liveRefreshArtifact?.payload?.status, 80)
+        || cleanText(telegramSource?.status, 80)
+        || "not_run",
+      itemCount: Number(
+        liveRefreshArtifact?.payload?.raw_post_count
+        ?? telegramSource?.item_count
+        ?? 0
+      ),
+      noticeCategory:
+        cleanText(liveRefreshArtifact?.payload?.notice_category, 120)
+        || cleanText(telegramSource?.notice_category, 120),
+      lastCollectedAt:
+        cleanText(liveRefreshArtifact?.payload?.generated_at, 80)
+        || cleanText(telegramSource?.checked_at, 80)
+        || cleanText(sourceStatusArtifact?.payload?.generated_at, 80),
     },
     deduplication: {
-      rawPostCount: telegramRecords.length,
-      clusteredPostCount: clusteredRecords.length,
-      eventClusterCount: clusterIds.size,
-      consolidatedPostCount: Math.max(0, clusteredRecords.length - clusterIds.size),
-      representedChannelCount: channelsRepresented.size,
+      rawPostCount: Number(
+        liveRefreshArtifact?.payload?.raw_post_count
+        ?? telegramRecords.length
+      ),
+      clusteredPostCount: Number(
+        liveRefreshArtifact?.payload?.deduplicated_post_count
+        ?? clusteredRecords.length
+      ),
+      eventClusterCount: Number(
+        liveRefreshArtifact?.payload?.event_cluster_count
+        ?? clusterIds.size
+      ),
+      consolidatedPostCount: Number(
+        liveRefreshArtifact?.payload?.duplicate_post_count
+        ?? Math.max(0, clusteredRecords.length - clusterIds.size)
+      ),
+      representedChannelCount: Number(
+        liveRefreshArtifact?.payload?.represented_channel_count
+        ?? channelsRepresented.size
+      ),
     },
     clusters,
   };
@@ -495,6 +545,9 @@ function normalizeScoreboard(intelligence = {}) {
 
 function normalizeMarketInternals(payload = {}) {
   const leadership = payload.sector_leadership || {};
+  const constituent = payload.constituent_breadth || {};
+  const constituentMetrics = constituent.breadth || {};
+  const constituentSectors = constituent.sector_breadth || {};
   const normalizePeriod = (period) =>
     cleanList(leadership[period]?.all_sectors, 30).map((item) => ({
       ticker: cleanText(item.ticker, 20),
@@ -511,6 +564,50 @@ function normalizeMarketInternals(payload = {}) {
       required: Number(payload.coverage?.required_ticker_count || 0),
       missingTickers: cleanList(payload.coverage?.missing_tickers, 100).map(String),
     },
+    constituentBreadth: constituent.schema_version ? {
+      status: cleanText(constituent.collection_status, 80),
+      asOf: cleanText(constituent.as_of, 40),
+      membershipScope: cleanText(constituent.universe?.membership_scope, 80),
+      coveragePct: finiteNumber(constituent.coverage?.daily_price_pct),
+      advancePct: finiteNumber(constituentMetrics.advance_decline?.advance_pct),
+      declinePct: finiteNumber(constituentMetrics.advance_decline?.decline_pct),
+      netAdvances: finiteNumber(constituentMetrics.advance_decline?.net_advances),
+      upVolumePct: finiteNumber(constituentMetrics.volume?.up_volume_pct),
+      above20dPct: finiteNumber(constituentMetrics.moving_averages?.["20d"]?.above_pct),
+      above50dPct: finiteNumber(constituentMetrics.moving_averages?.["50d"]?.above_pct),
+      above200dPct: finiteNumber(constituentMetrics.moving_averages?.["200d"]?.above_pct),
+      newHighs: finiteNumber(constituentMetrics.highs_lows_52w?.new_highs),
+      newLows: finiteNumber(constituentMetrics.highs_lows_52w?.new_lows),
+    } : null,
+    sectorBreadth: {
+      status: cleanText(constituentSectors.collection_status, 80),
+      availableCount: Number(
+        constituentSectors.coverage?.available_sector_count || 0
+      ),
+      readyCount: Number(
+        constituentSectors.coverage?.ready_sector_count || 0
+      ),
+      requiredCount: Number(
+        constituentSectors.coverage?.required_sector_count || 0
+      ),
+      sectors: cleanList(constituentSectors.sectors, 20).map((item) => ({
+        ticker: cleanText(item.sector_ticker, 20),
+        sector: cleanText(item.sector_name, 80),
+        status: cleanText(item.collection_status, 80),
+        membershipAsOf: cleanText(item.membership_as_of, 40),
+        coveragePct: finiteNumber(item.coverage?.daily_price_pct),
+        advancePct: finiteNumber(item.breadth?.advance_decline?.advance_pct),
+        upVolumePct: finiteNumber(item.breadth?.volume?.up_volume_pct),
+        above50dPct: finiteNumber(
+          item.breadth?.moving_averages?.["50d"]?.above_pct
+        ),
+        above200dPct: finiteNumber(
+          item.breadth?.moving_averages?.["200d"]?.above_pct
+        ),
+        newHighs: finiteNumber(item.breadth?.highs_lows_52w?.new_highs),
+        newLows: finiteNumber(item.breadth?.highs_lows_52w?.new_lows),
+      })),
+    },
     sectors: {
       "1d": normalizePeriod("1d"),
       "5d": normalizePeriod("5d"),
@@ -521,7 +618,9 @@ function normalizeMarketInternals(payload = {}) {
       firstTicker: cleanText(item.first_ticker, 20),
       secondTicker: cleanText(item.second_ticker, 20),
       leader5d: cleanText(item.five_day_leader, 20),
+      relative1d: finiteNumber(item.relative_returns_pct_point?.["1d"]),
       relative5d: finiteNumber(item.relative_returns_pct_point?.["5d"]),
+      relative20d: finiteNumber(item.relative_returns_pct_point?.["20d"]),
     })),
     gaps: cleanList(payload.data_gaps, 30).map((item) => cleanText(item, 600)).filter(Boolean),
   };
@@ -620,6 +719,16 @@ function normalizeBrokerResearch(payload = {}) {
         stances: cleanList(item?.stances, 8).map((value) => cleanText(value, 20)),
         reportCount: Number(item?.report_count || 0),
       })),
+      sectorAssessments: cleanList(consensus.sector_assessments, 8).map((item) => ({
+        sector: cleanText(item?.sector, 120),
+        reportCount: Number(item?.report_count || 0),
+        signal: cleanText(item?.signal, 20) || "evidence_only",
+        stanceCounts: item?.stance_counts || {},
+        catalysts: cleanList(item?.catalysts, 3).map((value) => cleanText(value, 300)),
+        risks: cleanList(item?.risks, 3).map((value) => cleanText(value, 300)),
+        monitoringConditions: cleanList(item?.monitoring_conditions, 3)
+          .map((value) => cleanText(value, 300)),
+      })),
     },
     reports: cleanList(payload.reports, 20).map((item) => ({
       reportId: cleanText(item?.report_id, 120),
@@ -635,6 +744,8 @@ function normalizeBrokerResearch(payload = {}) {
       keyClaims: cleanList(item?.key_claims, 8).map((value) => cleanText(value, 500)),
       catalysts: cleanList(item?.catalysts, 6).map((value) => cleanText(value, 300)),
       risks: cleanList(item?.risks, 6).map((value) => cleanText(value, 300)),
+      monitoringConditions: cleanList(item?.monitoring_conditions, 6)
+        .map((value) => cleanText(value, 300)),
       opinionChange: item?.opinion_change || {},
       source: {
         reference: cleanText(item?.source?.reference, 240),
@@ -656,7 +767,10 @@ function normalizeBrokerResearch(payload = {}) {
   };
 }
 
-export async function loadPbDailyIntelligenceSnapshot({ env = process.env } = {}) {
+export async function loadPbDailyIntelligenceSnapshot({
+  env = process.env,
+  brokerResearchDate = "",
+} = {}) {
   const config = configuredRoot(env);
   if (!config.configured) {
     return {
@@ -715,11 +829,13 @@ export async function loadPbDailyIntelligenceSnapshot({ env = process.env } = {}
     STOCK_CANDIDATES_SCHEMA,
     readerArtifact.date
   );
+  const brokerResearchDates = await dateFolders(join(config.root, "broker_research_digest"));
   const brokerResearchArtifact = await latestArtifact(
     config.root,
     "broker_research_digest",
     "broker_research_digest.json",
-    BROKER_RESEARCH_SCHEMA
+    BROKER_RESEARCH_SCHEMA,
+    cleanText(brokerResearchDate, 20)
   );
   const telegramSources = await loadTelegramOverview({
     root: config.root,
@@ -751,6 +867,11 @@ export async function loadPbDailyIntelligenceSnapshot({ env = process.env } = {}
     brokerResearch: brokerResearchArtifact
       ? normalizeBrokerResearch(brokerResearchArtifact.payload)
       : null,
+    brokerResearchHistory: {
+      availableDates: brokerResearchDates,
+      selectedDate: brokerResearchArtifact?.date || "",
+      latestDate: brokerResearchDates[0] || "",
+    },
     telegramSources,
   };
 }
@@ -761,9 +882,12 @@ export async function handlePbDailyIntelligenceEndpoint(req, res) {
     return;
   }
   try {
+    const requestUrl = new URL(req.url || "/api/pb-daily-intelligence", "http://127.0.0.1");
     sendJson(res, {
       ok: true,
-      ...(await loadPbDailyIntelligenceSnapshot()),
+      ...(await loadPbDailyIntelligenceSnapshot({
+        brokerResearchDate: requestUrl.searchParams.get("brokerDate") || "",
+      })),
     });
   } catch (error) {
     sendJson(res, { ok: false, error: error.message }, 500);

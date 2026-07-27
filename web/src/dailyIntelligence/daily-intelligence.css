@@ -420,6 +420,166 @@
   background: #6388c0;
 }
 
+.daily-intelligence-constituent-breadth {
+  margin: 0 0 16px;
+  border: 1px solid #dfe6ef;
+  border-radius: 12px;
+  padding: 13px;
+  background: #f8fafc;
+}
+
+.daily-intelligence-constituent-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.daily-intelligence-constituent-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.daily-intelligence-constituent-heading span,
+.daily-intelligence-constituent-breadth small {
+  color: #6c7889;
+  font-size: 11px;
+}
+
+.daily-intelligence-constituent-heading strong {
+  color: #263952;
+  font-size: 13px;
+}
+
+.daily-intelligence-constituent-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 9px;
+}
+
+.daily-intelligence-constituent-grid article {
+  border-radius: 9px;
+  padding: 9px;
+  background: #fff;
+}
+
+.daily-intelligence-constituent-grid article span {
+  display: block;
+  min-height: 28px;
+  color: #6c7889;
+  font-size: 10px;
+}
+
+.daily-intelligence-constituent-grid article strong {
+  color: #243753;
+  font-size: 14px;
+}
+
+.daily-intelligence-style-matrix,
+.daily-intelligence-sector-matrix {
+  margin-top: 14px;
+  border: 1px solid #e2e7ee;
+  border-radius: 12px;
+  padding: 13px;
+  background: #fff;
+}
+
+.daily-intelligence-subsection-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.daily-intelligence-subsection-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.daily-intelligence-subsection-heading span {
+  color: #7d8999;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.daily-intelligence-subsection-heading strong {
+  color: #263952;
+  font-size: 13px;
+}
+
+.daily-intelligence-subsection-heading small {
+  color: #7a8797;
+  font-size: 10px;
+  text-align: right;
+}
+
+.daily-intelligence-table-scroll {
+  overflow-x: auto;
+}
+
+.daily-intelligence-table-scroll table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.daily-intelligence-table-scroll th,
+.daily-intelligence-table-scroll td {
+  border-top: 1px solid #edf0f4;
+  padding: 8px 10px;
+  color: #637188;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.daily-intelligence-table-scroll thead th {
+  border-top: 0;
+  color: #7d8999;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.daily-intelligence-table-scroll th:first-child {
+  min-width: 150px;
+  padding-left: 3px;
+  text-align: left;
+}
+
+.daily-intelligence-table-scroll tbody th {
+  display: table-cell;
+  color: #273a55;
+  font-weight: 600;
+}
+
+.daily-intelligence-table-scroll tbody th strong,
+.daily-intelligence-table-scroll tbody th small {
+  display: block;
+}
+
+.daily-intelligence-table-scroll tbody th small {
+  margin-top: 2px;
+  color: #8692a1;
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.daily-intelligence-table-scroll td.is-positive {
+  color: #1c8058;
+  font-weight: 700;
+}
+
+.daily-intelligence-table-scroll td.is-negative {
+  color: #b14c55;
+  font-weight: 700;
+}
+
 .daily-intelligence-sector-columns {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -629,6 +789,59 @@
   color: #7c899b !important;
 }
 
+.daily-intelligence-research-title-actions,
+.daily-intelligence-research-date-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.daily-intelligence-research-date-controls {
+  min-height: 34px;
+  border: 1px solid #dde4ed;
+  border-radius: 10px;
+  background: #f7f9fc;
+  padding: 3px;
+}
+
+.daily-intelligence-research-date-controls button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #52647b;
+  cursor: pointer;
+}
+
+.daily-intelligence-research-date-controls button:hover:not(:disabled) {
+  background: #e8eef7;
+  color: #244d88;
+}
+
+.daily-intelligence-research-date-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.32;
+}
+
+.daily-intelligence-research-date-controls select {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #263750;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.daily-intelligence-research-date-error {
+  margin: -7px 0 14px !important;
+  color: #b54747 !important;
+}
+
 .daily-intelligence-broker-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -779,6 +992,104 @@
   font-size: 24px;
 }
 
+.daily-intelligence-sector-assessments {
+  margin-bottom: 20px;
+}
+
+.daily-intelligence-broker-subtitle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 10px;
+}
+
+.daily-intelligence-broker-subtitle span {
+  color: var(--daily-muted);
+  font-size: 12px;
+}
+
+.daily-intelligence-sector-assessment-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.daily-intelligence-sector-assessment-grid > article {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 13px;
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.daily-intelligence-sector-assessment-grid header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.daily-intelligence-sector-assessment-grid header span,
+.daily-intelligence-sector-assessment-grid small {
+  color: var(--daily-muted);
+  font-size: 11px;
+}
+
+.daily-intelligence-sector-assessment-grid h3 {
+  margin: 3px 0 0;
+  font-size: 15px;
+}
+
+.daily-intelligence-sector-assessment-grid em {
+  height: fit-content;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: var(--daily-muted);
+  background: rgba(148, 163, 184, 0.12);
+  font-size: 10px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.daily-intelligence-sector-assessment-grid em.is-positive {
+  color: #6ee7b7;
+  background: rgba(52, 211, 153, 0.1);
+}
+
+.daily-intelligence-sector-assessment-grid em.is-cautious {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+}
+
+.daily-intelligence-sector-assessment-grid > article > div:not(:first-child) {
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.daily-intelligence-sector-assessment-grid strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 11px;
+}
+
+.daily-intelligence-sector-assessment-grid p {
+  margin: 0;
+  color: var(--daily-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.daily-intelligence-sector-assessment-grid .is-catalyst strong,
+.daily-intelligence-broker-evaluation .is-catalyst strong {
+  color: #6ee7b7;
+}
+
+.daily-intelligence-sector-assessment-grid .is-risk strong,
+.daily-intelligence-broker-evaluation .is-risk strong {
+  color: #fbbf24;
+}
+
 .daily-intelligence-broker-disagreements {
   display: flex;
   flex-wrap: wrap;
@@ -842,6 +1153,35 @@
 .daily-intelligence-broker-grid p,
 .daily-intelligence-broker-grid li {
   line-height: 1.55;
+}
+
+.daily-intelligence-broker-evaluation {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.daily-intelligence-broker-evaluation section {
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.2);
+}
+
+.daily-intelligence-broker-evaluation strong {
+  font-size: 11px;
+}
+
+.daily-intelligence-broker-evaluation .is-monitor strong {
+  color: #93c5fd;
+}
+
+.daily-intelligence-broker-evaluation ul {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  color: var(--daily-muted);
+  font-size: 11px;
 }
 
 .daily-intelligence-broker-grid footer {
@@ -1259,6 +1599,57 @@
   font-size: 12px;
 }
 
+.daily-intelligence-telegram-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.daily-intelligence-telegram-actions > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(94, 234, 212, 0.32);
+  border-radius: 10px;
+  padding: 9px 12px;
+  color: #d9fff8;
+  background: rgba(13, 148, 136, 0.14);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.daily-intelligence-telegram-actions > button:hover:not(:disabled) {
+  border-color: rgba(94, 234, 212, 0.58);
+  background: rgba(13, 148, 136, 0.24);
+}
+
+.daily-intelligence-telegram-actions > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.daily-intelligence-telegram-run-detail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(94, 234, 212, 0.16);
+  border-radius: 10px;
+  background: rgba(15, 118, 110, 0.08);
+  color: #c7f9ef;
+  font-size: 12px;
+}
+
+.daily-intelligence-telegram-run-detail span {
+  color: var(--daily-muted);
+}
+
 .daily-intelligence-telegram-events {
   display: grid;
   gap: 10px;
@@ -1438,6 +1829,7 @@
   .daily-intelligence-scoreboard-grid,
   .daily-intelligence-sector-metrics,
   .daily-intelligence-broker-summary,
+  .daily-intelligence-sector-assessment-grid,
   .daily-intelligence-telegram-summary,
   .daily-intelligence-research-shortcuts,
   .daily-intelligence-operation-actions {
@@ -1467,10 +1859,13 @@
   .daily-intelligence-grid,
   .daily-intelligence-scoreboard-grid,
   .daily-intelligence-sector-columns,
+  .daily-intelligence-constituent-grid,
   .daily-intelligence-sector-metrics,
   .daily-intelligence-stock-list,
   .daily-intelligence-broker-summary,
   .daily-intelligence-broker-grid,
+  .daily-intelligence-sector-assessment-grid,
+  .daily-intelligence-broker-evaluation,
   .daily-intelligence-telegram-summary,
   .daily-intelligence-telegram-event-grid,
   .daily-intelligence-telegram-channels,
@@ -1508,7 +1903,9 @@
   .daily-intelligence-metrics,
   .daily-intelligence-summary ol,
   .daily-intelligence-scoreboard-grid,
-  .daily-intelligence-stock-reaction {
+  .daily-intelligence-stock-reaction,
+  .daily-intelligence-broker-summary,
+  .daily-intelligence-sector-assessment-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1517,7 +1914,6 @@
   .daily-intelligence-sector-metrics,
   .daily-intelligence-stock-list,
   .daily-intelligence-review-list,
-  .daily-intelligence-broker-summary,
   .daily-intelligence-broker-grid,
   .daily-intelligence-telegram-summary,
   .daily-intelligence-telegram-event-grid,
@@ -1540,7 +1936,10 @@
 }
 
 @container (max-width: 480px) {
-  .daily-intelligence-metrics {
+  .daily-intelligence-metrics,
+  .daily-intelligence-broker-summary,
+  .daily-intelligence-sector-assessment-grid,
+  .daily-intelligence-broker-evaluation {
     grid-template-columns: 1fr;
   }
 

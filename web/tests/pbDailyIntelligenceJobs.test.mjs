@@ -10,6 +10,11 @@ const tempRoot = join(process.cwd(), "data", ".test-pb-daily-intelligence-jobs")
 async function createEngine() {
   await mkdir(tempRoot, { recursive: true });
   await writeFile(join(tempRoot, "collect_all.py"), "print('collect')\n", "utf8");
+  await writeFile(
+    join(tempRoot, "refresh_telegram_intelligence.py"),
+    "print('telegram refresh')\n",
+    "utf8"
+  );
   await writeFile(join(tempRoot, "run_daily_report.py"), "print('report')\n", "utf8");
 }
 
@@ -82,6 +87,29 @@ test("PB job service exposes an unpublished official-evidence verification run",
   );
 });
 
+test("PB job service exposes an allowlisted Telegram-only refresh", async () => {
+  await createEngine();
+  const service = createPbDailyIntelligenceJobService({
+    env: {
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_PYTHON: "python-test",
+    },
+    uuid: () => "telegram-plan",
+    spawnImpl() {
+      return fakeChild();
+    },
+  });
+
+  const plan = service.plan("telegram_refresh");
+  assert.equal(plan.token, "telegram-plan");
+  assert.equal(plan.job.id, "telegram_refresh");
+  assert.equal(plan.job.publish, false);
+  assert.equal(
+    plan.commandPreview,
+    "python-test refresh_telegram_intelligence.py"
+  );
+});
+
 test("PB job service executes only a confirmed plan and redacts log secrets", async () => {
   await createEngine();
   const calls = [];
@@ -107,6 +135,11 @@ test("PB job service executes only a confirmed plan and redacts log secrets", as
   assert.match(calls[0].args[0], /run_daily_report\.py$/);
   assert.deepEqual(calls[0].args.slice(1), ["--dry-run"]);
   assert.equal(calls[0].options.shell, false);
+  assert.equal(
+    calls[0].options.env.COLLECTOR_TIMEOUT_GOOGLE_DRIVE_RESEARCH_INBOX_SECONDS,
+    "300"
+  );
+  assert.equal(calls[0].options.env.OPENAI_BROKER_RESEARCH_MAX_REPORTS, "25");
 
   await new Promise((resolve) => setImmediate(resolve));
   const status = service.status();

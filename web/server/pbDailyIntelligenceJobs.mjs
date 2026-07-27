@@ -9,6 +9,15 @@ const MAX_LOG_LINES = 80;
 const MAX_LOG_LINE_LENGTH = 500;
 
 const JOB_CATALOG = Object.freeze({
+  telegram_refresh: Object.freeze({
+    id: "telegram_refresh",
+    label: "텔레그램 지금 수집",
+    description: "등록된 텔레그램 채널을 수집하고 중복 사건을 다시 묶습니다.",
+    script: "refresh_telegram_intelligence.py",
+    args: [],
+    effect: "텔레그램 후보·중복 제거·사건 클러스터 로컬 갱신",
+    publish: false,
+  }),
   collect: Object.freeze({
     id: "collect",
     label: "후보 데이터 수집",
@@ -31,7 +40,7 @@ const JOB_CATALOG = Object.freeze({
     id: "verification_dry_run",
     label: "공식 근거 검증 실행",
     description:
-      "공식 원문과 구조화 분석을 실제로 확인하되 Notion·Telegram에는 발행하지 않습니다.",
+      "승인된 애널리스트 PDF를 최대 25건까지 5건 단위로 구조화 분석하고 공식 원문을 확인하되 Notion·Telegram에는 발행하지 않습니다.",
     script: "run_daily_report.py",
     args: ["--verification-dry-run"],
     effect: "공식 근거·사건 분석 산출물 갱신 · 외부 발행 없음",
@@ -241,7 +250,15 @@ export function createPbDailyIntelligenceJobService({
     try {
       child = spawnImpl(config.python, [planRecord.scriptPath, ...job.args], {
         cwd: config.root,
-        env: { ...env },
+        env: {
+          ...env,
+          COLLECTOR_TIMEOUT_AUTHORIZED_REPORT_DROP_SECONDS:
+            env.COLLECTOR_TIMEOUT_AUTHORIZED_REPORT_DROP_SECONDS || "300",
+          COLLECTOR_TIMEOUT_GOOGLE_DRIVE_RESEARCH_INBOX_SECONDS:
+            env.COLLECTOR_TIMEOUT_GOOGLE_DRIVE_RESEARCH_INBOX_SECONDS || "300",
+          OPENAI_BROKER_RESEARCH_MAX_REPORTS:
+            env.OPENAI_BROKER_RESEARCH_MAX_REPORTS || "25",
+        },
         shell: false,
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],

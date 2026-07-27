@@ -10,6 +10,8 @@ export function useDailyIntelligenceController() {
   const [snapshot, setSnapshot] = useState(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const [brokerResearchBusy, setBrokerResearchBusy] = useState(false);
+  const [brokerResearchError, setBrokerResearchError] = useState("");
   const [jobStatus, setJobStatus] = useState(null);
   const [jobBusy, setJobBusy] = useState(false);
   const [jobError, setJobError] = useState("");
@@ -36,6 +38,22 @@ export function useDailyIntelligenceController() {
     } catch (requestError) {
       setJobError(requestError.message || "PB 파이프라인 상태를 불러오지 못했습니다.");
       return null;
+    }
+  }, []);
+
+  const selectBrokerResearchDate = useCallback(async (date) => {
+    setBrokerResearchBusy(true);
+    setBrokerResearchError("");
+    try {
+      setSnapshot(await fetchDailyIntelligence(globalThis.fetch, {
+        brokerResearchDate: date,
+      }));
+    } catch (requestError) {
+      setBrokerResearchError(
+        requestError.message || "선택한 날짜의 애널리스트 리포트를 불러오지 못했습니다."
+      );
+    } finally {
+      setBrokerResearchBusy(false);
     }
   }, []);
 
@@ -93,6 +111,9 @@ export function useDailyIntelligenceController() {
     busy,
     error,
     reload,
+    brokerResearchBusy,
+    brokerResearchError,
+    selectBrokerResearchDate,
     jobStatus,
     jobBusy,
     jobError,
