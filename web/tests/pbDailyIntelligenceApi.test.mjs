@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { loadPbDailyIntelligenceSnapshot } from "../server/pbDailyIntelligenceApi.mjs";
+import {
+  buildPortfolioImpact,
+  extractPortfolioUniverse,
+  loadPbDailyIntelligenceSnapshot,
+} from "../server/pbDailyIntelligenceApi.mjs";
 
 const tempRoot = join(process.cwd(), "data", ".test-pb-daily-intelligence");
 
@@ -15,6 +19,94 @@ test.afterEach(async () => {
   await rm(tempRoot, { recursive: true, force: true });
 });
 
+test("PB Daily Intelligence links portfolio and watchlist tickers to bounded evidence", () => {
+  const universe = extractPortfolioUniverse({
+    transactionSettings: {
+      watchlistGroups: [
+        { name: "AI 관심", symbols: ["NVDA", "MSFT"] },
+      ],
+    },
+    portfolioCanvasSnapshot: {
+      store: {
+        canvases: [
+          {
+            name: "미국 성장",
+            workspace: {
+              strategyPortfolios: [
+                {
+                  name: "핵심",
+                  weights: [
+                    { ticker: "NVDA", weight: 60 },
+                    { ticker: "QQQ", weight: 40 },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  });
+  assert.deepEqual(universe.map((item) => item.ticker), ["MSFT", "NVDA", "QQQ"]);
+  assert.deepEqual(
+    universe.find((item) => item.ticker === "NVDA").roles,
+    ["watchlist", "portfolio"],
+  );
+
+  const impact = buildPortfolioImpact({
+    universe,
+    intelligence: {
+      events: {
+        items: [
+          {
+            event_id: "event-nvda",
+            title: "NVDA 가이던스 업데이트",
+            listed_entities: [{ ticker: "NVDA" }],
+            verification: { primary_fact_confirmed: true },
+            impact_analysis: {
+              summary: "반도체 섹터 전이 여부를 확인한다.",
+              confirmation_condition: "SOXX 동반 강세",
+              invalidation_condition: "NVDA 단독 약세",
+            },
+          },
+          {
+            event_id: "event-ai",
+            title: "AI 투자 확대",
+            verification: { primary_fact_confirmed: false },
+          },
+        ],
+      },
+    },
+    report: {
+      executiveSummary: ["금리와 실적을 함께 본다."],
+      earningsWatch: {
+        companies: [{ ticker: "MSFT", companyName: "Microsoft" }],
+      },
+    },
+    stockCandidates: {
+      candidates: [
+        {
+          ticker: "NVDA",
+          score: 82,
+          deepAnalysisEligible: true,
+          reaction: { return1d: 4.1 },
+        },
+      ],
+    },
+  });
+
+  assert.equal(impact.configured, true);
+  assert.equal(impact.portfolioCount, 2);
+  assert.equal(impact.watchlistCount, 2);
+  assert.equal(impact.matchedCount, 2);
+  assert.equal(impact.unmatchedCount, 1);
+  assert.equal(impact.assets[0].ticker, "NVDA");
+  assert.equal(impact.assets[0].evidenceState, "primary_verified");
+  assert.equal(impact.assets[0].relatedEvents.length, 1);
+  assert.equal(impact.assets.find((item) => item.ticker === "MSFT").evidenceState, "quantitative_only");
+  assert.equal(impact.assets.find((item) => item.ticker === "QQQ").evidenceState, "no_direct_evidence");
+});
+
 test("PB Daily Intelligence reports an explicit disconnected state", async () => {
   const snapshot = await loadPbDailyIntelligenceSnapshot({ env: {} });
   assert.deepEqual(snapshot.connection, {
@@ -23,6 +115,245 @@ test("PB Daily Intelligence reports an explicit disconnected state", async () =>
     reason: "not_configured",
   });
   assert.equal(snapshot.report, null);
+});
+
+test("PB Daily Intelligence exposes Gmail research collection status without secrets", async () => {
+  const reportDate = "2026-07-28";
+  const engineRoot = join(tempRoot, "engine");
+  await writeJson(
+    join(tempRoot, "v2_reader_reports", reportDate, "reader_report.json"),
+    {
+      schema_version: "v2_reader_report.v1",
+      report_date: reportDate,
+      generated_at: "2026-07-28T08:00:00+09:00",
+      title: "Daily Market Intelligence",
+      executive_summary: [],
+      market_findings: [],
+      verified_events: [],
+      korea_connection: {},
+      next_checks: [],
+      data_status: {},
+      sources: [],
+    }
+  );
+  await writeJson(
+    join(tempRoot, "source_status", reportDate, "source_status_190241.json"),
+    {
+      report_date: reportDate,
+      generated_at: "2026-07-28T19:02:41+09:00",
+      sources: [
+        {
+          source_id: "gmail_research",
+          status: "ok",
+          item_count: 2,
+          checked_at: "2026-07-28T19:02:41+09:00",
+        },
+      ],
+    }
+  );
+  await writeJson(
+    join(tempRoot, "normalized_inbox", reportDate, "inbox_190241.json"),
+    [
+      {
+        id: "gmail-1",
+        source_id: "morgan_stanley",
+        source_type: "broker_report",
+        publisher: "Morgan Stanley",
+        title: "Global Investment Committee Weekly",
+        published_at: "2026-07-28T18:40:00+09:00",
+        source_reference: "gmail:message-1",
+        tags: ["institutional_research", "official_email_source"],
+        market_scope: "US",
+        research_metadata: {
+          report_type: "market_strategy",
+          stance: "not_stated",
+          summary: "",
+          key_claims: [],
+        },
+        gmail_message: {
+          attachment_count: 1,
+          pdf_attachment_count: 1,
+          attachment_review_required: true,
+          attachments: [
+            {
+              attachment_key: "safe-attachment-key",
+              filename: "weekly-outlook.pdf",
+              mime_type: "application/pdf",
+              size: 2048,
+              is_pdf: true,
+              approval_state: "pending",
+              provider_attachment_id: "must-not-leak",
+            },
+          ],
+        },
+      },
+      {
+        id: "not-gmail",
+        source_id: "newsapi",
+        source_type: "news",
+        title: "Unrelated news",
+      },
+      {
+        id: "gmail-pdf-1",
+        source_id: "morgan_stanley",
+        source_type: "broker_report",
+        publisher: "Morgan Stanley",
+        title: "Global Investment Committee Weekly · weekly-outlook.pdf",
+        published_at: "2026-07-28T18:40:00+09:00",
+        source_reference: "gmail:message-1:attachment:safe-attachment-key",
+        tags: ["institutional_research", "official_email_source"],
+        market_scope: "US",
+        research_metadata: {
+          report_type: "sector",
+          stance: "not_stated",
+          summary: "",
+          key_claims: [],
+        },
+        gmail_attachment: {
+          attachment_key: "safe-attachment-key",
+          filename: "weekly-outlook.pdf",
+          mime_type: "application/pdf",
+          size: 2048,
+          approval_state: "approved",
+          parent_source_reference: "gmail:message-1",
+        },
+      },
+    ]
+  );
+  await writeJson(
+    join(
+      tempRoot,
+      "broker_research_analysis",
+      reportDate,
+      "broker_research_analysis.json"
+    ),
+    {
+      schema_version: "broker_research_analysis.v1",
+      report_date: reportDate,
+      generated_at: "2026-07-28T19:10:00+09:00",
+      status: "complete",
+      reports: [
+        {
+          report_id: "gmail-1",
+          analyst: "Global Investment Committee",
+          report_type: "strategy",
+          stance: "cautious",
+          summary: "미국 주식의 이익 전망은 유지되지만 장기금리 부담을 함께 점검한다.",
+          key_claims: ["대형주 이익 가시성은 유지된다.", "시장 폭 확산 여부가 중요하다."],
+          catalysts: ["실적 가이던스 상향"],
+          risks: ["장기금리 재상승"],
+          sectors: ["Technology"],
+          tickers: ["SPY"],
+          monitoring_conditions: ["10년물 금리와 동일가중 상대강도 확인"],
+        },
+        {
+          report_id: "gmail-pdf-1",
+          analyst: "US Equity Strategy Team",
+          report_type: "sector",
+          stance: "constructive",
+          summary: "첨부 리포트는 AI 투자와 전력 인프라 수요의 동반 확장을 전망한다.",
+          key_claims: ["AI 설비투자가 전력망 투자로 확산된다.", "반도체와 전력기기의 실적 가시성이 높다."],
+          catalysts: ["하이퍼스케일러 투자계획 상향"],
+          risks: ["금리 상승에 따른 밸류에이션 압박"],
+          sectors: ["Semiconductors", "Electrical Equipment"],
+          tickers: ["NVDA", "ETN"],
+          monitoring_conditions: ["다음 분기 AI CAPEX와 수주잔고 확인"],
+        },
+      ],
+    }
+  );
+  await mkdir(engineRoot, { recursive: true });
+  await writeFile(
+    join(engineRoot, ".env"),
+    [
+      "GOOGLE_GMAIL_REFRESH_TOKEN=secret-refresh-token",
+      "GOOGLE_GMAIL_RESEARCH_LABEL=Stocks",
+    ].join("\n"),
+    "utf8"
+  );
+  await writeJson(join(engineRoot, "sources.json"), {
+    gmail_research: {
+      sender_sources: [
+        { sender_domains: ["morganstanley.com"] },
+        { sender_domains: ["blackrock.com"] },
+      ],
+    },
+  });
+
+  const snapshot = await loadPbDailyIntelligenceSnapshot({
+    env: {
+      PB_DAILY_INTELLIGENCE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: engineRoot,
+    },
+  });
+
+  assert.deepEqual(snapshot.gmailResearch, {
+    configured: true,
+    label: "Stocks",
+    readOnly: true,
+    allowlistedSenderDomains: ["morganstanley.com", "blackrock.com"],
+    collection: {
+      reportDate,
+      status: "ok",
+      itemCount: 2,
+      lastCollectedAt: "2026-07-28T19:02:41+09:00",
+    },
+    candidates: [
+      {
+        id: "gmail-1",
+        publisher: "Morgan Stanley",
+        title: "Global Investment Committee Weekly",
+        publishedAt: "2026-07-28T18:40:00+09:00",
+        marketScope: "US",
+        analyst: "Global Investment Committee",
+        reportType: "strategy",
+        stance: "cautious",
+        analysisState: "analyzed",
+        summary: "미국 주식의 이익 전망은 유지되지만 장기금리 부담을 함께 점검한다.",
+        keyClaims: ["대형주 이익 가시성은 유지된다.", "시장 폭 확산 여부가 중요하다."],
+        catalysts: ["실적 가이던스 상향"],
+        risks: ["장기금리 재상승"],
+        sectors: ["Technology"],
+        tickers: ["SPY"],
+        monitoringConditions: ["10년물 금리와 동일가중 상대강도 확인"],
+        attachmentCount: 1,
+        pdfAttachmentCount: 1,
+        attachmentReviewRequired: true,
+        attachments: [
+          {
+            attachmentKey: "safe-attachment-key",
+            filename: "weekly-outlook.pdf",
+            mimeType: "application/pdf",
+            size: 2048,
+            isPdf: true,
+            approvalState: "pending",
+          },
+        ],
+        sourceReference: "gmail:message-1",
+        analyzedAttachments: [
+          {
+            id: "gmail-pdf-1",
+            attachmentKey: "safe-attachment-key",
+            filename: "weekly-outlook.pdf",
+            title: "Global Investment Committee Weekly · weekly-outlook.pdf",
+            analyst: "US Equity Strategy Team",
+            reportType: "sector",
+            stance: "constructive",
+            analysisState: "analyzed",
+            summary: "첨부 리포트는 AI 투자와 전력 인프라 수요의 동반 확장을 전망한다.",
+            keyClaims: ["AI 설비투자가 전력망 투자로 확산된다.", "반도체와 전력기기의 실적 가시성이 높다."],
+            catalysts: ["하이퍼스케일러 투자계획 상향"],
+            risks: ["금리 상승에 따른 밸류에이션 압박"],
+            sectors: ["Semiconductors", "Electrical Equipment"],
+            tickers: ["NVDA", "ETN"],
+            monitoringConditions: ["다음 분기 AI CAPEX와 수주잔고 확인"],
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(JSON.stringify(snapshot).includes("secret-refresh-token"), false);
+  assert.equal(JSON.stringify(snapshot).includes("must-not-leak"), false);
 });
 
 test("PB Daily Intelligence separates verified reader content from review queue", async () => {
@@ -37,6 +368,53 @@ test("PB Daily Intelligence separates verified reader content from review queue"
       executive_summary: ["선별적 순환매가 이어졌다."],
       market_findings: [{ title: "시장 폭", body: "동일가중이 우위였다." }],
       verified_events: [],
+      earnings_watch: {
+        status: "ready",
+        companies: [
+          {
+            ticker: "NVDA",
+            company_name: "NVIDIA",
+            upcoming_event: {
+              event_date: "2026-08-26",
+              confidence: "provider_expected",
+            },
+            estimate_revision: {
+              status: "third_party_estimate_bar_available",
+              freeze_as_of: "2026-07-28",
+              revision_direction: "positive_revision",
+              rows: [
+                {
+                  metric_id: "diluted_eps",
+                  period_end: "2026-08-31",
+                  value: 1.25,
+                  units: "USD per share",
+                  revision_pct_30d: 4.2,
+                  evidence_label: "third_party_forward_estimate",
+                },
+              ],
+            },
+            guidance: [
+              {
+                metric_id: "revenue",
+                period_end: "2026-08-31",
+                midpoint: 50000000000,
+                units: "USD",
+                evidence_label: "issuer_management_claim",
+              },
+            ],
+            historical_surprises: [
+              {
+                reported_date: "2026-05-20",
+                surprise_pct: 4.2,
+                reaction_pct: 2.1,
+              },
+            ],
+            post_result_estimate_revision: {
+              status: "not_established",
+            },
+          },
+        ],
+      },
       korea_connection: { status: "insufficient", summary: "수급 데이터가 부족하다." },
       next_checks: ["외국인 선물 수급"],
       data_status: {
@@ -95,11 +473,22 @@ test("PB Daily Intelligence separates verified reader content from review queue"
     {
       schema_version: "us_market_internals.v1",
       collection_status: "partial_coverage",
+      market_source: {
+        provider: "Alpaca Historical Bars (iex)",
+        as_of: "2026-07-22",
+        freshness_status: "current",
+        provider_configuration: {
+          alpaca_batch_enabled: true,
+          alpaca_feed: "iex",
+          alpaca_configuration_status: "ready",
+        },
+      },
       coverage: { available_ticker_count: 3, required_ticker_count: 11, missing_tickers: ["XLY"] },
       market_structure: { classification: "insufficient_data", reason: "partial" },
       constituent_breadth: {
         schema_version: "us_constituent_breadth.v1",
         collection_status: "ready",
+        data_gaps: [],
         as_of: "2026-07-22",
         universe: { membership_scope: "fund_holdings_proxy" },
         coverage: { daily_price_pct: 96.4 },
@@ -183,6 +572,15 @@ test("PB Daily Intelligence separates verified reader content from review queue"
     {
       schema_version: "us_equity_candidate_screen.v1",
       screen_status: "complete",
+      universe_security_count: 506,
+      market_covered_security_count: 506,
+      material_candidate_count: 25,
+      deep_analysis_count: 1,
+      universe_coverage: {
+        full_index_scan_ready: false,
+        membership_counts: { sp500: 500, nasdaq100: 0 },
+        membership_source_count: 1,
+      },
       candidates: [
         {
           ticker: "NVDA",
@@ -207,12 +605,25 @@ test("PB Daily Intelligence separates verified reader content from review queue"
   });
   assert.equal(snapshot.connection.available, true);
   assert.equal(snapshot.connection.sameReportDate, true);
+  assert.equal(snapshot.decisionGate.status, "blocked");
+  assert.ok(
+    snapshot.decisionGate.blockers.some(
+      (blocker) => blocker.code === "market_coverage_incomplete"
+    )
+  );
+  assert.ok(
+    snapshot.decisionGate.blockers.some(
+      (blocker) => blocker.code === "insufficient_quantitative_evidence"
+    )
+  );
   assert.equal(snapshot.report.verifiedEvents.length, 0);
   assert.equal(snapshot.pipeline.reviewQueue.length, 15);
   assert.equal(snapshot.pipeline.reviewQueue[0].title, "검증 전 후보 1");
   assert.equal(snapshot.pipeline.reviewQueue[0].priorityScore, 42);
   assert.equal(snapshot.scoreboard.cards[0].label, "RSP/SPY");
   assert.equal(snapshot.marketInternals.sectors["5d"][0].ticker, "XLE");
+  assert.equal(snapshot.marketInternals.provider.alpacaBatchEnabled, true);
+  assert.equal(snapshot.marketInternals.provider.alpacaFeed, "iex");
   assert.equal(snapshot.marketInternals.constituentBreadth.advancePct, 61.2);
   assert.equal(snapshot.marketInternals.constituentBreadth.above200dPct, 70);
   assert.equal(snapshot.marketInternals.sectorBreadth.readyCount, 1);
@@ -221,6 +632,20 @@ test("PB Daily Intelligence separates verified reader content from review queue"
   assert.equal(snapshot.marketInternals.stylePairs[0].relative20d, 2.4);
   assert.equal(snapshot.sectorMetrics.metrics[0].score, 89.4);
   assert.equal(snapshot.stockCandidates.candidates[0].ticker, "NVDA");
+  assert.equal(snapshot.stockCandidates.marketCoveredCount, 506);
+  assert.equal(snapshot.stockCandidates.materialCandidateCount, 25);
+  assert.equal(snapshot.stockCandidates.universeCoverage.sp500Count, 500);
+  assert.equal(snapshot.stockCandidates.universeCoverage.nasdaq100Count, 0);
+  assert.equal(snapshot.report.earningsWatch.status, "ready");
+  assert.equal(snapshot.report.earningsWatch.companies[0].ticker, "NVDA");
+  assert.equal(
+    snapshot.report.earningsWatch.companies[0].estimateRevision.rows[0].evidenceLabel,
+    "third_party_forward_estimate"
+  );
+  assert.equal(
+    snapshot.report.earningsWatch.companies[0].guidance[0].evidenceLabel,
+    "issuer_management_claim"
+  );
 });
 
 test("PB Daily Intelligence selects the newest valid reader artifact", async () => {
@@ -726,4 +1151,72 @@ test("PB Daily Intelligence tracks standardized sector coverage across research 
     publishers: ["국내증권", "Latest Securities"],
     type: "claim",
   }]);
+});
+
+test("PB Daily Intelligence separates document scope labels from transport coverage", async () => {
+  const reportDate = "2026-07-28";
+  await writeJson(
+    join(tempRoot, "v2_reader_reports", reportDate, "reader_report.json"),
+    { schema_version: "v2_reader_report.v1", report_date: reportDate, title: "Scope test" },
+  );
+  await writeJson(
+    join(tempRoot, "broker_research_digest", reportDate, "broker_research_digest.json"),
+    {
+      schema_version: "broker_research_digest.v1",
+      report_date: reportDate,
+      summary: {
+        selected_report_count: 3,
+        structured_report_count: 3,
+        publisher_count: 3,
+        analysis_status: "complete",
+      },
+      consensus: {},
+      reports: [
+        {
+          report_id: "daily",
+          publisher: "Daily Securities",
+          title: "데일리 마켓",
+          report_type: "strategy",
+          sectors: ["데일리"],
+          processing: { structured_analysis_available: true, status: "ready" },
+        },
+        {
+          report_id: "all-research",
+          publisher: "All Securities",
+          title: "전체 리서치",
+          report_type: "other",
+          sectors: ["전체리서치"],
+          processing: { structured_analysis_available: true, status: "ready" },
+        },
+        {
+          report_id: "transport",
+          publisher: "Transport Securities",
+          title: "운송 위클리",
+          report_type: "sector",
+          sectors: ["운송"],
+          processing: { structured_analysis_available: true, status: "ready" },
+        },
+      ],
+    },
+  );
+
+  const snapshot = await loadPbDailyIntelligenceSnapshot({
+    env: { PB_DAILY_INTELLIGENCE_DIR: tempRoot },
+  });
+  const reports = snapshot.brokerResearch.reports;
+  assert.equal(reports[0].researchScope, "daily_digest");
+  assert.equal(reports[1].researchScope, "multi_sector_digest");
+  assert.equal(reports[2].researchScope, "sector");
+  assert.deepEqual(snapshot.brokerResearch.summary.researchScopeCounts, {
+    daily_digest: 1,
+    multi_sector_digest: 1,
+    sector: 1,
+  });
+  assert.equal(snapshot.brokerResearch.consensus.coverage.length, 1);
+  assert.equal(
+    snapshot.brokerResearch.consensus.coverage[0].sectorId,
+    "transportation_logistics",
+  );
+  assert.equal(snapshot.brokerResearch.consensus.coverage[0].sector, "운송·물류");
+  assert.deepEqual(snapshot.brokerResearch.consensus.coverage[0].sourceLabels, ["운송"]);
 });

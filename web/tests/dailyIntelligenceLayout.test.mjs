@@ -1,0 +1,60 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+const viewSource = readFileSync(
+  new URL("../src/dailyIntelligence/DailyIntelligenceView.jsx", import.meta.url),
+  "utf8",
+);
+const navigationSource = readFileSync(
+  new URL("../src/shell/AppNavigation.jsx", import.meta.url),
+  "utf8",
+);
+const routesSource = readFileSync(
+  new URL("../src/shell/AppRoutes.jsx", import.meta.url),
+  "utf8",
+);
+const operationsStart = viewSource.indexOf("if (operationsMode)");
+const readerStart = viewSource.indexOf("PB DAILY MARKET INTELLIGENCE", operationsStart);
+const operationsView = viewSource.slice(operationsStart, readerStart);
+const readerView = viewSource.slice(readerStart);
+
+test("Daily Intelligence leads with decisions and links to a separate operations surface", () => {
+  const readingPath = [
+    "<DecisionGate",
+    "<h2>30초 결론</h2>",
+    "<h2>내 종목과 오늘의 리포트</h2>",
+    "<h2>결론을 지지하는 시장 근거</h2>",
+    "<h2>검증된 핵심 사건</h2>",
+    "<h2>오늘 확인할 조건</h2>",
+    "Research Operations",
+  ].map((needle) => readerView.indexOf(needle));
+
+  assert.equal(readingPath.every((index) => index >= 0), true);
+  assert.deepEqual(readingPath, [...readingPath].sort((a, b) => a - b));
+  assert.doesNotMatch(readerView, /<GmailResearchStatus|<BrokerResearchMonitor|<TelegramSourceMonitor/);
+  assert.doesNotMatch(readerView, /<details className="daily-intelligence-operations">/);
+});
+
+test("Research Operations owns collection, approval, and verification controls", () => {
+  assert.match(operationsView, /<GmailResearchStatus/);
+  assert.match(operationsView, /<BrokerResearchApprovalQueue/);
+  assert.match(operationsView, /<BrokerResearchMonitor/);
+  assert.match(operationsView, /<TelegramSourceMonitor/);
+  assert.match(operationsView, /<OperationsPanel/);
+  assert.match(operationsView, /<ReviewQueue/);
+  assert.match(viewSource, /id="pipeline-operations"/);
+  assert.match(operationsView, /id="verification-review-queue"/);
+  assert.match(operationsView, /검증 대기 사건 확인 방법/);
+  assert.match(operationsView, /href="#pipeline-operations"/);
+  assert.match(viewSource, /if \(!operationsMode\) return;/);
+});
+
+test("sidebar and routes expose Research Operations as an independent screen", () => {
+  assert.match(
+    navigationSource,
+    /label: "Research Operations", icon: ShieldCheck, view: "research-operations"/,
+  );
+  assert.match(routesSource, /activeView === "research-operations"/);
+  assert.match(routesSource, /mode="operations"/);
+});

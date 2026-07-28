@@ -110,6 +110,53 @@ test("PB job service exposes an allowlisted Telegram-only refresh", async () => 
   );
 });
 
+test("PB job service exposes an allowlisted Gmail-only refresh", async () => {
+  await createEngine();
+  const service = createPbDailyIntelligenceJobService({
+    env: {
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_PYTHON: "python-test",
+    },
+    uuid: () => "gmail-plan",
+    spawnImpl() {
+      return fakeChild();
+    },
+  });
+
+  const plan = service.plan("gmail_refresh");
+  assert.equal(plan.token, "gmail-plan");
+  assert.equal(plan.job.id, "gmail_refresh");
+  assert.equal(plan.job.publish, false);
+  assert.equal(
+    plan.commandPreview,
+    "python-test collect_all.py --sources gmail_research --source-timeout-seconds 90"
+  );
+});
+
+test("PB job service exposes an unpublished Gmail-inclusive analysis run", async () => {
+  await createEngine();
+  const service = createPbDailyIntelligenceJobService({
+    env: {
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_PYTHON: "python-test",
+    },
+    uuid: () => "gmail-analysis-plan",
+    spawnImpl() {
+      return fakeChild();
+    },
+  });
+
+  const plan = service.plan("gmail_analyze");
+  assert.equal(plan.token, "gmail-analysis-plan");
+  assert.equal(plan.job.id, "gmail_analyze");
+  assert.equal(plan.job.label, "Gmail 수집·분석");
+  assert.equal(plan.job.publish, false);
+  assert.equal(
+    plan.commandPreview,
+    "python-test run_daily_report.py --verification-dry-run"
+  );
+});
+
 test("PB job service executes only a confirmed plan and redacts log secrets", async () => {
   await createEngine();
   const calls = [];
@@ -147,4 +194,35 @@ test("PB job service executes only a confirmed plan and redacts log secrets", as
   assert.equal(status.run.logTail.some((line) => line.includes("do-not-show")), false);
   assert.equal(status.run.logTail.some((line) => line.includes("[REDACTED]")), true);
   assert.throws(() => service.execute(plan.token), /만료됐거나 유효하지/);
+});
+
+test("PB job service preserves the concrete failure cause after process close", async () => {
+  await createEngine();
+  const service = createPbDailyIntelligenceJobService({
+    env: {
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_PYTHON: "python-test",
+    },
+    uuid: () => "failure-id",
+    spawnImpl() {
+      return fakeChild({
+        code: 1,
+        output: "OpenAI returned HTTP 520: temporary upstream error\n",
+      });
+    },
+  });
+
+  const plan = service.plan("dry_run");
+  service.execute(plan.token);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const status = service.status();
+  assert.equal(status.run.status, "failed");
+  assert.equal(status.run.exitCode, 1);
+  assert.equal(
+    status.run.errorSummary,
+    "OpenAI returned HTTP 520: temporary upstream error",
+  );
+  assert.match(status.run.message, /종료 코드 1/);
+  assert.match(status.run.message, /OpenAI returned HTTP 520/);
 });

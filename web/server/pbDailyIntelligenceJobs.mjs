@@ -18,6 +18,25 @@ const JOB_CATALOG = Object.freeze({
     effect: "텔레그램 후보·중복 제거·사건 클러스터 로컬 갱신",
     publish: false,
   }),
+  gmail_refresh: Object.freeze({
+    id: "gmail_refresh",
+    label: "Gmail 리서치 지금 수집",
+    description: "Stocks 라벨의 허용된 공식 리서치 메일만 읽기 전용으로 수집합니다.",
+    script: "collect_all.py",
+    args: ["--sources", "gmail_research", "--source-timeout-seconds", "90"],
+    effect: "Gmail Stocks 라벨 후보와 수집 상태 로컬 갱신",
+    publish: false,
+  }),
+  gmail_analyze: Object.freeze({
+    id: "gmail_analyze",
+    label: "Gmail 수집·분석",
+    description:
+      "Gmail 해외 리서치를 새로 수집한 뒤 승인 자료를 구조화 분석하고 기존 분석 캐시를 재사용합니다.",
+    script: "run_daily_report.py",
+    args: ["--verification-dry-run"],
+    effect: "Gmail 수집 및 승인 리서치 요약·핵심 주장·촉매·위험 갱신 · 외부 발행 없음",
+    publish: false,
+  }),
   collect: Object.freeze({
     id: "collect",
     label: "후보 데이터 수집",
@@ -124,6 +143,7 @@ function emptyRun() {
     finishedAt: "",
     exitCode: null,
     message: "",
+    errorSummary: "",
     logTail: [],
   };
 }
@@ -216,10 +236,15 @@ export function createPbDailyIntelligenceJobService({
       .map(redactLogLine)
       .filter(Boolean);
     if (!nextLines.length) return;
+    const detectedError = [...nextLines].reverse().find((line) => (
+      /OpenAI returned HTTP|timed out|(?:^|\s)(?:Error|Exception):|No such file|not found/i
+        .test(line)
+    ));
     run = {
       ...run,
       logTail: [...run.logTail, ...nextLines].slice(-MAX_LOG_LINES),
       message: nextLines[nextLines.length - 1],
+      errorSummary: detectedError || run.errorSummary,
     };
   }
 
@@ -286,6 +311,7 @@ export function createPbDailyIntelligenceJobService({
     });
     child.on("close", (code) => {
       const succeeded = Number(code) === 0;
+      const failureMessage = `${job.label} 작업이 종료 코드 ${code ?? "미확인"}로 실패했습니다.`;
       run = {
         ...run,
         status: succeeded ? "succeeded" : "failed",
@@ -293,7 +319,9 @@ export function createPbDailyIntelligenceJobService({
         exitCode: Number.isInteger(code) ? Number(code) : null,
         message: succeeded
           ? `${job.label} 작업이 완료됐습니다.`
-          : `${job.label} 작업이 종료 코드 ${code ?? "미확인"}로 실패했습니다.`,
+          : run.errorSummary
+            ? `${failureMessage} 원인: ${run.errorSummary}`
+            : failureMessage,
       };
       child = null;
     });

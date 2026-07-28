@@ -1,6 +1,7 @@
 import React from "react";
 import AlertTriangle from "lucide-react/dist/esm/icons/alert-triangle.js";
 import ArrowUpRight from "lucide-react/dist/esm/icons/arrow-up-right.js";
+import BriefcaseBusiness from "lucide-react/dist/esm/icons/briefcase-business.js";
 import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check-big.js";
 import ChevronLeft from "lucide-react/dist/esm/icons/chevron-left.js";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.js";
@@ -8,11 +9,13 @@ import CircleDashed from "lucide-react/dist/esm/icons/circle-dashed.js";
 import Database from "lucide-react/dist/esm/icons/database.js";
 import FileText from "lucide-react/dist/esm/icons/file-text.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
+import Mail from "lucide-react/dist/esm/icons/mail.js";
 import Radio from "lucide-react/dist/esm/icons/radio.js";
 import Play from "lucide-react/dist/esm/icons/play.js";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
 import Send from "lucide-react/dist/esm/icons/send.js";
 import ShieldCheck from "lucide-react/dist/esm/icons/shield-check.js";
+import Sparkles from "lucide-react/dist/esm/icons/sparkles.js";
 import X from "lucide-react/dist/esm/icons/x.js";
 import { PortfolioEChart } from "../portfolio/PortfolioEChart.jsx";
 import { MarkdownText } from "../utils/MarkdownText.jsx";
@@ -224,12 +227,42 @@ function Scoreboard({ scoreboard }) {
   );
 }
 
+function DecisionGate({ gate }) {
+  if (!gate) return null;
+  const ready = gate.status === "ready";
+  return (
+    <section
+      className={`daily-intelligence-decision-gate ${ready ? "is-ready" : "is-blocked"}`}
+      aria-live="polite"
+    >
+      <div>
+        {ready ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
+        <span>
+          <small>DECISION EVIDENCE GATE</small>
+          <strong>{gate.labelKo}</strong>
+        </span>
+      </div>
+      <p>{gate.summary}</p>
+      {!ready && gate.blockers?.length ? (
+        <ul>
+          {gate.blockers.map((blocker) => (
+            <li key={blocker.code}>{blocker.message}</li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
 function SectorLeadership({ marketInternals }) {
   if (!marketInternals) {
     return <p className="daily-intelligence-muted">섹터 리더십 데이터가 없습니다.</p>;
   }
   const constituent = marketInternals.constituentBreadth;
   const sectorBreadth = marketInternals.sectorBreadth;
+  const localAlpacaMissing =
+    marketInternals.provider?.alpacaConfigurationStatus === "missing_credentials"
+    || constituent?.dataGaps?.some((gap) => /Alpaca credentials/i.test(gap));
   const breadthCards = constituent ? [
     ["상승 종목", constituent.advancePct, "%"],
     ["상승 거래량", constituent.upVolumePct, "%"],
@@ -268,6 +301,14 @@ function SectorLeadership({ marketInternals }) {
           />
         </div>
       </div>
+      {localAlpacaMissing ? (
+        <p className="daily-intelligence-inline-warning">
+          localhost의 전체 미국시장 수집이 차단됐습니다. 로컬 리포트 엔진에
+          ALPACA_API_KEY와 ALPACA_SECRET_KEY 또는 APCA_API_KEY_ID와
+          APCA_API_SECRET_KEY가 필요합니다. GitHub Actions Secrets는 이 서버에
+          자동 전달되지 않습니다.
+        </p>
+      ) : null}
       {constituent ? (
         <div className="daily-intelligence-constituent-breadth">
           <div className="daily-intelligence-constituent-heading">
@@ -451,37 +492,152 @@ function StockCandidates({ stockCandidates }) {
   if (!stockCandidates?.candidates?.length) {
     return <p className="daily-intelligence-muted">분석 기준을 통과한 미국 개별주 후보가 없습니다.</p>;
   }
+  const coverage = stockCandidates.universeCoverage || {};
   return (
-    <div className="daily-intelligence-stock-list">
-      {stockCandidates.candidates.map((candidate) => (
-        <article key={candidate.ticker}>
-          <header>
-            <div>
-              <span>{candidate.ticker}</span>
-              <h3>{candidate.companyName}</h3>
+    <>
+      <p className="daily-intelligence-panel-note">
+        가격·거래량 {stockCandidates.marketCoveredCount}/{stockCandidates.universeCount}종목 확인 ·
+        이상 움직임 {stockCandidates.materialCandidateCount}종목 중 상위 {stockCandidates.candidates.length}개 표시 ·
+        심층분석 가능 {stockCandidates.deepAnalysisCount}개
+        <br />
+        S&amp;P 500 프록시 {coverage.sp500Count || 0}종목 · Nasdaq-100 프록시{" "}
+        {coverage.nasdaq100Count || 0}종목
+        {!coverage.fullIndexScanReady ? " · Nasdaq-100 구성자료 연결 대기" : ""}
+      </p>
+      <div className="daily-intelligence-stock-list">
+        {stockCandidates.candidates.map((candidate) => (
+          <article key={candidate.ticker}>
+            <header>
+              <div>
+                <span>{candidate.ticker}</span>
+                <h3>{candidate.companyName}</h3>
+              </div>
+              <strong>{candidate.score}점</strong>
+            </header>
+            <div className="daily-intelligence-stock-reaction">
+              <div><span>1일</span><strong>{signed(candidate.reaction.return1d, 2, "%")}</strong></div>
+              <div><span>5일</span><strong>{signed(candidate.reaction.return5d, 2, "%")}</strong></div>
+              <div><span>SPY 대비</span><strong>{signed(candidate.reaction.spyRelative1d, 2, "%p")}</strong></div>
+              <div><span>거래량</span><strong>{signed(candidate.reaction.volumeRatio20d, 2, "x")}</strong></div>
             </div>
-            <strong>{candidate.score}점</strong>
-          </header>
-          <div className="daily-intelligence-stock-reaction">
-            <div><span>1일</span><strong>{signed(candidate.reaction.return1d, 2, "%")}</strong></div>
-            <div><span>5일</span><strong>{signed(candidate.reaction.return5d, 2, "%")}</strong></div>
-            <div><span>SPY 대비</span><strong>{signed(candidate.reaction.spyRelative1d, 2, "%p")}</strong></div>
-            <div><span>거래량</span><strong>{signed(candidate.reaction.volumeRatio20d, 2, "x")}</strong></div>
-          </div>
+            <p>
+              공식 근거 {candidate.evidence.filter((item) => item.primaryConfirmed).length}건 ·
+              확인 사실 {candidate.evidence.reduce((sum, item) => sum + item.factCount, 0)}개
+            </p>
+            <div className="daily-intelligence-stock-sources">
+              {candidate.evidence.map((item) => (
+                <a key={`${candidate.ticker}-${item.title}`} href={item.sourceUrl} target="_blank" rel="noreferrer">
+                  {item.title} <ArrowUpRight size={13} />
+                </a>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+    </>
+  );
+}
+
+const portfolioEvidenceLabels = {
+  primary_verified: "공식 근거 확인",
+  unverified: "검증 대기 사건",
+  quantitative_only: "정량·일정만 확인",
+  no_direct_evidence: "직접 근거 없음",
+};
+
+function PortfolioImpact({ portfolioImpact }) {
+  if (!portfolioImpact?.configured) {
+    return (
+      <div className="daily-intelligence-portfolio-empty">
+        <BriefcaseBusiness size={22} />
+        <div>
+          <strong>연결할 보유·관심종목이 없습니다.</strong>
           <p>
-            공식 근거 {candidate.evidence.filter((item) => item.primaryConfirmed).length}건 ·
-            확인 사실 {candidate.evidence.reduce((sum, item) => sum + item.factCount, 0)}개
+            포트폴리오 캔버스에 비중을 입력하거나 주식현황의 관심종목 그룹에 티커를
+            추가하면, 다음 새로고침부터 관련 사건과 실적 일정을 이곳에 연결합니다.
           </p>
-          <div className="daily-intelligence-stock-sources">
-            {candidate.evidence.map((item) => (
-              <a key={`${candidate.ticker}-${item.title}`} href={item.sourceUrl} target="_blank" rel="noreferrer">
-                {item.title} <ArrowUpRight size={13} />
-              </a>
-            ))}
-          </div>
-        </article>
-      ))}
-    </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <>
+      <div className="daily-intelligence-portfolio-summary">
+        <span>포트폴리오 {portfolioImpact.portfolioCount}종목</span>
+        <span>관심종목 {portfolioImpact.watchlistCount}종목</span>
+        <span>오늘 연결 {portfolioImpact.matchedCount}종목</span>
+        <span>직접 근거 없음 {portfolioImpact.unmatchedCount}종목</span>
+      </div>
+      <p className="daily-intelligence-panel-note">
+        리포트 결론을 종목별 매수·매도 신호로 바꾸지 않고, 관련 사건·가격 이상·실적
+        일정과 근거 상태만 연결합니다.
+      </p>
+      <div className="daily-intelligence-portfolio-list">
+        {portfolioImpact.assets.map((asset) => (
+          <article
+            key={asset.ticker}
+            className={`daily-intelligence-portfolio-card is-${asset.attentionLevel}`}
+          >
+            <header>
+              <div>
+                <strong>{asset.ticker}</strong>
+                <small>
+                  {asset.roles.includes("portfolio") ? "보유" : ""}
+                  {asset.roles.includes("portfolio") && asset.roles.includes("watchlist") ? " · " : ""}
+                  {asset.roles.includes("watchlist") ? "관심" : ""}
+                </small>
+              </div>
+              <span>{portfolioEvidenceLabels[asset.evidenceState] || asset.evidenceState}</span>
+            </header>
+            {asset.labels?.length ? (
+              <p className="daily-intelligence-muted">{asset.labels.join(" · ")}</p>
+            ) : null}
+            {asset.candidate ? (
+              <div className="daily-intelligence-portfolio-signal">
+                <strong>가격·거래량 관찰</strong>
+                <span>
+                  후보점수 {asset.candidate.score}
+                  {asset.candidate.reaction?.return1d !== null
+                    ? ` · 1일 ${signed(asset.candidate.reaction.return1d, 2, "%")}`
+                    : ""}
+                </span>
+              </div>
+            ) : null}
+            {asset.earnings ? (
+              <div className="daily-intelligence-portfolio-signal">
+                <strong>실적 관찰</strong>
+                <span>
+                  {asset.earnings.companyName || asset.ticker}
+                  {asset.earnings.upcomingEvent?.eventDate
+                    ? ` · ${asset.earnings.upcomingEvent.eventDate}`
+                    : ""}
+                </span>
+              </div>
+            ) : null}
+            {asset.relatedEvents?.length ? (
+              <div className="daily-intelligence-portfolio-events">
+                {asset.relatedEvents.map((event) => (
+                  <div key={event.eventId || event.title}>
+                    <strong>{event.title}</strong>
+                    {event.impact ? <p>{event.impact}</p> : null}
+                    {event.confirmationCondition ? (
+                      <small>확인: {event.confirmationCondition}</small>
+                    ) : null}
+                    {event.invalidationCondition ? (
+                      <small>무효화: {event.invalidationCondition}</small>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="daily-intelligence-muted">
+                오늘 리포트에서 이 종목과 직접 연결되는 검증 사건은 없습니다.
+              </p>
+            )}
+          </article>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -529,6 +685,70 @@ function ReviewQueue({ items = [] }) {
   );
 }
 
+function EarningsWatch({ earningsWatch }) {
+  const companies = earningsWatch?.companies || [];
+  if (!companies.length) {
+    return (
+      <p className="daily-intelligence-muted">
+        미국 개별주 분석 후보가 확정되면 실적 서프라이즈, 회사 가이던스,
+        제3자 전망치 변화를 이 영역에 연결합니다.
+      </p>
+    );
+  }
+  const revisionLabels = {
+    positive_revision: "상향",
+    negative_revision: "하향",
+    mixed_revision: "혼조",
+    insufficient_detail: "자료 부족",
+    not_available: "자료 없음",
+  };
+  return (
+    <div className="daily-intelligence-finding-list">
+      {companies.map((company) => {
+        const latest = company.historicalSurprises?.[0];
+        return (
+          <article key={company.ticker || company.companyName}>
+            <h3>{[company.ticker, company.companyName].filter(Boolean).join(" · ")}</h3>
+            {company.upcomingEvent?.eventDate ? (
+              <p>
+                <b>다음 실적일</b> {company.upcomingEvent.eventDate}
+                {" · "}
+                {company.upcomingEvent.confidence === "confirmed" ? "공식 확인" : "예상 일정"}
+              </p>
+            ) : null}
+            {company.estimateRevision?.rows?.length ? (
+              <p>
+                <b>제3자 전망치</b>{" "}
+                {revisionLabels[company.estimateRevision.revisionDirection] || "자료 부족"}
+                {company.estimateRevision.freezeAsOf
+                  ? ` · 기준 ${company.estimateRevision.freezeAsOf}`
+                  : ""}
+              </p>
+            ) : null}
+            {company.guidance?.length ? (
+              <p><b>회사 가이던스</b> {company.guidance.length}개 지표 확인</p>
+            ) : null}
+            {latest ? (
+              <p>
+                <b>최근 과거 실적</b>{" "}
+                EPS 서프라이즈 {latest.surprisePct == null ? "확인 불가" : `${latest.surprisePct >= 0 ? "+" : ""}${latest.surprisePct.toFixed(2)}%`}
+                {latest.reactionPct == null
+                  ? ""
+                  : ` · 종가 반응 ${latest.reactionPct >= 0 ? "+" : ""}${latest.reactionPct.toFixed(2)}%`}
+              </p>
+            ) : null}
+            {String(company.postResultEstimateRevision?.status || "").startsWith("not_established") ? (
+              <p className="daily-intelligence-muted">
+                발표 후 동일 기간 갱신 전망치 대기
+              </p>
+            ) : null}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 function OperationsPanel({
   jobStatus,
   jobBusy,
@@ -548,7 +768,10 @@ function OperationsPanel({
     failed: "실패",
   };
   return (
-    <section className="daily-intelligence-panel daily-intelligence-operations daily-intelligence-wide">
+    <section
+      id="pipeline-operations"
+      className="daily-intelligence-panel daily-intelligence-operations daily-intelligence-wide"
+    >
       <div className="daily-intelligence-panel-title">
         <div>
           <span>PIPELINE OPERATIONS</span>
@@ -569,7 +792,9 @@ function OperationsPanel({
         </div>
       ) : (
         <div className="daily-intelligence-operation-actions">
-          {(jobStatus?.jobs || []).filter((job) => job.id !== "telegram_refresh").map((job) => (
+          {(jobStatus?.jobs || [])
+            .filter((job) => !["telegram_refresh", "gmail_refresh", "gmail_analyze"].includes(job.id))
+            .map((job) => (
             <button
               type="button"
               key={job.id}
@@ -589,7 +814,7 @@ function OperationsPanel({
 
       {jobError ? <p className="daily-intelligence-operation-error">{jobError}</p> : null}
 
-      {pendingPlan && pendingPlan.job?.id !== "telegram_refresh" ? (
+      {pendingPlan && !["telegram_refresh", "gmail_refresh", "gmail_analyze"].includes(pendingPlan.job?.id) ? (
         <div className={`daily-intelligence-confirmation ${pendingPlan.job?.publish ? "is-publish" : ""}`}>
           <div>
             <span>실행 전 확인</span>
@@ -1876,6 +2101,378 @@ function BrokerResearchMonitor({
   );
 }
 
+function GmailResearchStatus({
+  gmailResearch,
+  attachmentApprovalQueue,
+  attachmentApprovalBusy,
+  attachmentApprovalError,
+  jobStatus,
+  jobBusy,
+  jobError,
+  pendingPlan,
+  onPlan,
+  onExecute,
+  onCancel,
+  onReloadAttachmentApprovals,
+  onDecideAttachment,
+}) {
+  if (!gmailResearch) return null;
+  const collection = gmailResearch.collection || {};
+  const connected = Boolean(gmailResearch.configured);
+  const collectionOk = collection.status === "ok";
+  const senderDomains = gmailResearch.allowlistedSenderDomains || [];
+  const candidates = gmailResearch.candidates || [];
+  const gmailRun = jobStatus?.run?.jobId === "gmail_refresh"
+    ? jobStatus.run
+    : null;
+  const gmailAnalysisRun = jobStatus?.run?.jobId === "gmail_analyze"
+    ? jobStatus.run
+    : null;
+  const refreshing = gmailRun?.status === "running";
+  const analyzing = gmailAnalysisRun?.status === "running";
+  const gmailPlanPending = pendingPlan?.job?.id === "gmail_refresh";
+  const gmailAnalysisPlanPending = pendingPlan?.job?.id === "gmail_analyze";
+  const attachmentItems = attachmentApprovalQueue?.items || [];
+  return (
+    <section
+      id="gmail-research-analysis"
+      className="daily-intelligence-panel daily-intelligence-wide daily-intelligence-gmail"
+    >
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>EMAIL RESEARCH</span>
+          <h2>Gmail 해외 리서치 수집</h2>
+        </div>
+        <div className="daily-intelligence-gmail-actions">
+          <span className={`daily-intelligence-run-status is-${connected ? "succeeded" : "failed"}`}>
+            {connected ? "읽기 전용 연결" : "인증 필요"}
+          </span>
+          <button
+            type="button"
+            onClick={() => onPlan("gmail_refresh")}
+            disabled={!connected || jobBusy || refreshing || analyzing}
+          >
+            {refreshing
+              ? <LoaderCircle size={15} className="is-spinning" />
+              : <RefreshCw size={15} />}
+            {refreshing ? "수집 중" : "Gmail 지금 수집"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onPlan("gmail_analyze")}
+            disabled={!connected || jobBusy || refreshing || analyzing}
+          >
+            {analyzing
+              ? <LoaderCircle size={15} className="is-spinning" />
+              : <Sparkles size={15} />}
+            {analyzing ? "수집·분석 중" : "Gmail 수집·분석"}
+          </button>
+        </div>
+      </div>
+      <div className="daily-intelligence-gmail-status">
+        <article>
+          <span>연결 상태</span>
+          <strong>{connected ? "읽기 전용 연결" : "인증 필요"}</strong>
+          <small>메일 전송·삭제·수정 권한 없음</small>
+        </article>
+        <article>
+          <span>수집 라벨</span>
+          <strong>{gmailResearch.label || "Stocks"}</strong>
+          <small>해당 라벨이 붙은 메일만 확인</small>
+        </article>
+        <article>
+          <span>최근 수집</span>
+          <strong>{collection.itemCount || 0}건</strong>
+          <small>
+            {collection.lastCollectedAt
+              ? formatGeneratedAt(collection.lastCollectedAt)
+              : "아직 실행되지 않음"}
+          </small>
+        </article>
+        <article>
+          <span>허용 발신자</span>
+          <strong>{senderDomains.length}개 도메인</strong>
+          <small>{senderDomains.join(" · ") || "허용 목록 설정 필요"}</small>
+        </article>
+      </div>
+      {candidates.length ? (
+        <div className="daily-intelligence-gmail-candidates">
+          <div className="daily-intelligence-subsection-heading">
+            <div>
+              <span>COLLECTED RESEARCH</span>
+              <h3>최근 해외 리서치 메일</h3>
+            </div>
+            <small>{candidates.length}건</small>
+          </div>
+          <div className="daily-intelligence-gmail-candidate-grid">
+            {candidates.map((candidate) => (
+              <article key={candidate.id}>
+                <div className="daily-intelligence-gmail-candidate-meta">
+                  <span>{candidate.publisher || "발행사 확인 필요"}</span>
+                  <span>{candidate.marketScope || "GLOBAL"}</span>
+                  <span>
+                    {candidate.analysisState === "analyzed" ? "분석 완료" : "구조화 분석 준비"}
+                  </span>
+                </div>
+                <h4>{candidate.title || "제목 없음"}</h4>
+                <p>
+                  {candidate.summary
+                    || "메일 본문은 재배포하지 않고 기존 공식 근거 검증 작업에서 한국어 요약·핵심 주장·리스크를 추출합니다."}
+                </p>
+                {candidate.keyClaims?.length ? (
+                  <div className="daily-intelligence-gmail-insight">
+                    <strong>핵심 주장</strong>
+                    <ul>
+                      {candidate.keyClaims.slice(0, 3).map((claim) => (
+                        <li key={claim}>{claim}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {candidate.catalysts?.length || candidate.risks?.length ? (
+                  <div className="daily-intelligence-gmail-signal-row">
+                    {candidate.catalysts?.length ? (
+                      <span><strong>촉매</strong>{candidate.catalysts[0]}</span>
+                    ) : null}
+                    {candidate.risks?.length ? (
+                      <span className="is-risk"><strong>위험</strong>{candidate.risks[0]}</span>
+                    ) : null}
+                  </div>
+                ) : null}
+                {candidate.monitoringConditions?.length ? (
+                  <p className="daily-intelligence-gmail-monitor">
+                    <strong>다음 확인</strong> {candidate.monitoringConditions[0]}
+                  </p>
+                ) : null}
+                {candidate.analyzedAttachments?.length ? (
+                  <div className="daily-intelligence-gmail-attachment-analysis">
+                    <div className="daily-intelligence-gmail-attachment-analysis-heading">
+                      <div>
+                        <span>ATTACHMENT RESEARCH</span>
+                        <strong>첨부 PDF 분석</strong>
+                      </div>
+                      <small>{candidate.analyzedAttachments.length}건</small>
+                    </div>
+                    {candidate.analyzedAttachments.map((attachment) => (
+                      <section key={attachment.attachmentKey || attachment.id}>
+                        <div className="daily-intelligence-gmail-attachment-title">
+                          <strong>{attachment.filename || attachment.title || "첨부 리포트"}</strong>
+                          <span>분석 완료</span>
+                        </div>
+                        <p>
+                          {attachment.summary
+                            || "첨부 PDF 구조화 분석은 완료됐으나 표시할 요약이 없습니다."}
+                        </p>
+                        {attachment.keyClaims?.length ? (
+                          <div className="daily-intelligence-gmail-insight">
+                            <strong>리포트 핵심 주장</strong>
+                            <ul>
+                              {attachment.keyClaims.slice(0, 3).map((claim) => (
+                                <li key={claim}>{claim}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                        {attachment.catalysts?.length || attachment.risks?.length ? (
+                          <div className="daily-intelligence-gmail-signal-row">
+                            {attachment.catalysts?.length ? (
+                              <span><strong>촉매</strong>{attachment.catalysts[0]}</span>
+                            ) : null}
+                            {attachment.risks?.length ? (
+                              <span className="is-risk">
+                                <strong>위험</strong>{attachment.risks[0]}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {attachment.monitoringConditions?.length ? (
+                          <p className="daily-intelligence-gmail-monitor">
+                            <strong>다음 확인</strong> {attachment.monitoringConditions[0]}
+                          </p>
+                        ) : null}
+                        {attachment.sectors?.length || attachment.tickers?.length ? (
+                          <div className="daily-intelligence-gmail-attachment-tags">
+                            {[...(attachment.sectors || []), ...(attachment.tickers || [])]
+                              .slice(0, 6)
+                              .map((tag) => <span key={tag}>{tag}</span>)}
+                          </div>
+                        ) : null}
+                      </section>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="daily-intelligence-gmail-candidate-footer">
+                  <span>
+                    {candidate.analyst ? `${candidate.analyst} · ` : ""}
+                    {formatGeneratedAt(candidate.publishedAt)}
+                  </span>
+                  {candidate.attachmentReviewRequired ? (
+                    <strong>
+                      PDF {candidate.pdfAttachmentCount || 1}개 · 별도 승인 필요
+                    </strong>
+                  ) : (
+                    <strong>본문 분석 가능</strong>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="daily-intelligence-muted daily-intelligence-gmail-empty">
+          아직 수집된 해외 리서치 메일이 없습니다. 뉴스레터 도착 후
+          <strong> Gmail 지금 수집</strong>을 실행하세요.
+        </p>
+      )}
+      {attachmentItems.length ? (
+        <div className="daily-intelligence-gmail-attachment-approvals">
+          <div className="daily-intelligence-subsection-heading">
+            <div>
+              <span>PDF APPROVAL</span>
+              <h3>Gmail PDF 첨부 승인 대기</h3>
+            </div>
+            <div className="daily-intelligence-approval-title-actions">
+              <small>
+                대기 {attachmentApprovalQueue?.counts?.pending || 0} ·
+                승인 {attachmentApprovalQueue?.counts?.approved || 0} ·
+                완료 {attachmentApprovalQueue?.counts?.ready || 0} ·
+                제외 {attachmentApprovalQueue?.counts?.excluded || 0}
+              </small>
+              <button
+                type="button"
+                onClick={onReloadAttachmentApprovals}
+                disabled={attachmentApprovalBusy}
+              >
+                <RefreshCw size={14} className={attachmentApprovalBusy ? "is-spinning" : ""} />
+                새로고침
+              </button>
+            </div>
+          </div>
+          {attachmentApprovalError ? (
+            <p className="daily-intelligence-approval-error">
+              <AlertTriangle size={15} /> {attachmentApprovalError}
+            </p>
+          ) : null}
+          <div className="daily-intelligence-approval-list">
+            {attachmentItems.map((item) => (
+              <article key={item.attachmentKey}>
+                <div>
+                  <span>{item.publisher || "발행사 확인 필요"} · PDF 첨부</span>
+                  <h3>{item.filename}</h3>
+                  <small>
+                    {item.messageTitle || "메일 제목 없음"} ·
+                    {item.size ? ` ${Math.max(1, Math.round(item.size / 1024))}KB` : " 크기 미확인"}
+                  </small>
+                </div>
+                <div className="daily-intelligence-approval-actions">
+                  <span className="daily-intelligence-approval-status">
+                    <span>
+                      {item.state === "approved"
+                        ? "분석 승인"
+                        : item.state === "ready"
+                          ? "분석 완료"
+                        : item.state === "excluded"
+                          ? "분석 제외"
+                          : "승인 대기"}
+                    </span>
+                    <small>
+                      {item.state === "approved"
+                        ? "다음 Gmail 수집·분석에서 다운로드"
+                        : item.state === "ready"
+                          ? "PDF 구조화 분석 산출물 확인됨"
+                        : "원문은 승인 전 다운로드하지 않음"}
+                    </small>
+                  </span>
+                  <button
+                    type="button"
+                    className="is-approve"
+                    onClick={() => onDecideAttachment(item.attachmentKey, "approved")}
+                    disabled={
+                      attachmentApprovalBusy
+                      || item.state === "approved"
+                      || item.state === "ready"
+                    }
+                  >
+                    <ShieldCheck size={14} /> 분석 승인
+                  </button>
+                  <button
+                    type="button"
+                    className="is-exclude"
+                    onClick={() => onDecideAttachment(item.attachmentKey, "excluded")}
+                    disabled={attachmentApprovalBusy || item.state === "excluded"}
+                  >
+                    <X size={14} /> 제외
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+          <p className="daily-intelligence-panel-note">
+            승인만으로는 다운로드하지 않습니다. 결정 후 <strong>Gmail 수집·분석</strong>을
+            실행하면 승인된 PDF만 내려받아 구조화 분석합니다.
+          </p>
+        </div>
+      ) : null}
+      <p className="daily-intelligence-panel-note">
+        발신자 인증을 통과한 공식 메일만 후보로 수집합니다. PDF 첨부파일은 자동 분석하지 않고
+        별도 승인 대기로 남깁니다.
+      </p>
+      {gmailPlanPending ? (
+        <div className="daily-intelligence-confirmation">
+          <div>
+            <span>Gmail 리서치 수집 실행 확인</span>
+            <h3>{pendingPlan.job?.label}</h3>
+            <p>{pendingPlan.job?.effect}</p>
+            <dl>
+              <div><dt>실행</dt><dd>{pendingPlan.commandPreview}</dd></div>
+              <div><dt>외부 변경</dt><dd>없음 · 읽기 전용 수집 및 로컬 갱신</dd></div>
+            </dl>
+          </div>
+          <div className="daily-intelligence-confirmation-actions">
+            <button type="button" onClick={onCancel} disabled={jobBusy}>
+              <X size={15} /> 취소
+            </button>
+            <button type="button" onClick={onExecute} disabled={jobBusy}>
+              {jobBusy
+                ? <LoaderCircle size={15} className="is-spinning" />
+                : <Play size={15} />}
+              확인 후 수집
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {gmailAnalysisPlanPending ? (
+        <div className="daily-intelligence-confirmation">
+          <div>
+            <span>해외 리서치 수집·구조화 분석 실행 확인</span>
+            <h3>{pendingPlan.job?.label}</h3>
+            <p>{pendingPlan.job?.effect}</p>
+            <dl>
+              <div><dt>실행</dt><dd>{pendingPlan.commandPreview}</dd></div>
+              <div><dt>외부 처리</dt><dd>Gmail 읽기 전용 수집 후 승인된 메일 본문을 OpenAI API로 구조화 분석</dd></div>
+              <div><dt>외부 발행</dt><dd>없음 · 로컬 분석 산출물만 갱신</dd></div>
+            </dl>
+          </div>
+          <div className="daily-intelligence-confirmation-actions">
+            <button type="button" onClick={onCancel} disabled={jobBusy}>
+              <X size={15} /> 취소
+            </button>
+            <button type="button" onClick={onExecute} disabled={jobBusy}>
+              {jobBusy
+                ? <LoaderCircle size={15} className="is-spinning" />
+                : <Sparkles size={15} />}
+              확인 후 분석
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {jobError && (gmailPlanPending || gmailAnalysisPlanPending || gmailRun || gmailAnalysisRun) ? (
+        <p className="daily-intelligence-operation-error">{jobError}</p>
+      ) : null}
+    </section>
+  );
+}
+
 function BrokerResearchApprovalQueue({
   approvalQueue,
   busy,
@@ -1970,13 +2567,37 @@ function BrokerResearchApprovalQueue({
   );
 }
 
-function ResearchIntelligenceShortcuts({ telegramSources, brokerResearch }) {
+function ResearchIntelligenceShortcuts({ telegramSources, brokerResearch, gmailResearch }) {
   const telegramPosts = telegramSources?.deduplication?.rawPostCount || 0;
   const telegramClusters = telegramSources?.deduplication?.eventClusterCount || 0;
   const brokerReports = brokerResearch?.summary?.selectedReportCount || 0;
   const brokerStructured = brokerResearch?.summary?.structuredReportCount || 0;
+  const gmailCollected = gmailResearch?.collection?.itemCount || 0;
+  const gmailCandidates = gmailResearch?.candidates || [];
+  const gmailAnalyzed = gmailCandidates.filter(
+    (candidate) => candidate.analysisState === "analyzed"
+  ).length;
+  const gmailPdfPending = gmailCandidates.reduce(
+    (count, candidate) => count + (
+      candidate.attachmentReviewRequired
+        ? Number(candidate.pdfAttachmentCount || 1)
+        : 0
+    ),
+    0
+  );
   return (
     <nav className="daily-intelligence-research-shortcuts" aria-label="리서치 분석 바로가기">
+      <a href="#gmail-research-analysis">
+        <Mail size={19} />
+        <span>
+          <small>EMAIL RESEARCH</small>
+          <strong>Gmail 해외 리서치 분석</strong>
+          <em>
+            {gmailCollected}건 수집 · {gmailAnalyzed}건 분석
+            {gmailPdfPending ? ` · PDF 승인 대기 ${gmailPdfPending}건` : ""}
+          </em>
+        </span>
+      </a>
       <a href="#broker-research-analysis">
         <FileText size={19} />
         <span>
@@ -1997,7 +2618,12 @@ function ResearchIntelligenceShortcuts({ telegramSources, brokerResearch }) {
   );
 }
 
-export default function DailyIntelligenceView() {
+export default function DailyIntelligenceView({
+  mode = "reader",
+  onOpenOperations,
+  onOpenDailyIntelligence,
+}) {
+  const operationsMode = mode === "operations";
   const {
     snapshot,
     busy,
@@ -2016,17 +2642,23 @@ export default function DailyIntelligenceView() {
   } = useDailyIntelligenceController();
   const report = snapshot?.report;
   const pipeline = snapshot?.pipeline;
+  const decisionGate = snapshot?.decisionGate;
   const scoreboard = snapshot?.scoreboard;
   const marketInternals = snapshot?.marketInternals;
   const sectorMetrics = snapshot?.sectorMetrics;
   const stockCandidates = snapshot?.stockCandidates;
+  const portfolioImpact = snapshot?.portfolioImpact;
   const telegramSources = snapshot?.telegramSources;
+  const gmailResearch = snapshot?.gmailResearch;
   const brokerResearch = snapshot?.brokerResearch;
   const brokerResearchHistory = snapshot?.brokerResearchHistory;
   const brokerResearchIndex = snapshot?.brokerResearchIndex;
   const [brokerApprovalQueue, setBrokerApprovalQueue] = React.useState(null);
   const [brokerApprovalBusy, setBrokerApprovalBusy] = React.useState(false);
   const [brokerApprovalError, setBrokerApprovalError] = React.useState("");
+  const [gmailAttachmentApprovalQueue, setGmailAttachmentApprovalQueue] = React.useState(null);
+  const [gmailAttachmentApprovalBusy, setGmailAttachmentApprovalBusy] = React.useState(false);
+  const [gmailAttachmentApprovalError, setGmailAttachmentApprovalError] = React.useState("");
 
   const loadBrokerApprovalQueue = React.useCallback(async () => {
     setBrokerApprovalBusy(true);
@@ -2068,9 +2700,67 @@ export default function DailyIntelligenceView() {
     }
   }, []);
 
+  const loadGmailAttachmentApprovalQueue = React.useCallback(async () => {
+    setGmailAttachmentApprovalBusy(true);
+    setGmailAttachmentApprovalError("");
+    try {
+      const response = await fetch(
+        "/api/pb-daily-intelligence/gmail-attachment-approvals",
+        { cache: "no-store" },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setGmailAttachmentApprovalQueue(payload);
+    } catch (approvalError) {
+      setGmailAttachmentApprovalError(
+        approvalError.message || "Gmail 첨부 승인 목록을 불러오지 못했습니다.",
+      );
+    } finally {
+      setGmailAttachmentApprovalBusy(false);
+    }
+  }, []);
+
+  const decideGmailAttachment = React.useCallback(async (attachmentKey, decision) => {
+    setGmailAttachmentApprovalBusy(true);
+    setGmailAttachmentApprovalError("");
+    try {
+      const response = await fetch(
+        "/api/pb-daily-intelligence/gmail-attachment-approvals",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ attachmentKey, decision }),
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setGmailAttachmentApprovalQueue(payload);
+    } catch (approvalError) {
+      setGmailAttachmentApprovalError(
+        approvalError.message || "Gmail 첨부 승인 결정을 저장하지 못했습니다.",
+      );
+    } finally {
+      setGmailAttachmentApprovalBusy(false);
+    }
+  }, []);
+
   React.useEffect(() => {
+    if (!operationsMode) return;
     void loadBrokerApprovalQueue();
-  }, [loadBrokerApprovalQueue]);
+  }, [loadBrokerApprovalQueue, operationsMode]);
+
+  React.useEffect(() => {
+    if (!operationsMode) return;
+    void loadGmailAttachmentApprovalQueue();
+  }, [
+    loadGmailAttachmentApprovalQueue,
+    gmailResearch?.collection?.lastCollectedAt,
+    operationsMode,
+  ]);
 
   if (busy && !snapshot) {
     return (
@@ -2096,6 +2786,162 @@ export default function DailyIntelligenceView() {
 
   const reviewCount = pipeline?.reviewQueue?.length || 0;
   const koreaStatus = report.koreaConnection?.status || "unknown";
+  const driveApprovalCount = brokerApprovalQueue?.counts?.pending || 0;
+  const gmailApprovalCount = gmailAttachmentApprovalQueue?.counts?.pending || 0;
+
+  if (operationsMode) {
+    return (
+      <div className="daily-intelligence-shell research-operations-shell">
+        <header className="daily-intelligence-header">
+          <div>
+            <span className="daily-intelligence-eyebrow">RESEARCH OPERATIONS</span>
+            <h1>수집·승인·검증 운영</h1>
+            <p>
+              {report.title} · 독자용 결론과 분리된 내부 운영 화면
+            </p>
+          </div>
+          <div className="daily-intelligence-header-actions">
+            <button
+              type="button"
+              className="daily-intelligence-refresh"
+              onClick={onOpenDailyIntelligence}
+            >
+              <ChevronLeft size={16} />
+              Daily Intelligence
+            </button>
+            <button
+              type="button"
+              className="daily-intelligence-refresh"
+              onClick={reload}
+              disabled={busy}
+            >
+              <RefreshCw size={16} className={busy ? "is-spinning" : ""} />
+              새로고침
+            </button>
+          </div>
+        </header>
+
+        <section className="daily-intelligence-metrics" aria-label="운영 대기 현황">
+          <MetricCard
+            label="사건 검증"
+            value={`${reviewCount}건`}
+            detail="공식 원문 확인 전 독자 본문 제외"
+            tone={reviewCount ? "warning" : "positive"}
+            icon={ShieldCheck}
+          />
+          <MetricCard
+            label="Drive PDF 승인"
+            value={`${driveApprovalCount}건`}
+            detail="애널리스트 리포트 분석 승인 대기"
+            tone={driveApprovalCount ? "warning" : "positive"}
+            icon={FileText}
+          />
+          <MetricCard
+            label="Gmail 첨부 승인"
+            value={`${gmailApprovalCount}건`}
+            detail="허용 발신자의 PDF 첨부만 표시"
+            tone={gmailApprovalCount ? "warning" : "positive"}
+            icon={Mail}
+          />
+        </section>
+
+        <main className="daily-intelligence-grid research-operations-grid">
+          <ResearchIntelligenceShortcuts
+            telegramSources={telegramSources}
+            brokerResearch={brokerResearch}
+            gmailResearch={gmailResearch}
+          />
+
+          <GmailResearchStatus
+            gmailResearch={gmailResearch}
+            attachmentApprovalQueue={gmailAttachmentApprovalQueue}
+            attachmentApprovalBusy={gmailAttachmentApprovalBusy}
+            attachmentApprovalError={gmailAttachmentApprovalError}
+            jobStatus={jobStatus}
+            jobBusy={jobBusy}
+            jobError={jobError}
+            pendingPlan={pendingPlan}
+            onPlan={requestJobPlan}
+            onExecute={executePendingPlan}
+            onCancel={cancelPendingPlan}
+            onReloadAttachmentApprovals={loadGmailAttachmentApprovalQueue}
+            onDecideAttachment={decideGmailAttachment}
+          />
+
+          <BrokerResearchApprovalQueue
+            approvalQueue={brokerApprovalQueue}
+            busy={brokerApprovalBusy}
+            error={brokerApprovalError}
+            onReload={loadBrokerApprovalQueue}
+            onDecide={decideBrokerReport}
+          />
+
+          <BrokerResearchMonitor
+            brokerResearch={brokerResearch}
+            researchIndex={brokerResearchIndex}
+            history={brokerResearchHistory}
+            busy={brokerResearchBusy}
+            error={brokerResearchError}
+            onDateChange={selectBrokerResearchDate}
+            onTaxonomyChanged={reload}
+          />
+
+          <TelegramSourceMonitor
+            telegramSources={telegramSources}
+            jobStatus={jobStatus}
+            jobBusy={jobBusy}
+            jobError={jobError}
+            pendingPlan={pendingPlan}
+            onPlan={requestJobPlan}
+            onExecute={executePendingPlan}
+            onCancel={cancelPendingPlan}
+          />
+
+          <OperationsPanel
+            jobStatus={jobStatus}
+            jobBusy={jobBusy}
+            jobError={jobError}
+            pendingPlan={pendingPlan}
+            onPlan={requestJobPlan}
+            onExecute={executePendingPlan}
+            onCancel={cancelPendingPlan}
+          />
+
+          <section
+            id="verification-review-queue"
+            className="daily-intelligence-panel daily-intelligence-review"
+          >
+            <div className="daily-intelligence-panel-title">
+              <div>
+                <span>RESEARCH QUEUE</span>
+                <h2>검증 대기 사건</h2>
+              </div>
+              <span className="daily-intelligence-count">{reviewCount}</span>
+            </div>
+            <p className="daily-intelligence-panel-note">
+              사실 확인 전에는 독자용 리포트에 자동 반영되지 않습니다.
+            </p>
+            <div className="daily-intelligence-operation-notice">
+              <ShieldCheck size={18} />
+              <div>
+                <strong>검증 대기 사건 확인 방법</strong>
+                <p>
+                  후보 원문에서 발행 주체·날짜·핵심 수치를 확인한 뒤, 리포트 실행 제어의
+                  공식 근거 검증을 실행하세요. 공식 원문 확인을 통과한 사건만 다음
+                  새로고침에서 독자용 리포트 후보로 승격됩니다.
+                </p>
+                <a href="#pipeline-operations">
+                  공식 근거 검증 실행으로 이동 <ArrowUpRight size={14} />
+                </a>
+              </div>
+            </div>
+            <ReviewQueue items={pipeline?.reviewQueue || []} />
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="daily-intelligence-shell">
       <header className="daily-intelligence-header">
@@ -2112,85 +2958,44 @@ export default function DailyIntelligenceView() {
         </button>
       </header>
 
-      <section className="daily-intelligence-metrics" aria-label="리포트 상태">
+      <section className="daily-intelligence-metrics" aria-label="오늘의 투자 판단">
         <MetricCard
-          label="검증 완료 사건"
-          value={report.dataStatus.verifiedEventCount}
-          detail="공식 원문 사실 확인 통과"
-          tone={report.dataStatus.verifiedEventCount > 0 ? "positive" : "warning"}
+          label="시장 체제"
+          value={
+            decisionGate?.status === "blocked"
+              ? "판단 보류"
+              : statusLabels[scoreboard?.regime?.label] || scoreboard?.regime?.label || "확인 필요"
+          }
+          detail={
+            Number.isFinite(scoreboard?.regime?.confidence)
+              ? `판단 신뢰도 ${Math.round(scoreboard.regime.confidence * 100)}%`
+              : "정량 근거 확인 필요"
+          }
+          tone={decisionGate?.status === "blocked" ? "warning" : "positive"}
+          icon={Sparkles}
+        />
+        <MetricCard
+          label="판단 근거"
+          value={decisionGate?.status === "ready" ? "사용 가능" : "보류"}
+          detail={`검증 완료 ${report.dataStatus.verifiedEventCount}건 · 대기 ${reviewCount}건`}
+          tone={decisionGate?.status === "ready" ? "positive" : "warning"}
           icon={ShieldCheck}
         />
         <MetricCard
-          label="검증 대기"
-          value={reviewCount}
-          detail={`전체 사건 클러스터 ${pipeline?.clusterCount || 0}건`}
-          tone={reviewCount ? "warning" : "positive"}
-          icon={CircleDashed}
-        />
-        <MetricCard
-          label="한국시장 연결"
-          value={statusLabels[koreaStatus] || koreaStatus}
-          detail={statusLabels[report.dataStatus.koreaDataStatus] || "상태 확인 필요"}
-          tone={koreaStatus === "sufficient" || koreaStatus === "complete" ? "positive" : "warning"}
-          icon={Database}
+          label="내 종목 연결"
+          value={`${portfolioImpact?.matchedCount || 0}종목`}
+          detail={
+            portfolioImpact?.configured
+              ? `보유 ${portfolioImpact.portfolioCount} · 관심 ${portfolioImpact.watchlistCount}`
+              : "포트폴리오·관심종목 입력 대기"
+          }
+          tone={portfolioImpact?.matchedCount ? "positive" : "neutral"}
+          icon={BriefcaseBusiness}
         />
       </section>
 
-      <ResearchIntelligenceShortcuts
-        telegramSources={telegramSources}
-        brokerResearch={brokerResearch}
-      />
-
       <main className="daily-intelligence-grid">
-        <BrokerResearchApprovalQueue
-          approvalQueue={brokerApprovalQueue}
-          busy={brokerApprovalBusy}
-          error={brokerApprovalError}
-          onReload={loadBrokerApprovalQueue}
-          onDecide={decideBrokerReport}
-        />
-
-        <BrokerResearchMonitor
-          brokerResearch={brokerResearch}
-          researchIndex={brokerResearchIndex}
-          history={brokerResearchHistory}
-          busy={brokerResearchBusy}
-          error={brokerResearchError}
-          onDateChange={selectBrokerResearchDate}
-          onTaxonomyChanged={reload}
-        />
-
-        <TelegramSourceMonitor
-          telegramSources={telegramSources}
-          jobStatus={jobStatus}
-          jobBusy={jobBusy}
-          jobError={jobError}
-          pendingPlan={pendingPlan}
-          onPlan={requestJobPlan}
-          onExecute={executePendingPlan}
-          onCancel={cancelPendingPlan}
-        />
-
-        <OperationsPanel
-          jobStatus={jobStatus}
-          jobBusy={jobBusy}
-          jobError={jobError}
-          pendingPlan={pendingPlan}
-          onPlan={requestJobPlan}
-          onExecute={executePendingPlan}
-          onCancel={cancelPendingPlan}
-        />
-
-        <section className="daily-intelligence-panel daily-intelligence-wide">
-          <div className="daily-intelligence-panel-title">
-            <div>
-              <span>MARKET SCOREBOARD</span>
-              <h2>시장 스코어보드</h2>
-            </div>
-            <StatusPill status={scoreboard?.regime?.label || "unknown"} />
-          </div>
-          <Scoreboard scoreboard={scoreboard} />
-        </section>
+        <DecisionGate gate={decisionGate} />
 
         <section className="daily-intelligence-panel daily-intelligence-summary">
           <div className="daily-intelligence-panel-title">
@@ -2200,11 +3005,87 @@ export default function DailyIntelligenceView() {
             </div>
             <CheckCircle2 size={21} />
           </div>
-          <ol>
-            {report.executiveSummary.map((item) => (
-              <li key={item}><MarkdownText text={item} /></li>
-            ))}
-          </ol>
+          {decisionGate?.status === "blocked" ? (
+            <p className="daily-intelligence-summary-blocked">
+              최신 데이터와 정량 근거의 일치 검증이 끝날 때까지 기존 결론을 숨깁니다.
+              위 차단 사유를 해소한 뒤 분석을 다시 실행하세요.
+            </p>
+          ) : (
+            <ol>
+              {report.executiveSummary.map((item) => (
+                <li key={item}><MarkdownText text={item} /></li>
+              ))}
+            </ol>
+          )}
+        </section>
+
+        <section className="daily-intelligence-panel daily-intelligence-wide">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>PORTFOLIO & WATCHLIST LINKAGE</span>
+              <h2>내 종목과 오늘의 리포트</h2>
+            </div>
+            <span className="daily-intelligence-count">
+              {portfolioImpact?.matchedCount || 0}
+            </span>
+          </div>
+          <PortfolioImpact portfolioImpact={portfolioImpact} />
+        </section>
+
+        <section className="daily-intelligence-panel daily-intelligence-wide">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>MARKET SCOREBOARD</span>
+              <h2>결론을 지지하는 시장 근거</h2>
+            </div>
+            <StatusPill
+              status={
+                decisionGate?.status === "blocked"
+                  ? "판단 보류"
+                  : scoreboard?.regime?.label || "unknown"
+              }
+            />
+          </div>
+          <Scoreboard scoreboard={scoreboard} />
+        </section>
+
+        <section className="daily-intelligence-panel">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>VERIFIED EVENTS</span>
+              <h2>검증된 핵심 사건</h2>
+            </div>
+            <span className="daily-intelligence-count">{report.verifiedEvents.length}</span>
+          </div>
+          {report.verifiedEvents.length ? (
+            <div className="daily-intelligence-finding-list">
+              {report.verifiedEvents.map((event) => (
+                <article key={event.eventId || event.title}>
+                  <h3>{event.title}</h3>
+                  {event.summary ? <MarkdownText text={event.summary} /> : null}
+                  {event.facts.length ? (
+                    <ul>{event.facts.map((fact) => <li key={fact}>{fact}</li>)}</ul>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="daily-intelligence-muted">
+              공식 원문 사실 확인을 통과한 신규 사건이 없습니다. 미확인 해석은 독자 영역에 노출하지 않습니다.
+            </p>
+          )}
+        </section>
+
+        <section className="daily-intelligence-panel daily-intelligence-next-checks">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>NEXT CHECKS</span>
+              <h2>오늘 확인할 조건</h2>
+            </div>
+          </div>
+          <ul className="daily-intelligence-check-list">
+            {report.nextChecks.map((item) => <li key={item}>{item}</li>)}
+          </ul>
         </section>
 
         <section className="daily-intelligence-panel daily-intelligence-wide">
@@ -2239,6 +3120,22 @@ export default function DailyIntelligenceView() {
           <StockCandidates stockCandidates={stockCandidates} />
         </section>
 
+        <section className="daily-intelligence-panel daily-intelligence-wide">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>EARNINGS INTELLIGENCE</span>
+              <h2>실적·가이던스·추정치 변화</h2>
+            </div>
+            <span className="daily-intelligence-count">
+              {report.earningsWatch?.companies?.length || 0}
+            </span>
+          </div>
+          <p className="daily-intelligence-panel-note">
+            전망치는 제3자 전망치, 가이던스는 회사 주장, 실제치는 공식 원문 확인 값으로 구분합니다.
+          </p>
+          <EarningsWatch earningsWatch={report.earningsWatch} />
+        </section>
+
         <section className="daily-intelligence-panel">
           <div className="daily-intelligence-panel-title">
             <div>
@@ -2270,59 +3167,6 @@ export default function DailyIntelligenceView() {
         <section className="daily-intelligence-panel">
           <div className="daily-intelligence-panel-title">
             <div>
-              <span>VERIFIED EVENTS</span>
-              <h2>검증된 핵심 사건</h2>
-            </div>
-            <span className="daily-intelligence-count">{report.verifiedEvents.length}</span>
-          </div>
-          {report.verifiedEvents.length ? (
-            <div className="daily-intelligence-finding-list">
-              {report.verifiedEvents.map((event) => (
-                <article key={event.eventId || event.title}>
-                  <h3>{event.title}</h3>
-                  {event.summary ? <MarkdownText text={event.summary} /> : null}
-                  {event.facts.length ? (
-                    <ul>{event.facts.map((fact) => <li key={fact}>{fact}</li>)}</ul>
-                  ) : null}
-                </article>
-              ))}
-            </div>
-          ) : (
-            <p className="daily-intelligence-muted">
-              공식 원문 사실 확인을 통과한 신규 사건이 없습니다. 미확인 해석은 독자 영역에 노출하지 않습니다.
-            </p>
-          )}
-        </section>
-
-        <section className="daily-intelligence-panel daily-intelligence-review">
-          <div className="daily-intelligence-panel-title">
-            <div>
-              <span>RESEARCH QUEUE</span>
-              <h2>검증 대기 사건</h2>
-            </div>
-            <span className="daily-intelligence-count">{reviewCount}</span>
-          </div>
-          <p className="daily-intelligence-panel-note">
-            이 영역은 운영 검토용입니다. 사실 확인 전에는 독자용 리포트에 자동 반영되지 않습니다.
-          </p>
-          <ReviewQueue items={pipeline?.reviewQueue || []} />
-        </section>
-
-        <section className="daily-intelligence-panel">
-          <div className="daily-intelligence-panel-title">
-            <div>
-              <span>NEXT CHECKS</span>
-              <h2>다음 확인 항목</h2>
-            </div>
-          </div>
-          <ul className="daily-intelligence-check-list">
-            {report.nextChecks.map((item) => <li key={item}>{item}</li>)}
-          </ul>
-        </section>
-
-        <section className="daily-intelligence-panel">
-          <div className="daily-intelligence-panel-title">
-            <div>
               <span>DATA QUALITY</span>
               <h2>데이터 상태</h2>
             </div>
@@ -2344,6 +3188,23 @@ export default function DailyIntelligenceView() {
             </div>
           </div>
           <SourceLinks sources={report.sources} />
+        </section>
+
+        <section className="daily-intelligence-operations-link daily-intelligence-wide">
+          <div>
+            <span>DATA & EVIDENCE STATUS</span>
+            <strong>
+              핵심 가격 {marketInternals?.coverage?.available || 0}/
+              {marketInternals?.coverage?.required || 0}
+              {" · "}
+              검증 대기 {reviewCount}건
+            </strong>
+            <p>수집 상태, PDF 승인, Telegram·Gmail 및 검증 대기열은 운영 화면에서 관리합니다.</p>
+          </div>
+          <button type="button" onClick={onOpenOperations}>
+            Research Operations
+            <ChevronRight size={16} />
+          </button>
         </section>
       </main>
     </div>

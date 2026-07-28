@@ -41,6 +41,13 @@
   font-size: 13px;
 }
 
+.daily-intelligence-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
 .daily-intelligence-refresh,
 .daily-intelligence-empty button {
   display: inline-flex;
@@ -72,7 +79,7 @@
 
 .daily-intelligence-research-shortcuts {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -124,7 +131,8 @@
 }
 
 #broker-research-analysis,
-#telegram-intelligence {
+#telegram-intelligence,
+#gmail-research-analysis {
   scroll-margin-top: 18px;
 }
 
@@ -186,6 +194,69 @@
   gap: 16px;
 }
 
+.research-operations-grid > .daily-intelligence-research-shortcuts {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+.daily-intelligence-operations-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border: 1px solid #dbe4ec;
+  border-radius: 17px;
+  background: linear-gradient(135deg, #f7fbfa 0%, #f5f7fb 100%);
+  padding: 20px 22px;
+}
+
+.daily-intelligence-operations-link > div {
+  min-width: 0;
+}
+
+.daily-intelligence-operations-link span {
+  display: block;
+  color: #6f7d90;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.daily-intelligence-operations-link strong {
+  display: block;
+  margin-top: 6px;
+  color: #243449;
+  font-size: 16px;
+}
+
+.daily-intelligence-operations-link p {
+  margin: 5px 0 0;
+  color: #718096;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.daily-intelligence-operations-link button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #b8c9c4;
+  border-radius: 10px;
+  background: #fff;
+  color: #23695b;
+  padding: 10px 13px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.daily-intelligence-operations-link button:hover {
+  border-color: #66a492;
+  box-shadow: 0 5px 14px rgba(34, 91, 76, 0.09);
+}
+
 .daily-intelligence-panel {
   min-width: 0;
   border: 1px solid #e0e6ed;
@@ -199,6 +270,95 @@
 .daily-intelligence-review,
 .daily-intelligence-wide {
   grid-column: 1 / -1;
+}
+
+.daily-intelligence-decision-gate {
+  grid-column: 1 / -1;
+}
+
+.daily-intelligence-next-checks {
+  border-color: #d7e3f2;
+  background: linear-gradient(145deg, #ffffff, #f7faff);
+}
+
+.daily-intelligence-operations {
+  grid-column: 1 / -1;
+  border: 1px solid #dbe2eb;
+  border-radius: 17px;
+  background: rgba(245, 248, 251, 0.9);
+  overflow: hidden;
+}
+
+.daily-intelligence-operations > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 22px;
+  color: #52647b;
+  cursor: pointer;
+  list-style: none;
+}
+
+.daily-intelligence-operations > summary::-webkit-details-marker {
+  display: none;
+}
+
+.daily-intelligence-operations > summary::after {
+  content: "펼치기";
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #e5ebf2;
+  padding: 6px 10px;
+  color: #53667e;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.daily-intelligence-operations[open] > summary::after {
+  content: "접기";
+}
+
+.daily-intelligence-operations > summary:focus-visible {
+  outline: 3px solid rgba(49, 95, 157, 0.25);
+  outline-offset: -3px;
+}
+
+.daily-intelligence-operations > summary > span {
+  display: grid;
+  gap: 3px;
+}
+
+.daily-intelligence-operations > summary small {
+  color: #7c899b;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.daily-intelligence-operations > summary strong {
+  color: #2c405a;
+  font-size: 15px;
+}
+
+.daily-intelligence-operations > summary em {
+  margin-left: auto;
+  color: #748398;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.daily-intelligence-operations-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 16px;
+  border-top: 1px solid #dbe2eb;
+  padding: 18px;
+}
+
+.daily-intelligence-operations-grid > .daily-intelligence-research-shortcuts {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
 }
 
 .daily-intelligence-panel-title {
@@ -784,6 +944,157 @@
   gap: 4px;
 }
 
+.daily-intelligence-portfolio-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px dashed #cfd8e5;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 16px;
+  color: #607088;
+}
+
+.daily-intelligence-portfolio-empty strong {
+  color: #293d58;
+  font-size: 13px;
+}
+
+.daily-intelligence-portfolio-empty p {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.daily-intelligence-portfolio-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.daily-intelligence-portfolio-summary span {
+  border-radius: 9px;
+  background: #eef3f8;
+  padding: 9px 10px;
+  color: #4d6078;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.daily-intelligence-portfolio-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.daily-intelligence-portfolio-card {
+  border: 1px solid #e1e7ee;
+  border-left: 4px solid #aeb9c7;
+  border-radius: 12px;
+  background: #fafbfd;
+  padding: 14px;
+}
+
+.daily-intelligence-portfolio-card.is-high {
+  border-left-color: #d5943e;
+}
+
+.daily-intelligence-portfolio-card.is-monitor {
+  border-left-color: #527eb8;
+}
+
+.daily-intelligence-portfolio-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.daily-intelligence-portfolio-card > header > div {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.daily-intelligence-portfolio-card > header strong {
+  color: #244d88;
+  font-size: 16px;
+}
+
+.daily-intelligence-portfolio-card > header small {
+  color: #76869a;
+  font-size: 10px;
+}
+
+.daily-intelligence-portfolio-card > header > span {
+  border-radius: 999px;
+  background: #edf2f7;
+  padding: 5px 8px;
+  color: #53667e;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.daily-intelligence-portfolio-card > p {
+  margin: 8px 0 0;
+  font-size: 10px;
+}
+
+.daily-intelligence-portfolio-signal {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 9px;
+  border-radius: 8px;
+  background: #f0f4f8;
+  padding: 8px 10px;
+  color: #566981;
+  font-size: 10px;
+}
+
+.daily-intelligence-portfolio-signal strong {
+  color: #314861;
+}
+
+.daily-intelligence-portfolio-events {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.daily-intelligence-portfolio-events > div {
+  border-top: 1px solid #e6ebf1;
+  padding-top: 9px;
+}
+
+.daily-intelligence-portfolio-events strong,
+.daily-intelligence-portfolio-events p,
+.daily-intelligence-portfolio-events small {
+  display: block;
+}
+
+.daily-intelligence-portfolio-events strong {
+  color: #2b3f59;
+  font-size: 11px;
+}
+
+.daily-intelligence-portfolio-events p {
+  margin: 4px 0;
+  color: #617088;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.daily-intelligence-portfolio-events small {
+  margin-top: 3px;
+  color: #7b899b;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
 .daily-intelligence-panel-note,
 .daily-intelligence-muted {
   color: #7c899b !important;
@@ -847,6 +1158,322 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 18px;
+}
+
+.daily-intelligence-gmail-status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.daily-intelligence-gmail-status article {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.26);
+}
+
+.daily-intelligence-gmail-status span,
+.daily-intelligence-gmail-status small {
+  color: var(--daily-muted);
+}
+
+.daily-intelligence-gmail-status strong {
+  color: var(--daily-text);
+  font-size: 1rem;
+}
+
+.daily-intelligence-gmail-status small {
+  overflow: hidden;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+}
+
+.daily-intelligence-gmail-candidates {
+  display: grid;
+  gap: 12px;
+  margin: 4px 0 14px;
+}
+
+.daily-intelligence-gmail-candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.daily-intelligence-gmail-candidate-grid > article {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(94, 234, 212, 0.16);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.42), rgba(13, 148, 136, 0.06));
+}
+
+.daily-intelligence-gmail-candidate-grid h4,
+.daily-intelligence-gmail-candidate-grid p {
+  margin: 0;
+}
+
+.daily-intelligence-gmail-candidate-grid h4 {
+  color: var(--daily-text);
+  font-size: 0.96rem;
+  line-height: 1.45;
+}
+
+.daily-intelligence-gmail-candidate-grid p {
+  color: var(--daily-muted);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.daily-intelligence-gmail-insight {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.daily-intelligence-gmail-insight > strong,
+.daily-intelligence-gmail-monitor strong {
+  color: #b9f4e8;
+  font-size: 0.72rem;
+}
+
+.daily-intelligence-gmail-insight ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 17px;
+  color: var(--daily-text);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.daily-intelligence-gmail-signal-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.daily-intelligence-gmail-signal-row > span {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid rgba(94, 234, 212, 0.13);
+  border-radius: 10px;
+  color: var(--daily-muted);
+  background: rgba(13, 148, 136, 0.07);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.daily-intelligence-gmail-signal-row > span.is-risk {
+  border-color: rgba(251, 146, 60, 0.17);
+  background: rgba(194, 65, 12, 0.07);
+}
+
+.daily-intelligence-gmail-signal-row strong {
+  color: #b9f4e8;
+  font-size: 0.68rem;
+}
+
+.daily-intelligence-gmail-signal-row .is-risk strong {
+  color: #f4c879;
+}
+
+.daily-intelligence-gmail-monitor {
+  padding-top: 8px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.17);
+}
+
+.daily-intelligence-gmail-attachment-analysis {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 12px;
+  background: rgba(30, 64, 175, 0.08);
+}
+
+.daily-intelligence-gmail-attachment-analysis-heading,
+.daily-intelligence-gmail-attachment-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.daily-intelligence-gmail-attachment-analysis-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.daily-intelligence-gmail-attachment-analysis-heading span {
+  color: #93c5fd;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.daily-intelligence-gmail-attachment-analysis-heading strong {
+  color: var(--daily-text);
+  font-size: 0.78rem;
+}
+
+.daily-intelligence-gmail-attachment-analysis-heading small {
+  color: #bfdbfe;
+  font-size: 0.68rem;
+}
+
+.daily-intelligence-gmail-attachment-analysis > section {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.daily-intelligence-gmail-attachment-title > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--daily-text);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daily-intelligence-gmail-attachment-title > span,
+.daily-intelligence-gmail-attachment-tags span {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.15);
+  font-size: 0.62rem;
+  font-weight: 750;
+}
+
+.daily-intelligence-gmail-attachment-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.daily-intelligence-gmail-candidate-meta,
+.daily-intelligence-gmail-candidate-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.daily-intelligence-gmail-candidate-meta span {
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: #b9f4e8;
+  background: rgba(13, 148, 136, 0.13);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.daily-intelligence-gmail-candidate-footer {
+  justify-content: space-between;
+  color: var(--daily-muted);
+  font-size: 0.7rem;
+}
+
+.daily-intelligence-gmail-candidate-footer strong {
+  color: #f4c879;
+  font-weight: 750;
+}
+
+.daily-intelligence-gmail-empty {
+  margin: 3px 0 14px;
+}
+
+.daily-intelligence-decision-gate {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid rgba(94, 234, 212, 0.22);
+  border-radius: 15px;
+  background: linear-gradient(135deg, rgba(13, 148, 136, 0.12), rgba(15, 23, 42, 0.55));
+}
+
+.daily-intelligence-decision-gate.is-blocked {
+  border-color: rgba(251, 146, 60, 0.3);
+  background: linear-gradient(135deg, rgba(194, 65, 12, 0.13), rgba(15, 23, 42, 0.58));
+}
+
+.daily-intelligence-decision-gate > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #5eead4;
+}
+
+.daily-intelligence-decision-gate.is-blocked > div {
+  color: #fb923c;
+}
+
+.daily-intelligence-decision-gate span {
+  display: grid;
+  gap: 2px;
+}
+
+.daily-intelligence-decision-gate small {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+}
+
+.daily-intelligence-decision-gate strong {
+  color: var(--daily-text);
+  font-size: 0.94rem;
+}
+
+.daily-intelligence-decision-gate p,
+.daily-intelligence-decision-gate ul {
+  margin: 0;
+  color: var(--daily-muted);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.daily-intelligence-decision-gate ul {
+  display: grid;
+  gap: 4px;
+  padding-left: 18px;
+}
+
+.daily-intelligence-summary-blocked {
+  margin: 0;
+  padding: 13px 14px;
+  border: 1px dashed rgba(251, 146, 60, 0.28);
+  border-radius: 11px;
+  color: #fdba74;
+  background: rgba(154, 52, 18, 0.08);
+  font-size: 0.8rem;
+  line-height: 1.65;
+}
+
+.daily-intelligence-gmail-attachment-approvals {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.daily-intelligence-gmail-attachment-approvals .daily-intelligence-approval-list {
+  margin-top: 12px;
 }
 
 .daily-intelligence-research-filter {
@@ -2296,6 +2923,21 @@
   line-height: 1.55;
 }
 
+.daily-intelligence-operation-notice a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  color: #7c5b13;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.daily-intelligence-operation-notice a:hover {
+  text-decoration: underline;
+}
+
 .daily-intelligence-operation-error {
   color: #a13e3e;
 }
@@ -2464,7 +3106,8 @@
   font-size: 12px;
 }
 
-.daily-intelligence-telegram-actions {
+.daily-intelligence-telegram-actions,
+.daily-intelligence-gmail-actions {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2472,7 +3115,8 @@
   justify-content: flex-end;
 }
 
-.daily-intelligence-telegram-actions > button {
+.daily-intelligence-telegram-actions > button,
+.daily-intelligence-gmail-actions > button {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -2487,12 +3131,14 @@
   cursor: pointer;
 }
 
-.daily-intelligence-telegram-actions > button:hover:not(:disabled) {
+.daily-intelligence-telegram-actions > button:hover:not(:disabled),
+.daily-intelligence-gmail-actions > button:hover:not(:disabled) {
   border-color: rgba(94, 234, 212, 0.58);
   background: rgba(13, 148, 136, 0.24);
 }
 
-.daily-intelligence-telegram-actions > button:disabled {
+.daily-intelligence-telegram-actions > button:disabled,
+.daily-intelligence-gmail-actions > button:disabled {
   cursor: not-allowed;
   opacity: 0.48;
 }
@@ -2704,7 +3350,10 @@
   .daily-intelligence-sector-detail-grid,
   .daily-intelligence-sector-trend-summary,
   .daily-intelligence-sector-narrative-grid,
-  .daily-intelligence-sector-opinion-grid {
+  .daily-intelligence-sector-opinion-grid,
+  .daily-intelligence-portfolio-summary,
+  .daily-intelligence-portfolio-list,
+  .daily-intelligence-operations-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -2724,6 +3373,20 @@
   }
 
   .daily-intelligence-refresh {
+    justify-content: center;
+  }
+
+  .daily-intelligence-header-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .daily-intelligence-operations-link {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .daily-intelligence-operations-link button {
     justify-content: center;
   }
 
@@ -2749,8 +3412,22 @@
   .daily-intelligence-sector-detail-grid,
   .daily-intelligence-sector-trend-summary,
   .daily-intelligence-sector-narrative-grid,
-  .daily-intelligence-sector-opinion-grid {
+  .daily-intelligence-sector-opinion-grid,
+  .daily-intelligence-portfolio-summary,
+  .daily-intelligence-portfolio-list,
+  .daily-intelligence-operations-grid {
     grid-template-columns: 1fr;
+  }
+
+  .daily-intelligence-operations > summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .daily-intelligence-operations > summary em {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
   }
 
   .daily-intelligence-sector-narrative-change > header {
@@ -2807,6 +3484,20 @@
     justify-content: center;
   }
 
+  .daily-intelligence-header-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .daily-intelligence-operations-link {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .daily-intelligence-operations-link button {
+    justify-content: center;
+  }
+
   .daily-intelligence-metrics,
   .daily-intelligence-summary ol,
   .daily-intelligence-scoreboard-grid,
@@ -2828,7 +3519,8 @@
   .daily-intelligence-telegram-channels,
   .daily-intelligence-research-signals > div,
   .daily-intelligence-research-shortcuts,
-  .daily-intelligence-operation-actions {
+  .daily-intelligence-operation-actions,
+  .daily-intelligence-operations-grid {
     grid-template-columns: 1fr;
   }
 

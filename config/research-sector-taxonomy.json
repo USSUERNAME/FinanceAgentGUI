@@ -5,127 +5,300 @@
       "id": "semiconductors_ai_compute",
       "nameKo": "반도체·AI 컴퓨트",
       "nameEn": "Semiconductors and AI Compute",
-      "aliases": ["반도체", "semiconductor", "semiconductors", "chips", "memory", "메모리", "hbm", "ai semiconductor", "ai chips"]
+      "aliases": [
+        "반도체",
+        "semiconductor",
+        "semiconductors",
+        "chips",
+        "memory",
+        "메모리",
+        "hbm",
+        "ai semiconductor",
+        "ai chips"
+      ]
     },
     {
       "id": "data_center_networking",
       "nameKo": "데이터센터 네트워크",
       "nameEn": "Data Center Networking",
-      "aliases": ["데이터센터 네트워크", "data center networking", "optical networking", "광통신"]
+      "aliases": [
+        "데이터센터 네트워크",
+        "data center networking",
+        "optical networking",
+        "광통신"
+      ]
     },
     {
       "id": "data_center_power_cooling",
       "nameKo": "데이터센터 전력·냉각",
       "nameEn": "Data Center Power and Cooling",
-      "aliases": ["데이터센터 전력", "데이터센터 냉각", "data center power", "data center cooling", "power cooling"]
+      "aliases": [
+        "데이터센터 전력",
+        "데이터센터 냉각",
+        "data center power",
+        "data center cooling",
+        "power cooling"
+      ]
     },
     {
       "id": "grid_electrification",
       "nameKo": "전력망·전기화",
       "nameEn": "Grid and Electrification",
-      "aliases": ["전력망", "전력기기", "전력 솔루션", "grid", "electrification", "electrical equipment"]
+      "aliases": [
+        "전력망",
+        "전력기기",
+        "전력 솔루션",
+        "grid",
+        "electrification",
+        "electrical equipment"
+      ]
     },
     {
       "id": "nuclear_generation",
       "nameKo": "원전·원자력 공급망",
       "nameEn": "Nuclear Generation and Supply Chain",
-      "aliases": ["원전", "원자력", "nuclear", "nuclear power"]
+      "aliases": [
+        "원전",
+        "원자력",
+        "nuclear",
+        "nuclear power"
+      ]
     },
     {
       "id": "batteries_energy_storage",
       "nameKo": "배터리·에너지저장",
       "nameEn": "Batteries and Energy Storage",
-      "aliases": ["배터리", "이차전지", "2차전지", "에너지저장", "battery", "batteries", "energy storage", "ess"]
+      "aliases": [
+        "배터리",
+        "이차전지",
+        "2차전지",
+        "에너지저장",
+        "battery",
+        "batteries",
+        "energy storage",
+        "ess"
+      ]
     },
     {
       "id": "electric_vehicles_autonomy",
       "nameKo": "전기차·자율주행",
       "nameEn": "Electric Vehicles and Autonomy",
-      "aliases": ["전기차", "자율주행", "ev", "electric vehicle", "electric vehicles", "autonomous driving", "autonomy"]
+      "aliases": [
+        "전기차",
+        "자율주행",
+        "ev",
+        "electric vehicle",
+        "electric vehicles",
+        "autonomous driving",
+        "autonomy"
+      ]
     },
     {
       "id": "industrial_automation_robotics",
       "nameKo": "산업자동화·로봇",
       "nameEn": "Industrial Automation and Robotics",
-      "aliases": ["로봇", "로보틱스", "산업자동화", "robot", "robotics", "industrial automation"]
+      "aliases": [
+        "로봇",
+        "로보틱스",
+        "산업자동화",
+        "robot",
+        "robotics",
+        "industrial automation",
+        "AI/로보틱스",
+        "휴머노이드"
+      ]
     },
     {
       "id": "aerospace_defense",
       "nameKo": "항공우주·방산",
       "nameEn": "Aerospace and Defense",
-      "aliases": ["방산", "항공우주", "defense", "aerospace", "aerospace defense"]
+      "aliases": [
+        "방산",
+        "항공우주",
+        "defense",
+        "aerospace",
+        "aerospace defense"
+      ]
     },
     {
       "id": "shipbuilding_marine",
       "nameKo": "조선·해양",
       "nameEn": "Shipbuilding and Marine",
-      "aliases": ["조선", "해양", "shipbuilding", "marine"]
+      "aliases": [
+        "조선",
+        "해양",
+        "shipbuilding",
+        "marine",
+        "조선기자재"
+      ]
+    },
+    {
+      "id": "transportation_logistics",
+      "nameKo": "운송·물류",
+      "nameEn": "Transportation and Logistics",
+      "aliases": [
+        "운송",
+        "물류",
+        "육운",
+        "택배",
+        "해운",
+        "해상운송",
+        "항공운송",
+        "항공사",
+        "transportation",
+        "logistics",
+        "transport logistics",
+        "shipping services",
+        "airlines"
+      ]
     },
     {
       "id": "biotech_healthcare_innovation",
       "nameKo": "바이오·헬스케어 혁신",
       "nameEn": "Biotech and Healthcare Innovation",
-      "aliases": ["바이오", "헬스케어", "제약", "biotech", "healthcare", "pharmaceuticals", "pharma"]
+      "aliases": [
+        "바이오",
+        "헬스케어",
+        "제약",
+        "biotech",
+        "healthcare",
+        "pharmaceuticals",
+        "pharma"
+      ]
     },
     {
       "id": "financials_capital_markets",
       "nameKo": "금융·자본시장",
       "nameEn": "Financials and Capital Markets",
-      "aliases": ["금융", "은행", "증권", "보험", "financials", "banks", "capital markets", "insurance"]
+      "aliases": [
+        "금융",
+        "은행",
+        "증권",
+        "보험",
+        "financials",
+        "banks",
+        "capital markets",
+        "insurance"
+      ]
     },
     {
       "id": "consumer_internet_platforms",
       "nameKo": "소비자 인터넷·플랫폼",
       "nameEn": "Consumer Internet and Platforms",
-      "aliases": ["인터넷", "플랫폼", "consumer internet", "internet platforms", "platforms"]
+      "aliases": [
+        "인터넷",
+        "플랫폼",
+        "consumer internet",
+        "internet platforms",
+        "platforms"
+      ]
     },
     {
       "id": "cloud_saas_cybersecurity",
       "nameKo": "클라우드·SaaS·사이버보안",
       "nameEn": "Cloud, SaaS and Cybersecurity",
-      "aliases": ["클라우드", "소프트웨어", "사이버보안", "cloud", "software", "saas", "cybersecurity"]
+      "aliases": [
+        "클라우드",
+        "소프트웨어",
+        "사이버보안",
+        "cloud",
+        "software",
+        "saas",
+        "cybersecurity"
+      ]
     },
     {
       "id": "energy_oil_gas",
       "nameKo": "에너지·석유가스",
       "nameEn": "Energy and Oil and Gas",
-      "aliases": ["에너지", "정유", "석유가스", "oil gas", "oil and gas", "energy"]
+      "aliases": [
+        "에너지",
+        "정유",
+        "석유가스",
+        "oil gas",
+        "oil and gas",
+        "energy"
+      ]
     },
     {
       "id": "metals_critical_materials",
       "nameKo": "금속·핵심소재",
       "nameEn": "Metals and Critical Materials",
-      "aliases": ["금속", "소재", "철강", "critical materials", "metals", "materials", "steel"]
+      "aliases": [
+        "금속",
+        "소재",
+        "철강",
+        "critical materials",
+        "metals",
+        "materials",
+        "steel",
+        "철강비철금속"
+      ]
     },
     {
       "id": "construction_infrastructure",
       "nameKo": "건설·인프라",
       "nameEn": "Construction and Infrastructure",
-      "aliases": ["건설", "인프라", "construction", "infrastructure"]
+      "aliases": [
+        "건설",
+        "인프라",
+        "construction",
+        "infrastructure"
+      ]
     },
     {
       "id": "reits_data_centers",
       "nameKo": "리츠·데이터센터",
       "nameEn": "REITs and Data Centers",
-      "aliases": ["리츠", "데이터센터 리츠", "reit", "reits", "data center reits"]
+      "aliases": [
+        "리츠",
+        "데이터센터 리츠",
+        "reit",
+        "reits",
+        "data center reits"
+      ]
     },
     {
       "id": "renewable_energy_equipment",
       "nameKo": "재생에너지 장비",
       "nameEn": "Renewable Energy Equipment",
-      "aliases": ["재생에너지", "태양광", "풍력", "renewable energy", "solar", "wind"]
+      "aliases": [
+        "재생에너지",
+        "태양광",
+        "풍력",
+        "renewable energy",
+        "solar",
+        "wind"
+      ]
     },
     {
       "id": "media_gaming_entertainment",
       "nameKo": "미디어·게임·엔터테인먼트",
       "nameEn": "Media, Gaming and Entertainment",
-      "aliases": ["미디어", "게임", "엔터테인먼트", "media", "gaming", "entertainment"]
+      "aliases": [
+        "미디어",
+        "게임",
+        "엔터테인먼트",
+        "media",
+        "gaming",
+        "entertainment",
+        "미디어업종",
+        "업종리서치"
+      ]
     },
     {
       "id": "consumer_brands_beauty",
       "nameKo": "소비재 브랜드·뷰티",
       "nameEn": "Consumer Brands and Beauty",
-      "aliases": ["소비재", "브랜드", "뷰티", "화장품", "consumer brands", "beauty", "cosmetics"]
+      "aliases": [
+        "소비재",
+        "브랜드",
+        "뷰티",
+        "화장품",
+        "consumer brands",
+        "beauty",
+        "cosmetics"
+      ]
     }
   ]
 }

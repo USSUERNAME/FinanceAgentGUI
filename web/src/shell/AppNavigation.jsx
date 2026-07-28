@@ -12,6 +12,7 @@ import Newspaper from "lucide-react/dist/esm/icons/newspaper.js";
 import PieChart from "lucide-react/dist/esm/icons/chart-pie.js";
 import ReceiptText from "lucide-react/dist/esm/icons/receipt-text.js";
 import Settings from "lucide-react/dist/esm/icons/settings.js";
+import ShieldCheck from "lucide-react/dist/esm/icons/shield-check.js";
 import TrendingUp from "lucide-react/dist/esm/icons/trending-up.js";
 import { newsFeedSidebarHealthState } from "../news/newsFeedStatus.js";
 import { PortfolioCanvasNavList } from "../portfolio/PortfolioCanvasNavList.jsx";
@@ -28,6 +29,7 @@ const leftSidebarSections = [
       { label: "Economic Calendar", icon: Landmark, view: "economic-calendar" },
       { label: "채팅", icon: MessageSquare, view: "chat" },
       { label: "Daily Intelligence", icon: TrendingUp, view: "daily-intelligence" },
+      { label: "Research Operations", icon: ShieldCheck, view: "research-operations" },
       { label: "보고서", icon: FileText, view: "reports" },
       { label: "포트폴리오", icon: PieChart, view: "portfolio" },
     ],

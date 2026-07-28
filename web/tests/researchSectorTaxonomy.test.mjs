@@ -36,6 +36,14 @@ test("research sector taxonomy preserves unknown source labels", () => {
   assert.equal(researchSectorTaxonomyVersion(), "research-sector-taxonomy.v1");
 });
 
+test("research sector taxonomy maps transport operators without merging shipbuilders", () => {
+  assert.equal(classifyResearchSector("운송").id, "transportation_logistics");
+  assert.equal(classifyResearchSector("logistics").id, "transportation_logistics");
+  assert.equal(classifyResearchSector("해운").id, "transportation_logistics");
+  assert.equal(classifyResearchSector("조선").id, "shipbuilding_marine");
+  assert.equal(classifyResearchSector("항공우주").id, "aerospace_defense");
+});
+
 test("research sector taxonomy persists an approved alias to an isolated config", () => {
   const directory = mkdtempSync(join(tmpdir(), "research-sector-taxonomy-"));
   const source = fileURLToPath(

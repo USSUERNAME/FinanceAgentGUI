@@ -7,6 +7,8 @@ import {
   researchSectorTaxonomyVersion,
   suggestResearchSectors,
 } from "./researchSectorTaxonomy.mjs";
+import { readPortfolioCanvasStoreSnapshot } from "./portfolioApi.mjs";
+import { readTransactionSettings } from "./transactionSettings.mjs";
 
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
 const READER_SCHEMA = "v2_reader_report.v1";
@@ -17,6 +19,7 @@ const STOCK_CANDIDATES_SCHEMA = "us_equity_candidate_screen.v1";
 const TELEGRAM_REGISTRY_SCHEMA = "telegram_channel_registry.v1";
 const TELEGRAM_REFRESH_SCHEMA = "telegram_intelligence_refresh.v1";
 const BROKER_RESEARCH_SCHEMA = "broker_research_digest.v1";
+const BROKER_RESEARCH_ANALYSIS_SCHEMA = "broker_research_analysis.v1";
 
 function cleanText(value, maxLength = 1000) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -48,6 +51,16 @@ function configuredEngineRoot(env = process.env, workspaceRoot = "") {
     return isAbsolute(raw) ? resolve(raw) : resolve(process.cwd(), raw);
   }
   return workspaceRoot ? dirname(workspaceRoot) : "";
+}
+
+function parseDotEnv(text = "") {
+  const values = new Map();
+  for (const line of String(text).split(/\r?\n/)) {
+    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!match) continue;
+    values.set(match[1], match[2].trim().replace(/^(['"])(.*)\1$/, "$2"));
+  }
+  return values;
 }
 
 async function readJsonFile(filePath) {
@@ -112,6 +125,99 @@ async function latestJsonInDateFolder(root, folderName, preferredDate, filePatte
     }
   }
   return null;
+}
+
+async function latestGmailResearchCandidates(root, preferredDate, limit = 20) {
+  const parent = join(root, "normalized_inbox");
+  const dates = await dateFolders(parent);
+  const selectedDate =
+    preferredDate && dates.includes(preferredDate)
+      ? preferredDate
+      : dates[0];
+  if (!selectedDate) return { date: preferredDate || "", candidates: [] };
+
+  const dateRoot = join(parent, selectedDate);
+  const entries = await readdir(dateRoot, { withFileTypes: true }).catch(() => []);
+  const names = entries
+    .filter((entry) => entry.isFile() && /^inbox_.*\.json$/i.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+    .reverse();
+  const seen = new Set();
+  const candidates = [];
+  for (const name of names) {
+    let rows;
+    try {
+      rows = await readJsonFile(join(dateRoot, name));
+    } catch {
+      continue;
+    }
+    for (const row of cleanList(rows, 500)) {
+      const tags = cleanList(row?.tags, 50).map((tag) => cleanText(tag, 120));
+      if (!row?.gmail_message && !tags.includes("official_email_source")) continue;
+      const id = cleanText(row?.id || row?.source_reference, 300);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const research = row?.research_metadata || {};
+      const gmailMessage = row?.gmail_message || {};
+      const gmailAttachmentKey = cleanText(
+        row?.gmail_attachment?.attachment_key,
+        128,
+      );
+      const gmailParentSourceReference = cleanText(
+        row?.gmail_attachment?.parent_source_reference,
+        300,
+      );
+      const gmailAttachmentFilename = cleanText(
+        row?.gmail_attachment?.filename,
+        500,
+      );
+      const attachments = cleanList(gmailMessage?.attachments, 30)
+        .filter((attachment) => attachment && typeof attachment === "object")
+        .map((attachment) => ({
+          attachmentKey: cleanText(attachment.attachment_key, 128),
+          filename: cleanText(attachment.filename, 500),
+          mimeType: cleanText(attachment.mime_type, 120),
+          size: Math.max(0, Number(attachment.size) || 0),
+          isPdf: attachment.is_pdf === true,
+          approvalState: ["approved", "excluded"].includes(
+            cleanText(attachment.approval_state, 40)
+          )
+            ? cleanText(attachment.approval_state, 40)
+            : "pending",
+        }))
+        .filter((attachment) => attachment.attachmentKey && attachment.filename);
+      const hasAnalysis = Boolean(
+        cleanText(research?.summary, 1200)
+        || cleanList(research?.key_claims, 8).length
+      );
+      candidates.push({
+        id,
+        publisher: cleanText(row?.publisher || row?.source_id, 160),
+        title: cleanText(row?.title, 300),
+        publishedAt: cleanText(row?.published_at, 80),
+        marketScope: cleanText(row?.market_scope, 40) || "GLOBAL",
+        reportType: cleanText(research?.report_type, 80) || "market_strategy",
+        stance: cleanText(research?.stance, 40) || "not_stated",
+        analysisState: hasAnalysis ? "analyzed" : "ready",
+        summary: cleanText(research?.summary, 600),
+        attachmentCount: Number(gmailMessage?.attachment_count || 0),
+        pdfAttachmentCount: Number(gmailMessage?.pdf_attachment_count || 0),
+        attachmentReviewRequired: gmailMessage?.attachment_review_required === true,
+        attachments,
+        sourceReference: cleanText(row?.source_reference, 300),
+        ...(gmailAttachmentKey ? {
+          gmailAttachmentKey,
+          gmailParentSourceReference,
+          gmailAttachmentFilename,
+        } : {}),
+      });
+      if (candidates.length >= limit) {
+        return { date: selectedDate, candidates };
+      }
+    }
+  }
+  return { date: selectedDate, candidates };
 }
 
 async function artifactForDate(root, folderName, fileName, expectedSchema, date) {
@@ -361,6 +467,134 @@ async function loadTelegramOverview({ root, reportDate, engineRoot, env }) {
   };
 }
 
+async function loadGmailResearchOverview({ root, reportDate, engineRoot, env }) {
+  const sourceStatusArtifact = await latestJsonInDateFolder(
+    root,
+    "source_status",
+    reportDate,
+    /^source_status_.*\.json$/i
+  );
+  const gmailSource = cleanList(sourceStatusArtifact?.payload?.sources, 100)
+    .find((source) => source?.source_id === "gmail_research");
+  const candidateArtifact = await latestGmailResearchCandidates(root, reportDate);
+  const analysisArtifact = candidateArtifact.date
+    ? await artifactForDate(
+        root,
+        "broker_research_analysis",
+        "broker_research_analysis.json",
+        BROKER_RESEARCH_ANALYSIS_SCHEMA,
+        candidateArtifact.date
+      )
+    : null;
+  const analysisById = new Map(
+    cleanList(analysisArtifact?.payload?.reports, 100)
+      .filter((row) => row && typeof row === "object")
+      .map((row) => [cleanText(row.report_id, 300), row])
+      .filter(([id]) => Boolean(id))
+  );
+  const analyzedCandidates = candidateArtifact.candidates.map((candidate) => {
+    const analysis = analysisById.get(candidate.id);
+    if (!analysis) return candidate;
+    return {
+      ...candidate,
+      analyst: cleanText(analysis.analyst, 160),
+      reportType: cleanText(analysis.report_type, 80) || candidate.reportType,
+      stance: cleanText(analysis.stance, 40) || candidate.stance,
+      analysisState: "analyzed",
+      summary: cleanText(analysis.summary, 800),
+      keyClaims: cleanList(analysis.key_claims, 6).map((value) => cleanText(value, 400)),
+      catalysts: cleanList(analysis.catalysts, 5).map((value) => cleanText(value, 300)),
+      risks: cleanList(analysis.risks, 5).map((value) => cleanText(value, 300)),
+      sectors: cleanList(analysis.sectors, 6).map((value) => cleanText(value, 120)),
+      tickers: cleanList(analysis.tickers, 10).map((value) => cleanText(value, 40)),
+      monitoringConditions: cleanList(analysis.monitoring_conditions, 5)
+        .map((value) => cleanText(value, 300)),
+    };
+  });
+  const attachmentsByParent = new Map();
+  for (const candidate of analyzedCandidates) {
+    if (!candidate.gmailAttachmentKey || !candidate.gmailParentSourceReference) continue;
+    const attachments = attachmentsByParent.get(candidate.gmailParentSourceReference) || [];
+    attachments.push({
+      id: candidate.id,
+      attachmentKey: candidate.gmailAttachmentKey,
+      filename: candidate.gmailAttachmentFilename || candidate.title,
+      title: candidate.title,
+      analyst: candidate.analyst || "",
+      reportType: candidate.reportType,
+      stance: candidate.stance,
+      analysisState: candidate.analysisState,
+      summary: candidate.summary,
+      keyClaims: candidate.keyClaims || [],
+      catalysts: candidate.catalysts || [],
+      risks: candidate.risks || [],
+      sectors: candidate.sectors || [],
+      tickers: candidate.tickers || [],
+      monitoringConditions: candidate.monitoringConditions || [],
+    });
+    attachmentsByParent.set(candidate.gmailParentSourceReference, attachments);
+  }
+  const candidates = analyzedCandidates
+    .filter((candidate) => !candidate.gmailAttachmentKey)
+    .map((candidate) => {
+      const analyzedAttachments = attachmentsByParent.get(candidate.sourceReference) || [];
+      return {
+        ...candidate,
+        ...(analyzedAttachments.length ? { analyzedAttachments } : {}),
+      };
+    });
+
+  let dotenv = new Map();
+  const envPath = engineRoot ? join(engineRoot, ".env") : "";
+  if (envPath && existsSync(envPath)) {
+    try {
+      const info = await stat(envPath);
+      if (info.isFile() && info.size <= 1024 * 1024) {
+        dotenv = parseDotEnv(await readFile(envPath, "utf8"));
+      }
+    } catch {
+      dotenv = new Map();
+    }
+  }
+  const configuredValue = (name) => cleanText(env[name] || dotenv.get(name), 8000);
+  const refreshTokenConfigured = Boolean(configuredValue("GOOGLE_GMAIL_REFRESH_TOKEN"));
+  const label = configuredValue("GOOGLE_GMAIL_RESEARCH_LABEL") || "Stocks";
+
+  let allowlistedSenderDomains = [];
+  const sourcesPath = engineRoot ? join(engineRoot, "sources.json") : "";
+  if (sourcesPath && existsSync(sourcesPath)) {
+    try {
+      const sources = await readJsonFile(sourcesPath);
+      allowlistedSenderDomains = [
+        ...new Set(
+          cleanList(sources?.gmail_research?.sender_sources, 50)
+            .flatMap((source) => cleanList(source?.sender_domains, 20))
+            .map((item) => cleanText(item, 200))
+            .filter(Boolean)
+        ),
+      ];
+    } catch {
+      allowlistedSenderDomains = [];
+    }
+  }
+
+  return {
+    configured: refreshTokenConfigured,
+    label,
+    readOnly: true,
+    allowlistedSenderDomains,
+    collection: {
+      reportDate: sourceStatusArtifact?.date || reportDate,
+      status: cleanText(gmailSource?.status, 80) || "not_run",
+      itemCount: Number(gmailSource?.item_count || 0),
+      lastCollectedAt:
+        cleanText(gmailSource?.checked_at, 80)
+        || cleanText(sourceStatusArtifact?.payload?.generated_at, 80),
+    },
+    candidates,
+  };
+}
+
 function normalizeFinding(item = {}) {
   const title = cleanText(item.title, 160);
   const body = cleanText(item.body, 1200);
@@ -408,6 +642,71 @@ function normalizeReviewItem(item = {}) {
   };
 }
 
+function normalizeEarningsWatch(value = {}) {
+  const companies = cleanList(value.companies, 12).map((company) => ({
+    ticker: cleanText(company?.ticker, 20),
+    companyName: cleanText(company?.company_name, 180),
+    upcomingEvent: {
+      status: cleanText(company?.upcoming_event?.status, 60) || "not_available",
+      eventDate: cleanText(company?.upcoming_event?.event_date, 40),
+      confidence: cleanText(company?.upcoming_event?.confidence, 40),
+    },
+    estimateRevision: {
+      status: cleanText(company?.estimate_revision?.status, 80) || "not_available",
+      freezeAsOf: cleanText(company?.estimate_revision?.freeze_as_of, 40),
+      revisionDirection: cleanText(
+        company?.estimate_revision?.revision_direction,
+        80,
+      ) || "not_available",
+      rows: cleanList(company?.estimate_revision?.rows, 4).map((row) => ({
+        metricId: cleanText(row?.metric_id, 80),
+        periodEnd: cleanText(row?.period_end, 40),
+        value: Number.isFinite(Number(row?.value)) ? Number(row.value) : null,
+        units: cleanText(row?.units, 60),
+        revisionPct30d: Number.isFinite(Number(row?.revision_pct_30d))
+          ? Number(row.revision_pct_30d)
+          : null,
+        analystCount: Number.isFinite(Number(row?.analyst_count))
+          ? Number(row.analyst_count)
+          : null,
+        evidenceLabel: cleanText(row?.evidence_label, 80),
+      })),
+    },
+    guidance: cleanList(company?.guidance, 4).map((row) => ({
+      metricId: cleanText(row?.metric_id, 80),
+      periodEnd: cleanText(row?.period_end, 40),
+      midpoint: Number.isFinite(Number(row?.midpoint)) ? Number(row.midpoint) : null,
+      units: cleanText(row?.units, 60),
+      currency: cleanText(row?.currency, 20),
+      evidenceLabel: cleanText(row?.evidence_label, 80),
+    })),
+    historicalSurprises: cleanList(company?.historical_surprises, 4).map((row) => ({
+      reportedDate: cleanText(row?.reported_date, 40),
+      surprisePct: Number.isFinite(Number(row?.surprise_pct))
+        ? Number(row.surprise_pct)
+        : null,
+      reactionPct: Number.isFinite(Number(row?.reaction_pct))
+        ? Number(row.reaction_pct)
+        : null,
+    })),
+    postResultEstimateRevision: {
+      status: cleanText(company?.post_result_estimate_revision?.status, 100),
+      modelUpdateApplied: company?.post_result_estimate_revision?.model_update_applied === true,
+    },
+  }));
+  return {
+    status: cleanText(value.status, 60) || "not_available",
+    summary: {
+      companyCount: Number(value.summary?.company_count || companies.length || 0),
+      confirmedEventCount: Number(value.summary?.confirmed_event_count || 0),
+      estimateRevisionCount: Number(value.summary?.estimate_revision_count || 0),
+      guidanceCount: Number(value.summary?.guidance_count || 0),
+      verifiedResultCount: Number(value.summary?.verified_result_count || 0),
+    },
+    companies,
+  };
+}
+
 function normalizeReaderReport(reader = {}) {
   const findings = cleanList(reader.market_findings, 12)
     .map(normalizeFinding)
@@ -427,6 +726,7 @@ function normalizeReaderReport(reader = {}) {
       .map(normalizeFinding)
       .filter(Boolean),
     verifiedEvents: events,
+    earningsWatch: normalizeEarningsWatch(reader.earnings_watch),
     koreaConnection: {
       status: cleanText(reader.korea_connection?.status, 40) || "unknown",
       summary: cleanText(reader.korea_connection?.summary, 1200),
@@ -494,6 +794,10 @@ function normalizeScoreboard(intelligence = {}) {
       label: cleanText(intelligence.market?.regime?.label, 80) || "unknown",
       confidence: finiteNumber(intelligence.market?.regime?.confidence),
       summary: cleanText(intelligence.market?.regime?.summary, 1200),
+      quantitativeEvidence: cleanList(
+        intelligence.market?.regime?.quantitative_evidence,
+        12,
+      ).map((item) => cleanText(item, 400)).filter(Boolean),
     },
     cards: [
       metricCard(
@@ -560,8 +864,94 @@ function normalizeScoreboard(intelligence = {}) {
   };
 }
 
+function buildDecisionGate({
+  intelligence,
+  scoreboard,
+  marketInternals,
+}) {
+  const blockers = [];
+  const addBlocker = (code, message) => {
+    if (!blockers.some((item) => item.code === code)) {
+      blockers.push({ code, message });
+    }
+  };
+  if (!intelligence) {
+    addBlocker("missing_intelligence", "시장 분석 산출물이 없습니다.");
+  }
+  if (!marketInternals) {
+    addBlocker("missing_market_internals", "미국 시장 내부지표 산출물이 없습니다.");
+  } else {
+    if (marketInternals.status !== "ready") {
+      addBlocker(
+        "market_internals_not_ready",
+        `미국 시장 내부지표 상태가 ${marketInternals.status || "미확인"}입니다.`,
+      );
+    }
+    if (
+      marketInternals.coverage.required > 0
+      && marketInternals.coverage.available < marketInternals.coverage.required
+    ) {
+      addBlocker(
+        "market_coverage_incomplete",
+        `미국 가격·스타일 패널이 ${marketInternals.coverage.available}/${marketInternals.coverage.required}만 확보됐습니다.`,
+      );
+    }
+    if (marketInternals.provider.freshnessStatus !== "current") {
+      addBlocker(
+        "market_data_stale",
+        `시장 가격 신선도 상태가 ${marketInternals.provider.freshnessStatus || "미확인"}입니다.`,
+      );
+    }
+    if (marketInternals.constituentBreadth?.status !== "ready") {
+      addBlocker(
+        "constituent_breadth_not_ready",
+        "S&P 500 구성종목 브레드스가 준비되지 않았습니다.",
+      );
+    }
+    const sectorBreadth = marketInternals.sectorBreadth;
+    if (
+      sectorBreadth.requiredCount > 0
+      && sectorBreadth.readyCount < sectorBreadth.requiredCount
+    ) {
+      addBlocker(
+        "sector_breadth_incomplete",
+        `11개 섹터 내부지표가 ${sectorBreadth.readyCount}/${sectorBreadth.requiredCount}만 준비됐습니다.`,
+      );
+    }
+    const internalsBreadthReady = cleanList(
+      marketInternals?.sectors?.["5d"],
+      20,
+    ).length > 0 && marketInternals.coverage.available === marketInternals.coverage.required;
+    const conclusionHasBreadth = Boolean(
+      scoreboard?.cards?.some((card) => card.id === "breadth"),
+    );
+    if (internalsBreadthReady && !conclusionHasBreadth) {
+      addBlocker(
+        "derived_conclusion_outdated",
+        "최신 시장 내부지표가 결론 스냅샷에 아직 반영되지 않았습니다.",
+      );
+    }
+  }
+  if ((scoreboard?.regime?.quantitativeEvidence || []).length < 2) {
+    addBlocker(
+      "insufficient_quantitative_evidence",
+      "시장 결론을 뒷받침하는 정량 근거가 2개 미만입니다.",
+    );
+  }
+  return {
+    status: blockers.length ? "blocked" : "ready",
+    labelKo: blockers.length ? "판단 보류" : "투자 판단 준비",
+    summary: blockers.length
+      ? "신선도·커버리지·근거 조건을 모두 통과할 때까지 방향성 결론을 노출하지 않습니다."
+      : "최신 가격·브레드스·섹터 내부지표와 정량 근거가 결론에 반영됐습니다.",
+    blockers,
+  };
+}
+
 function normalizeMarketInternals(payload = {}) {
   const leadership = payload.sector_leadership || {};
+  const marketSource = payload.market_source || {};
+  const providerConfiguration = marketSource.provider_configuration || {};
   const constituent = payload.constituent_breadth || {};
   const constituentMetrics = constituent.breadth || {};
   const constituentSectors = constituent.sector_breadth || {};
@@ -576,6 +966,17 @@ function normalizeMarketInternals(payload = {}) {
     status: cleanText(payload.collection_status, 80),
     classification: cleanText(payload.market_structure?.classification, 80),
     classificationReason: cleanText(payload.market_structure?.reason, 500),
+    provider: {
+      name: cleanText(marketSource.provider, 160),
+      asOf: cleanText(marketSource.as_of, 40),
+      freshnessStatus: cleanText(marketSource.freshness_status, 80),
+      alpacaBatchEnabled: providerConfiguration.alpaca_batch_enabled === true,
+      alpacaFeed: cleanText(providerConfiguration.alpaca_feed, 40),
+      alpacaConfigurationStatus: cleanText(
+        providerConfiguration.alpaca_configuration_status,
+        80
+      ),
+    },
     coverage: {
       available: Number(payload.coverage?.available_ticker_count || 0),
       required: Number(payload.coverage?.required_ticker_count || 0),
@@ -595,6 +996,9 @@ function normalizeMarketInternals(payload = {}) {
       above200dPct: finiteNumber(constituentMetrics.moving_averages?.["200d"]?.above_pct),
       newHighs: finiteNumber(constituentMetrics.highs_lows_52w?.new_highs),
       newLows: finiteNumber(constituentMetrics.highs_lows_52w?.new_lows),
+      dataGaps: cleanList(constituent.data_gaps, 20)
+        .map((item) => cleanText(item, 500))
+        .filter(Boolean),
     } : null,
     sectorBreadth: {
       status: cleanText(constituentSectors.collection_status, 80),
@@ -672,6 +1076,16 @@ function normalizeStockCandidates(payload = {}) {
     status: cleanText(payload.screen_status, 80),
     universeCount: Number(payload.universe_security_count || 0),
     marketCoveredCount: Number(payload.market_covered_security_count || 0),
+    materialCandidateCount: Number(payload.material_candidate_count || 0),
+    deepAnalysisCount: Number(payload.deep_analysis_count || 0),
+    universeCoverage: {
+      fullIndexScanReady: payload.universe_coverage?.full_index_scan_ready === true,
+      sp500Count: Number(payload.universe_coverage?.membership_counts?.sp500 || 0),
+      nasdaq100Count: Number(payload.universe_coverage?.membership_counts?.nasdaq100 || 0),
+      membershipSourceCount: Number(
+        payload.universe_coverage?.membership_source_count || 0,
+      ),
+    },
     candidates: candidates.map((item) => {
       const reaction = item.market_reaction || {};
       const evidence = cleanList(item.event_evidence, 20);
@@ -703,6 +1117,196 @@ function normalizeStockCandidates(payload = {}) {
       };
     }),
     gaps: cleanList(payload.data_gaps, 30).map((item) => cleanText(item, 600)).filter(Boolean),
+  };
+}
+
+function cleanTicker(value) {
+  const ticker = String(value || "").trim().toUpperCase();
+  return /^[A-Z][A-Z0-9.-]{0,14}$/.test(ticker) ? ticker : "";
+}
+
+function portfolioWeightRows(weights) {
+  if (Array.isArray(weights)) return weights;
+  if (weights && typeof weights === "object") {
+    return Object.entries(weights).map(([ticker, weight]) => ({ ticker, weight }));
+  }
+  return [];
+}
+
+export function extractPortfolioUniverse({
+  transactionSettings = {},
+  portfolioCanvasSnapshot = {},
+} = {}) {
+  const byTicker = new Map();
+  const add = (rawTicker, role, label, weight = null) => {
+    const ticker = cleanTicker(rawTicker);
+    if (!ticker) return;
+    const current = byTicker.get(ticker) || {
+      ticker,
+      roles: [],
+      labels: [],
+      weights: [],
+    };
+    if (!current.roles.includes(role)) current.roles.push(role);
+    const cleanLabel = cleanText(label, 100);
+    if (cleanLabel && !current.labels.includes(cleanLabel)) current.labels.push(cleanLabel);
+    const numericWeight = finiteNumber(weight);
+    if (numericWeight !== null) current.weights.push(numericWeight);
+    byTicker.set(ticker, current);
+  };
+
+  for (const group of cleanList(transactionSettings?.watchlistGroups, 100)) {
+    const label = cleanText(group?.name, 100) || "관심종목";
+    for (const ticker of cleanList(group?.symbols, 500)) {
+      add(ticker, "watchlist", label);
+    }
+    for (const instrument of cleanList(group?.instruments, 500)) {
+      add(instrument?.symbol || instrument?.ticker, "watchlist", label);
+    }
+  }
+
+  const canvases = cleanList(portfolioCanvasSnapshot?.store?.canvases, 50);
+  for (const canvas of canvases) {
+    const canvasName = cleanText(canvas?.name, 100) || "포트폴리오";
+    for (const strategy of cleanList(canvas?.workspace?.strategyPortfolios, 30)) {
+      const strategyName = cleanText(strategy?.name, 100);
+      const label = strategyName ? `${canvasName} · ${strategyName}` : canvasName;
+      for (const row of portfolioWeightRows(strategy?.weights).slice(0, 300)) {
+        add(
+          row?.ticker || row?.symbol || row?.asset || row?.name,
+          "portfolio",
+          label,
+          row?.weight ?? row?.targetWeight ?? row?.allocation,
+        );
+      }
+    }
+  }
+
+  return [...byTicker.values()]
+    .map((item) => ({
+      ...item,
+      weights: [...new Set(item.weights)],
+    }))
+    .sort((a, b) => a.ticker.localeCompare(b.ticker));
+}
+
+function eventTickers(item = {}) {
+  const tickers = new Set();
+  const ambiguousTokens = new Set([
+    "AI", "US", "USA", "USD", "ETF", "SEC", "CPI", "PPI", "FOMC", "CEO", "EPS", "GDP",
+  ]);
+  const add = (value) => {
+    const ticker = cleanTicker(
+      value && typeof value === "object"
+        ? value.ticker || value.symbol || value.code
+        : value,
+    );
+    if (ticker && !ambiguousTokens.has(ticker)) tickers.add(ticker);
+  };
+  cleanList(item.listed_entities, 100).forEach(add);
+  cleanList(item.tickers, 100).forEach(add);
+  cleanList(item.attributed_research, 50)
+    .flatMap((research) => cleanList(research?.tickers, 100))
+    .forEach(add);
+  const searchable = [
+    item.title,
+    item.summary,
+    ...cleanList(item.common_facts, 20).map((fact) => fact?.claim || fact),
+  ].join(" ");
+  for (const match of searchable.matchAll(/(?:^|[^A-Z0-9])\$?([A-Z]{1,5}(?:[.-][A-Z0-9]{1,3})?)(?=$|[^A-Z0-9])/g)) {
+    add(match[1]);
+  }
+  return [...tickers];
+}
+
+function portfolioEvent(item = {}) {
+  const verification = item.verification || {};
+  const impact = item.impact_analysis || {};
+  const primaryVerified =
+    verification.primary_fact_confirmed === true
+    || verification.publication_eligible_as_fact === true;
+  return {
+    eventId: cleanText(item.event_id, 120),
+    title: cleanText(item.title || item.summary, 240),
+    eventType: cleanText(item.event_type, 80) || "other",
+    evidenceState: primaryVerified ? "primary_verified" : "unverified",
+    impact: cleanText(
+      impact.summary || impact.interpretation || item.interpretation,
+      600,
+    ),
+    confirmationCondition: cleanText(
+      impact.confirmation_condition || item.confirmation_condition,
+      500,
+    ),
+    invalidationCondition: cleanText(
+      impact.invalidation_condition || item.invalidation_condition,
+      500,
+    ),
+  };
+}
+
+export function buildPortfolioImpact({
+  universe = [],
+  intelligence = {},
+  report = {},
+  stockCandidates = null,
+} = {}) {
+  const events = cleanList(intelligence?.events?.items, 200);
+  const candidates = cleanList(stockCandidates?.candidates, 200);
+  const earnings = cleanList(report?.earningsWatch?.companies, 100);
+  const rows = universe.map((asset) => {
+    const ticker = cleanTicker(asset?.ticker);
+    const relatedEvents = events
+      .filter((event) => eventTickers(event).includes(ticker))
+      .slice(0, 5)
+      .map(portfolioEvent);
+    const candidate = candidates.find((item) => cleanTicker(item?.ticker) === ticker) || null;
+    const earningsItem = earnings.find((item) => cleanTicker(item?.ticker) === ticker) || null;
+    const verifiedEventCount = relatedEvents.filter(
+      (event) => event.evidenceState === "primary_verified",
+    ).length;
+    const evidenceState = verifiedEventCount
+      ? "primary_verified"
+      : relatedEvents.length
+        ? "unverified"
+        : candidate?.deepAnalysisEligible || earningsItem
+          ? "quantitative_only"
+          : "no_direct_evidence";
+    const attentionLevel = verifiedEventCount || candidate?.deepAnalysisEligible
+      ? "high"
+      : relatedEvents.length || earningsItem
+        ? "monitor"
+        : "none";
+    return {
+      ticker,
+      roles: cleanList(asset?.roles, 5),
+      labels: cleanList(asset?.labels, 10),
+      weights: cleanList(asset?.weights, 20).map(finiteNumber).filter((value) => value !== null),
+      attentionLevel,
+      evidenceState,
+      relatedEvents,
+      candidate,
+      earnings: earningsItem,
+    };
+  });
+  const matched = rows.filter((item) => item.attentionLevel !== "none");
+  const attentionRank = { high: 0, monitor: 1, none: 2 };
+  const orderedAssets = [...rows].sort(
+    (a, b) =>
+      (attentionRank[a.attentionLevel] ?? 3) - (attentionRank[b.attentionLevel] ?? 3)
+      || a.ticker.localeCompare(b.ticker),
+  );
+  return {
+    configured: rows.length > 0,
+    portfolioCount: rows.filter((item) => item.roles.includes("portfolio")).length,
+    watchlistCount: rows.filter((item) => item.roles.includes("watchlist")).length,
+    matchedCount: matched.length,
+    unmatchedCount: rows.length - matched.length,
+    marketContext: {
+      status: cleanText(report?.decisionGateStatus, 40) || "informational",
+      summary: cleanList(report?.executiveSummary, 3).map((item) => cleanText(item, 500)),
+    },
+    assets: orderedAssets,
   };
 }
 
@@ -772,6 +1376,7 @@ function brokerResearchCoverage(reports = []) {
   };
 
   for (const report of reports) {
+    if (report.researchScope && report.researchScope !== "sector") continue;
     const sectors = report.standardSectors?.length
       ? report.standardSectors
       : [{
@@ -957,13 +1562,64 @@ function normalizeBrokerResearch(payload = {}) {
     }
     return "UNKNOWN";
   };
+  const compactResearchLabel = (value) => cleanText(value, 120)
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US")
+    .replace(/[\s_-]+/g, "");
+  const documentScopeFor = (sectors, reportType) => {
+    const labels = new Set(sectors.map(compactResearchLabel));
+    if (
+      labels.has("데일리")
+      || labels.has("daily")
+      || labels.has("dailybrief")
+      || labels.has("dailyresearch")
+    ) {
+      return "daily_digest";
+    }
+    if (
+      labels.has("전체리서치")
+      || labels.has("전체")
+      || labels.has("종합")
+      || labels.has("allresearch")
+      || labels.has("multisector")
+    ) {
+      return "multi_sector_digest";
+    }
+    if (
+      labels.has("market")
+      || labels.has("strategy")
+      || /macro|strategy|market/i.test(reportType)
+    ) {
+      return "market_strategy";
+    }
+    return "sector";
+  };
+  const isDocumentScopeLabel = (value) => {
+    const label = compactResearchLabel(value);
+    return new Set([
+      "데일리",
+      "daily",
+      "dailybrief",
+      "dailyresearch",
+      "전체리서치",
+      "전체",
+      "종합",
+      "allresearch",
+      "multisector",
+      "market",
+      "strategy",
+    ]).has(label);
+  };
   const normalizedReports = cleanList(payload.reports, 20).map((item) => {
     const source = item?.source || {};
     const rating = item?.rating || item?.research?.rating || {};
     const targetPrice = item?.target_price || item?.research?.target_price || {};
     const sectors = cleanList(item?.sectors, 8).map((value) => cleanText(value, 120));
+    const reportType = cleanText(item?.report_type, 80);
+    const researchScope = documentScopeFor(sectors, reportType);
     const standardSectorMap = new Map();
     for (const sector of sectors) {
+      if (isDocumentScopeLabel(sector)) continue;
       const classified = classifyResearchSector(sector);
       const key = classified.id || classified.name.toLocaleLowerCase("en-US");
       const existing = standardSectorMap.get(key);
@@ -985,7 +1641,8 @@ function normalizeBrokerResearch(payload = {}) {
       analyst: cleanText(item?.analyst, 120),
       title: cleanText(item?.title, 240),
       publishedAt: cleanText(item?.published_at, 80),
-      reportType: cleanText(item?.report_type, 80),
+      reportType,
+      researchScope,
       marketScope: inferLegacyMarketScope(item, source),
       issuerCountry: cleanText(item?.issuer_country || source?.issuer_country, 20).toUpperCase(),
       originalLanguage: cleanText(
@@ -1048,6 +1705,10 @@ function normalizeBrokerResearch(payload = {}) {
     counts[scope] = Number(counts[scope] || 0) + 1;
     return counts;
   }, {});
+  const researchScopeCounts = normalizedReports.reduce((counts, report) => {
+    counts[report.researchScope] = Number(counts[report.researchScope] || 0) + 1;
+    return counts;
+  }, {});
   return {
     reportDate: cleanText(payload.report_date, 20),
     generatedAt: cleanText(payload.generated_at, 80),
@@ -1063,6 +1724,7 @@ function normalizeBrokerResearch(payload = {}) {
       marketScopeCounts: Object.keys(summary.market_scope_counts || {}).length
         ? summary.market_scope_counts
         : derivedMarketScopeCounts,
+      researchScopeCounts,
       sectorTaxonomyVersion: researchSectorTaxonomyVersion(),
     },
     consensus: {
@@ -1245,6 +1907,55 @@ export async function loadPbDailyIntelligenceSnapshot({
     engineRoot: configuredEngineRoot(env, config.root),
     env,
   });
+  const gmailResearch = await loadGmailResearchOverview({
+    root: config.root,
+    reportDate: readerArtifact.date,
+    engineRoot: configuredEngineRoot(env, config.root),
+    env,
+  });
+  const pipeline = intelligenceArtifact
+    ? normalizePipeline(intelligenceArtifact.payload)
+    : null;
+  const scoreboard = intelligenceArtifact
+    ? normalizeScoreboard(intelligenceArtifact.payload)
+    : null;
+  const marketInternals = marketInternalsArtifact
+    ? normalizeMarketInternals(marketInternalsArtifact.payload)
+    : null;
+  const report = normalizeReaderReport(readerArtifact.payload);
+  const decisionGate = buildDecisionGate({
+    intelligence: intelligenceArtifact?.payload,
+    scoreboard,
+    marketInternals,
+  });
+  const stockCandidates = stockCandidatesArtifact
+    ? normalizeStockCandidates(stockCandidatesArtifact.payload)
+    : null;
+  let transactionSettings = {};
+  let portfolioCanvasSnapshot = {};
+  try {
+    transactionSettings = readTransactionSettings();
+  } catch {
+    transactionSettings = {};
+  }
+  try {
+    portfolioCanvasSnapshot = readPortfolioCanvasStoreSnapshot();
+  } catch {
+    portfolioCanvasSnapshot = {};
+  }
+  const portfolioUniverse = extractPortfolioUniverse({
+    transactionSettings,
+    portfolioCanvasSnapshot,
+  });
+  const portfolioImpact = buildPortfolioImpact({
+    universe: portfolioUniverse,
+    intelligence: intelligenceArtifact?.payload,
+    report: {
+      ...report,
+      decisionGateStatus: decisionGate?.status,
+    },
+    stockCandidates,
+  });
   return {
     connection: {
       configured: true,
@@ -1256,16 +1967,14 @@ export async function loadPbDailyIntelligenceSnapshot({
         intelligenceArtifact && intelligenceArtifact.date === readerArtifact.date
       ),
     },
-    report: normalizeReaderReport(readerArtifact.payload),
-    pipeline: intelligenceArtifact ? normalizePipeline(intelligenceArtifact.payload) : null,
-    scoreboard: intelligenceArtifact ? normalizeScoreboard(intelligenceArtifact.payload) : null,
-    marketInternals: marketInternalsArtifact
-      ? normalizeMarketInternals(marketInternalsArtifact.payload)
-      : null,
+    report,
+    decisionGate,
+    pipeline,
+    scoreboard,
+    marketInternals,
     sectorMetrics: sectorMetricsArtifact ? normalizeSectorMetrics(sectorMetricsArtifact.payload) : null,
-    stockCandidates: stockCandidatesArtifact
-      ? normalizeStockCandidates(stockCandidatesArtifact.payload)
-      : null,
+    stockCandidates,
+    portfolioImpact,
     brokerResearch: brokerResearchNormalized,
     brokerResearchIndex,
     brokerResearchHistory: {
@@ -1274,6 +1983,7 @@ export async function loadPbDailyIntelligenceSnapshot({
       latestDate: brokerResearchDates[0] || "",
     },
     telegramSources,
+    gmailResearch,
   };
 }
 
