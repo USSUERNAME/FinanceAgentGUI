@@ -11,8 +11,38 @@ const APPROVAL_RELATIVE_PATH = join(
 );
 const DRIVE_FILES_API = "https://www.googleapis.com/drive/v3/files";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
+const DRIVE_FOLDER_MIME = "application/vnd.google-apps.folder";
 const SUPPORTED_SUFFIXES = new Set([".pdf", ".md", ".txt"]);
 const MAX_RESPONSE_FILES = 100;
+const MAX_FOLDER_DEPTH = 3;
+
+const MARKET_SCOPE_ALIASES = new Map([
+  ["KR", "KR"],
+  ["KOREA", "KR"],
+  ["국내", "KR"],
+  ["한국", "KR"],
+  ["US", "US"],
+  ["USA", "US"],
+  ["미국", "US"],
+  ["EU", "EU"],
+  ["EUROPE", "EU"],
+  ["유럽", "EU"],
+  ["JP", "JP"],
+  ["JAPAN", "JP"],
+  ["일본", "JP"],
+  ["GLOBAL", "GLOBAL"],
+  ["INTERNATIONAL", "GLOBAL"],
+  ["해외", "GLOBAL"],
+]);
+
+const MARKET_DEFAULTS = {
+  KR: { language: "ko", currency: "KRW", issuerCountry: "KR" },
+  US: { language: "en", currency: "USD", issuerCountry: "US" },
+  EU: { language: "en", currency: "EUR", issuerCountry: "EU" },
+  JP: { language: "ja", currency: "JPY", issuerCountry: "JP" },
+  GLOBAL: { language: "en", currency: "USD", issuerCountry: "" },
+  UNKNOWN: { language: "", currency: "", issuerCountry: "" },
+};
 
 function cleanText(value, maxLength = 1000) {
   return String(value || "")
@@ -89,11 +119,10 @@ async function driveAccessToken(credentials, fetchImpl = fetch) {
   return token;
 }
 
-async function listDriveFiles(credentials, fetchImpl = fetch) {
-  const token = await driveAccessToken(credentials, fetchImpl);
+async function listDriveFolder(token, folderId, fetchImpl = fetch) {
   const query = new URLSearchParams({
-    q: `'${credentials.folderId}' in parents and trashed = false`,
-    fields: "files(id,name,mimeType,modifiedTime,size,md5Checksum)",
+    q: `'${folderId}' in parents and trashed = false`,
+    fields: "files(id,name,mimeType,modifiedTime,size,md5Checksum,parents)",
     orderBy: "modifiedTime desc",
     pageSize: String(MAX_RESPONSE_FILES),
   });
@@ -106,6 +135,35 @@ async function listDriveFiles(credentials, fetchImpl = fetch) {
   return Array.isArray(payload.files) ? payload.files : [];
 }
 
+async function listDriveFiles(credentials, fetchImpl = fetch) {
+  const token = await driveAccessToken(credentials, fetchImpl);
+  const files = [];
+  const queue = [{ id: credentials.folderId, path: [], depth: 0 }];
+  const visited = new Set();
+  while (queue.length) {
+    const folder = queue.shift();
+    if (!folder?.id || visited.has(folder.id)) continue;
+    visited.add(folder.id);
+    const children = await listDriveFolder(token, folder.id, fetchImpl);
+    for (const child of children) {
+      const name = cleanText(child?.name, 500);
+      if (!name) continue;
+      if (child.mimeType === DRIVE_FOLDER_MIME) {
+        if (folder.depth < MAX_FOLDER_DEPTH) {
+          queue.push({
+            id: cleanText(child.id, 300),
+            path: [...folder.path, name],
+            depth: folder.depth + 1,
+          });
+        }
+        continue;
+      }
+      files.push({ ...child, researchPath: folder.path });
+    }
+  }
+  return files;
+}
+
 function dateFromFileName(fileName, modifiedTime = "") {
   const match = parse(fileName).name.match(/^(\d{4})(\d{2})(\d{2})(?:_|$)/);
   if (match) return `${match[1]}-${match[2]}-${match[3]}`;
@@ -114,20 +172,52 @@ function dateFromFileName(fileName, modifiedTime = "") {
   return new Date().toISOString().slice(0, 10);
 }
 
+function normalizedMarketScope(value) {
+  return MARKET_SCOPE_ALIASES.get(cleanText(value, 40).toUpperCase()) || "";
+}
+
+function inferMarketScope(file, parts, offset) {
+  let folderFallback = "";
+  for (const segment of Array.isArray(file.researchPath) ? file.researchPath : []) {
+    const scope = normalizedMarketScope(segment);
+    if (scope === "GLOBAL") folderFallback = scope;
+    if (scope && scope !== "GLOBAL") return { scope, consumedFileToken: false };
+  }
+  if (folderFallback) return { scope: folderFallback, consumedFileToken: false };
+  const fromFileName = normalizedMarketScope(parts[offset]);
+  if (fromFileName) return { scope: fromFileName, consumedFileToken: true };
+  const publisher = cleanText(parts[offset], 180);
+  if (/증권|투자증권|자산운용|경제연구소/.test(publisher)) {
+    return { scope: "KR", consumedFileToken: false };
+  }
+  return { scope: "UNKNOWN", consumedFileToken: false };
+}
+
 export function inferDriveReportMetadata(file = {}) {
   const fileName = cleanText(file.name, 500);
   const stem = parse(fileName).name;
   const parts = stem.split("_").map((item) => cleanText(item, 180)).filter(Boolean);
   const hasDate = /^\d{8}$/.test(parts[0] || "");
-  const offset = hasDate ? 1 : 0;
+  let offset = hasDate ? 1 : 0;
+  const market = inferMarketScope(file, parts, offset);
+  if (market.consumedFileToken) offset += 1;
   const publisher = parts[offset] || "발행처 미확인";
   const sector = parts[offset + 1] || "";
   const title = parts.slice(offset + 2).join(" · ") || sector || stem;
   const reportDate = dateFromFileName(fileName, file.modifiedTime);
+  const marketDefaults = MARKET_DEFAULTS[market.scope] || MARKET_DEFAULTS.UNKNOWN;
   return {
     publisher,
     title,
     published_at: `${reportDate}T00:00:00+09:00`,
+    market_scope: market.scope,
+    issuer_country: marketDefaults.issuerCountry,
+    original_language: marketDefaults.language,
+    base_currency: marketDefaults.currency,
+    source_type: "sell_side_research",
+    research_path: Array.isArray(file.researchPath)
+      ? file.researchPath.map((item) => cleanText(item, 120)).filter(Boolean)
+      : [],
     source_reference: `drive:${cleanText(file.id, 300)}`,
     source_url: "",
     acquisition_mode: "operator_authorized_drive",
@@ -140,6 +230,10 @@ export function inferDriveReportMetadata(file = {}) {
     tickers: [],
     research: {
       stance: "not_stated",
+      original_rating: "",
+      normalized_rating: "not_stated",
+      target_price: null,
+      target_currency: marketDefaults.currency,
       key_claims: [],
       catalysts: [],
       risks: [],

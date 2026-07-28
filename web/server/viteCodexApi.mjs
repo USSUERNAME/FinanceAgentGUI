@@ -11,6 +11,7 @@ import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
 import { handlePbBrokerResearchApprovalsEndpoint } from "./pbBrokerResearchApprovals.mjs";
 import { handlePbDailyIntelligenceEndpoint } from "./pbDailyIntelligenceApi.mjs";
 import { handlePbDailyIntelligenceJobsEndpoint } from "./pbDailyIntelligenceJobs.mjs";
+import { handleResearchSectorTaxonomyEndpoint } from "./researchSectorTaxonomy.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
 import { handleTossInvestEndpoint } from "./tossInvestApi.mjs";
@@ -334,6 +335,10 @@ export function codexApiPlugin() {
 
       server.middlewares.use("/api/pb-daily-intelligence/broker-approvals", async (req, res) => {
         await handlePbBrokerResearchApprovalsEndpoint(req, res);
+      });
+
+      server.middlewares.use("/api/pb-daily-intelligence/sector-taxonomy", async (req, res) => {
+        await handleResearchSectorTaxonomyEndpoint(req, res);
       });
 
       server.middlewares.use("/api/pb-daily-intelligence", async (req, res) => {

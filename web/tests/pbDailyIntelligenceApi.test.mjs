@@ -448,6 +448,17 @@ test("PB Daily Intelligence exposes a rights-safe analyst research digest", asyn
           title: "NVDA earnings review",
           published_at: "2026-07-24T07:00:00+09:00",
           report_type: "earnings",
+          market_scope: "US",
+          issuer_country: "US",
+          original_language: "en",
+          base_currency: "USD",
+          original_rating: "Overweight",
+          normalized_rating: "positive",
+          target_price: {
+            value: 240,
+            currency: "USD",
+            as_of: "2026-07-24",
+          },
           stance: "positive",
           tickers: ["NVDA"],
           sectors: ["semiconductor"],
@@ -469,6 +480,20 @@ test("PB Daily Intelligence exposes a rights-safe analyst research digest", asyn
             },
           ],
         },
+        {
+          report_id: "research-2",
+          publisher: "SK증권",
+          analyst: "B. Analyst",
+          title: "국내 반도체 업황",
+          published_at: "2026-07-24T08:00:00+09:00",
+          report_type: "industry",
+          stance: "not_stated",
+          tickers: ["005930"],
+          sectors: ["반도체"],
+          summary: "Legacy artifacts infer the domestic market from the publisher.",
+          source: { reference: "REF-2", url: "" },
+          processing: { structured_analysis_available: true, status: "ready" },
+        },
       ],
     }
   );
@@ -487,6 +512,49 @@ test("PB Daily Intelligence exposes a rights-safe analyst research digest", asyn
   assert.equal(snapshot.brokerResearch.reports[0].monitoringConditions[0], "Next earnings");
   assert.equal(snapshot.brokerResearch.summary.analysisStatus, "complete");
   assert.equal(snapshot.brokerResearch.reports[0].linkedTelegramEvents[0].eventId, "event-nvda");
+  assert.equal(snapshot.brokerResearch.reports[0].marketScope, "US");
+  assert.equal(snapshot.brokerResearch.reports[0].originalLanguage, "en");
+  assert.equal(snapshot.brokerResearch.reports[0].rating.original, "Overweight");
+  assert.equal(snapshot.brokerResearch.reports[0].targetPrice.value, 240);
+  assert.equal(snapshot.brokerResearch.summary.marketScopeCounts.US, 1);
+  assert.equal(snapshot.brokerResearch.summary.marketScopeCounts.KR, 1);
+  assert.equal(snapshot.brokerResearch.reports[1].marketScope, "KR");
+  assert.equal(snapshot.brokerResearchIndex.latest.reportCount, 2);
+  assert.equal(snapshot.brokerResearchIndex.latest.domesticCount, 1);
+  assert.equal(snapshot.brokerResearchIndex.latest.overseasCount, 1);
+  assert.equal(snapshot.brokerResearchIndex.latest.targetPriceCount, 1);
+  assert.equal(snapshot.brokerResearchIndex.history.length, 1);
+  assert.equal(snapshot.brokerResearch.summary.sectorTaxonomyVersion, "research-sector-taxonomy.v1");
+  assert.equal(snapshot.brokerResearch.reports[0].sectors[0], "semiconductor");
+  assert.equal(
+    snapshot.brokerResearch.reports[0].standardSectors[0].id,
+    "semiconductors_ai_compute",
+  );
+  assert.equal(snapshot.brokerResearch.reports[1].sectors[0], "반도체");
+  assert.equal(
+    snapshot.brokerResearch.reports[1].standardSectors[0].id,
+    "semiconductors_ai_compute",
+  );
+  assert.equal(snapshot.brokerResearch.consensus.coverage[0].sectorId, "semiconductors_ai_compute");
+  assert.equal(snapshot.brokerResearch.consensus.coverage[0].sector, "반도체·AI 컴퓨트");
+  assert.deepEqual(
+    new Set(snapshot.brokerResearch.consensus.coverage[0].sourceLabels),
+    new Set(["반도체", "semiconductor"]),
+  );
+  assert.equal(snapshot.brokerResearch.consensus.coverage[0].reportCount, 2);
+  assert.equal(snapshot.brokerResearch.consensus.coverage[0].publisherCount, 2);
+  assert.equal(snapshot.brokerResearch.consensus.coverage[0].domesticCount, 1);
+  assert.equal(snapshot.brokerResearch.consensus.coverage[0].overseasCount, 1);
+  assert.equal(snapshot.brokerResearch.consensus.coverage[0].structuredCount, 2);
+  assert.equal(snapshot.brokerResearch.consensus.coverage[0].ratedCount, 1);
+  assert.equal(snapshot.brokerResearch.consensus.coverage[0].depth, "cross_checked");
+  assert.deepEqual(
+    snapshot.brokerResearch.consensus.coverage[0].topTickers,
+    [
+      { ticker: "005930", reportCount: 1 },
+      { ticker: "NVDA", reportCount: 1 },
+    ],
+  );
   assert.equal(JSON.stringify(snapshot.brokerResearch).includes("raw_text"), false);
 });
 
@@ -533,6 +601,10 @@ test("PB Daily Intelligence shows newer analyst research independently of the re
   assert.deepEqual(snapshot.brokerResearchHistory.availableDates, [researchDate, readerDate]);
   assert.equal(snapshot.brokerResearchHistory.selectedDate, researchDate);
   assert.equal(snapshot.brokerResearchHistory.latestDate, researchDate);
+  assert.equal(snapshot.brokerResearchIndex.history.length, 2);
+  assert.equal(snapshot.brokerResearchIndex.latest.date, researchDate);
+  assert.equal(snapshot.brokerResearchIndex.latest.reportCount, 3);
+  assert.equal(snapshot.brokerResearchIndex.change.reportCount, 3);
 
   const priorSnapshot = await loadPbDailyIntelligenceSnapshot({
     env: { PB_DAILY_INTELLIGENCE_DIR: tempRoot },
@@ -540,4 +612,118 @@ test("PB Daily Intelligence shows newer analyst research independently of the re
   });
   assert.equal(priorSnapshot.brokerResearch.reportDate, readerDate);
   assert.equal(priorSnapshot.brokerResearchHistory.selectedDate, readerDate);
+});
+
+test("PB Daily Intelligence tracks standardized sector coverage across research dates", async () => {
+  const priorDate = "2026-07-27";
+  const latestDate = "2026-07-28";
+  await writeJson(
+    join(tempRoot, "v2_reader_reports", latestDate, "reader_report.json"),
+    { schema_version: "v2_reader_report.v1", report_date: latestDate, title: "Sector trend" },
+  );
+  await writeJson(
+    join(tempRoot, "broker_research_digest", priorDate, "broker_research_digest.json"),
+    {
+      schema_version: "broker_research_digest.v1",
+      report_date: priorDate,
+      summary: {
+        selected_report_count: 1,
+        structured_report_count: 1,
+        publisher_count: 1,
+        analysis_status: "complete",
+      },
+      consensus: {},
+      reports: [{
+        report_id: "prior-semiconductor",
+        publisher: "Prior Securities",
+        title: "Memory update",
+        market_scope: "US",
+        sectors: ["Semiconductors"],
+        stance: "positive",
+        key_claims: ["Legacy memory thesis"],
+        catalysts: ["Prior catalyst"],
+        risks: ["Shared risk"],
+        processing: { structured_analysis_available: true, status: "ready" },
+      }],
+    },
+  );
+  await writeJson(
+    join(tempRoot, "broker_research_digest", latestDate, "broker_research_digest.json"),
+    {
+      schema_version: "broker_research_digest.v1",
+      report_date: latestDate,
+      summary: {
+        selected_report_count: 2,
+        structured_report_count: 2,
+        publisher_count: 2,
+        analysis_status: "complete",
+      },
+      consensus: {},
+      reports: [
+        {
+          report_id: "latest-semiconductor-1",
+          publisher: "Latest Securities",
+          title: "AI compute update",
+          market_scope: "US",
+          sectors: ["semiconductor"],
+          normalized_rating: "positive",
+          key_claims: ["AI demand expanded"],
+          catalysts: ["New accelerator cycle"],
+          risks: ["Shared risk"],
+          processing: { structured_analysis_available: true, status: "ready" },
+        },
+        {
+          report_id: "latest-semiconductor-2",
+          publisher: "국내증권",
+          title: "메모리 업황",
+          sectors: ["반도체"],
+          stance: "neutral",
+          key_claims: ["AI demand expanded"],
+          processing: { structured_analysis_available: true, status: "ready" },
+        },
+      ],
+    },
+  );
+
+  const snapshot = await loadPbDailyIntelligenceSnapshot({
+    env: { PB_DAILY_INTELLIGENCE_DIR: tempRoot },
+  });
+  const sectorHistory = snapshot.brokerResearchIndex.sectorHistory;
+  assert.equal(sectorHistory.length, 2);
+  assert.deepEqual(sectorHistory.map((point) => point.date), [priorDate, latestDate]);
+  assert.equal(sectorHistory[0].sectors[0].sectorId, "semiconductors_ai_compute");
+  assert.equal(sectorHistory[0].sectors[0].reportCount, 1);
+  assert.equal(sectorHistory[0].sectors[0].publisherCount, 1);
+  assert.deepEqual(sectorHistory[0].sectors[0].claims, ["Legacy memory thesis"]);
+  assert.deepEqual(sectorHistory[0].sectors[0].catalysts, ["Prior catalyst"]);
+  assert.deepEqual(sectorHistory[0].sectors[0].risks, ["Shared risk"]);
+  assert.equal(sectorHistory[0].sectors[0].publisherOpinion.status, "single_source");
+  assert.equal(sectorHistory[0].sectors[0].publisherOpinion.ratedPublisherCount, 1);
+  assert.equal(sectorHistory[1].sectors[0].sectorId, "semiconductors_ai_compute");
+  assert.equal(sectorHistory[1].sectors[0].reportCount, 2);
+  assert.equal(sectorHistory[1].sectors[0].publisherCount, 2);
+  assert.deepEqual(sectorHistory[1].sectors[0].claims, ["AI demand expanded"]);
+  assert.deepEqual(sectorHistory[1].sectors[0].catalysts, ["New accelerator cycle"]);
+  assert.deepEqual(sectorHistory[1].sectors[0].risks, ["Shared risk"]);
+  assert.deepEqual(sectorHistory[1].sectors[0].publisherOpinion, {
+    status: "divided",
+    ratedPublisherCount: 2,
+    mixedPublisherCount: 0,
+    dominantStance: "",
+    dominantSharePct: null,
+    stances: {
+      positive: ["Latest Securities"],
+      neutral: ["국내증권"],
+      cautious: [],
+      negative: [],
+      mixed: [],
+    },
+  });
+  assert.deepEqual(sectorHistory[1].sectors[0].crossPublisherThemes, [{
+    text: "AI demand expanded",
+    publisherCount: 2,
+    reportCount: 2,
+    publishers: ["국내증권", "Latest Securities"],
+    type: "claim",
+  }]);
 });

@@ -14,6 +14,7 @@ import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
 import Send from "lucide-react/dist/esm/icons/send.js";
 import ShieldCheck from "lucide-react/dist/esm/icons/shield-check.js";
 import X from "lucide-react/dist/esm/icons/x.js";
+import { PortfolioEChart } from "../portfolio/PortfolioEChart.jsx";
 import { MarkdownText } from "../utils/MarkdownText.jsx";
 import { useDailyIntelligenceController } from "./useDailyIntelligenceController.js";
 import "./daily-intelligence.css";
@@ -98,6 +99,15 @@ const researchAnalysisStatusLabels = {
   partial: "일부 분석",
   no_eligible_reports: "분석 대상 없음",
   not_available: "분석 대기",
+};
+
+const researchMarketScopeLabels = {
+  KR: "국내",
+  US: "미국",
+  EU: "유럽",
+  JP: "일본",
+  GLOBAL: "글로벌",
+  UNKNOWN: "미분류",
 };
 
 function formatGeneratedAt(value) {
@@ -852,13 +862,729 @@ function formatResearchDate(value) {
   return match ? `${match[1]}.${match[2]}.${match[3]}` : value;
 }
 
+function signedCount(value) {
+  const number = Number(value || 0);
+  return number > 0 ? `+${number}` : String(number);
+}
+
+function BrokerResearchIndex({ index, brokerResearch }) {
+  const history = index?.history || [];
+  const latest = index?.latest;
+  const change = index?.change;
+  if (!latest) return null;
+  const targetSignals = (brokerResearch?.reports || [])
+    .filter((report) => report.rating?.original || report.targetPrice?.value !== null)
+    .slice(0, 6);
+  const chartOption = history.length >= 2 ? {
+    animation: false,
+    grid: { left: 42, right: 48, top: 24, bottom: 36 },
+    tooltip: { trigger: "axis" },
+    legend: {
+      top: 0,
+      textStyle: { color: "#94a3b8", fontSize: 10 },
+      data: ["리포트 수", "방향성 균형"],
+    },
+    xAxis: {
+      type: "category",
+      data: history.map((point) => point.date.slice(5).replace("-", ".")),
+      axisLine: { lineStyle: { color: "rgba(148,163,184,.25)" } },
+      axisLabel: { color: "#94a3b8", fontSize: 10 },
+    },
+    yAxis: [
+      {
+        type: "value",
+        min: 0,
+        axisLabel: { color: "#94a3b8", fontSize: 10 },
+        splitLine: { lineStyle: { color: "rgba(148,163,184,.12)" } },
+      },
+      {
+        type: "value",
+        min: -100,
+        max: 100,
+        axisLabel: { color: "#94a3b8", fontSize: 10, formatter: "{value}" },
+        splitLine: { show: false },
+      },
+    ],
+    series: [
+      {
+        name: "리포트 수",
+        type: "bar",
+        data: history.map((point) => point.reportCount),
+        itemStyle: { color: "#3b82f6", borderRadius: [5, 5, 0, 0] },
+        barMaxWidth: 30,
+      },
+      {
+        name: "방향성 균형",
+        type: "line",
+        yAxisIndex: 1,
+        data: history.map((point) => point.directionalBalance),
+        connectNulls: false,
+        smooth: true,
+        symbolSize: 7,
+        lineStyle: { color: "#34d399", width: 2 },
+        itemStyle: { color: "#34d399" },
+      },
+    ],
+  } : null;
+  return (
+    <section className="daily-intelligence-research-index" aria-label="리서치 인덱스">
+      <div className="daily-intelligence-broker-subtitle">
+        <strong>리서치 인덱스</strong>
+        <span>수집량과 명시적 의견의 방향 변화를 날짜별로 비교합니다.</span>
+      </div>
+      <div className="daily-intelligence-research-index-kpis">
+        <article>
+          <span>최신 수집량</span>
+          <strong>{latest.reportCount}</strong>
+          <small>{change ? `${signedCount(change.reportCount)}건` : "비교 기준 없음"}</small>
+        </article>
+        <article>
+          <span>발행사</span>
+          <strong>{latest.publisherCount}</strong>
+          <small>{change ? `${signedCount(change.publisherCount)}곳` : "비교 기준 없음"}</small>
+        </article>
+        <article>
+          <span>구조화율</span>
+          <strong>
+            {latest.reportCount
+              ? `${Math.round((latest.structuredCount / latest.reportCount) * 100)}%`
+              : "—"}
+          </strong>
+          <small>{latest.structuredCount}/{latest.reportCount}건</small>
+        </article>
+        <article>
+          <span>방향성 균형</span>
+          <strong>
+            {latest.directionalBalance === null
+              ? "표본 부족"
+              : `${latest.directionalBalance > 0 ? "+" : ""}${latest.directionalBalance.toFixed(0)}`}
+          </strong>
+          <small>긍정 +100 · 경계/부정 -100</small>
+        </article>
+      </div>
+      {chartOption ? (
+        <div className="daily-intelligence-research-index-chart">
+          <PortfolioEChart
+            option={chartOption}
+            ariaLabel="날짜별 리포트 수와 방향성 균형 차트"
+          />
+        </div>
+      ) : null}
+      {targetSignals.length ? (
+        <div className="daily-intelligence-research-signals">
+          <strong>투자의견·목표가 신호</strong>
+          <div>
+            {targetSignals.map((report) => (
+              <article key={report.reportId || `${report.publisher}-${report.title}`}>
+                <span>{report.publisher}</span>
+                <h3>{report.title}</h3>
+                <p>
+                  {report.rating.original ? `원문 의견 ${report.rating.original}` : ""}
+                  {report.rating.original && report.targetPrice.value !== null ? " · " : ""}
+                  {report.targetPrice.value !== null
+                    ? `목표가 ${report.targetPrice.currency || report.baseCurrency} ${report.targetPrice.value.toLocaleString()}`
+                    : ""}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <p className="daily-intelligence-panel-note">
+        방향성 균형은 명시적 의견이 있는 자료만 계산합니다. 목표가가 서로 다른 통화인 경우
+        환산 기준 없이 합산하거나 평균 내지 않습니다.
+      </p>
+    </section>
+  );
+}
+
+function SectorMappingQueue({ coverage, onChanged }) {
+  const queue = React.useMemo(() => {
+    const rows = [];
+    const seen = new Set();
+    for (const item of coverage || []) {
+      if (item.sectorId || !item.sourceLabels?.length) continue;
+      for (const sourceLabel of item.sourceLabels) {
+        const key = sourceLabel.toLocaleLowerCase("en-US");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push({
+          sourceLabel,
+          reportCount: item.reportCount,
+          publisherCount: item.publisherCount,
+          suggestion: item.mappingSuggestion || null,
+        });
+      }
+    }
+    return rows;
+  }, [coverage]);
+  const [taxonomy, setTaxonomy] = React.useState(null);
+  const [selections, setSelections] = React.useState({});
+  const [busyLabel, setBusyLabel] = React.useState("");
+  const [error, setError] = React.useState("");
+
+  React.useEffect(() => {
+    setSelections((current) => {
+      const next = { ...current };
+      for (const item of queue) {
+        const recommended = item.suggestion?.confidence === "high"
+          ? item.suggestion.candidates?.[0]?.sectorId
+          : "";
+        if (!next[item.sourceLabel] && recommended) next[item.sourceLabel] = recommended;
+      }
+      return next;
+    });
+  }, [queue]);
+
+  React.useEffect(() => {
+    if (!queue.length) return undefined;
+    let active = true;
+    const load = async () => {
+      try {
+        const response = await fetch("/api/pb-daily-intelligence/sector-taxonomy", {
+          cache: "no-store",
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) {
+          throw new Error(payload.error || `HTTP ${response.status}`);
+        }
+        if (active) setTaxonomy(payload.taxonomy);
+      } catch (loadError) {
+        if (active) setError(loadError.message || "섹터 마스터를 불러오지 못했습니다.");
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [queue.length]);
+
+  if (!queue.length) return null;
+
+  const saveAlias = async (sourceLabel) => {
+    const sectorId = selections[sourceLabel] || "";
+    if (!sectorId) {
+      setError("표준 섹터를 먼저 선택해 주세요.");
+      return;
+    }
+    setBusyLabel(sourceLabel);
+    setError("");
+    try {
+      const response = await fetch("/api/pb-daily-intelligence/sector-taxonomy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alias: sourceLabel, sectorId }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setTaxonomy(payload.taxonomy);
+      await onChanged?.();
+    } catch (saveError) {
+      setError(saveError.message || "섹터 별칭을 저장하지 못했습니다.");
+    } finally {
+      setBusyLabel("");
+    }
+  };
+
+  return (
+    <div className="daily-intelligence-sector-mapping">
+      <div className="daily-intelligence-broker-subtitle">
+        <strong>섹터 매핑 대기</strong>
+        <span>원문 섹터명을 표준 섹터에 연결하면 이후 리포트부터 자동 통합됩니다.</span>
+      </div>
+      {error ? <p className="daily-intelligence-research-date-error">{error}</p> : null}
+      <div className="daily-intelligence-sector-mapping-list">
+        {queue.map((item) => (
+          <article key={item.sourceLabel}>
+            <div>
+              <strong>{item.sourceLabel}</strong>
+              <small>{item.reportCount}건 · {item.publisherCount}개 발행사</small>
+              {item.suggestion?.candidates?.length ? (
+                <div className="daily-intelligence-sector-suggestions">
+                  <span className={`is-${item.suggestion.confidence}`}>
+                    {item.suggestion.confidence === "high" ? "추천" : "검토 필요"}
+                  </span>
+                  {item.suggestion.candidates.map((candidate) => (
+                    <button
+                      type="button"
+                      key={candidate.sectorId}
+                      onClick={() => setSelections((current) => ({
+                        ...current,
+                        [item.sourceLabel]: candidate.sectorId,
+                      }))}
+                      title={`${candidate.reason} · ${(candidate.score * 100).toFixed(0)}점`}
+                    >
+                      {candidate.nameKo}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <select
+              value={selections[item.sourceLabel] || ""}
+              onChange={(event) => setSelections((current) => ({
+                ...current,
+                [item.sourceLabel]: event.target.value,
+              }))}
+              aria-label={`${item.sourceLabel} 표준 섹터`}
+              disabled={!taxonomy || busyLabel === item.sourceLabel}
+            >
+              <option value="">표준 섹터 선택</option>
+              {(taxonomy?.sectors || []).map((sector) => (
+                <option key={sector.id} value={sector.id}>
+                  {sector.nameKo}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => saveAlias(item.sourceLabel)}
+              disabled={!selections[item.sourceLabel] || busyLabel === item.sourceLabel}
+            >
+              {busyLabel === item.sourceLabel
+                ? <LoaderCircle size={14} className="is-spinning" />
+                : <CheckCircle2 size={14} />}
+              연결
+            </button>
+          </article>
+        ))}
+      </div>
+      <p className="daily-intelligence-panel-note">
+        저장 결과는 <code>config/research-sector-taxonomy.json</code>에 남습니다.
+        원문 리포트와 원래 섹터명은 변경하지 않습니다.
+      </p>
+    </div>
+  );
+}
+
+function SectorCoverageExplorer({ coverage, reports, sectorHistory, selectedDate }) {
+  const [selectedKey, setSelectedKey] = React.useState("");
+  const selected = coverage.find((item) => (item.sectorId || item.sector) === selectedKey)
+    || coverage[0]
+    || null;
+
+  React.useEffect(() => {
+    if (!coverage.length) {
+      setSelectedKey("");
+      return;
+    }
+    if (!coverage.some((item) => (item.sectorId || item.sector) === selectedKey)) {
+      setSelectedKey(coverage[0].sectorId || coverage[0].sector);
+    }
+  }, [coverage, selectedKey]);
+
+  if (!selected) return null;
+
+  const selectedReports = reports.filter((report) => {
+    if (selected.sectorId) {
+      return report.standardSectors?.some((sector) => sector.id === selected.sectorId);
+    }
+    const sourceLabels = new Set(selected.sourceLabels || []);
+    return report.sectors?.some((sector) => sourceLabels.has(sector));
+  });
+  const uniqueItems = (field, limit = 4) => {
+    const seen = new Set();
+    const values = [];
+    for (const report of selectedReports) {
+      for (const value of report[field] || []) {
+        const key = value.toLocaleLowerCase("en-US");
+        if (!value || seen.has(key)) continue;
+        seen.add(key);
+        values.push(value);
+        if (values.length >= limit) return values;
+      }
+    }
+    return values;
+  };
+  const claims = uniqueItems("keyClaims", 5);
+  const catalysts = uniqueItems("catalysts", 4);
+  const risks = uniqueItems("risks", 4);
+  const monitoring = uniqueItems("monitoringConditions", 4);
+  const trend = (sectorHistory || [])
+    .filter((point) => !selectedDate || point.date <= selectedDate)
+    .map((point) => ({
+      date: point.date,
+      sector: point.sectors?.find((item) => (
+        selected.sectorId
+          ? item.sectorId === selected.sectorId
+          : item.sector === selected.sector
+      )) || null,
+    }))
+    .filter((point) => point.sector);
+  const latestTrend = trend.at(-1)?.sector || selected;
+  const previousTrend = trend.at(-2)?.sector || null;
+  const trendChange = previousTrend
+    ? {
+      reportCount: latestTrend.reportCount - previousTrend.reportCount,
+      publisherCount: latestTrend.publisherCount - previousTrend.publisherCount,
+      ratedCount: latestTrend.ratedCount - previousTrend.ratedCount,
+    }
+    : null;
+  const textKey = (value) => String(value || "")
+    .toLocaleLowerCase("en-US")
+    .replace(/\s+/g, " ")
+    .trim();
+  const diffTexts = (current = [], previous = []) => {
+    const previousKeys = new Set(previous.map(textKey));
+    const currentKeys = new Set(current.map(textKey));
+    return {
+      added: current.filter((value) => !previousKeys.has(textKey(value))).slice(0, 4),
+      removed: previous.filter((value) => !currentKeys.has(textKey(value))).slice(0, 4),
+    };
+  };
+  const narrativeChanges = [
+    { id: "claims", label: "주요 주장", ...diffTexts(latestTrend.claims, previousTrend?.claims) },
+    { id: "catalysts", label: "상승 촉매", ...diffTexts(latestTrend.catalysts, previousTrend?.catalysts) },
+    { id: "risks", label: "핵심 위험", ...diffTexts(latestTrend.risks, previousTrend?.risks) },
+  ];
+  const hasNarrativeChange = narrativeChanges.some(
+    (change) => change.added.length || change.removed.length,
+  );
+  const crossPublisherThemes = latestTrend.crossPublisherThemes || [];
+  const crossPublisherTypeLabels = {
+    claim: "주장",
+    catalyst: "촉매",
+    risk: "위험",
+  };
+  const publisherOpinion = latestTrend.publisherOpinion || {
+    status: "no_sample",
+    ratedPublisherCount: 0,
+    mixedPublisherCount: 0,
+    stances: {},
+  };
+  const publisherOpinionStatusLabels = {
+    no_sample: "명시적 의견 없음",
+    single_source: "단일 발행사 표본",
+    aligned: "방향 정렬",
+    divided: "의견 분산",
+  };
+  const publisherStanceLabels = {
+    positive: "긍정",
+    neutral: "중립",
+    cautious: "경계",
+    negative: "부정",
+    mixed: "발행사 내부 혼재",
+  };
+  const visiblePublisherStances = Object.entries(publisherOpinion.stances || {})
+    .filter(([, publishers]) => publishers?.length);
+  const trendOption = trend.length >= 2 ? {
+    animation: false,
+    tooltip: { trigger: "axis" },
+    legend: {
+      top: 0,
+      textStyle: { color: "#94a3b8", fontSize: 10 },
+      data: ["리포트", "발행사"],
+    },
+    xAxis: {
+      type: "category",
+      data: trend.map((point) => point.date.slice(5).replace("-", ".")),
+      axisLine: { lineStyle: { color: "rgba(148,163,184,.25)" } },
+      axisLabel: { color: "#94a3b8", fontSize: 10 },
+    },
+    yAxis: {
+      type: "value",
+      min: 0,
+      minInterval: 1,
+      axisLabel: { color: "#94a3b8", fontSize: 10 },
+      splitLine: { lineStyle: { color: "rgba(148,163,184,.12)" } },
+    },
+    series: [
+      {
+        name: "리포트",
+        type: "bar",
+        data: trend.map((point) => point.sector.reportCount),
+        itemStyle: { color: "#3b82f6", borderRadius: [4, 4, 0, 0] },
+        barMaxWidth: 24,
+      },
+      {
+        name: "발행사",
+        type: "line",
+        data: trend.map((point) => point.sector.publisherCount),
+        smooth: true,
+        symbolSize: 6,
+        lineStyle: { color: "#34d399", width: 2 },
+        itemStyle: { color: "#34d399" },
+      },
+    ],
+  } : null;
+
+  return (
+    <div className="daily-intelligence-research-coverage">
+      <div className="daily-intelligence-broker-subtitle">
+        <strong>섹터 커버리지 지도</strong>
+        <span>섹터를 선택하면 관련 리포트의 주장·촉매·위험을 한 화면에서 비교합니다.</span>
+      </div>
+      <div className="daily-intelligence-research-coverage-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>섹터</th>
+              <th>리포트</th>
+              <th>발행사</th>
+              <th>시장 범위</th>
+              <th>구조화</th>
+              <th>명시적 의견</th>
+              <th>커버리지</th>
+              <th>주요 종목</th>
+            </tr>
+          </thead>
+          <tbody>
+            {coverage.map((item) => {
+              const itemKey = item.sectorId || item.sector;
+              const active = itemKey === (selected.sectorId || selected.sector);
+              return (
+                <tr key={itemKey} className={active ? "is-selected" : ""}>
+                  <th scope="row">
+                    <button
+                      type="button"
+                      className="daily-intelligence-coverage-sector-button"
+                      onClick={() => setSelectedKey(itemKey)}
+                      aria-pressed={active}
+                    >
+                      <span>{item.sector}</span>
+                      {item.sourceLabels?.length ? (
+                        <small>원문 · {item.sourceLabels.join(" · ")}</small>
+                      ) : null}
+                    </button>
+                  </th>
+                  <td>{item.reportCount}</td>
+                  <td>{item.publisherCount}</td>
+                  <td>
+                    <span className="daily-intelligence-coverage-market">
+                      국내 {item.domesticCount} · 해외 {item.overseasCount}
+                      {item.unclassifiedCount ? ` · 미분류 ${item.unclassifiedCount}` : ""}
+                    </span>
+                  </td>
+                  <td>{item.structuredCount}/{item.reportCount}</td>
+                  <td>{item.ratedCount || "—"}</td>
+                  <td>
+                    <em className={`is-${item.depth}`}>
+                      {item.depth === "multi_source"
+                        ? "다원 확인"
+                        : item.depth === "cross_checked"
+                          ? "교차 확인"
+                          : "단일 출처"}
+                    </em>
+                  </td>
+                  <td>
+                    {item.topTickers?.length
+                      ? item.topTickers.map((ticker) => ticker.ticker).join(" · ")
+                      : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="daily-intelligence-sector-detail">
+        <header>
+          <div>
+            <span>SECTOR DETAIL</span>
+            <h3>{selected.sector}</h3>
+          </div>
+          <p>
+            {selectedReports.length}건 · {[...new Set(selectedReports.map((report) => report.publisher))].length}개 발행사
+          </p>
+        </header>
+        <div className="daily-intelligence-sector-trend-summary">
+          <article>
+            <span>리포트 변화</span>
+            <strong>{latestTrend.reportCount}</strong>
+            <small>{trendChange ? `${signedCount(trendChange.reportCount)}건` : "비교 기준 축적 중"}</small>
+          </article>
+          <article>
+            <span>발행사 변화</span>
+            <strong>{latestTrend.publisherCount}</strong>
+            <small>{trendChange ? `${signedCount(trendChange.publisherCount)}곳` : "비교 기준 축적 중"}</small>
+          </article>
+          <article>
+            <span>명시적 의견</span>
+            <strong>{latestTrend.ratedCount || 0}</strong>
+            <small>{trendChange ? `${signedCount(trendChange.ratedCount)}건` : "의견 표본 축적 중"}</small>
+          </article>
+        </div>
+        {trendOption ? (
+          <div className="daily-intelligence-sector-trend-chart">
+            <PortfolioEChart
+              option={trendOption}
+              ariaLabel={`${selected.sector} 날짜별 리포트와 발행사 추이`}
+            />
+          </div>
+        ) : null}
+        <section className={`daily-intelligence-sector-opinion is-${publisherOpinion.status}`}>
+          <header>
+            <div>
+              <span>PUBLISHER OPINION</span>
+              <h4>발행사 의견 분포</h4>
+            </div>
+            <strong>{publisherOpinionStatusLabels[publisherOpinion.status]}</strong>
+          </header>
+          <div className="daily-intelligence-sector-opinion-summary">
+            <p>
+              명시적 의견 {publisherOpinion.ratedPublisherCount}개 발행사
+              {publisherOpinion.mixedPublisherCount
+                ? ` · 내부 혼재 ${publisherOpinion.mixedPublisherCount}곳`
+                : ""}
+            </p>
+            {publisherOpinion.status === "aligned" ? (
+              <p>
+                {publisherStanceLabels[publisherOpinion.dominantStance]} 방향
+                {" "}{publisherOpinion.dominantSharePct}%
+              </p>
+            ) : null}
+          </div>
+          {visiblePublisherStances.length ? (
+            <div className="daily-intelligence-sector-opinion-grid">
+              {visiblePublisherStances.map(([stance, publishers]) => (
+                <article key={stance} className={`is-${stance}`}>
+                  <span>{publisherStanceLabels[stance] || stance}</span>
+                  <strong>{publishers.length}</strong>
+                  <small>{publishers.join(" · ")}</small>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="is-empty">방향성이 명시된 발행사 자료가 없습니다.</p>
+          )}
+          <p className="daily-intelligence-sector-opinion-note">
+            발행사당 하나의 명시적 의견만 집계합니다. 동일 발행사 안에서 방향이 충돌하면 별도 혼재 표본으로 분리합니다.
+          </p>
+        </section>
+        <section className="daily-intelligence-sector-cross-check">
+          <header>
+            <div>
+              <span>CROSS-PUBLISHER CHECK</span>
+              <h4>독립 발행사 반복 논점</h4>
+            </div>
+            <small>같은 구조화 문구를 2개 이상 발행사가 사용한 경우만 표시합니다.</small>
+          </header>
+          {crossPublisherThemes.length ? (
+            <div className="daily-intelligence-sector-cross-check-list">
+              {crossPublisherThemes.map((theme) => (
+                <article key={`${theme.type}-${theme.text}`}>
+                  <div>
+                    <em className={`is-${theme.type}`}>
+                      {crossPublisherTypeLabels[theme.type] || theme.type}
+                    </em>
+                    <strong>{theme.text}</strong>
+                  </div>
+                  <p>
+                    {theme.publisherCount}개 발행사 · {theme.reportCount}건
+                    <span>{theme.publishers.join(" · ")}</span>
+                  </p>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="is-empty">
+              정확히 같은 문구를 사용한 독립 발행사 표본이 없습니다.
+            </p>
+          )}
+          <p className="daily-intelligence-sector-cross-check-note">
+            반복 문구는 시장의 정답이나 합의를 뜻하지 않으며, 독립 자료에서 동일하게 관측된 표현만 보여줍니다.
+          </p>
+        </section>
+        <section className="daily-intelligence-sector-narrative-change">
+          <header>
+            <div>
+              <span>NARRATIVE CHANGE</span>
+              <h4>논점 변화</h4>
+            </div>
+            <small>구조화 문구를 그대로 비교하며 의미가 비슷한 표현을 임의로 합치지 않습니다.</small>
+          </header>
+          {!previousTrend ? (
+            <p className="is-empty">이전 날짜의 비교 기준을 축적 중입니다.</p>
+          ) : !hasNarrativeChange ? (
+            <p className="is-empty">이전 리서치 날짜와 비교해 구조화 문구 변화가 없습니다.</p>
+          ) : (
+            <div className="daily-intelligence-sector-narrative-grid">
+              {narrativeChanges.filter((change) => (
+                change.added.length || change.removed.length
+              )).map((change) => (
+                <article key={change.id}>
+                  <strong>{change.label}</strong>
+                  {change.added.length ? (
+                    <div className="is-added">
+                      <span>새로 수집</span>
+                      <ul>{change.added.map((item) => <li key={`added-${item}`}>{item}</li>)}</ul>
+                    </div>
+                  ) : null}
+                  {change.removed.length ? (
+                    <div className="is-removed">
+                      <span>이전 자료에서 소멸</span>
+                      <ul>{change.removed.map((item) => <li key={`removed-${item}`}>{item}</li>)}</ul>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          )}
+          <p className="daily-intelligence-sector-narrative-note">
+            ‘소멸’은 주장이 반박됐다는 뜻이 아니라 최신 수집 자료에 같은 문구가 없다는 뜻입니다.
+          </p>
+        </section>
+        <div className="daily-intelligence-sector-detail-grid">
+          <div className="daily-intelligence-sector-detail-evidence">
+            {claims.length ? (
+              <section>
+                <strong>주요 주장</strong>
+                <ul>{claims.map((item) => <li key={item}>{item}</li>)}</ul>
+              </section>
+            ) : null}
+            {catalysts.length ? (
+              <section className="is-catalyst">
+                <strong>상승 촉매</strong>
+                <ul>{catalysts.map((item) => <li key={item}>{item}</li>)}</ul>
+              </section>
+            ) : null}
+            {risks.length ? (
+              <section className="is-risk">
+                <strong>핵심 위험</strong>
+                <ul>{risks.map((item) => <li key={item}>{item}</li>)}</ul>
+              </section>
+            ) : null}
+            {monitoring.length ? (
+              <section>
+                <strong>확인 조건</strong>
+                <ul>{monitoring.map((item) => <li key={item}>{item}</li>)}</ul>
+              </section>
+            ) : null}
+          </div>
+          <div className="daily-intelligence-sector-detail-reports">
+            <strong>관련 리포트</strong>
+            {selectedReports.slice(0, 8).map((report) => (
+              <article key={report.reportId || `${report.publisher}-${report.title}`}>
+                <span>{report.publisher} · {researchMarketScopeLabels[report.marketScope] || report.marketScope}</span>
+                <h4>{report.title}</h4>
+                <p>{report.keyClaims?.[0] || report.summary || "구조화 분석 대기 중"}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <p className="daily-intelligence-panel-note">
+        단일 출처는 내용의 오류를 뜻하지 않습니다. 같은 섹터를 독립된 발행사가
+        교차 확인했는지 보여주는 커버리지 깊이 지표입니다.
+      </p>
+    </div>
+  );
+}
+
 function BrokerResearchMonitor({
   brokerResearch,
+  researchIndex,
   history,
   busy,
   error,
   onDateChange,
+  onTaxonomyChanged,
 }) {
+  const [marketScopeFilter, setMarketScopeFilter] = React.useState("all");
   const availableDates = history?.availableDates || [];
   const selectedDate = history?.selectedDate || brokerResearch?.reportDate || "";
   const selectedIndex = availableDates.indexOf(selectedDate);
@@ -930,6 +1656,21 @@ function BrokerResearchMonitor({
   }
   const summary = brokerResearch.summary || {};
   const stanceCounts = summary.stanceCounts || {};
+  const reports = brokerResearch.reports || [];
+  const researchCoverage = brokerResearch.consensus?.coverage || [];
+  const domesticCount = reports.filter((report) => report.marketScope === "KR").length;
+  const overseasCount = reports.filter(
+    (report) => !["KR", "UNKNOWN"].includes(report.marketScope),
+  ).length;
+  const unclassifiedCount = reports.filter((report) => report.marketScope === "UNKNOWN").length;
+  const visibleReports = reports.filter((report) => {
+    if (marketScopeFilter === "domestic") return report.marketScope === "KR";
+    if (marketScopeFilter === "overseas") {
+      return !["KR", "UNKNOWN"].includes(report.marketScope);
+    }
+    if (marketScopeFilter === "unknown") return report.marketScope === "UNKNOWN";
+    return true;
+  });
   return (
     <section
       id="broker-research-results"
@@ -949,10 +1690,45 @@ function BrokerResearchMonitor({
 
       <div className="daily-intelligence-broker-summary">
         <article><span>수집 리포트</span><strong>{summary.selectedReportCount || 0}</strong><small>{summary.publisherCount || 0}개 발행사</small></article>
+        <article><span>국내 리서치</span><strong>{domesticCount}</strong><small>KR 시장 분류</small></article>
+        <article><span>해외 리서치</span><strong>{overseasCount}</strong><small>미국·유럽·일본·글로벌</small></article>
         <article><span>구조화 완료</span><strong>{summary.structuredReportCount || 0}</strong><small>{researchAnalysisStatusLabels[summary.analysisStatus] || summary.analysisStatus || "요약·논거·촉매·위험"}</small></article>
         <article><span>긍정 / 중립</span><strong>{stanceCounts.positive || 0} / {stanceCounts.neutral || 0}</strong><small>리포트 관점 기준</small></article>
         <article><span>명시적 의견 없음</span><strong>{stanceCounts.not_stated || 0}</strong><small>촉매·위험은 별도 평가</small></article>
       </div>
+
+      <div className="daily-intelligence-research-filter" role="group" aria-label="리서치 시장 구분">
+        {[
+          ["all", "전체", reports.length],
+          ["domestic", "국내", domesticCount],
+          ["overseas", "해외", overseasCount],
+          ["unknown", "미분류", unclassifiedCount],
+        ].map(([value, label, count]) => (
+          <button
+            type="button"
+            key={value}
+            className={marketScopeFilter === value ? "is-active" : ""}
+            onClick={() => setMarketScopeFilter(value)}
+          >
+            {label} <span>{count}</span>
+          </button>
+        ))}
+        <small>원문 등급·목표가는 발행사 표현을 보존하고 공통 등급은 별도로 집계합니다.</small>
+      </div>
+
+      <BrokerResearchIndex index={researchIndex} brokerResearch={brokerResearch} />
+
+      <SectorMappingQueue
+        coverage={researchCoverage}
+        onChanged={onTaxonomyChanged}
+      />
+
+      <SectorCoverageExplorer
+        coverage={researchCoverage}
+        reports={reports}
+        sectorHistory={researchIndex?.sectorHistory}
+        selectedDate={selectedDate}
+      />
 
       {brokerResearch.consensus?.sectorAssessments?.length ? (
         <div className="daily-intelligence-sector-assessments">
@@ -1005,11 +1781,16 @@ function BrokerResearchMonitor({
       ) : null}
 
       <div className="daily-intelligence-broker-grid">
-        {(brokerResearch.reports || []).map((report) => (
+        {visibleReports.map((report) => (
           <article key={report.reportId || `${report.publisher}-${report.title}`}>
             <header>
               <div>
-                <span>{report.publisher}{report.analyst ? ` · ${report.analyst}` : ""}</span>
+                <span>
+                  <b className={`daily-intelligence-market-scope is-${report.marketScope.toLowerCase()}`}>
+                    {researchMarketScopeLabels[report.marketScope] || report.marketScope}
+                  </b>
+                  {report.publisher}{report.analyst ? ` · ${report.analyst}` : ""}
+                </span>
                 <h3>{report.title}</h3>
               </div>
               <em className={`is-${report.stance}`}>
@@ -1019,6 +1800,24 @@ function BrokerResearchMonitor({
             <p>
               {report.summary || "구조화 분석 대기 중 — 원문은 보관하되 화면에는 재배포하지 않습니다."}
             </p>
+            {report.rating.original || report.targetPrice.value !== null ? (
+              <div className="daily-intelligence-broker-terms">
+                {report.rating.original ? (
+                  <span>
+                    원문 의견 <strong>{report.rating.original}</strong>
+                    {report.rating.normalized !== "not_stated"
+                      ? ` · 공통 분류 ${researchStanceLabels[report.rating.normalized] || report.rating.normalized}`
+                      : ""}
+                  </span>
+                ) : null}
+                {report.targetPrice.value !== null ? (
+                  <span>
+                    목표가 <strong>{report.targetPrice.currency || report.baseCurrency} {report.targetPrice.value.toLocaleString()}</strong>
+                    {report.targetPrice.asOf ? ` · ${report.targetPrice.asOf.slice(0, 10)} 기준` : ""}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             {report.keyClaims.length ? (
               <ul>{report.keyClaims.slice(0, 3).map((claim) => <li key={claim}>{claim}</li>)}</ul>
             ) : null}
@@ -1064,6 +1863,9 @@ function BrokerResearchMonitor({
             </footer>
           </article>
         ))}
+        {!visibleReports.length ? (
+          <p className="daily-intelligence-muted">선택한 시장 구분에 해당하는 리포트가 없습니다.</p>
+        ) : null}
       </div>
 
       <p className="daily-intelligence-panel-note">
@@ -1111,9 +1913,19 @@ function BrokerResearchApprovalQueue({
           {pendingItems.map((item) => (
             <article key={item.fileId}>
               <div>
-                <span>{item.inferred.publisher} · {item.inferred.published_at.slice(0, 10)}</span>
+                <span>
+                  <b className={`daily-intelligence-market-scope is-${String(item.inferred.market_scope || "UNKNOWN").toLowerCase()}`}>
+                    {researchMarketScopeLabels[item.inferred.market_scope] || "미분류"}
+                  </b>
+                  {item.inferred.publisher} · {item.inferred.published_at.slice(0, 10)}
+                </span>
                 <h3>{item.inferred.title}</h3>
-                <small>{item.fileName}</small>
+                <small>
+                  {item.inferred.research_path?.length
+                    ? `${item.inferred.research_path.join(" / ")} · `
+                    : ""}
+                  {item.fileName}
+                </small>
               </div>
               <div className="daily-intelligence-approval-actions">
                 <a href={item.driveUrl} target="_blank" rel="noreferrer">
@@ -1211,6 +2023,7 @@ export default function DailyIntelligenceView() {
   const telegramSources = snapshot?.telegramSources;
   const brokerResearch = snapshot?.brokerResearch;
   const brokerResearchHistory = snapshot?.brokerResearchHistory;
+  const brokerResearchIndex = snapshot?.brokerResearchIndex;
   const [brokerApprovalQueue, setBrokerApprovalQueue] = React.useState(null);
   const [brokerApprovalBusy, setBrokerApprovalBusy] = React.useState(false);
   const [brokerApprovalError, setBrokerApprovalError] = React.useState("");
@@ -1339,10 +2152,12 @@ export default function DailyIntelligenceView() {
 
         <BrokerResearchMonitor
           brokerResearch={brokerResearch}
+          researchIndex={brokerResearchIndex}
           history={brokerResearchHistory}
           busy={brokerResearchBusy}
           error={brokerResearchError}
           onDateChange={selectBrokerResearchDate}
+          onTaxonomyChanged={reload}
         />
 
         <TelegramSourceMonitor
