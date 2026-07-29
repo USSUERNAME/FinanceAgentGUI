@@ -10,9 +10,13 @@ import {
   buildSectorWatchlistRanking,
   buildMarketSectorStockChain,
   buildPortfolioImpact,
+  buildPortfolioResponseCalibration,
+  buildRiskThesisReviewActivity,
   extractPortfolioUniverse,
   linkThesisAlertsToPortfolio,
   loadPbDailyIntelligenceSnapshot,
+  evaluatePortfolioResponse,
+  portfolioResponseObservation,
 } from "../server/pbDailyIntelligenceApi.mjs";
 
 const tempRoot = join(process.cwd(), "data", ".test-pb-daily-intelligence");
@@ -24,6 +28,239 @@ async function writeJson(filePath, payload) {
 
 test.afterEach(async () => {
   await rm(tempRoot, { recursive: true, force: true });
+});
+
+test("PB Daily Intelligence exposes only completed thesis review decisions in audit order", () => {
+  const activity = buildRiskThesisReviewActivity({
+    thesisMemory: {
+      records: [{
+        continuityId: "pb-stock-nvda",
+        entityId: "NVDA",
+        state: "weakened",
+        stateLabel: "약화",
+      }],
+    },
+    stockCandidates: {
+      candidates: [{ ticker: "NVDA", reaction: { close: 130 } }],
+    },
+    reportDate: "2026-07-29",
+    reviews: [
+      {
+        reportDate: "2026-07-29",
+        riskId: "stock:NVDA",
+        title: "NVDA 집중 위험",
+        thesisImpact: "contradicts",
+        thesisProposalStatus: "approved",
+        thesisProposalReviewedAt: "2026-07-29T09:00:00+09:00",
+        thesisContinuityIds: ["pb-stock-nvda"],
+        note: "공식 실적 근거 확인",
+        portfolioResponseAction: "maintain",
+        portfolioResponseMetricId: "stock_close",
+        portfolioResponseMetricLabel: "종목 종가",
+        portfolioResponseMetricTicker: "NVDA",
+        portfolioResponseBaselineValue: 125,
+        portfolioResponseBaselineDate: "2026-07-28",
+      },
+      {
+        reportDate: "2026-07-29",
+        riskId: "sector:XLK",
+        title: "기술 섹터 위험",
+        thesisImpact: "neutral",
+        thesisProposalStatus: "pending",
+        thesisContinuityIds: ["pb-sector-xlk"],
+      },
+      {
+        reportDate: "2026-07-28",
+        riskId: "sector:XLY",
+        title: "경기소비재 위험",
+        thesisImpact: "neutral",
+        thesisProposalStatus: "rejected",
+        thesisProposalReviewedAt: "2026-07-29T08:00:00+09:00",
+        thesisContinuityIds: ["pb-sector-xly"],
+      },
+    ],
+  });
+  assert.equal(activity.length, 2);
+  assert.equal(activity[0].decision, "approved");
+  assert.equal(activity[0].targets[0].entityId, "NVDA");
+  assert.equal(activity[0].portfolioResponseAction, "maintain");
+  assert.equal(activity[0].portfolioResponseEvaluation.status, "supported");
+  assert.equal(activity[1].decision, "rejected");
+  assert.equal(activity[1].targets[0].entityId, "XLY");
+});
+
+test("portfolio response evaluation uses only comparable next-report observations", () => {
+  assert.deepEqual(
+    portfolioResponseObservation("stock:NVDA", {
+      stockCandidates: {
+        candidates: [{ ticker: "NVDA", reaction: { close: 125 } }],
+      },
+    }),
+    {
+      metricId: "stock_close",
+      metricLabel: "종목 종가",
+      ticker: "NVDA",
+      value: 125,
+    },
+  );
+  assert.equal(
+    portfolioResponseObservation("stock:NVDA", {
+      stockCandidates: {
+        candidates: [{ ticker: "NVDA", reaction: { close: null } }],
+      },
+    }),
+    null,
+  );
+  assert.deepEqual(
+    portfolioResponseObservation("sector:XLK", {
+      marketInternals: {
+        sectors: { "5d": [{ ticker: "XLK", vsSpyPctPoint: -2.1 }] },
+      },
+    }),
+    {
+      metricId: "sector_vs_spy_5d_pct_point",
+      metricLabel: "섹터의 SPY 대비 5일 상대수익률",
+      ticker: "XLK",
+      value: -2.1,
+    },
+  );
+  const supported = evaluatePortfolioResponse({
+    action: "reduce_review",
+    metricId: "stock_close",
+    metricLabel: "종목 종가",
+    metricTicker: "NVDA",
+    baselineValue: 125,
+    baselineDate: "2026-07-29",
+    currentObservation: {
+      metricId: "stock_close",
+      metricLabel: "종목 종가",
+      ticker: "NVDA",
+      value: 120,
+    },
+    currentReportDate: "2026-07-30",
+  });
+  assert.equal(supported.status, "supported");
+  assert.equal(supported.change, -4);
+
+  const pending = evaluatePortfolioResponse({
+    action: "maintain",
+    metricId: "stock_close",
+    baselineValue: 125,
+    baselineDate: "2026-07-29",
+    currentObservation: { metricId: "stock_close", ticker: "NVDA", value: 126 },
+    currentReportDate: "2026-07-29",
+  });
+  assert.equal(pending.status, "pending");
+
+  const unavailable = evaluatePortfolioResponse({
+    action: "maintain",
+    metricId: "stock_close",
+    baselineValue: 125,
+    baselineDate: "2026-07-29",
+    currentObservation: null,
+    currentReportDate: "2026-07-30",
+  });
+  assert.equal(unavailable.status, "unavailable");
+});
+
+test("portfolio response calibration hides thin-sample rates and separates non-directional actions", () => {
+  const activity = [
+    {
+      activityId: "a",
+      reportDate: "2026-07-29",
+      riskId: "stock:NVDA",
+      title: "NVDA",
+      portfolioResponseAction: "maintain",
+      portfolioResponseEvaluation: { status: "supported", summary: "상승" },
+    },
+    {
+      activityId: "b",
+      reportDate: "2026-07-29",
+      riskId: "stock:TSLA",
+      title: "TSLA",
+      portfolioResponseAction: "reduce_review",
+      portfolioResponseEvaluation: { status: "challenged", summary: "상승" },
+    },
+    {
+      activityId: "c",
+      reportDate: "2026-07-29",
+      riskId: "sector:XLK",
+      title: "XLK",
+      portfolioResponseAction: "increase_monitoring",
+      portfolioResponseEvaluation: { status: "observed", summary: "변화 관측" },
+    },
+    {
+      activityId: "d",
+      reportDate: "2026-07-29",
+      riskId: "sector:XLY",
+      title: "XLY",
+      portfolioResponseAction: "no_position_change",
+      portfolioResponseEvaluation: { status: "pending", summary: "평가 전" },
+    },
+  ];
+  const calibration = buildPortfolioResponseCalibration(activity, {
+    minimumDecisiveSample: 10,
+  });
+  assert.equal(calibration.totalCount, 4);
+  assert.equal(calibration.decisiveCount, 2);
+  assert.equal(calibration.successRateVisible, false);
+  assert.equal(calibration.successRatePct, 50);
+  assert.equal(calibration.counts.observed, 1);
+  assert.equal(calibration.counts.pending, 1);
+  assert.equal(calibration.challenged.length, 1);
+  assert.equal(calibration.ruleSuggestions.length, 0);
+  assert.match(calibration.warning, /최소 10건/);
+
+  const mature = buildPortfolioResponseCalibration(
+    Array.from({ length: 10 }, (_, index) => ({
+      activityId: `mature-${index}`,
+      reportDate: "2026-07-29",
+      riskId: `stock:T${index}`,
+      title: `T${index}`,
+      portfolioResponseAction: "maintain",
+      portfolioResponseEvaluation: {
+        status: index < 8 ? "supported" : "challenged",
+        summary: "평가",
+      },
+    })),
+  );
+  assert.equal(mature.successRateVisible, true);
+  assert.equal(mature.successRatePct, 80);
+  assert.equal(mature.warning, "");
+  assert.equal(mature.ruleSuggestions.length, 0);
+
+  const repeatedChallenges = buildPortfolioResponseCalibration(
+    [
+      ...Array.from({ length: 2 }, (_, index) => ({
+        activityId: `reduce-challenged-${index}`,
+        reportDate: `2026-07-${28 + index}`,
+        riskId: `stock:C${index}`,
+        title: `C${index}`,
+        portfolioResponseAction: "reduce_review",
+        portfolioResponseEvaluation: {
+          status: "challenged",
+          summary: "축소 검토 이후 가격이 상승했습니다.",
+        },
+      })),
+      {
+        activityId: "reduce-supported",
+        reportDate: "2026-07-27",
+        riskId: "stock:S1",
+        title: "S1",
+        portfolioResponseAction: "reduce_review",
+        portfolioResponseEvaluation: {
+          status: "supported",
+          summary: "축소 검토 이후 가격이 하락했습니다.",
+        },
+      },
+    ],
+  );
+  assert.equal(repeatedChallenges.ruleSuggestions.length, 1);
+  assert.equal(repeatedChallenges.ruleSuggestions[0].action, "reduce_review");
+  assert.equal(repeatedChallenges.ruleSuggestions[0].status, "pending_approval");
+  assert.equal(repeatedChallenges.ruleSuggestions[0].autoApply, false);
+  assert.equal(repeatedChallenges.ruleSuggestions[0].challengeRatePct, 66.7);
+  assert.match(repeatedChallenges.ruleSuggestions[0].proposal, /가격 추세/);
 });
 
 test("PB Daily Intelligence separates direct report tickers from indirect sector candidates", () => {

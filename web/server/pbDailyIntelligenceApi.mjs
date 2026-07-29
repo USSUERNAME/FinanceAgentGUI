@@ -22,10 +22,29 @@ import {
 import {
   attachPortfolioRiskReviews,
   readPortfolioRiskReviews,
+  reviewPortfolioRiskThesisProposal,
+  savePortfolioRiskResponse,
   savePortfolioRiskFollowUp,
   savePortfolioRiskReview,
 } from "./portfolioRiskReviews.mjs";
 import {
+  attachPortfolioResponseRuleDecisions,
+  buildMonthlyPortfolioDecisionReview,
+  buildPortfolioFailureCauseRuleImpact,
+  buildPortfolioResponseRuleImpact,
+  readPortfolioResponseRuleDecisions,
+  reviewPortfolioResponseActiveRule,
+  reviewPortfolioResponseRuleSuggestion,
+} from "./portfolioResponseRules.mjs";
+import {
+  attachMonthlyDecisionGoals,
+  buildMonthlyFailureChecklistSuggestions,
+  buildMonthlyDecisionGoalProposals,
+  readPortfolioDecisionGoals,
+  reviewMonthlyDecisionGoalProposal,
+} from "./portfolioDecisionGoals.mjs";
+import {
+  applyRiskReviewEvidenceToInvestmentTheses,
   buildTrackedInvestmentTheses,
   buildWeeklyThesisCalibration,
   readInvestmentThesisMemory,
@@ -1847,6 +1866,404 @@ function portfolioEvent(item = {}) {
       impact.invalidation_condition || item.invalidation_condition,
       500,
     ),
+  };
+}
+
+function buildRiskThesisReviewProposals({
+  reviews = [],
+  thesisMemory = {},
+} = {}) {
+  const recordById = new Map(
+    cleanList(thesisMemory?.records, 500)
+      .map((record) => [cleanText(record?.continuityId, 120), record])
+      .filter(([id]) => id),
+  );
+  const latestByRiskId = new Map();
+  for (const review of cleanList(reviews, 500)) {
+    if (review?.thesisProposalStatus !== "pending" || !review?.riskId) continue;
+    const previous = latestByRiskId.get(review.riskId);
+    if (
+      !previous
+      || String(review.reportDate || "") > String(previous.reportDate || "")
+      || (
+        review.reportDate === previous.reportDate
+        && String(review.updatedAt || "") > String(previous.updatedAt || "")
+      )
+    ) {
+      latestByRiskId.set(review.riskId, review);
+    }
+  }
+  return [...latestByRiskId.values()]
+    .map((review) => {
+      const targets = cleanList(review.thesisContinuityIds, 8)
+        .map((continuityId) => recordById.get(continuityId))
+        .filter(Boolean)
+        .map((record) => ({
+          continuityId: record.continuityId,
+          kind: record.kind,
+          entityId: record.entityId,
+          title: record.title,
+          state: record.state,
+          stateLabel: record.stateLabel,
+        }));
+      return {
+        proposalId: `${review.reportDate}:${review.riskId}`,
+        reportDate: review.reportDate,
+        riskId: review.riskId,
+        title: review.title || review.riskId,
+        relation: review.thesisImpact || "neutral",
+        summary: review.followUpEvidenceNote || review.note || "",
+        evidenceUrl: review.followUpEvidenceUrl || "",
+        targets,
+        createdAt: review.updatedAt || "",
+      };
+    })
+    .filter((proposal) => proposal.targets.length)
+    .sort((a, b) =>
+      String(b.createdAt || "").localeCompare(String(a.createdAt || ""))
+      || a.riskId.localeCompare(b.riskId),
+    );
+}
+
+export function buildRiskThesisReviewActivity({
+  reviews = [],
+  thesisMemory = {},
+  stockCandidates = {},
+  marketInternals = {},
+  reportDate = "",
+  limit = 12,
+} = {}) {
+  const recordById = new Map(
+    cleanList(thesisMemory?.records, 500)
+      .map((record) => [cleanText(record?.continuityId, 120), record])
+      .filter(([id]) => id),
+  );
+  return cleanList(reviews, 500)
+    .filter((review) =>
+      ["approved", "rejected"].includes(review?.thesisProposalStatus)
+      && review?.riskId
+      && review?.thesisProposalReviewedAt
+    )
+    .sort((a, b) =>
+      String(b.thesisProposalReviewedAt).localeCompare(String(a.thesisProposalReviewedAt)),
+    )
+    .slice(0, Math.max(1, Math.min(500, Number(limit) || 12)))
+    .map((review) => {
+      const currentObservation = portfolioResponseObservation(review.riskId, {
+        stockCandidates,
+        marketInternals,
+      });
+      return {
+        activityId: `${review.reportDate}:${review.riskId}:${review.thesisProposalStatus}`,
+        reportDate: review.reportDate,
+        riskId: review.riskId,
+        title: review.title || review.riskId,
+        relation: review.thesisImpact || "neutral",
+        decision: review.thesisProposalStatus,
+        summary: review.followUpEvidenceNote || review.note || "",
+        evidenceUrl: review.followUpEvidenceUrl || "",
+        reviewedAt: review.thesisProposalReviewedAt,
+        portfolioResponseAction: review.portfolioResponseAction || "",
+        portfolioResponseNote: review.portfolioResponseNote || "",
+        portfolioResponseReviewDate: review.portfolioResponseReviewDate || "",
+        portfolioResponseRecordedAt: review.portfolioResponseRecordedAt || "",
+        portfolioResponseRuleIds: cleanList(review.portfolioResponseRuleIds, 10),
+        portfolioResponseRuleAcknowledgedAt:
+          review.portfolioResponseRuleAcknowledgedAt || "",
+        portfolioResponseEvaluation: evaluatePortfolioResponse({
+          action: review.portfolioResponseAction,
+          metricId: review.portfolioResponseMetricId,
+          metricLabel: review.portfolioResponseMetricLabel,
+          metricTicker: review.portfolioResponseMetricTicker,
+          baselineValue: review.portfolioResponseBaselineValue,
+          baselineDate: review.portfolioResponseBaselineDate,
+          currentObservation,
+          currentReportDate: reportDate,
+        }),
+        targets: cleanList(review.thesisContinuityIds, 8).map((continuityId) => {
+        const record = recordById.get(continuityId);
+        return {
+          continuityId,
+          entityId: record?.entityId || continuityId.replace(/^pb-(?:stock|sector)-/, "").toUpperCase(),
+          state: record?.state || "",
+          stateLabel: record?.stateLabel || "",
+        };
+      }),
+      };
+    });
+}
+
+export function buildPortfolioResponseCalibration(activity = [], {
+  minimumDecisiveSample = 10,
+  minimumRuleReviewSample = 3,
+  minimumRuleChallengeCount = 2,
+  minimumRuleChallengeRatePct = 50,
+} = {}) {
+  const rows = cleanList(activity, 500)
+    .filter((item) => item?.portfolioResponseAction)
+    .map((item) => ({
+      activityId: item.activityId,
+      reportDate: item.reportDate,
+      riskId: item.riskId,
+      title: item.title,
+      action: item.portfolioResponseAction,
+      evaluation: item.portfolioResponseEvaluation,
+    }));
+  const counts = {
+    supported: 0,
+    challenged: 0,
+    inconclusive: 0,
+    observed: 0,
+    pending: 0,
+    unavailable: 0,
+  };
+  const actionMap = new Map();
+  for (const row of rows) {
+    const status = counts[row.evaluation?.status] === undefined
+      ? "unavailable"
+      : row.evaluation.status;
+    counts[status] += 1;
+    const action = actionMap.get(row.action) || {
+      action: row.action,
+      total: 0,
+      supported: 0,
+      challenged: 0,
+      inconclusive: 0,
+      observed: 0,
+      pending: 0,
+      unavailable: 0,
+    };
+    action.total += 1;
+    action[status] += 1;
+    actionMap.set(row.action, action);
+  }
+  const decisiveCount = counts.supported + counts.challenged;
+  const minimumSample = Math.max(1, Number(minimumDecisiveSample) || 10);
+  const successRateVisible = decisiveCount >= minimumSample;
+  const successRatePct = decisiveCount
+    ? Number(((counts.supported / decisiveCount) * 100).toFixed(1))
+    : 0;
+  const ruleReviewSample = Math.max(1, Number(minimumRuleReviewSample) || 3);
+  const ruleChallengeCount = Math.max(1, Number(minimumRuleChallengeCount) || 2);
+  const ruleChallengeRatePct = Math.max(
+    1,
+    Math.min(100, Number(minimumRuleChallengeRatePct) || 50),
+  );
+  const ruleProposalByAction = {
+    maintain: "유지 판단 전에 상대강도와 핵심 가설 무효화 조건을 함께 확인하도록 기준을 보강합니다.",
+    increase_monitoring: "관찰 강화의 종료일과 실제 대응으로 전환할 객관적 조건을 함께 기록하도록 기준을 보강합니다.",
+    reduce_review: "비중 축소 검토 전에 가격 추세와 공식 펀더멘털 악화를 모두 확인하도록 기준을 보강합니다.",
+    exit_review: "매도 검토 전에 핵심 가설 무효화와 섹터 대비 상대약세가 동시에 확인되는지 점검하도록 기준을 보강합니다.",
+  };
+  const ruleSuggestions = [...actionMap.values()]
+    .map((action) => {
+      const actionDecisiveCount = action.supported + action.challenged;
+      const challengeRatePct = actionDecisiveCount
+        ? Number(((action.challenged / actionDecisiveCount) * 100).toFixed(1))
+        : 0;
+      return {
+        suggestionId: `portfolio-response-rule:${action.action}`,
+        action: action.action,
+        decisiveCount: actionDecisiveCount,
+        challengedCount: action.challenged,
+        challengeRatePct,
+        proposal: ruleProposalByAction[action.action] || "",
+        status: "pending_approval",
+        autoApply: false,
+        evidence: rows
+          .filter((row) =>
+            row.action === action.action
+            && row.evaluation?.status === "challenged"
+          )
+          .slice(0, 3)
+          .map((row) => ({
+            activityId: row.activityId,
+            reportDate: row.reportDate,
+            title: row.title,
+            summary: row.evaluation?.summary || "",
+          })),
+      };
+    })
+    .filter((suggestion) =>
+      suggestion.proposal
+      && suggestion.decisiveCount >= ruleReviewSample
+      && suggestion.challengedCount >= ruleChallengeCount
+      && suggestion.challengeRatePct >= ruleChallengeRatePct
+    )
+    .sort((a, b) =>
+      b.challengeRatePct - a.challengeRatePct
+      || b.challengedCount - a.challengedCount
+      || a.action.localeCompare(b.action),
+    );
+  return {
+    totalCount: rows.length,
+    decisiveCount,
+    minimumDecisiveSample: minimumSample,
+    successRateVisible,
+    successRatePct,
+    counts,
+    byAction: [...actionMap.values()].sort((a, b) =>
+      b.total - a.total || a.action.localeCompare(b.action),
+    ),
+    challenged: rows
+      .filter((row) => row.evaluation?.status === "challenged")
+      .slice(0, 5)
+      .map((row) => ({
+        activityId: row.activityId,
+        reportDate: row.reportDate,
+        riskId: row.riskId,
+        title: row.title,
+        action: row.action,
+        summary: row.evaluation.summary,
+      })),
+    ruleSuggestions,
+    warning: successRateVisible
+      ? ""
+      : `결정 가능한 대응 판단 ${decisiveCount}건으로 성공률을 공개하지 않습니다. 최소 ${minimumSample}건이 필요합니다.`,
+  };
+}
+
+export function portfolioResponseObservation(riskId = "", {
+  stockCandidates = {},
+  marketInternals = {},
+} = {}) {
+  const parts = cleanText(riskId, 160).split(":").filter(Boolean);
+  const stockTicker = parts[0] === "stock"
+    ? cleanTicker(parts[1])
+    : parts[0] === "conflict"
+      ? cleanTicker(parts[1])
+      : "";
+  if (stockTicker) {
+    const candidate = cleanList(stockCandidates?.candidates, 500)
+      .find((item) => cleanTicker(item?.ticker) === stockTicker);
+    const rawClose = candidate?.reaction?.close;
+    const close = rawClose === null || rawClose === undefined || rawClose === ""
+      ? null
+      : finiteNumber(rawClose);
+    if (close !== null) {
+      return {
+        metricId: "stock_close",
+        metricLabel: "종목 종가",
+        ticker: stockTicker,
+        value: close,
+      };
+    }
+  }
+  const sectorTicker = parts[0] === "sector"
+    ? cleanTicker(parts[1])
+    : parts[0] === "conflict"
+      ? cleanTicker(parts[2])
+      : "";
+  if (sectorTicker) {
+    const sector = cleanList(marketInternals?.sectors?.["5d"], 50)
+      .find((item) => cleanTicker(item?.ticker) === sectorTicker);
+    const rawRelativeReturn = sector?.vsSpyPctPoint;
+    const relativeReturn =
+      rawRelativeReturn === null
+      || rawRelativeReturn === undefined
+      || rawRelativeReturn === ""
+        ? null
+        : finiteNumber(rawRelativeReturn);
+    if (relativeReturn !== null) {
+      return {
+        metricId: "sector_vs_spy_5d_pct_point",
+        metricLabel: "섹터의 SPY 대비 5일 상대수익률",
+        ticker: sectorTicker,
+        value: relativeReturn,
+      };
+    }
+  }
+  return null;
+}
+
+export function evaluatePortfolioResponse({
+  action = "",
+  metricId = "",
+  metricLabel = "",
+  metricTicker = "",
+  baselineValue = null,
+  baselineDate = "",
+  currentObservation = null,
+  currentReportDate = "",
+} = {}) {
+  if (!action) return null;
+  const baseline = baselineValue === null || baselineValue === undefined || baselineValue === ""
+    ? null
+    : finiteNumber(baselineValue);
+  if (!metricId || baseline === null || !baselineDate) {
+    return {
+      status: "unavailable",
+      label: "기준값 없음",
+      summary: "판단 당시 비교 가능한 시장 기준값이 없어 성과를 계산하지 않습니다.",
+    };
+  }
+  if (!currentObservation || currentObservation.metricId !== metricId) {
+    return {
+      status: "unavailable",
+      label: "현재값 없음",
+      summary: "현재 동일 지표가 수집되지 않아 다음 리포트에서 다시 평가합니다.",
+    };
+  }
+  if (!currentReportDate || currentReportDate <= baselineDate) {
+    return {
+      status: "pending",
+      label: "평가 전",
+      summary: "판단 다음 거래일 데이터가 쌓인 뒤 평가합니다.",
+    };
+  }
+  const current = currentObservation.value === null
+    || currentObservation.value === undefined
+    || currentObservation.value === ""
+    ? null
+    : finiteNumber(currentObservation.value);
+  if (current === null) return null;
+  const change = metricId === "stock_close" && baseline !== 0
+    ? ((current / baseline) - 1) * 100
+    : current - baseline;
+  const unit = metricId === "stock_close" ? "%" : "%p";
+  const threshold = metricId === "stock_close" ? 1 : 0.5;
+  const movement = change > threshold
+    ? "favorable"
+    : change < -threshold
+      ? "adverse"
+      : "flat";
+  const scored = ["maintain", "reduce_review", "exit_review"].includes(action);
+  const supported = action === "maintain"
+    ? movement === "favorable"
+    : ["reduce_review", "exit_review"].includes(action)
+      ? movement === "adverse"
+      : false;
+  const challenged = action === "maintain"
+    ? movement === "adverse"
+    : ["reduce_review", "exit_review"].includes(action)
+      ? movement === "favorable"
+      : false;
+  const status = !scored
+    ? "observed"
+    : supported
+      ? "supported"
+      : challenged
+        ? "challenged"
+        : "inconclusive";
+  const labels = {
+    observed: "변화 관측",
+    supported: "판단 부합",
+    challenged: "판단과 반대",
+    inconclusive: "변화 미미",
+  };
+  return {
+    status,
+    label: labels[status],
+    ticker: currentObservation.ticker || metricTicker,
+    metricLabel: currentObservation.metricLabel || metricLabel,
+    baseline,
+    current,
+    change: Number(change.toFixed(4)),
+    unit,
+    baselineDate,
+    currentReportDate,
+    summary: `${currentObservation.ticker || metricTicker} ${metricLabel || currentObservation.metricLabel}: `
+      + `${baseline.toFixed(2)} → ${current.toFixed(2)} (${change >= 0 ? "+" : ""}${change.toFixed(2)}${unit})`,
   };
 }
 
@@ -3736,6 +4153,11 @@ export async function handlePbDailyIntelligenceEndpoint(req, res) {
         "removePortfolioHolding",
         "reviewPortfolioRisk",
         "updatePortfolioRiskFollowUp",
+        "reviewRiskThesisProposal",
+        "recordRiskPortfolioResponse",
+        "reviewPortfolioResponseRuleSuggestion",
+        "reviewPortfolioResponseActiveRule",
+        "reviewMonthlyDecisionGoalProposal",
       ].includes(body.action)) {
         sendJson(res, { ok: false, error: "unknown action" }, 422);
         return;
@@ -3768,6 +4190,7 @@ export async function handlePbDailyIntelligenceEndpoint(req, res) {
           note: body.note,
           reviewDate: body.reviewDate,
           deferReason: body.deferReason,
+          thesisImpact: body.thesisImpact,
           title: currentAction?.title || existingReview?.title || riskId,
         });
         sendJson(res, { ok: true, ...result });
@@ -3780,6 +4203,178 @@ export async function handlePbDailyIntelligenceEndpoint(req, res) {
           status: body.followUpStatus,
           evidenceUrl: body.evidenceUrl,
           evidenceNote: body.evidenceNote,
+        });
+        sendJson(res, { ok: true, ...result });
+        return;
+      }
+      if (body.action === "reviewRiskThesisProposal") {
+        const reportDate = cleanText(body.reviewReportDate, 20);
+        const riskId = cleanText(body.riskId, 160);
+        const decision = cleanText(body.decision, 30);
+        const review = readPortfolioRiskReviews({ reportDate })
+          .find((item) => item.riskId === riskId);
+        if (!review || review.thesisProposalStatus !== "pending") {
+          throw new Error("승인 대기 중인 투자 가설 반영 제안을 찾지 못했습니다.");
+        }
+        let thesisMemory = null;
+        if (decision === "approved") {
+          thesisMemory = await applyRiskReviewEvidenceToInvestmentTheses({
+            continuityIds: review.thesisContinuityIds,
+            relation: review.thesisImpact,
+            riskId,
+            reportDate,
+            summary: review.followUpEvidenceNote || review.note,
+            evidenceUrl: review.followUpEvidenceUrl,
+            env: process.env,
+          });
+        }
+        const result = reviewPortfolioRiskThesisProposal({
+          reportDate,
+          riskId,
+          decision,
+        });
+        sendJson(res, { ok: true, ...result, thesisMemory });
+        return;
+      }
+      if (body.action === "recordRiskPortfolioResponse") {
+        const activeRules = readPortfolioResponseRuleDecisions()
+          .filter((item) =>
+            item?.decision === "approved"
+            && item?.lifecycleStatus !== "inactive"
+            && item?.action === cleanText(body.portfolioResponseAction, 40)
+          );
+        const acknowledgedRuleIds = cleanList(body.acknowledgedRuleIds, 10)
+          .map((item) => cleanText(item, 160));
+        const missingRule = activeRules.find(
+          (rule) => !acknowledgedRuleIds.includes(rule.suggestionId),
+        );
+        if (missingRule) {
+          throw new Error("활성 검토 규칙을 확인해야 포트폴리오 대응을 기록할 수 있습니다.");
+        }
+        const observation = portfolioResponseObservation(body.riskId, {
+          stockCandidates: snapshot.stockCandidates,
+          marketInternals: snapshot.marketInternals,
+        });
+        const result = savePortfolioRiskResponse({
+          reportDate: body.reviewReportDate,
+          riskId: body.riskId,
+          action: body.portfolioResponseAction,
+          note: body.note,
+          reviewDate: body.reviewDate,
+          metricId: observation?.metricId,
+          metricLabel: observation?.metricLabel,
+          metricTicker: observation?.ticker,
+          baselineValue: observation?.value,
+          baselineDate: snapshot.report.reportDate,
+          acknowledgedRuleIds,
+        });
+        sendJson(res, { ok: true, ...result });
+        return;
+      }
+      if (body.action === "reviewPortfolioResponseRuleSuggestion") {
+        const responseActivity = buildRiskThesisReviewActivity({
+          reviews: readPortfolioRiskReviews(),
+          thesisMemory: snapshot.thesisMemory,
+          stockCandidates: snapshot.stockCandidates,
+          marketInternals: snapshot.marketInternals,
+          reportDate: snapshot.report.reportDate,
+          limit: 500,
+        });
+        const monthlyReview = buildMonthlyPortfolioDecisionReview(
+          responseActivity,
+          readPortfolioResponseRuleDecisions(),
+          { asOfDate: snapshot.report.reportDate },
+        );
+        monthlyReview.goals = attachMonthlyDecisionGoals(
+          monthlyReview,
+          buildMonthlyDecisionGoalProposals(monthlyReview),
+          readPortfolioDecisionGoals(),
+          {
+            asOfDate: snapshot.report.reportDate,
+            activity: responseActivity,
+          },
+        );
+        const suggestion = [
+          ...buildPortfolioResponseCalibration(responseActivity).ruleSuggestions,
+          ...buildMonthlyFailureChecklistSuggestions(
+            monthlyReview.goals.activeGoals,
+          ),
+        ].find((item) =>
+          item?.suggestionId === cleanText(body.suggestionId, 160)
+        );
+        if (!suggestion) {
+          throw new Error("현재 검토 대기 중인 규칙 개선 제안을 찾지 못했습니다.");
+        }
+        const result = reviewPortfolioResponseRuleSuggestion({
+          suggestionId: suggestion.suggestionId,
+          action: suggestion.action,
+          proposal: suggestion.proposal,
+          decision: body.decision,
+          decisiveCount: suggestion.decisiveCount,
+          challengedCount: suggestion.challengedCount,
+          challengeRatePct: suggestion.challengeRatePct,
+          origin: suggestion.origin,
+          causeId: suggestion.causeId,
+          causeLabel: suggestion.causeLabel,
+          sourceGoalId: suggestion.sourceGoalId,
+        });
+        sendJson(res, { ok: true, ...result });
+        return;
+      }
+      if (body.action === "reviewPortfolioResponseActiveRule") {
+        const responseActivity = buildRiskThesisReviewActivity({
+          reviews: readPortfolioRiskReviews(),
+          thesisMemory: snapshot.thesisMemory,
+          stockCandidates: snapshot.stockCandidates,
+          marketInternals: snapshot.marketInternals,
+          reportDate: snapshot.report.reportDate,
+          limit: 500,
+        });
+        const responseRuleDecisions = readPortfolioResponseRuleDecisions();
+        const impact = buildPortfolioResponseRuleImpact(
+          responseActivity,
+          responseRuleDecisions,
+        ).find((item) => item.suggestionId === cleanText(body.suggestionId, 160));
+        const causeImpact = buildPortfolioFailureCauseRuleImpact(
+          responseActivity,
+          responseRuleDecisions,
+        ).find((item) => item.suggestionId === cleanText(body.suggestionId, 160));
+        if (
+          impact?.status !== "declined"
+          && causeImpact?.status !== "worsened"
+        ) {
+          throw new Error("효과 악화가 확인된 활성 규칙만 재검토할 수 있습니다.");
+        }
+        const result = reviewPortfolioResponseActiveRule({
+          suggestionId: impact?.suggestionId || causeImpact.suggestionId,
+          managementDecision: body.managementDecision,
+          modifiedProposal: body.modifiedProposal,
+        });
+        sendJson(res, { ok: true, ...result });
+        return;
+      }
+      if (body.action === "reviewMonthlyDecisionGoalProposal") {
+        const responseActivity = buildRiskThesisReviewActivity({
+          reviews: readPortfolioRiskReviews(),
+          thesisMemory: snapshot.thesisMemory,
+          stockCandidates: snapshot.stockCandidates,
+          marketInternals: snapshot.marketInternals,
+          reportDate: snapshot.report.reportDate,
+          limit: 500,
+        });
+        const monthlyReview = buildMonthlyPortfolioDecisionReview(
+          responseActivity,
+          readPortfolioResponseRuleDecisions(),
+          { asOfDate: snapshot.report.reportDate },
+        );
+        const proposal = buildMonthlyDecisionGoalProposals(monthlyReview)
+          .find((item) => item.goalId === cleanText(body.goalId, 180));
+        if (!proposal) {
+          throw new Error("현재 승인 대기 중인 월간 개선 목표를 찾지 못했습니다.");
+        }
+        const result = reviewMonthlyDecisionGoalProposal({
+          proposal,
+          decision: body.decision,
         });
         sendJson(res, { ok: true, ...result });
         return;
@@ -3903,6 +4498,81 @@ export async function handlePbDailyIntelligenceEndpoint(req, res) {
       snapshot.portfolioImpact.riskReview.dueFollowUps = riskReviews.dueFollowUps;
       snapshot.portfolioImpact.riskReview.followUpQueue = riskReviews.followUpQueue;
       snapshot.portfolioImpact.riskReview.reviewAnalytics = riskReviews.analytics;
+      const allRiskReviews = readPortfolioRiskReviews();
+      snapshot.thesisMemory.riskReviewProposals = buildRiskThesisReviewProposals({
+        reviews: allRiskReviews,
+        thesisMemory: snapshot.thesisMemory,
+      });
+      const responseActivity = buildRiskThesisReviewActivity({
+        reviews: allRiskReviews,
+        thesisMemory: snapshot.thesisMemory,
+        stockCandidates: snapshot.stockCandidates,
+        marketInternals: snapshot.marketInternals,
+        reportDate: snapshot.report.reportDate,
+        limit: 500,
+      });
+      snapshot.thesisMemory.riskReviewActivity = responseActivity.slice(0, 12);
+      const responseRuleDecisions = readPortfolioResponseRuleDecisions();
+      const responseMonthlyReview = buildMonthlyPortfolioDecisionReview(
+          responseActivity,
+          responseRuleDecisions,
+          { asOfDate: snapshot.report.reportDate },
+        );
+      responseMonthlyReview.goals = attachMonthlyDecisionGoals(
+        responseMonthlyReview,
+        buildMonthlyDecisionGoalProposals(responseMonthlyReview),
+        readPortfolioDecisionGoals(),
+        {
+          asOfDate: snapshot.report.reportDate,
+          activity: responseActivity,
+        },
+      );
+      const responseCalibration = buildPortfolioResponseCalibration(
+        responseActivity,
+      );
+      responseCalibration.ruleSuggestions = [
+        ...responseCalibration.ruleSuggestions,
+        ...buildMonthlyFailureChecklistSuggestions(
+          responseMonthlyReview.goals.activeGoals,
+        ),
+      ];
+      snapshot.thesisMemory.portfolioResponseCalibration =
+        attachPortfolioResponseRuleDecisions(
+          responseCalibration,
+          responseRuleDecisions,
+        );
+      snapshot.thesisMemory.portfolioResponseCalibration.ruleImpact =
+        buildPortfolioResponseRuleImpact(responseActivity, responseRuleDecisions);
+      snapshot.thesisMemory.portfolioResponseCalibration.failureCauseRuleImpact =
+        buildPortfolioFailureCauseRuleImpact(
+          responseActivity,
+          responseRuleDecisions,
+        );
+      for (
+        const impact of snapshot.thesisMemory.portfolioResponseCalibration
+          .failureCauseRuleImpact.filter((item) => item.status === "worsened")
+      ) {
+        await pushSystemNotification({
+          level: "watch",
+          source: "portfolio-failure-cause-rule",
+          clickTarget: "daily-intelligence",
+          dedupeKey: `portfolio-failure-cause-rule:${impact.suggestionId}:${
+            impact.latestAfterRecordedAt || "comparison"
+          }`,
+          summary: `${impact.causeLabel} 체크리스트 적용 후 동일 원인 재발률이 ${impact.before.recurrenceRatePct.toFixed(0)}%에서 ${impact.after.recurrenceRatePct.toFixed(0)}%로 높아져 재검토가 필요합니다.`,
+        }).catch(() => null);
+      }
+      snapshot.thesisMemory.portfolioResponseCalibration.monthlyReview =
+        responseMonthlyReview;
+      for (const alert of responseMonthlyReview.goals.alerts || []) {
+        await pushSystemNotification({
+          level: alert.level,
+          source: "portfolio-decision-goal",
+          clickTarget: "daily-intelligence",
+          dedupeKey: alert.id,
+          summary: alert.summary,
+        }).catch(() => null);
+      }
       for (const followUp of riskReviews.dueFollowUps) {
         await pushSystemNotification({
           level: "watch",

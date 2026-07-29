@@ -14,6 +14,7 @@ const DEFAULT_LEDGER_PATH = join(
 const LEDGER_SCHEMA = "pb_investment_thesis_memory.v1";
 const MAX_HISTORY = 60;
 const MAX_OBSERVATIONS = 120;
+const MAX_REVIEW_EVIDENCE = 80;
 const ledgerWriteQueues = new Map();
 
 function cleanText(value, maxLength = 800) {
@@ -197,6 +198,18 @@ function normalizeRecord(record) {
         : null,
       evidenceCount: Math.max(0, Number(item.evidenceCount || 0)),
     }));
+  const reviewEvidence = (Array.isArray(record?.reviewEvidence) ? record.reviewEvidence : [])
+    .filter((item) => item && typeof item === "object" && item.id)
+    .slice(-MAX_REVIEW_EVIDENCE)
+    .map((item) => ({
+      id: cleanText(item.id, 220),
+      at: cleanText(item.at, 40),
+      relation: cleanText(item.relation, 30),
+      riskId: cleanText(item.riskId, 160),
+      reportDate: cleanText(item.reportDate, 20),
+      summary: cleanText(item.summary, 500),
+      url: cleanText(item.url, 1000),
+    }));
   return {
     continuityId: cleanText(record?.continuityId, 120),
     kind: record?.kind === "sector" ? "sector" : "stock",
@@ -224,7 +237,122 @@ function normalizeRecord(record) {
     observationCount: Math.max(1, Number(record?.observationCount || 1)),
     history,
     observations,
+    reviewEvidence,
   };
+}
+
+function reviewedState(previousState, relation) {
+  if (["invalidated", "archived"].includes(previousState)) return previousState;
+  if (relation === "supports") return "confirmed";
+  if (relation === "contradicts") return "weakened";
+  return previousState;
+}
+
+export async function applyRiskReviewEvidenceToInvestmentTheses({
+  continuityIds = [],
+  relation,
+  riskId,
+  reportDate,
+  summary,
+  evidenceUrl = "",
+  env = process.env,
+  now = () => new Date().toISOString(),
+} = {}) {
+  const cleanRelation = cleanText(relation, 30);
+  if (!["supports", "contradicts", "neutral"].includes(cleanRelation)) {
+    throw new Error("지원하지 않는 투자 가설 근거 관계입니다.");
+  }
+  const ids = uniqueTextList(continuityIds, 8);
+  if (!ids.length) throw new Error("연결할 투자 가설 ID가 없습니다.");
+  const path = ledgerPath(env);
+  const previousWrite = ledgerWriteQueues.get(path) || Promise.resolve();
+  let release;
+  const currentWrite = new Promise((resolveQueue) => {
+    release = resolveQueue;
+  });
+  const queued = previousWrite.then(() => currentWrite);
+  ledgerWriteQueues.set(path, queued);
+  await previousWrite;
+  try {
+    const current = await readInvestmentThesisMemory({ env });
+    if (!current.available) throw new Error(current.error);
+    const at = now();
+    const evidenceId = `portfolio-risk:${cleanText(reportDate, 20)}:${cleanText(riskId, 160)}`;
+    let appliedCount = 0;
+    let matchedCount = 0;
+    const records = current.records.map((record) => {
+      if (!ids.includes(record.continuityId)) return record;
+      matchedCount += 1;
+      if (record.reviewEvidence?.some((item) => item.id === evidenceId)) return record;
+      const nextState = reviewedState(record.state, cleanRelation);
+      const evidenceSummary = cleanText(summary, 500)
+        || `${riskId} 검토 결과를 ${cleanRelation} 근거로 반영했습니다.`;
+      const history = nextState === record.state
+        ? record.history
+        : [...record.history, {
+          at: cleanText(reportDate, 20),
+          fromState: record.state,
+          toState: nextState,
+          fromPriority: record.priority,
+          toPriority: record.priority,
+          reason: evidenceSummary,
+        }].slice(-MAX_HISTORY);
+      appliedCount += 1;
+      return {
+        ...record,
+        state: nextState,
+        stateLabel: stateLabel(nextState),
+        evidence: uniqueTextList([...record.evidence, evidenceSummary], 8),
+        history,
+        reviewEvidence: [...(record.reviewEvidence || []), {
+          id: evidenceId,
+          at,
+          relation: cleanRelation,
+          riskId: cleanText(riskId, 160),
+          reportDate: cleanText(reportDate, 20),
+          summary: evidenceSummary,
+          url: cleanText(evidenceUrl, 1000),
+        }].slice(-MAX_REVIEW_EVIDENCE),
+      };
+    });
+    if (!matchedCount) {
+      throw new Error("승인된 근거를 반영할 투자 가설을 찾지 못했습니다.");
+    }
+    if (!appliedCount) {
+      return {
+        ...current,
+        appliedCount: 0,
+        relation: cleanRelation,
+      };
+    }
+    const payload = {
+      schemaVersion: LEDGER_SCHEMA,
+      updatedAt: at,
+      lastSyncedReportDate: current.lastSyncedReportDate,
+      records: records
+        .map(normalizeRecord)
+        .sort((first, second) => first.continuityId.localeCompare(second.continuityId)),
+    };
+    await mkdir(dirname(path), { recursive: true });
+    const tempPath = `${path}.${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`;
+    const serialized = `${JSON.stringify(payload, null, 2)}\n`;
+    await writeFile(tempPath, serialized, "utf8");
+    try {
+      await rename(tempPath, path);
+    } catch (error) {
+      if (!["EPERM", "EEXIST"].includes(error?.code)) throw error;
+      await writeFile(path, serialized, "utf8");
+      await rm(tempPath, { force: true });
+    }
+    return {
+      ...(await readInvestmentThesisMemory({ env })),
+      appliedCount,
+      relation: cleanRelation,
+    };
+  } finally {
+    release();
+    if (ledgerWriteQueues.get(path) === queued) ledgerWriteQueues.delete(path);
+  }
 }
 
 export async function readInvestmentThesisMemory({ env = process.env } = {}) {

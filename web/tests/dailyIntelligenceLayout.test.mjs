@@ -22,6 +22,7 @@ const readerView = viewSource.slice(readerStart);
 test("Daily Intelligence leads with decisions and links to a separate operations surface", () => {
   const readingPath = [
     "<DecisionGate",
+    "<DecisionCoach",
     "<h2>30초 결론</h2>",
     "<MarketSectorStockChain",
     "<InvestmentThesisMemory",
@@ -45,6 +46,11 @@ test("Daily Intelligence leads with decisions and links to a separate operations
   assert.match(viewSource, /제외 후보/);
   assert.match(viewSource, /7-DAY CALIBRATION/);
   assert.match(viewSource, /최소 표본/);
+  assert.match(viewSource, /DECISION COACH/);
+  assert.match(viewSource, /오늘 지킬 판단 원칙/);
+  assert.match(viewSource, /getElementById\("investment-thesis-memory"\)/);
+  assert.match(viewSource, /scrollIntoView\(\{ behavior: "smooth", block: "start" \}\)/);
+  assert.match(viewSource, /portfolioResponseCalibration \|\| \{\}/);
 });
 
 test("Research Operations owns collection, approval, and verification controls", () => {

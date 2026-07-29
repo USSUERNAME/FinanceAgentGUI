@@ -11,10 +11,23 @@ import {
   classifyPortfolioRiskDeferReason,
   listDuePortfolioRiskReviews,
   portfolioRiskDeferFollowUp,
+  portfolioRiskThesisContinuityIds,
   readPortfolioRiskReviews,
+  reviewPortfolioRiskThesisProposal,
+  savePortfolioRiskResponse,
   savePortfolioRiskFollowUp,
   savePortfolioRiskReview,
 } from "../server/portfolioRiskReviews.mjs";
+
+test("portfolio risks map only to bounded stock and sector thesis ids", () => {
+  assert.deepEqual(portfolioRiskThesisContinuityIds("stock:NVDA"), ["pb-stock-nvda"]);
+  assert.deepEqual(portfolioRiskThesisContinuityIds("sector:XLK"), ["pb-sector-xlk"]);
+  assert.deepEqual(
+    portfolioRiskThesisContinuityIds("conflict:NVDA:XLK"),
+    ["pb-stock-nvda", "pb-sector-xlk"],
+  );
+  assert.deepEqual(portfolioRiskThesisContinuityIds("unmapped:NVDA"), []);
+});
 
 test("portfolio risk defer reasons classify bounded legacy notes", () => {
   assert.equal(classifyPortfolioRiskDeferReason("실적 발표 후 다시 판단"), "event_wait");
@@ -61,6 +74,140 @@ test("portfolio risk reviews persist by report date and risk id", () => {
   const reviews = readPortfolioRiskReviews({ reportDate: "2026-07-29", dataDir });
   assert.equal(reviews.length, 1);
   assert.equal(reviews[0].note, "실적과 거래량 확인 완료");
+});
+
+test("completed risk reviews wait for an explicit thesis proposal decision", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "portfolio-risk-review-"));
+  const saved = savePortfolioRiskReview({
+    reportDate: "2026-07-29",
+    riskId: "stock:NVDA",
+    status: "checked",
+    note: "공식 실적 근거가 기존 가설을 약화함",
+    thesisImpact: "contradicts",
+    dataDir,
+  });
+  assert.deepEqual(saved.review.thesisContinuityIds, ["pb-stock-nvda"]);
+  assert.equal(saved.review.thesisImpact, "contradicts");
+  assert.equal(saved.review.thesisProposalStatus, "pending");
+
+  const reviewed = reviewPortfolioRiskThesisProposal({
+    reportDate: "2026-07-29",
+    riskId: "stock:NVDA",
+    decision: "approved",
+    dataDir,
+  });
+  assert.equal(reviewed.review.thesisProposalStatus, "approved");
+  assert.match(reviewed.review.thesisProposalReviewedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.throws(
+    () => reviewPortfolioRiskThesisProposal({
+      reportDate: "2026-07-29",
+      riskId: "stock:NVDA",
+      decision: "approved",
+      dataDir,
+    }),
+    /승인 대기/,
+  );
+
+  savePortfolioRiskReview({
+    reportDate: "2026-07-29",
+    riskId: "sector:XLK",
+    status: "checked",
+    note: "가격 신호만으로는 기존 가설을 바꾸지 않음",
+    thesisImpact: "neutral",
+    dataDir,
+  });
+  const rejected = reviewPortfolioRiskThesisProposal({
+    reportDate: "2026-07-29",
+    riskId: "sector:XLK",
+    decision: "rejected",
+    dataDir,
+  });
+  assert.equal(rejected.review.thesisProposalStatus, "rejected");
+  assert.throws(
+    () => savePortfolioRiskResponse({
+      reportDate: "2026-07-29",
+      riskId: "sector:XLK",
+      action: "maintain",
+      note: "반영 제외 항목",
+      dataDir,
+    }),
+    /가설 반영이 승인된/,
+  );
+
+  const response = savePortfolioRiskResponse({
+    reportDate: "2026-07-29",
+    riskId: "stock:NVDA",
+    action: "increase_monitoring",
+    note: "다음 실적 전까지 관찰 빈도를 높임",
+    reviewDate: "2026-08-01",
+    metricId: "stock_close",
+    metricLabel: "종목 종가",
+    metricTicker: "NVDA",
+    baselineValue: 125.5,
+    baselineDate: "2026-07-29",
+    acknowledgedRuleIds: ["portfolio-response-rule:increase_monitoring"],
+    dataDir,
+  });
+  assert.equal(response.review.portfolioResponseAction, "increase_monitoring");
+  assert.equal(response.review.portfolioResponseReviewDate, "2026-08-01");
+  assert.equal(response.review.portfolioResponseMetricId, "stock_close");
+  assert.equal(response.review.portfolioResponseBaselineValue, 125.5);
+  assert.deepEqual(
+    response.review.portfolioResponseRuleIds,
+    ["portfolio-response-rule:increase_monitoring"],
+  );
+  assert.match(
+    response.review.portfolioResponseRuleAcknowledgedAt,
+    /^\d{4}-\d{2}-\d{2}T/,
+  );
+  assert.match(response.review.portfolioResponseRecordedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("portfolio response journal requires an approved thesis decision and rationale", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "portfolio-risk-review-"));
+  savePortfolioRiskReview({
+    reportDate: "2026-07-29",
+    riskId: "stock:NVDA",
+    status: "checked",
+    note: "근거 확인",
+    dataDir,
+  });
+  assert.throws(
+    () => savePortfolioRiskResponse({
+      reportDate: "2026-07-29",
+      riskId: "stock:NVDA",
+      action: "maintain",
+      note: "아직 승인 전",
+      dataDir,
+    }),
+    /가설 반영이 승인된/,
+  );
+  reviewPortfolioRiskThesisProposal({
+    reportDate: "2026-07-29",
+    riskId: "stock:NVDA",
+    decision: "approved",
+    dataDir,
+  });
+  assert.throws(
+    () => savePortfolioRiskResponse({
+      reportDate: "2026-07-29",
+      riskId: "stock:NVDA",
+      action: "maintain",
+      note: "",
+      dataDir,
+    }),
+    /근거 메모/,
+  );
+  assert.throws(
+    () => savePortfolioRiskResponse({
+      reportDate: "2026-07-29",
+      riskId: "stock:NVDA",
+      action: "buy_now",
+      note: "허용되지 않은 자동 대응",
+      dataDir,
+    }),
+    /지원하지 않는/,
+  );
 });
 
 test("portfolio risk reviews replace the same date and risk id", () => {

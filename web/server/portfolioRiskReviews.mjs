@@ -8,6 +8,15 @@ const DEFAULT_DATA_DIR = join(GUIBUILD_ROOT, "data", "pb-daily-intelligence");
 const STORE_FILE_NAME = "portfolio-risk-reviews.json";
 const ALLOWED_STATUSES = new Set(["pending", "checked", "deferred", "resolved"]);
 const ALLOWED_FOLLOW_UP_STATUSES = new Set(["not_started", "in_progress", "completed"]);
+const ALLOWED_THESIS_IMPACTS = new Set(["supports", "contradicts", "neutral"]);
+const ALLOWED_THESIS_PROPOSAL_DECISIONS = new Set(["approved", "rejected"]);
+const ALLOWED_PORTFOLIO_RESPONSES = new Set([
+  "maintain",
+  "increase_monitoring",
+  "reduce_review",
+  "exit_review",
+  "no_position_change",
+]);
 const DEFER_REASON_LABELS = {
   data_gap: "데이터 부족",
   criteria_unclear: "판단 기준 불명확",
@@ -126,6 +135,23 @@ export function readPortfolioRiskReviews({
     .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
 }
 
+export function portfolioRiskThesisContinuityIds(riskId = "") {
+  const parts = cleanText(riskId, 160).split(":").filter(Boolean);
+  if (parts[0] === "stock" && parts[1]) {
+    return [`pb-stock-${parts[1].toLowerCase()}`];
+  }
+  if (parts[0] === "sector" && parts[1]) {
+    return [`pb-sector-${parts[1].toLowerCase()}`];
+  }
+  if (parts[0] === "conflict") {
+    return [
+      parts[1] ? `pb-stock-${parts[1].toLowerCase()}` : "",
+      parts[2] ? `pb-sector-${parts[2].toLowerCase()}` : "",
+    ].filter(Boolean);
+  }
+  return [];
+}
+
 export function savePortfolioRiskReview({
   reportDate,
   riskId,
@@ -134,6 +160,7 @@ export function savePortfolioRiskReview({
   reviewDate = "",
   title = "",
   deferReason = "",
+  thesisImpact = "",
   dataDir = DEFAULT_DATA_DIR,
 } = {}) {
   const cleanDate = cleanText(reportDate, 20);
@@ -167,6 +194,14 @@ export function savePortfolioRiskReview({
     && previous.deferReason === normalizedDeferReason;
   const completesFollowUp = previous?.status === "deferred"
     && ["checked", "resolved"].includes(cleanStatus);
+  const thesisContinuityIds = portfolioRiskThesisContinuityIds(cleanRiskId);
+  const normalizedThesisImpact = ALLOWED_THESIS_IMPACTS.has(cleanText(thesisImpact, 30))
+    ? cleanText(thesisImpact, 30)
+    : cleanStatus === "resolved"
+      ? "supports"
+      : "neutral";
+  const proposesThesisUpdate = ["checked", "resolved"].includes(cleanStatus)
+    && thesisContinuityIds.length > 0;
   if (
     completesFollowUp
     && !previous?.followUpEvidenceUrl
@@ -208,7 +243,146 @@ export function savePortfolioRiskReview({
       : continuesSameDeferral
         ? previous?.followUpEvidenceNote || ""
         : "",
+    thesisContinuityIds,
+    thesisImpact: proposesThesisUpdate ? normalizedThesisImpact : "",
+    thesisProposalStatus: proposesThesisUpdate ? "pending" : "",
+    thesisProposalReviewedAt: "",
+    portfolioResponseAction: "",
+    portfolioResponseNote: "",
+    portfolioResponseReviewDate: "",
+    portfolioResponseRecordedAt: "",
+    portfolioResponseRuleIds: [],
+    portfolioResponseRuleAcknowledgedAt: "",
     createdAt: previous?.createdAt || now,
+    updatedAt: now,
+  };
+  const reviews = existing
+    .filter((item) => !(item.reportDate === cleanDate && item.riskId === cleanRiskId))
+    .concat(review)
+    .sort((a, b) =>
+      `${a.reportDate}:${a.riskId}`.localeCompare(`${b.reportDate}:${b.riskId}`),
+    );
+  writeStore(path, reviews);
+  return {
+    review,
+    path: "data/pb-daily-intelligence/portfolio-risk-reviews.json",
+  };
+}
+
+export function reviewPortfolioRiskThesisProposal({
+  reportDate,
+  riskId,
+  decision,
+  dataDir = DEFAULT_DATA_DIR,
+} = {}) {
+  const cleanDate = cleanText(reportDate, 20);
+  const cleanRiskId = cleanText(riskId, 160);
+  const cleanDecision = cleanText(decision, 30);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate) || !cleanRiskId) {
+    throw new Error("유효한 위험 검토 기록이 필요합니다.");
+  }
+  if (!ALLOWED_THESIS_PROPOSAL_DECISIONS.has(cleanDecision)) {
+    throw new Error("지원하지 않는 가설 반영 결정입니다.");
+  }
+  const path = join(dataDir, STORE_FILE_NAME);
+  const existing = readStore(path);
+  const previous = existing.find(
+    (item) => item.reportDate === cleanDate && item.riskId === cleanRiskId,
+  );
+  if (!previous || previous.thesisProposalStatus !== "pending") {
+    throw new Error("승인 대기 중인 가설 반영 제안을 찾지 못했습니다.");
+  }
+  const review = {
+    ...previous,
+    thesisProposalStatus: cleanDecision,
+    thesisProposalReviewedAt: new Date().toISOString(),
+    portfolioResponseAction: "",
+    portfolioResponseNote: "",
+    portfolioResponseReviewDate: "",
+    portfolioResponseRecordedAt: "",
+    portfolioResponseRuleIds: [],
+    portfolioResponseRuleAcknowledgedAt: "",
+    updatedAt: new Date().toISOString(),
+  };
+  const reviews = existing
+    .filter((item) => !(item.reportDate === cleanDate && item.riskId === cleanRiskId))
+    .concat(review)
+    .sort((a, b) =>
+      `${a.reportDate}:${a.riskId}`.localeCompare(`${b.reportDate}:${b.riskId}`),
+    );
+  writeStore(path, reviews);
+  return {
+    review,
+    path: "data/pb-daily-intelligence/portfolio-risk-reviews.json",
+  };
+}
+
+export function savePortfolioRiskResponse({
+  reportDate,
+  riskId,
+  action,
+  note,
+  reviewDate = "",
+  metricId = "",
+  metricLabel = "",
+  metricTicker = "",
+  baselineValue = null,
+  baselineDate = "",
+  acknowledgedRuleIds = [],
+  dataDir = DEFAULT_DATA_DIR,
+} = {}) {
+  const cleanDate = cleanText(reportDate, 20);
+  const cleanRiskId = cleanText(riskId, 160);
+  const cleanAction = cleanText(action, 40);
+  const cleanNote = cleanText(note, 500);
+  const cleanReviewDate = cleanText(reviewDate, 20);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate) || !cleanRiskId) {
+    throw new Error("유효한 위험 검토 기록이 필요합니다.");
+  }
+  if (!ALLOWED_PORTFOLIO_RESPONSES.has(cleanAction)) {
+    throw new Error("지원하지 않는 포트폴리오 대응 판단입니다.");
+  }
+  if (!cleanNote) {
+    throw new Error("포트폴리오 대응 판단에는 근거 메모가 필요합니다.");
+  }
+  if (cleanReviewDate && !/^\d{4}-\d{2}-\d{2}$/.test(cleanReviewDate)) {
+    throw new Error("재검토일은 유효한 날짜여야 합니다.");
+  }
+  mkdirSync(dataDir, { recursive: true });
+  const path = join(dataDir, STORE_FILE_NAME);
+  const existing = readStore(path);
+  const previous = existing.find(
+    (item) => item.reportDate === cleanDate && item.riskId === cleanRiskId,
+  );
+  if (!previous || previous.thesisProposalStatus !== "approved") {
+    throw new Error("가설 반영이 승인된 위험 검토만 포트폴리오 대응을 기록할 수 있습니다.");
+  }
+  const now = new Date().toISOString();
+  const cleanAcknowledgedRuleIds = [...new Set(
+    (Array.isArray(acknowledgedRuleIds) ? acknowledgedRuleIds : [])
+      .map((item) => cleanText(item, 160))
+      .filter((item) => item.startsWith("portfolio-response-rule:")),
+  )].slice(0, 10);
+  const numericBaseline = baselineValue === null || baselineValue === ""
+    ? null
+    : Number(baselineValue);
+  const review = {
+    ...previous,
+    portfolioResponseAction: cleanAction,
+    portfolioResponseNote: cleanNote,
+    portfolioResponseReviewDate: cleanReviewDate,
+    portfolioResponseRecordedAt: now,
+    portfolioResponseMetricId: cleanText(metricId, 80),
+    portfolioResponseMetricLabel: cleanText(metricLabel, 120),
+    portfolioResponseMetricTicker: cleanText(metricTicker, 20).toUpperCase(),
+    portfolioResponseBaselineValue: Number.isFinite(numericBaseline)
+      ? numericBaseline
+      : null,
+    portfolioResponseBaselineDate: /^\d{4}-\d{2}-\d{2}$/.test(cleanText(baselineDate, 20))
+      ? cleanText(baselineDate, 20)
+      : "",
+    portfolioResponseRuleIds: cleanAcknowledgedRuleIds,
+    portfolioResponseRuleAcknowledgedAt: cleanAcknowledgedRuleIds.length ? now : "",
     updatedAt: now,
   };
   const reviews = existing
@@ -532,6 +706,10 @@ export function attachPortfolioRiskReviews({
       followUpCompletedAt: "",
       followUpEvidenceUrl: "",
       followUpEvidenceNote: "",
+      thesisContinuityIds: [],
+      thesisImpact: "",
+      thesisProposalStatus: "",
+      thesisProposalReviewedAt: "",
       createdAt: "",
       updatedAt: "",
       nextStep: null,

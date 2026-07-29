@@ -7,8 +7,13 @@ import {
   planDailyIntelligenceJob,
   quickAddDailyIntelligencePortfolioHolding,
   quickAddDailyIntelligenceWatchlistTicker,
+  recordDailyIntelligenceRiskPortfolioResponse,
+  reviewDailyIntelligencePortfolioResponseActiveRule,
+  reviewDailyIntelligencePortfolioResponseRuleSuggestion,
+  reviewDailyIntelligenceMonthlyDecisionGoalProposal,
   removeDailyIntelligencePortfolioHolding,
   reviewDailyIntelligencePortfolioRisk,
+  reviewDailyIntelligenceRiskThesisProposal,
   updateDailyIntelligencePortfolioRiskFollowUp,
 } from "../src/dailyIntelligence/dailyIntelligenceApi.js";
 
@@ -140,6 +145,7 @@ test("Daily Intelligence portfolio risk review sends bounded status and note", a
       reviewDate: "",
       reviewReportDate: "2026-07-29",
       deferReason: "",
+      thesisImpact: "contradicts",
     },
     async (path, options = {}) => {
       calls.push({ path, options });
@@ -156,6 +162,124 @@ test("Daily Intelligence portfolio risk review sends bounded status and note", a
     reviewDate: "",
     reviewReportDate: "2026-07-29",
     deferReason: "",
+    thesisImpact: "contradicts",
+  });
+});
+
+test("Daily Intelligence thesis proposal review sends an explicit approval decision", async () => {
+  const calls = [];
+  const result = await reviewDailyIntelligenceRiskThesisProposal(
+    {
+      riskId: "stock:NVDA",
+      reviewReportDate: "2026-07-29",
+      decision: "approved",
+    },
+    async (path, options = {}) => {
+      calls.push({ path, options });
+      return response({ ok: true, review: { thesisProposalStatus: "approved" } });
+    },
+  );
+  assert.equal(result.review.thesisProposalStatus, "approved");
+  assert.equal(calls[0].path, "/api/pb-daily-intelligence");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    action: "reviewRiskThesisProposal",
+    riskId: "stock:NVDA",
+    reviewReportDate: "2026-07-29",
+    decision: "approved",
+  });
+});
+
+test("Daily Intelligence portfolio response journal sends a non-trading decision", async () => {
+  const calls = [];
+  const result = await recordDailyIntelligenceRiskPortfolioResponse(
+    {
+      riskId: "stock:NVDA",
+      reviewReportDate: "2026-07-29",
+      portfolioResponseAction: "increase_monitoring",
+      note: "실적 발표 전까지 관찰 빈도를 높임",
+      reviewDate: "2026-08-01",
+      acknowledgedRuleIds: ["portfolio-response-rule:increase_monitoring"],
+    },
+    async (path, options = {}) => {
+      calls.push({ path, options });
+      return response({
+        ok: true,
+        review: { portfolioResponseAction: "increase_monitoring" },
+      });
+    },
+  );
+  assert.equal(result.review.portfolioResponseAction, "increase_monitoring");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    action: "recordRiskPortfolioResponse",
+    riskId: "stock:NVDA",
+    reviewReportDate: "2026-07-29",
+    portfolioResponseAction: "increase_monitoring",
+    note: "실적 발표 전까지 관찰 빈도를 높임",
+    reviewDate: "2026-08-01",
+    acknowledgedRuleIds: ["portfolio-response-rule:increase_monitoring"],
+  });
+});
+
+test("Daily Intelligence portfolio rule review sends only an explicit decision", async () => {
+  const calls = [];
+  const result = await reviewDailyIntelligencePortfolioResponseRuleSuggestion(
+    {
+      suggestionId: "portfolio-response-rule:reduce_review",
+      decision: "approved",
+    },
+    async (path, options = {}) => {
+      calls.push({ path, options });
+      return response({ ok: true, record: { decision: "approved" } });
+    },
+  );
+  assert.equal(result.record.decision, "approved");
+  assert.equal(calls[0].path, "/api/pb-daily-intelligence");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    action: "reviewPortfolioResponseRuleSuggestion",
+    suggestionId: "portfolio-response-rule:reduce_review",
+    decision: "approved",
+  });
+});
+
+test("Daily Intelligence active rule review sends a bounded management decision", async () => {
+  const calls = [];
+  const result = await reviewDailyIntelligencePortfolioResponseActiveRule(
+    {
+      suggestionId: "portfolio-response-rule:reduce_review",
+      managementDecision: "modify",
+      modifiedProposal: "가격과 실적 추정치 하향을 함께 확인합니다.",
+    },
+    async (path, options = {}) => {
+      calls.push({ path, options });
+      return response({ ok: true, record: { managementDecision: "modify" } });
+    },
+  );
+  assert.equal(result.record.managementDecision, "modify");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    action: "reviewPortfolioResponseActiveRule",
+    suggestionId: "portfolio-response-rule:reduce_review",
+    managementDecision: "modify",
+    modifiedProposal: "가격과 실적 추정치 하향을 함께 확인합니다.",
+  });
+});
+
+test("Daily Intelligence monthly goal review sends only an explicit decision", async () => {
+  const calls = [];
+  const result = await reviewDailyIntelligenceMonthlyDecisionGoalProposal(
+    {
+      goalId: "portfolio-decision-goal:2026-07:reduce_review",
+      decision: "approved",
+    },
+    async (path, options = {}) => {
+      calls.push({ path, options });
+      return response({ ok: true, record: { decision: "approved" } });
+    },
+  );
+  assert.equal(result.record.decision, "approved");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    action: "reviewMonthlyDecisionGoalProposal",
+    goalId: "portfolio-decision-goal:2026-07:reduce_review",
+    decision: "approved",
   });
 });
 

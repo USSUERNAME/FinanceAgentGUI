@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  applyRiskReviewEvidenceToInvestmentTheses,
   buildTrackedInvestmentTheses,
   buildWeeklyThesisCalibration,
   readInvestmentThesisMemory,
@@ -120,6 +121,45 @@ test("PB thesis memory is idempotent per date and records only real transitions"
   const stored = await readInvestmentThesisMemory({ env });
   assert.equal(stored.lastSyncedReportDate, "2026-07-29");
   assert.equal(stored.recordCount, 2);
+});
+
+test("approved portfolio risk evidence updates matched theses once", async () => {
+  await syncInvestmentThesisMemory({
+    decisionChain: chain(),
+    reportDate: "2026-07-28",
+    env,
+    now: () => "2026-07-28T08:00:00+09:00",
+  });
+  const first = await applyRiskReviewEvidenceToInvestmentTheses({
+    continuityIds: ["pb-stock-nvda"],
+    relation: "contradicts",
+    riskId: "stock:NVDA",
+    reportDate: "2026-07-29",
+    summary: "공식 실적 근거가 기존 가설을 약화함",
+    evidenceUrl: "https://www.sec.gov/Archives/example",
+    env,
+    now: () => "2026-07-29T08:30:00+09:00",
+  });
+  assert.equal(first.appliedCount, 1);
+  const nvda = first.records.find((record) => record.continuityId === "pb-stock-nvda");
+  assert.equal(nvda.state, "weakened");
+  assert.equal(nvda.reviewEvidence.length, 1);
+  assert.equal(nvda.reviewEvidence[0].relation, "contradicts");
+
+  const repeated = await applyRiskReviewEvidenceToInvestmentTheses({
+    continuityIds: ["pb-stock-nvda"],
+    relation: "contradicts",
+    riskId: "stock:NVDA",
+    reportDate: "2026-07-29",
+    summary: "같은 근거 재승인",
+    env,
+  });
+  assert.equal(repeated.appliedCount, 0);
+  assert.equal(
+    repeated.records.find((record) => record.continuityId === "pb-stock-nvda")
+      .reviewEvidence.length,
+    1,
+  );
 });
 
 test("PB thesis memory stores only an eligible selected stock and dedupes by ticker", async () => {

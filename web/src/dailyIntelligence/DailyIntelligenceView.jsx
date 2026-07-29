@@ -496,6 +496,20 @@ const thesisStateLabels = {
   archived: "보관",
 };
 
+const thesisImpactLabels = {
+  supports: "가설 지지",
+  contradicts: "가설 반박",
+  neutral: "중립 근거",
+};
+
+const portfolioResponseLabels = {
+  maintain: "현재 판단 유지",
+  increase_monitoring: "관찰 강화",
+  reduce_review: "축소 검토",
+  exit_review: "청산 검토",
+  no_position_change: "비중 변경 없음",
+};
+
 function ThesisOutcomeAlerts({ calibration, compact = false }) {
   const alerts = calibration?.alerts || [];
   if (compact && !alerts.length) return null;
@@ -587,14 +601,256 @@ function ThesisOutcomeAlerts({ calibration, compact = false }) {
   );
 }
 
+function DecisionCoach({ memory }) {
+  if (!memory) return null;
+  const calibration = memory.portfolioResponseCalibration || {};
+
+  const activeGoals = calibration.monthlyReview?.goals?.activeGoals || [];
+  const activeRules = calibration.activeRules || [];
+  const ruleImpactById = new Map(
+    (calibration.ruleImpact || []).map((item) => [item.suggestionId, item]),
+  );
+  const causeImpactById = new Map(
+    (calibration.failureCauseRuleImpact || [])
+      .map((item) => [item.suggestionId, item]),
+  );
+  const reviewRules = activeRules.filter((rule) => (
+    ruleImpactById.get(rule.suggestionId)?.status === "declined"
+    || causeImpactById.get(rule.suggestionId)?.status === "worsened"
+  ));
+
+  return (
+    <section className="daily-intelligence-decision-coach" aria-label="Decision Coach">
+      <header>
+        <div>
+          <span>DECISION COACH</span>
+          <h2>오늘 지킬 판단 원칙</h2>
+        </div>
+        <button
+          type="button"
+          onClick={() => document.getElementById("investment-thesis-memory")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" })}
+        >
+          상세 기록 <ChevronRight size={15} />
+        </button>
+      </header>
+
+      <div className="daily-intelligence-decision-coach-grid">
+        <article>
+          <span>활성 목표</span>
+          <strong>{activeGoals.length}개</strong>
+          {activeGoals.length ? (
+            <>
+              <p>{activeGoals[0].summary}</p>
+              <small>
+                {portfolioResponseLabels[activeGoals[0].action] || activeGoals[0].action}
+                {" · "}
+                현재 반대 비율 {Number(activeGoals[0].challengeRatePct || 0).toFixed(0)}%
+              </small>
+            </>
+          ) : (
+            <p>승인된 월간 개선 목표가 없습니다.</p>
+          )}
+        </article>
+
+        <article>
+          <span>필수 체크리스트</span>
+          <strong>{activeRules.length}개</strong>
+          {activeRules.length ? (
+            <ul>
+              {activeRules.slice(0, 2).map((rule) => (
+                <li key={rule.suggestionId}>
+                  {rule.origin === "failure_cause" && rule.causeLabel
+                    ? `[${rule.causeLabel}] `
+                    : ""}
+                  {rule.proposal}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>현재 적용 중인 검토 규칙이 없습니다.</p>
+          )}
+        </article>
+
+        <article className={reviewRules.length ? "is-review" : "is-clear"}>
+          <span>재검토 필요</span>
+          <strong>{reviewRules.length}개</strong>
+          {reviewRules.length ? (
+            <>
+              <p>{reviewRules[0].proposal}</p>
+              <small>
+                {causeImpactById.get(reviewRules[0].suggestionId)?.status === "worsened"
+                  ? "동일 실패 원인의 재발률이 악화됐습니다."
+                  : "규칙 적용 후 판단 부합률이 낮아졌습니다."}
+              </small>
+            </>
+          ) : (
+            <p>새 증거로 다시 볼 규칙이 없습니다.</p>
+          )}
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function PortfolioResponseForm({
+  activity,
+  activeRules = [],
+  busy,
+  onRecord,
+}) {
+  const [action, setAction] = React.useState("no_position_change");
+  const matchingRules = activeRules.filter((rule) => rule.action === action);
+  return (
+    <form
+      className="daily-intelligence-portfolio-response-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        onRecord?.({
+          riskId: activity.riskId,
+          reviewReportDate: activity.reportDate,
+          portfolioResponseAction: action,
+          note: String(formData.get("note") || ""),
+          reviewDate: String(formData.get("reviewDate") || ""),
+          acknowledgedRuleIds: matchingRules
+            .filter((rule) => formData.get(`rule:${rule.suggestionId}`) === "on")
+            .map((rule) => rule.suggestionId),
+        });
+      }}
+    >
+      <strong>포트폴리오 대응 기록</strong>
+      <select
+        name="portfolioResponseAction"
+        value={action}
+        onChange={(event) => setAction(event.target.value)}
+        disabled={busy}
+        aria-label={`${activity.title || activity.riskId} 포트폴리오 대응`}
+      >
+        {Object.entries(portfolioResponseLabels).map(([value, label]) => (
+          <option key={value} value={value}>{label}</option>
+        ))}
+      </select>
+      <input
+        type="date"
+        name="reviewDate"
+        min={activity.reportDate || undefined}
+        disabled={busy}
+        aria-label={`${activity.title || activity.riskId} 포트폴리오 재검토일`}
+      />
+      <textarea
+        name="note"
+        rows="2"
+        maxLength="500"
+        required
+        disabled={busy}
+        placeholder="비중을 유지하거나 재검토하는 이유를 기록하세요."
+        aria-label={`${activity.title || activity.riskId} 포트폴리오 판단 근거`}
+      />
+      {matchingRules.length ? (
+        <div className="daily-intelligence-portfolio-response-rule-checklist">
+          <strong>승인된 검토 규칙 확인</strong>
+          {matchingRules.map((rule) => (
+            <label key={rule.suggestionId}>
+              <input
+                type="checkbox"
+                name={`rule:${rule.suggestionId}`}
+                required
+                disabled={busy}
+              />
+              <span>
+                {rule.origin === "failure_cause" && rule.causeLabel
+                  ? `[${rule.causeLabel}] `
+                  : ""}
+                {rule.proposal}
+              </span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+      <button type="submit" disabled={busy}>
+        {busy ? "저장 중" : "대응 기록"}
+      </button>
+      <small>판단 일지만 저장하며 주문이나 보유 비중은 변경하지 않습니다.</small>
+    </form>
+  );
+}
+
+function PortfolioActiveRuleReviewForm({
+  rule,
+  busy,
+  onReview,
+}) {
+  const [decision, setDecision] = React.useState("maintain");
+  return (
+    <form
+      className="daily-intelligence-portfolio-active-rule-review"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        onReview?.({
+          suggestionId: rule.suggestionId,
+          managementDecision: decision,
+          modifiedProposal: String(formData.get("modifiedProposal") || ""),
+        });
+      }}
+    >
+      <strong>효과 악화 · 규칙 재검토 필요</strong>
+      <select
+        value={decision}
+        onChange={(event) => setDecision(event.target.value)}
+        disabled={busy}
+        aria-label={`${portfolioResponseLabels[rule.action] || rule.action} 규칙 재검토 결정`}
+      >
+        <option value="maintain">현재 규칙 유지</option>
+        <option value="modify">규칙 문구 수정</option>
+        <option value="deactivate">규칙 비활성화</option>
+      </select>
+      {decision === "modify" ? (
+        <textarea
+          name="modifiedProposal"
+          rows="2"
+          maxLength="1000"
+          required
+          defaultValue={rule.proposal}
+          disabled={busy}
+          aria-label={`${portfolioResponseLabels[rule.action] || rule.action} 수정 규칙`}
+        />
+      ) : null}
+      <button type="submit" disabled={busy}>
+        {busy ? "저장 중" : "재검토 결정 저장"}
+      </button>
+      <small>비활성화해도 과거 판단·검증 기록은 유지됩니다.</small>
+    </form>
+  );
+}
+
 function InvestmentThesisMemory({
   memory,
   busy,
   error,
   onSync,
+  onReviewProposal,
+  onRecordPortfolioResponse,
+  onReviewPortfolioRuleSuggestion,
+  onReviewPortfolioActiveRule,
+  onReviewMonthlyGoal,
 }) {
+  const [expandedMonthlyGoalId, setExpandedMonthlyGoalId] = React.useState("");
   if (!memory) return null;
   const records = memory.activeRecords || [];
+  const riskReviewProposals = memory.riskReviewProposals || [];
+  const riskReviewActivity = memory.riskReviewActivity || [];
+  const portfolioResponseCalibration = memory.portfolioResponseCalibration;
+  const portfolioMonthlyReview = portfolioResponseCalibration?.monthlyReview;
+  const portfolioRuleImpactById = new Map(
+    (portfolioResponseCalibration?.ruleImpact || [])
+      .map((item) => [item.suggestionId, item]),
+  );
+  const portfolioFailureCauseImpactById = new Map(
+    (portfolioResponseCalibration?.failureCauseRuleImpact || [])
+      .map((item) => [item.suggestionId, item]),
+  );
   const pendingCount = memory.pendingCandidates?.length || 0;
   const calibration = memory.weeklyCalibration;
   const outcomeById = new Map(
@@ -636,6 +892,618 @@ function InvestmentThesisMemory({
         <span>오늘 반영 후보 {pendingCount}개</span>
         <span>최근 동기화 {memory.lastSyncedReportDate || "아직 없음"}</span>
       </div>
+      {riskReviewProposals.length ? (
+        <div className="daily-intelligence-thesis-review-proposals">
+          <header>
+            <div>
+              <span>APPROVAL REQUIRED</span>
+              <strong>위험 검토 결과의 가설 반영 대기</strong>
+            </div>
+            <em>{riskReviewProposals.length}건</em>
+          </header>
+          <p>
+            위험 판정만으로 투자 가설을 자동 변경하지 않습니다. 근거와 대상을 확인한 뒤
+            승인한 항목만 World Memory에 반영됩니다.
+          </p>
+          <div>
+            {riskReviewProposals.map((proposal) => (
+              <article key={proposal.proposalId}>
+                <header>
+                  <div>
+                    <strong>{proposal.title || proposal.riskId}</strong>
+                    <small>{proposal.reportDate}</small>
+                  </div>
+                  <span className={`is-${proposal.relation}`}>
+                    {thesisImpactLabels[proposal.relation] || proposal.relation}
+                  </span>
+                </header>
+                <p>{proposal.summary || "저장된 검토 메모가 없습니다."}</p>
+                <div className="daily-intelligence-thesis-review-targets">
+                  {(proposal.targets || []).map((target) => (
+                    <span key={target.continuityId}>
+                      {target.entityId} · {thesisStateLabels[target.state] || target.state}
+                    </span>
+                  ))}
+                </div>
+                {proposal.evidenceUrl ? (
+                  <a href={proposal.evidenceUrl} target="_blank" rel="noreferrer">
+                    검토 근거 열기
+                  </a>
+                ) : null}
+                <footer>
+                  <button
+                    type="button"
+                    className="is-reject"
+                    disabled={busy}
+                    onClick={() => onReviewProposal?.({
+                      riskId: proposal.riskId,
+                      reviewReportDate: proposal.reportDate,
+                      decision: "rejected",
+                    })}
+                  >
+                    제외
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onReviewProposal?.({
+                      riskId: proposal.riskId,
+                      reviewReportDate: proposal.reportDate,
+                      decision: "approved",
+                    })}
+                  >
+                    {busy ? "처리 중" : "가설에 반영"}
+                  </button>
+                </footer>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {riskReviewActivity.length ? (
+        <details className="daily-intelligence-thesis-review-activity">
+          <summary>
+            <span>
+              <strong>최근 가설 반영 결정</strong>
+              <small>승인과 제외 기록을 최근 순서로 보관합니다.</small>
+            </span>
+            <em>{riskReviewActivity.length}건</em>
+          </summary>
+          <div>
+            {riskReviewActivity.map((activity) => (
+              <article key={activity.activityId}>
+                <div>
+                  <strong>{activity.title || activity.riskId}</strong>
+                  <span>
+                    {(activity.targets || []).map((target) => target.entityId).join(" · ")}
+                    {" · "}
+                    {thesisImpactLabels[activity.relation] || activity.relation}
+                  </span>
+                </div>
+                <p>{activity.summary || "검토 메모 없음"}</p>
+                <footer>
+                  <span className={`is-${activity.decision}`}>
+                    {activity.decision === "approved" ? "반영 승인" : "반영 제외"}
+                  </span>
+                  <time>
+                    {activity.reviewedAt
+                      ? new Date(activity.reviewedAt).toLocaleString("ko-KR")
+                      : activity.reportDate}
+                  </time>
+                  {activity.evidenceUrl ? (
+                    <a href={activity.evidenceUrl} target="_blank" rel="noreferrer">
+                      근거
+                    </a>
+                  ) : null}
+                </footer>
+                {activity.decision === "approved" ? (
+                  activity.portfolioResponseAction ? (
+                    <div className="daily-intelligence-portfolio-response-record">
+                      <header>
+                        <strong>
+                          포트폴리오 판단 · {
+                            portfolioResponseLabels[activity.portfolioResponseAction]
+                            || activity.portfolioResponseAction
+                          }
+                        </strong>
+                        <time>
+                          {activity.portfolioResponseRecordedAt
+                            ? new Date(activity.portfolioResponseRecordedAt)
+                              .toLocaleString("ko-KR")
+                            : ""}
+                        </time>
+                      </header>
+                      <p>{activity.portfolioResponseNote}</p>
+                      {activity.portfolioResponseReviewDate ? (
+                        <small>다음 재검토 {activity.portfolioResponseReviewDate}</small>
+                      ) : null}
+                      {activity.portfolioResponseRuleIds?.length ? (
+                        <small>
+                          승인된 검토 규칙 {activity.portfolioResponseRuleIds.length}건 확인
+                        </small>
+                      ) : null}
+                      {activity.portfolioResponseEvaluation ? (
+                        <div className={`daily-intelligence-portfolio-response-evaluation is-${activity.portfolioResponseEvaluation.status}`}>
+                          <strong>{activity.portfolioResponseEvaluation.label}</strong>
+                          <span>{activity.portfolioResponseEvaluation.summary}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <PortfolioResponseForm
+                      activity={activity}
+                      activeRules={portfolioResponseCalibration?.activeRules || []}
+                      busy={busy}
+                      onRecord={onRecordPortfolioResponse}
+                    />
+                  )
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </details>
+      ) : null}
+      {portfolioResponseCalibration?.totalCount ? (
+        <div className="daily-intelligence-portfolio-response-calibration">
+          <header>
+            <div>
+              <span>PORTFOLIO DECISION CALIBRATION</span>
+              <strong>대응 판단 누적 검증</strong>
+            </div>
+            <em className={portfolioResponseCalibration.successRateVisible ? "is-ready" : ""}>
+              {portfolioResponseCalibration.successRateVisible
+                ? `부합률 ${portfolioResponseCalibration.successRatePct.toFixed(0)}%`
+                : `표본 ${portfolioResponseCalibration.decisiveCount}/${portfolioResponseCalibration.minimumDecisiveSample}`}
+            </em>
+          </header>
+          <div className="daily-intelligence-portfolio-response-calibration-kpis">
+            <article>
+              <span>판단 부합</span>
+              <strong>{portfolioResponseCalibration.counts.supported}</strong>
+            </article>
+            <article>
+              <span>판단과 반대</span>
+              <strong>{portfolioResponseCalibration.counts.challenged}</strong>
+            </article>
+            <article>
+              <span>미결·관측</span>
+              <strong>
+                {portfolioResponseCalibration.counts.inconclusive
+                  + portfolioResponseCalibration.counts.observed}
+              </strong>
+            </article>
+            <article>
+              <span>대기·자료 없음</span>
+              <strong>
+                {portfolioResponseCalibration.counts.pending
+                  + portfolioResponseCalibration.counts.unavailable}
+              </strong>
+            </article>
+          </div>
+          {portfolioResponseCalibration.byAction?.length ? (
+            <div className="daily-intelligence-portfolio-response-by-action">
+              {portfolioResponseCalibration.byAction.map((item) => (
+                <span key={item.action}>
+                  {portfolioResponseLabels[item.action] || item.action}
+                  {" · "}
+                  {item.total}건
+                  {item.supported || item.challenged
+                    ? ` · 부합 ${item.supported} / 반대 ${item.challenged}`
+                    : ""}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {portfolioResponseCalibration.warning ? (
+            <p>{portfolioResponseCalibration.warning}</p>
+          ) : null}
+          {portfolioResponseCalibration.challenged?.length ? (
+            <div className="daily-intelligence-portfolio-response-challenges">
+              <strong>판단과 반대로 움직인 사례</strong>
+              {portfolioResponseCalibration.challenged.map((item) => (
+                <span key={item.activityId}>
+                  {item.title || item.riskId} · {item.summary}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {portfolioResponseCalibration.ruleSuggestions?.length ? (
+            <div className="daily-intelligence-portfolio-rule-suggestions">
+              <header>
+                <div>
+                  <strong>검토 규칙 개선 제안</strong>
+                  <small>반대 결과가 반복된 대응만 제안합니다.</small>
+                </div>
+                <em>승인 전 · 자동 적용 안 됨</em>
+              </header>
+              {portfolioResponseCalibration.ruleSuggestions.map((suggestion) => (
+                <article key={suggestion.suggestionId}>
+                  <div>
+                    <strong>
+                      {portfolioResponseLabels[suggestion.action] || suggestion.action}
+                    </strong>
+                    <span>
+                      {suggestion.origin === "failure_cause" && suggestion.causeLabel
+                        ? `반복 원인 ${suggestion.causeLabel} · `
+                        : ""}
+                      결정 {suggestion.decisiveCount}건 중 반대 {suggestion.challengedCount}건
+                      {" · "}
+                      반대 비율 {suggestion.challengeRatePct.toFixed(0)}%
+                    </span>
+                  </div>
+                  <p>{suggestion.proposal}</p>
+                  {suggestion.evidence?.length ? (
+                    <details>
+                      <summary>근거 사례 {suggestion.evidence.length}건</summary>
+                      {suggestion.evidence.map((evidence) => (
+                        <span key={evidence.activityId}>
+                          {evidence.reportDate} · {evidence.title} · {evidence.summary}
+                        </span>
+                      ))}
+                    </details>
+                  ) : null}
+                  <small>
+                    승인해도 검토 체크리스트만 활성화되며 주문이나 비중 변경은
+                    실행하지 않습니다.
+                  </small>
+                  {suggestion.status === "pending_approval" ? (
+                    <footer>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onReviewPortfolioRuleSuggestion?.({
+                          suggestionId: suggestion.suggestionId,
+                          decision: "rejected",
+                        })}
+                      >
+                        제외
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onReviewPortfolioRuleSuggestion?.({
+                          suggestionId: suggestion.suggestionId,
+                          decision: "approved",
+                        })}
+                      >
+                        검토 규칙 승인
+                      </button>
+                    </footer>
+                  ) : (
+                    <footer>
+                      <em className={`is-${suggestion.status}`}>
+                        {suggestion.status === "approved" ? "승인됨" : "제외됨"}
+                      </em>
+                    </footer>
+                  )}
+                </article>
+              ))}
+            </div>
+          ) : null}
+          {portfolioResponseCalibration.activeRules?.length ? (
+            <div className="daily-intelligence-portfolio-active-rules">
+              <strong>활성 검토 규칙</strong>
+              {portfolioResponseCalibration.activeRules.map((rule) => (
+                <article key={rule.suggestionId}>
+                  <span>
+                    {portfolioResponseLabels[rule.action] || rule.action}
+                    {" · "}
+                    {rule.origin === "failure_cause" && rule.causeLabel
+                      ? `[${rule.causeLabel}] `
+                      : ""}
+                    {rule.proposal}
+                  </span>
+                  {(() => {
+                    const impact = portfolioRuleImpactById.get(rule.suggestionId);
+                    if (!impact) return null;
+                    return (
+                      <div className={`is-${impact.status}`}>
+                        <strong>
+                          {impact.comparisonReady
+                            ? `적용 효과 ${impact.deltaPctPoint > 0 ? "+" : ""}${impact.deltaPctPoint.toFixed(1)}%p`
+                            : `표본 전 ${impact.before.count}/${impact.minimumSamplePerGroup} · 후 ${impact.after.count}/${impact.minimumSamplePerGroup}`}
+                        </strong>
+                        <small>
+                          {impact.comparisonReady
+                            ? `부합률 ${impact.before.successRatePct.toFixed(0)}% → ${impact.after.successRatePct.toFixed(0)}%`
+                            : impact.warning}
+                        </small>
+                      </div>
+                    );
+                  })()}
+                  {rule.origin === "failure_cause" ? (() => {
+                    const impact = portfolioFailureCauseImpactById.get(
+                      rule.suggestionId,
+                    );
+                    if (!impact) return null;
+                    return (
+                      <div className={`daily-intelligence-portfolio-cause-rule-impact is-${impact.status}`}>
+                        <strong>
+                          {impact.comparisonReady
+                            ? `동일 원인 재발 ${impact.recurrenceDeltaPctPoint > 0 ? "+" : ""}${impact.recurrenceDeltaPctPoint.toFixed(1)}%p`
+                            : `재발률 표본 전 ${impact.before.count}/${impact.minimumSamplePerGroup} · 후 ${impact.after.count}/${impact.minimumSamplePerGroup}`}
+                        </strong>
+                        <small>
+                          {impact.comparisonReady
+                            ? `${impact.causeLabel} ${impact.before.recurrenceRatePct.toFixed(0)}% → ${impact.after.recurrenceRatePct.toFixed(0)}% · ${impact.warning}`
+                            : impact.warning}
+                        </small>
+                      </div>
+                    );
+                  })() : null}
+                  {(
+                    portfolioRuleImpactById.get(rule.suggestionId)?.status === "declined"
+                    || portfolioFailureCauseImpactById.get(rule.suggestionId)?.status
+                      === "worsened"
+                  ) ? (
+                    <PortfolioActiveRuleReviewForm
+                      rule={rule}
+                      busy={busy}
+                      onReview={onReviewPortfolioActiveRule}
+                    />
+                  ) : null}
+                </article>
+              ))}
+              <small>검토 체크리스트에만 적용되며 주문이나 비중 변경은 실행하지 않습니다.</small>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {portfolioMonthlyReview?.totalCount ? (
+        <div className="daily-intelligence-portfolio-monthly-review">
+          <header>
+            <div>
+              <span>MONTHLY DECISION REVIEW</span>
+              <strong>{portfolioMonthlyReview.month.replace("-", "년 ")}월 판단 회고</strong>
+            </div>
+            <em className={portfolioMonthlyReview.successRateVisible ? "is-ready" : ""}>
+              {portfolioMonthlyReview.successRateVisible
+                ? `부합률 ${portfolioMonthlyReview.successRatePct.toFixed(0)}%`
+                : `표본 ${portfolioMonthlyReview.decisiveCount}/${portfolioMonthlyReview.minimumRateSample}`}
+            </em>
+          </header>
+          <div className="daily-intelligence-portfolio-monthly-kpis">
+            <article>
+              <span>대응 기록</span>
+              <strong>{portfolioMonthlyReview.totalCount}</strong>
+            </article>
+            <article>
+              <span>부합 / 반대</span>
+              <strong>
+                {portfolioMonthlyReview.counts.supported}
+                {" / "}
+                {portfolioMonthlyReview.counts.challenged}
+              </strong>
+            </article>
+            <article>
+              <span>규칙 승인·수정</span>
+              <strong>
+                {portfolioMonthlyReview.ruleActivity.approved}
+                {" · "}
+                {portfolioMonthlyReview.ruleActivity.modified}
+              </strong>
+            </article>
+            <article>
+              <span>활성 / 비활성화</span>
+              <strong>
+                {portfolioMonthlyReview.ruleActivity.active}
+                {" · "}
+                {portfolioMonthlyReview.ruleActivity.deactivated}
+              </strong>
+            </article>
+          </div>
+          {portfolioMonthlyReview.keepHabits?.length ? (
+            <div className="daily-intelligence-portfolio-monthly-habits is-keep">
+              <strong>유지할 판단 습관</strong>
+              {portfolioMonthlyReview.keepHabits.map((habit) => (
+                <span key={habit.action}>
+                  {portfolioResponseLabels[habit.action] || habit.action}
+                  {" · "}
+                  부합률 {habit.successRatePct.toFixed(0)}%
+                  {" · "}
+                  {habit.summary}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {portfolioMonthlyReview.reviewHabits?.length ? (
+            <div className="daily-intelligence-portfolio-monthly-habits is-review">
+              <strong>재검토할 판단 습관</strong>
+              {portfolioMonthlyReview.reviewHabits.map((habit) => (
+                <span key={habit.action}>
+                  {portfolioResponseLabels[habit.action] || habit.action}
+                  {" · "}
+                  반대 비율 {habit.challengeRatePct.toFixed(0)}%
+                  {" · "}
+                  {habit.summary}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {portfolioMonthlyReview.goals?.proposals?.length ? (
+            <div className="daily-intelligence-portfolio-monthly-goals">
+              <strong>다음 달 개선 목표 제안</strong>
+              {portfolioMonthlyReview.goals.proposals.map((goal) => (
+                <article key={goal.goalId}>
+                  <div>
+                    <span>
+                      {portfolioResponseLabels[goal.action] || goal.action}
+                      {" · "}
+                      {goal.targetMonth.replace("-", "년 ")}월
+                    </span>
+                    <p>{goal.summary}</p>
+                  </div>
+                  {goal.status === "pending_approval" ? (
+                    <footer>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onReviewMonthlyGoal?.({
+                          goalId: goal.goalId,
+                          decision: "rejected",
+                        })}
+                      >
+                        제외
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onReviewMonthlyGoal?.({
+                          goalId: goal.goalId,
+                          decision: "approved",
+                        })}
+                      >
+                        목표 승인
+                      </button>
+                    </footer>
+                  ) : (
+                    <em className={`is-${goal.status}`}>
+                      {goal.status === "approved" ? "승인됨" : "제외됨"}
+                    </em>
+                  )}
+                </article>
+              ))}
+            </div>
+          ) : null}
+          {portfolioMonthlyReview.goals?.activeGoals?.length ? (
+            <div className="daily-intelligence-portfolio-monthly-goal-progress">
+              <strong>승인된 개선 목표</strong>
+              {portfolioMonthlyReview.goals.alerts?.length ? (
+                <div className="daily-intelligence-portfolio-monthly-goal-alerts">
+                  {portfolioMonthlyReview.goals.alerts.map((alert) => (
+                    <article key={alert.id} className={`is-${alert.alertType}`}>
+                      <AlertTriangle size={16} aria-hidden="true" />
+                      <div>
+                        <span>{alert.title}</span>
+                        <p>{alert.summary}</p>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedMonthlyGoalId((current) =>
+                            current === alert.goalId ? "" : alert.goalId
+                          )}
+                        >
+                          {expandedMonthlyGoalId === alert.goalId
+                            ? "근거 닫기"
+                            : "판정 근거 보기"}
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+              {portfolioMonthlyReview.goals.activeGoals.map((goal) => (
+                <article
+                  key={goal.goalId}
+                  className={
+                    expandedMonthlyGoalId === goal.goalId ? "is-expanded" : ""
+                  }
+                >
+                  <div>
+                    <button
+                      type="button"
+                      className="daily-intelligence-portfolio-monthly-goal-toggle"
+                      aria-expanded={expandedMonthlyGoalId === goal.goalId}
+                      onClick={() => setExpandedMonthlyGoalId((current) =>
+                        current === goal.goalId ? "" : goal.goalId
+                      )}
+                    >
+                      {portfolioResponseLabels[goal.action] || goal.action}
+                    </button>
+                    <em className={`is-${goal.progressStatus}`}>
+                      {{
+                        scheduled: "시작 전",
+                        in_progress: "진행 중",
+                        achieved: "달성",
+                        missed: "미달",
+                      }[goal.progressStatus] || goal.progressStatus}
+                    </em>
+                  </div>
+                  <p>{goal.summary}</p>
+                  <small>
+                    현재 반대 비율 {goal.challengeRatePct.toFixed(0)}%
+                    {" · "}
+                    목표 {goal.targetChallengeRatePct.toFixed(0)}% 이하
+                    {" · "}
+                    표본 {goal.decisiveCount}/{goal.minimumDecisiveSample}
+                  </small>
+                  {expandedMonthlyGoalId === goal.goalId ? (
+                    <div className="daily-intelligence-portfolio-monthly-goal-evidence">
+                      <strong>판정 근거 {goal.evidenceCases?.length || 0}건</strong>
+                      {goal.failureCauseAnalysis?.challengedCount ? (
+                        <div className={`daily-intelligence-portfolio-failure-causes is-${goal.failureCauseAnalysis.status}`}>
+                          <header>
+                            <strong>반복 실패 원인 후보</strong>
+                            <em>
+                              반대 사례 {goal.failureCauseAnalysis.challengedCount}건
+                            </em>
+                          </header>
+                          {goal.failureCauseAnalysis.primaryCause ? (
+                            <p>
+                              가장 많이 반복된 단서:{" "}
+                              <strong>{goal.failureCauseAnalysis.primaryCause.label}</strong>
+                              {" · "}
+                              {goal.failureCauseAnalysis.primaryCause.count}건
+                            </p>
+                          ) : null}
+                          {goal.failureCauseAnalysis.categories?.length ? (
+                            <div>
+                              {goal.failureCauseAnalysis.categories.map((cause) => (
+                                <span
+                                  key={cause.id}
+                                  className={cause.repeated ? "is-repeated" : ""}
+                                >
+                                  {cause.label} {cause.count}건
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                          <small>{goal.failureCauseAnalysis.warning}</small>
+                        </div>
+                      ) : null}
+                      {goal.evidenceCases?.length ? (
+                        goal.evidenceCases.map((evidence) => (
+                          <article
+                            key={evidence.activityId || `${evidence.reportDate}:${evidence.riskId}`}
+                            className={`is-${evidence.status}`}
+                          >
+                            <header>
+                              <span>{evidence.reportDate}</span>
+                              <em>{evidence.label || (
+                                evidence.status === "supported"
+                                  ? "판단 부합"
+                                  : "판단과 반대"
+                              )}</em>
+                            </header>
+                            <strong>{evidence.title}</strong>
+                            {evidence.targets?.length ? (
+                              <small>{evidence.targets.join(" · ")}</small>
+                            ) : null}
+                            <p>{evidence.evaluationSummary || evidence.note || "세부 근거 없음"}</p>
+                            {evidence.evidenceUrl ? (
+                              <a
+                                href={evidence.evidenceUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                원문 근거
+                              </a>
+                            ) : null}
+                          </article>
+                        ))
+                      ) : (
+                        <p>아직 판정에 포함된 결정 사례가 없습니다.</p>
+                      )}
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          ) : null}
+          {portfolioMonthlyReview.warning ? (
+            <p>{portfolioMonthlyReview.warning}</p>
+          ) : null}
+        </div>
+      ) : null}
       {calibration ? (
         <div className="daily-intelligence-calibration">
           <header>
@@ -696,6 +1564,9 @@ function InvestmentThesisMemory({
           {records.map((record) => {
             const latestTransition = record.history?.[record.history.length - 1];
             const latestOutcome = outcomeById.get(record.continuityId);
+            const latestReviewEvidence = record.reviewEvidence?.[
+              record.reviewEvidence.length - 1
+            ];
             return (
               <article key={record.continuityId}>
                 <header>
@@ -712,6 +1583,23 @@ function InvestmentThesisMemory({
                   <div className={`daily-intelligence-thesis-outcome is-${latestOutcome.status}`}>
                     <strong>{outcomeLabels[latestOutcome.status] || latestOutcome.status}</strong>
                     <span>{latestOutcome.reason}</span>
+                  </div>
+                ) : null}
+                {latestReviewEvidence ? (
+                  <div className={`daily-intelligence-thesis-linked-evidence is-${latestReviewEvidence.relation}`}>
+                    <header>
+                      <strong>
+                        위험 검토 · {thesisImpactLabels[latestReviewEvidence.relation]
+                          || latestReviewEvidence.relation}
+                      </strong>
+                      <time>{latestReviewEvidence.reportDate}</time>
+                    </header>
+                    <p>{latestReviewEvidence.summary}</p>
+                    {latestReviewEvidence.url ? (
+                      <a href={latestReviewEvidence.url} target="_blank" rel="noreferrer">
+                        반영 근거 열기
+                      </a>
+                    ) : null}
                   </div>
                 ) : null}
                 <dl>
@@ -1241,6 +2129,7 @@ function PortfolioRiskFollowUpInbox({
                   reviewDate: String(formData.get("reviewDate") || ""),
                   reviewReportDate: item.reportDate,
                   deferReason: String(formData.get("deferReason") || item.deferReason || ""),
+                  thesisImpact: String(formData.get("thesisImpact") || "neutral"),
                 });
               }}
             >
@@ -1262,6 +2151,16 @@ function PortfolioRiskFollowUpInbox({
                 disabled={Boolean(busy)}
               >
                 {Object.entries(portfolioRiskDeferReasonLabels).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+              <select
+                name="thesisImpact"
+                defaultValue={item.thesisImpact || "neutral"}
+                aria-label={`${item.title || item.riskId} 투자 가설 영향`}
+                disabled={Boolean(busy)}
+              >
+                {Object.entries(thesisImpactLabels).map(([value, label]) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
               </select>
@@ -1667,6 +2566,7 @@ function PortfolioImpact({
                         reviewDate: String(formData.get("reviewDate") || ""),
                         reviewReportDate: item.review?.reportDate || "",
                         deferReason: String(formData.get("deferReason") || ""),
+                        thesisImpact: String(formData.get("thesisImpact") || "neutral"),
                       });
                     }}
                   >
@@ -1700,6 +2600,18 @@ function PortfolioImpact({
                         disabled={Boolean(riskReviewBusy)}
                       >
                         {Object.entries(portfolioRiskDeferReasonLabels).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>투자 가설 영향</span>
+                      <select
+                        name="thesisImpact"
+                        defaultValue={item.review?.thesisImpact || "neutral"}
+                        disabled={Boolean(riskReviewBusy)}
+                      >
+                        {Object.entries(thesisImpactLabels).map(([value, label]) => (
                           <option key={value} value={value}>{label}</option>
                         ))}
                       </select>
@@ -4596,6 +5508,11 @@ export default function DailyIntelligenceView({
     portfolioRiskReviewBusy,
     portfolioRiskReviewError,
     reviewPortfolioRisk,
+    reviewRiskThesisProposal,
+    recordRiskPortfolioResponse,
+    reviewPortfolioResponseRuleSuggestion,
+    reviewPortfolioResponseActiveRule,
+    reviewMonthlyDecisionGoalProposal,
     updatePortfolioRiskFollowUp,
   } = useDailyIntelligenceController();
   const report = snapshot?.report;
@@ -4968,6 +5885,8 @@ export default function DailyIntelligenceView({
           compact
         />
 
+        <DecisionCoach memory={thesisMemory} />
+
         <section className="daily-intelligence-panel daily-intelligence-summary">
           <div className="daily-intelligence-panel-title">
             <div>
@@ -4997,6 +5916,11 @@ export default function DailyIntelligenceView({
           busy={thesisMemoryBusy}
           error={thesisMemoryError}
           onSync={syncThesisMemory}
+          onReviewProposal={reviewRiskThesisProposal}
+          onRecordPortfolioResponse={recordRiskPortfolioResponse}
+          onReviewPortfolioRuleSuggestion={reviewPortfolioResponseRuleSuggestion}
+          onReviewPortfolioActiveRule={reviewPortfolioResponseActiveRule}
+          onReviewMonthlyGoal={reviewMonthlyDecisionGoalProposal}
         />
 
         <section className="daily-intelligence-panel daily-intelligence-wide">
