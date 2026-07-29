@@ -3826,6 +3826,259 @@ function SectorWatchlistRanking({ watchlist = null }) {
   );
 }
 
+function StockDecisionComparison({
+  shortlists = null,
+  candidatePool = [],
+  thesisMemory = null,
+  brokerResearchDate = "",
+  busy = false,
+  error = "",
+  onTrackStock,
+  onAddWatchlist,
+}) {
+  const statusOrder = { qualified: 0, research: 1, hold: 2, excluded: 3 };
+  const priorityOrder = { A: 0, B: 1, C: 2, REJECTED: 3 };
+  const statusLabel = {
+    qualified: "심층검토",
+    research: "근거보강",
+    hold: "관찰",
+    excluded: "제외",
+  };
+  const revisionLabel = {
+    positive_revision: "추정치 상향",
+    negative_revision: "추정치 하향",
+    mixed_revision: "추정치 혼재",
+    not_available: "추정치 없음",
+  };
+  const seenTickers = new Set();
+  const shortlistRows = (shortlists?.sectors || [])
+    .flatMap((sector) => (sector.candidates || []).map((candidate) => ({
+      ...candidate,
+      sectorId: sector.sectorId,
+      sector: sector.sector,
+      sectorStatus: sector.sectorStatus,
+      shortlistTrackable: ["qualified", "research"].includes(candidate.status),
+    })));
+  const shortlistByTicker = new Map(
+    shortlistRows.map((candidate) => [candidate.ticker, candidate]),
+  );
+  const fallbackRows = (candidatePool || []).map((candidate) => {
+    const shortlistCandidate = shortlistByTicker.get(candidate.ticker);
+    if (shortlistCandidate) return { ...candidate, ...shortlistCandidate };
+    const status = candidate.researchPriority === "A"
+      ? "qualified"
+      : candidate.researchPriority === "B"
+        ? "research"
+        : candidate.researchPriority === "REJECTED"
+          ? "excluded"
+          : "hold";
+    return {
+      ...candidate,
+      sectorId: "",
+      sector: candidate.linkedSectorLabel || "미분류",
+      sectorStatus: "",
+      status,
+      shortlistTrackable: false,
+      researchProfile: {
+        whyNow: candidate.whyNow || "가격·거래량 이상 신호로 조사 후보에 포함됐습니다.",
+        invalidationCondition: candidate.firstRejection
+          || "기업 고유 촉매가 확인되지 않거나 섹터 상대강도가 반전되면 우선순위를 낮춥니다.",
+      },
+    };
+  });
+  const comparisonPool = [
+    ...fallbackRows,
+    ...shortlistRows.filter((candidate) =>
+      !fallbackRows.some((fallback) => fallback.ticker === candidate.ticker)
+    ),
+  ]
+    .sort((left, right) => (
+      Number(statusOrder[left.status] ?? 9) - Number(statusOrder[right.status] ?? 9)
+      || Number(priorityOrder[left.researchPriority] ?? 9)
+        - Number(priorityOrder[right.researchPriority] ?? 9)
+      || Number(right.candidateScore || 0) - Number(left.candidateScore || 0)
+    ))
+    .filter((candidate) => {
+      if (!candidate.ticker || seenTickers.has(candidate.ticker)) return false;
+      seenTickers.add(candidate.ticker);
+      return candidate.status !== "excluded";
+    })
+    .slice(0, 5);
+  const poolKey = comparisonPool.map((candidate) => candidate.ticker).join("|");
+  const [selectedTickers, setSelectedTickers] = React.useState([]);
+
+  React.useEffect(() => {
+    setSelectedTickers((current) => {
+      const valid = current
+        .filter((ticker) => comparisonPool.some((candidate) => candidate.ticker === ticker))
+        .slice(0, 3);
+      const fill = comparisonPool
+        .map((candidate) => candidate.ticker)
+        .filter((ticker) => !valid.includes(ticker))
+        .slice(0, Math.max(0, Math.min(3, comparisonPool.length) - valid.length));
+      return [...valid, ...fill];
+    });
+  }, [poolKey]);
+
+  if (comparisonPool.length < 2) return null;
+
+  const selectedCandidates = selectedTickers
+    .map((ticker) => comparisonPool.find((candidate) => candidate.ticker === ticker))
+    .filter(Boolean);
+  const trackedContinuityIds = new Set(
+    [
+      ...(thesisMemory?.records || []),
+      ...(thesisMemory?.activeRecords || []),
+    ].map((record) => record.continuityId),
+  );
+  const toggleCandidate = (ticker) => {
+    setSelectedTickers((current) => {
+      if (current.includes(ticker)) {
+        return current.length > 2 ? current.filter((item) => item !== ticker) : current;
+      }
+      if (current.length >= 3) return current;
+      return [...current, ticker];
+    });
+  };
+
+  return (
+    <section className="daily-intelligence-panel daily-intelligence-wide daily-intelligence-stock-comparison">
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>STOCK DECISION BOARD</span>
+          <h2>종목 비교 의사결정판</h2>
+        </div>
+        <span className="daily-intelligence-count">{selectedCandidates.length}</span>
+      </div>
+      <p className="daily-intelligence-panel-note">
+        상위 후보 5개 중 2~3개를 같은 근거로 비교합니다. 순위와 상태는 리서치
+        우선순위이며 매수·매도 추천이 아닙니다.
+      </p>
+
+      <div className="daily-intelligence-stock-comparison-selector" role="group" aria-label="비교 종목 선택">
+        {comparisonPool.map((candidate) => {
+          const selected = selectedTickers.includes(candidate.ticker);
+          const disabled = selected ? selectedTickers.length <= 2 : selectedTickers.length >= 3;
+          return (
+            <button
+              type="button"
+              key={candidate.ticker}
+              className={selected ? "is-selected" : ""}
+              aria-pressed={selected}
+              disabled={disabled}
+              onClick={() => toggleCandidate(candidate.ticker)}
+            >
+              <strong>{candidate.ticker}</strong>
+              <span>{candidate.sector}</span>
+              <em>{statusLabel[candidate.status] || candidate.status}</em>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="daily-intelligence-stock-comparison-grid">
+        {selectedCandidates.map((candidate) => {
+          const valuation = candidate.valuationScreen || {};
+          const revision = candidate.estimateRevision || {};
+          const tracked = trackedContinuityIds.has(
+            `pb-stock-${candidate.ticker.toLowerCase()}`,
+          );
+          const trackable = candidate.shortlistTrackable === true;
+          return (
+            <article key={candidate.ticker} className={`is-${candidate.status}`}>
+              <header>
+                <div>
+                  <span>{candidate.sector} · {candidate.linkedSectorTicker || "ETF 미연결"}</span>
+                  <h3>{candidate.ticker} <small>{candidate.companyName}</small></h3>
+                </div>
+                <em>{candidate.researchPriority || "C"} · {statusLabel[candidate.status]}</em>
+              </header>
+
+              <dl>
+                <div>
+                  <dt>왜 지금 보는가</dt>
+                  <dd>{candidate.researchProfile?.whyNow || candidate.whyNow}</dd>
+                </div>
+                <div>
+                  <dt>공식 근거</dt>
+                  <dd>
+                    {candidate.primaryEvidenceCount || 0}건
+                    {" · "}
+                    확인 사실 {candidate.verifiedFactCount || 0}개
+                  </dd>
+                </div>
+                <div>
+                  <dt>추정치 변화</dt>
+                  <dd>
+                    {revisionLabel[revision.revisionDirection]
+                      || revision.revisionDirection
+                      || "자료 없음"}
+                    {revision.rows?.[0]?.revisionPct30d != null
+                      ? ` · ${signed(revision.rows[0].revisionPct30d, 1, "%")}`
+                      : ""}
+                  </dd>
+                </div>
+                <div>
+                  <dt>밸류에이션</dt>
+                  <dd>
+                    {valuation.status === "screening_available"
+                      ? `${valuationMetricLabels[valuation.primaryMetric] || valuation.primaryMetric} ${multiple(valuation.targetValue)} · 비교기업 ${valuation.usablePeerCount || 0}개`
+                      : "비교 가능한 근거 부족"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>섹터 대비 5일</dt>
+                  <dd>
+                    {Number.isFinite(candidate.stockVsSector5d)
+                      ? signed(candidate.stockVsSector5d, 2, "%p")
+                      : "비교 자료 없음"}
+                  </dd>
+                </div>
+                <div className="is-risk">
+                  <dt>첫 기각 조건</dt>
+                  <dd>{candidate.researchProfile?.invalidationCondition}</dd>
+                </div>
+              </dl>
+
+              {candidate.missingRequirements?.length ? (
+                <p className="daily-intelligence-stock-comparison-gap">
+                  보강 필요 · {candidate.missingRequirements.slice(0, 3).join(" · ")}
+                </p>
+              ) : (
+                <p className="daily-intelligence-stock-comparison-ready">
+                  공식 촉매·추정치·비교 밸류에이션 게이트 통과
+                </p>
+              )}
+
+              <footer>
+                <button
+                  type="button"
+                  disabled={busy || !onAddWatchlist}
+                  onClick={() => onAddWatchlist?.(candidate.ticker)}
+                >
+                  관심종목 추가
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || !trackable || !onTrackStock}
+                  onClick={() => onTrackStock?.({
+                    ticker: candidate.ticker,
+                    sectorId: candidate.sectorId,
+                    brokerResearchDate,
+                  })}
+                >
+                  {tracked ? "오늘 관측 갱신" : trackable ? "가설 후보 저장" : "근거 보강 대기"}
+                </button>
+              </footer>
+            </article>
+          );
+        })}
+      </div>
+      {error ? <p className="daily-intelligence-research-date-error">{error}</p> : null}
+    </section>
+  );
+}
+
 function SectorStockShortlists({
   shortlists = null,
   thesisMemory = null,
@@ -5910,6 +6163,19 @@ export default function DailyIntelligenceView({
         </section>
 
         <MarketSectorStockChain chain={decisionChain} />
+
+        <StockDecisionComparison
+          shortlists={brokerResearch?.consensus?.sectorStockShortlists}
+          candidatePool={decisionChain?.ideaFunnel?.candidatePool || []}
+          thesisMemory={thesisMemory}
+          brokerResearchDate={
+            brokerResearchHistory?.selectedDate || brokerResearch?.reportDate || report.reportDate
+          }
+          busy={thesisMemoryBusy || watchlistQuickAddBusy}
+          error={thesisMemoryError || watchlistQuickAddError}
+          onTrackStock={trackStockThesis}
+          onAddWatchlist={quickAddWatchlistTicker}
+        />
 
         <InvestmentThesisMemory
           memory={thesisMemory}

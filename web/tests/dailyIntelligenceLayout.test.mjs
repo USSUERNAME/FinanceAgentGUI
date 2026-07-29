@@ -25,6 +25,7 @@ test("Daily Intelligence leads with decisions and links to a separate operations
     "<DecisionCoach",
     "<h2>30초 결론</h2>",
     "<MarketSectorStockChain",
+    "<StockDecisionComparison",
     "<InvestmentThesisMemory",
     "<h2>내 종목과 오늘의 리포트</h2>",
     "<h2>결론을 지지하는 시장 근거</h2>",
@@ -51,6 +52,12 @@ test("Daily Intelligence leads with decisions and links to a separate operations
   assert.match(viewSource, /getElementById\("investment-thesis-memory"\)/);
   assert.match(viewSource, /scrollIntoView\(\{ behavior: "smooth", block: "start" \}\)/);
   assert.match(viewSource, /portfolioResponseCalibration \|\| \{\}/);
+  assert.match(viewSource, /STOCK DECISION BOARD/);
+  assert.match(viewSource, /종목 비교 의사결정판/);
+  assert.match(viewSource, /상위 후보 5개 중 2~3개/);
+  assert.match(viewSource, /첫 기각 조건/);
+  assert.match(viewSource, /candidatePool=\{decisionChain\?\.ideaFunnel\?\.candidatePool \|\| \[\]\}/);
+  assert.match(viewSource, /shortlistTrackable: false/);
 });
 
 test("Research Operations owns collection, approval, and verification controls", () => {

@@ -385,6 +385,219 @@
   line-height: 1.45;
 }
 
+.daily-intelligence-stock-comparison {
+  border-color: #d9e2ed;
+  background:
+    linear-gradient(145deg, rgba(247, 250, 253, 0.98), rgba(255, 255, 255, 0.98));
+}
+
+.daily-intelligence-stock-comparison-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 15px 0;
+}
+
+.daily-intelligence-stock-comparison-selector button {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 8px;
+  min-width: 118px;
+  border: 1px solid #d8e1eb;
+  border-radius: 11px;
+  background: #fff;
+  padding: 9px 11px;
+  color: #53657a;
+  cursor: pointer;
+  text-align: left;
+}
+
+.daily-intelligence-stock-comparison-selector button.is-selected {
+  border-color: #60907f;
+  background: #edf7f3;
+  box-shadow: inset 0 0 0 1px rgba(64, 124, 105, 0.12);
+}
+
+.daily-intelligence-stock-comparison-selector button:disabled:not(.is-selected) {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.daily-intelligence-stock-comparison-selector strong {
+  color: #263c56;
+  font-size: 12px;
+}
+
+.daily-intelligence-stock-comparison-selector span,
+.daily-intelligence-stock-comparison-selector em {
+  font-size: 9px;
+}
+
+.daily-intelligence-stock-comparison-selector span {
+  align-self: center;
+  color: #7a899b;
+}
+
+.daily-intelligence-stock-comparison-selector em {
+  grid-column: 1 / -1;
+  color: #3f7b69;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.daily-intelligence-stock-comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 11px;
+}
+
+.daily-intelligence-stock-comparison-grid > article {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid #dce4ed;
+  border-top: 3px solid #8ca2b9;
+  border-radius: 13px;
+  background: #fff;
+  padding: 15px;
+}
+
+.daily-intelligence-stock-comparison-grid > article.is-qualified {
+  border-top-color: #3b9274;
+}
+
+.daily-intelligence-stock-comparison-grid > article.is-research {
+  border-top-color: #4f79b1;
+}
+
+.daily-intelligence-stock-comparison-grid > article > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 9px;
+}
+
+.daily-intelligence-stock-comparison-grid > article > header > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.daily-intelligence-stock-comparison-grid > article > header span {
+  color: #76879a;
+  font-size: 9px;
+}
+
+.daily-intelligence-stock-comparison-grid > article > header h3 {
+  margin: 0;
+  color: #263d58;
+  font-size: 17px;
+}
+
+.daily-intelligence-stock-comparison-grid > article > header h3 small {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: #8190a1;
+  font-size: 9px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daily-intelligence-stock-comparison-grid > article > header em {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #eef2f7;
+  padding: 5px 7px;
+  color: #50657d;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.daily-intelligence-stock-comparison-grid dl {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.daily-intelligence-stock-comparison-grid dl > div {
+  display: grid;
+  gap: 4px;
+  min-height: 66px;
+  border-top: 1px solid #edf1f5;
+  padding: 9px 0;
+}
+
+.daily-intelligence-stock-comparison-grid dl > div.is-risk {
+  min-height: 104px;
+}
+
+.daily-intelligence-stock-comparison-grid dt {
+  color: #7b8999;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.daily-intelligence-stock-comparison-grid dd {
+  margin: 0;
+  color: #42566e;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.daily-intelligence-stock-comparison-gap,
+.daily-intelligence-stock-comparison-ready {
+  min-height: 48px;
+  margin: 0;
+  border-radius: 9px;
+  padding: 9px 10px;
+  font-size: 9px !important;
+  line-height: 1.45 !important;
+}
+
+.daily-intelligence-stock-comparison-gap {
+  background: #fff5e8;
+  color: #8a642e !important;
+}
+
+.daily-intelligence-stock-comparison-ready {
+  background: #edf8f3;
+  color: #34735f !important;
+}
+
+.daily-intelligence-stock-comparison-grid footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: auto;
+}
+
+.daily-intelligence-stock-comparison-grid footer button {
+  border: 1px solid #cad6e2;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 8px 6px;
+  color: #4b627a;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.daily-intelligence-stock-comparison-grid footer button:last-child {
+  border-color: #9fc7b9;
+  background: #edf7f3;
+  color: #326d5a;
+}
+
+.daily-intelligence-stock-comparison-grid footer button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .daily-intelligence-next-checks {
   border-color: #d7e3f2;
   background: linear-gradient(145deg, #ffffff, #f7faff);
@@ -7300,6 +7513,7 @@
   .daily-intelligence-portfolio-summary,
   .daily-intelligence-portfolio-list,
   .daily-intelligence-decision-coach-grid,
+  .daily-intelligence-stock-comparison-grid,
   .daily-intelligence-operations-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -7315,6 +7529,10 @@
   }
 
   .daily-intelligence-decision-coach-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-intelligence-stock-comparison-grid {
     grid-template-columns: 1fr;
   }
 
