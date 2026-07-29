@@ -10,6 +10,7 @@ import {
   reviewDailyIntelligencePortfolioRisk,
   syncDailyIntelligenceTheses,
   trackDailyIntelligenceStockThesis,
+  updateDailyIntelligencePortfolioRiskFollowUp,
 } from "./dailyIntelligenceApi.js";
 
 export function useDailyIntelligenceController() {
@@ -201,6 +202,7 @@ export function useDailyIntelligenceController() {
     note,
     reviewDate = "",
     reviewReportDate = "",
+    deferReason = "",
   }) => {
     setPortfolioRiskReviewBusy(riskId);
     setPortfolioRiskReviewError("");
@@ -211,12 +213,42 @@ export function useDailyIntelligenceController() {
         note,
         reviewDate,
         reviewReportDate,
+        deferReason,
       });
       setSnapshot(await fetchDailyIntelligence());
       return result;
     } catch (requestError) {
       setPortfolioRiskReviewError(
         requestError.message || "위험 검토 상태를 저장하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setPortfolioRiskReviewBusy("");
+    }
+  }, []);
+
+  const updatePortfolioRiskFollowUp = useCallback(async ({
+    riskId,
+    reviewReportDate,
+    followUpStatus,
+    evidenceUrl = "",
+    evidenceNote = "",
+  }) => {
+    setPortfolioRiskReviewBusy(riskId);
+    setPortfolioRiskReviewError("");
+    try {
+      const result = await updateDailyIntelligencePortfolioRiskFollowUp({
+        riskId,
+        reviewReportDate,
+        followUpStatus,
+        evidenceUrl,
+        evidenceNote,
+      });
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setPortfolioRiskReviewError(
+        requestError.message || "후속 작업 상태를 저장하지 못했습니다.",
       );
       return null;
     } finally {
@@ -267,5 +299,6 @@ export function useDailyIntelligenceController() {
     portfolioRiskReviewBusy,
     portfolioRiskReviewError,
     reviewPortfolioRisk,
+    updatePortfolioRiskFollowUp,
   };
 }

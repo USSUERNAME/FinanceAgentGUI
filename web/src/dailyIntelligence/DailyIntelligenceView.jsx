@@ -608,7 +608,10 @@ function InvestmentThesisMemory({
     not_scoreable: "평가 지표 없음",
   };
   return (
-    <section className="daily-intelligence-panel daily-intelligence-wide daily-intelligence-thesis-memory">
+    <section
+      id="investment-thesis-memory"
+      className="daily-intelligence-panel daily-intelligence-wide daily-intelligence-thesis-memory"
+    >
       <div className="daily-intelligence-panel-title">
         <div>
           <span>WORLD MEMORY · THESIS LEDGER</span>
@@ -1040,6 +1043,264 @@ const portfolioRiskReviewStatusLabels = {
   resolved: "위험 해소",
 };
 
+const portfolioRiskDeferReasonLabels = {
+  data_gap: "데이터 부족",
+  criteria_unclear: "판단 기준 불명확",
+  event_wait: "이벤트 대기",
+  other: "기타",
+};
+
+const portfolioRiskFollowUpStatusLabels = {
+  not_started: "미착수",
+  in_progress: "확인 중",
+  completed: "완료",
+};
+
+function PortfolioRiskNextStep({
+  nextStep,
+  review,
+  busy = false,
+  onOpenOperations,
+  onUpdateFollowUp,
+}) {
+  const [evidenceUrl, setEvidenceUrl] = React.useState(review?.followUpEvidenceUrl || "");
+  const [evidenceNote, setEvidenceNote] = React.useState(review?.followUpEvidenceNote || "");
+  React.useEffect(() => {
+    setEvidenceUrl(review?.followUpEvidenceUrl || "");
+    setEvidenceNote(review?.followUpEvidenceNote || "");
+  }, [
+    review?.reportDate,
+    review?.riskId,
+    review?.followUpEvidenceUrl,
+    review?.followUpEvidenceNote,
+  ]);
+  if (!nextStep?.target) return null;
+  const navigate = () => {
+    if (nextStep.target === "research-operations") {
+      onOpenOperations?.();
+      return;
+    }
+    if (nextStep.targetType === "section") {
+      document.getElementById(nextStep.target)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+      return;
+    }
+    window.location.hash = nextStep.target;
+  };
+  const updateFollowUp = (followUpStatus) => onUpdateFollowUp?.({
+    riskId: review?.riskId,
+    reviewReportDate: review?.reportDate,
+    followUpStatus,
+    evidenceUrl,
+    evidenceNote,
+  });
+  const openNextStep = async () => {
+    if (currentStatus === "not_started" && review?.riskId && onUpdateFollowUp) {
+      const result = await updateFollowUp("in_progress");
+      if (!result) return;
+    }
+    navigate();
+  };
+  const currentStatus = review?.followUpStatus || "not_started";
+  return (
+    <div className="daily-intelligence-portfolio-risk-follow-up">
+      <button
+        type="button"
+        className="daily-intelligence-portfolio-risk-next-step"
+        onClick={openNextStep}
+        disabled={busy}
+      >
+        <strong>{nextStep.label}</strong>
+        <span>{nextStep.description}</span>
+      </button>
+      <div className="daily-intelligence-portfolio-risk-follow-up-status" aria-label="후속 작업 상태">
+        <strong>후속 작업</strong>
+        {Object.entries(portfolioRiskFollowUpStatusLabels).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            className={currentStatus === value ? "is-active" : ""}
+            disabled={busy}
+            onClick={() => updateFollowUp(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="daily-intelligence-portfolio-risk-follow-up-evidence">
+        <label>
+          <span>근거 링크</span>
+          <input
+            type="url"
+            value={evidenceUrl}
+            disabled={busy}
+            placeholder="공식자료·리서치·캘린더 URL"
+            onChange={(event) => setEvidenceUrl(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>근거 메모</span>
+          <textarea
+            rows="2"
+            maxLength="500"
+            value={evidenceNote}
+            disabled={busy}
+            placeholder="확인한 수치·문장과 판단 결과"
+            onChange={(event) => setEvidenceNote(event.target.value)}
+          />
+        </label>
+        {review?.followUpEvidenceUrl ? (
+          <a href={review.followUpEvidenceUrl} target="_blank" rel="noreferrer">
+            저장된 근거 열기 <ArrowUpRight size={11} />
+          </a>
+        ) : null}
+        {review?.followUpCompletedAt ? (
+          <small>
+            완료 근거 저장 {new Date(review.followUpCompletedAt).toLocaleString("ko-KR")}
+          </small>
+        ) : (
+          <small>완료하려면 링크 또는 메모 중 하나를 입력하세요.</small>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const portfolioRiskDueStateLabels = {
+  overdue: "기한 초과",
+  due_today: "오늘 재검토",
+  upcoming: "예정",
+  unscheduled: "기한 미정",
+};
+
+function PortfolioRiskFollowUpInbox({
+  queue,
+  busy = "",
+  error = "",
+  onOpenOperations,
+  onReviewRisk,
+  onUpdateFollowUp,
+}) {
+  if (!queue?.items?.length) return null;
+  return (
+    <section className="daily-intelligence-portfolio-risk-inbox">
+      <header>
+        <div>
+          <strong>후속 작업 우선순위함</strong>
+          <small>최신 위험 기록 기준 · 기한 초과와 미착수 우선</small>
+        </div>
+        <div>
+          <span className={queue.counts?.overdue ? "is-alert" : ""}>
+            기한 초과 {queue.counts?.overdue || 0}
+          </span>
+          <span>미착수 {queue.counts?.notStarted || 0}</span>
+          <span>확인 중 {queue.counts?.inProgress || 0}</span>
+        </div>
+      </header>
+      <div className="daily-intelligence-portfolio-risk-inbox-list">
+        {queue.items.map((item) => (
+          <article
+            key={`${item.reportDate}:${item.riskId}`}
+            className={`is-${item.dueState} is-${item.followUpStatus}`}
+          >
+            <div className="daily-intelligence-portfolio-risk-inbox-title">
+              <div>
+                <strong>{item.title || item.riskId}</strong>
+                <span>
+                  {portfolioRiskDeferReasonLabels[item.deferReason] || "기타"}
+                  {" · "}
+                  재검토 {item.reviewDate || "미정"}
+                  {item.daysOverdue ? ` · ${item.daysOverdue}일 초과` : ""}
+                </span>
+              </div>
+              <em>{portfolioRiskDueStateLabels[item.dueState] || "확인 필요"}</em>
+            </div>
+            {item.note ? <p>{item.note}</p> : null}
+            <PortfolioRiskNextStep
+              nextStep={item.nextStep}
+              review={item}
+              busy={busy === item.riskId}
+              onOpenOperations={onOpenOperations}
+              onUpdateFollowUp={onUpdateFollowUp}
+            />
+            <form
+              className="daily-intelligence-portfolio-risk-inbox-decision"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const formData = new FormData(event.currentTarget);
+                onReviewRisk?.({
+                  riskId: item.riskId,
+                  status: String(formData.get("status") || "checked"),
+                  note: String(
+                    formData.get("note")
+                    || item.followUpEvidenceNote
+                    || "",
+                  ),
+                  reviewDate: String(formData.get("reviewDate") || ""),
+                  reviewReportDate: item.reportDate,
+                  deferReason: String(formData.get("deferReason") || item.deferReason || ""),
+                });
+              }}
+            >
+              <strong>최종 판정</strong>
+              <select
+                name="status"
+                defaultValue="checked"
+                aria-label={`${item.title || item.riskId} 최종 판정`}
+                disabled={Boolean(busy)}
+              >
+                <option value="checked">확인 완료</option>
+                <option value="resolved">위험 해소</option>
+                <option value="deferred">다시 보류</option>
+              </select>
+              <select
+                name="deferReason"
+                defaultValue={item.deferReason || "other"}
+                aria-label={`${item.title || item.riskId} 보류 원인`}
+                disabled={Boolean(busy)}
+              >
+                {Object.entries(portfolioRiskDeferReasonLabels).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+              <input
+                type="date"
+                name="reviewDate"
+                min={queue.asOfDate || undefined}
+                defaultValue={
+                  item.reviewDate >= queue.asOfDate ? item.reviewDate : ""
+                }
+                aria-label={`${item.title || item.riskId} 다음 재검토일`}
+                disabled={Boolean(busy)}
+              />
+              <textarea
+                name="note"
+                rows="2"
+                maxLength="500"
+                defaultValue={item.followUpEvidenceNote || ""}
+                aria-label={`${item.title || item.riskId} 판정 근거`}
+                placeholder="확인 결과 또는 다시 보류할 객관적 조건"
+                disabled={Boolean(busy)}
+              />
+              <button type="submit" disabled={Boolean(busy)}>
+                {busy === item.riskId
+                  ? <LoaderCircle size={12} className="is-spinning" />
+                  : null}
+                판정 저장
+              </button>
+            </form>
+          </article>
+        ))}
+      </div>
+      {error ? (
+        <p className="daily-intelligence-research-date-error">{error}</p>
+      ) : null}
+    </section>
+  );
+}
+
 function PortfolioQuickAdd({
   candidates = [],
   busy = "",
@@ -1159,6 +1420,8 @@ function PortfolioImpact({
   riskReviewBusy = "",
   riskReviewError = "",
   onReviewRisk,
+  onUpdateFollowUp,
+  onOpenOperations,
 }) {
   if (!portfolioImpact?.configured) {
     return (
@@ -1212,7 +1475,10 @@ function PortfolioImpact({
       </div>
       {portfolioImpact.riskReview?.hasWarnings
       || portfolioImpact.riskReview?.history?.trend?.sampleCount ? (
-        <div className="daily-intelligence-portfolio-risk-review">
+        <div
+          id="portfolio-risk-review"
+          className="daily-intelligence-portfolio-risk-review"
+        >
           <div className="daily-intelligence-portfolio-risk-title">
             <AlertTriangle size={15} />
             <strong>보유 집중도와 현재 시장 가설 점검</strong>
@@ -1271,6 +1537,84 @@ function PortfolioImpact({
               ) : null}
             </div>
           ) : null}
+          {portfolioImpact.riskReview.reviewAnalytics?.sampleCount ? (
+            <div className={`daily-intelligence-portfolio-risk-analytics is-${
+              portfolioImpact.riskReview.reviewAnalytics.status
+            }`}>
+              <header>
+                <div>
+                  <span>30일 위험 검토</span>
+                  <strong>{portfolioImpact.riskReview.reviewAnalytics.label}</strong>
+                </div>
+                <small>
+                  {portfolioImpact.riskReview.reviewAnalytics.eligible
+                    ? `처리율 ${portfolioImpact.riskReview.reviewAnalytics.completionRate}%`
+                    : `기록 ${portfolioImpact.riskReview.reviewAnalytics.sampleCount}건 · 5건부터 처리율 표시`}
+                </small>
+              </header>
+              <div className="daily-intelligence-portfolio-risk-analytics-grid">
+                <article>
+                  <span>확인 완료</span>
+                  <strong>{portfolioImpact.riskReview.reviewAnalytics.counts.checked}</strong>
+                </article>
+                <article>
+                  <span>위험 해소</span>
+                  <strong>{portfolioImpact.riskReview.reviewAnalytics.counts.resolved}</strong>
+                </article>
+                <article>
+                  <span>현재 보류</span>
+                  <strong>{portfolioImpact.riskReview.reviewAnalytics.counts.deferred}</strong>
+                </article>
+                <article className={
+                  portfolioImpact.riskReview.reviewAnalytics.counts.overdue ? "is-alert" : ""
+                }>
+                  <span>기한 초과</span>
+                  <strong>{portfolioImpact.riskReview.reviewAnalytics.counts.overdue}</strong>
+                </article>
+              </div>
+              {portfolioImpact.riskReview.reviewAnalytics.deferReasons?.some(
+                (item) => item.count,
+              ) ? (
+                <div className="daily-intelligence-portfolio-risk-reasons">
+                  <strong>보류 원인</strong>
+                  {portfolioImpact.riskReview.reviewAnalytics.deferReasons
+                    .filter((item) => item.count)
+                    .map((item) => (
+                      <span key={item.id}>{item.label} {item.count}건</span>
+                    ))}
+                </div>
+              ) : null}
+              {portfolioImpact.riskReview.reviewAnalytics.counts.deferred ? (
+                <div className="daily-intelligence-portfolio-risk-reasons">
+                  <strong>후속 작업</strong>
+                  {Object.entries(portfolioRiskFollowUpStatusLabels).map(([id, label]) => (
+                    <span key={id}>
+                      {label} {portfolioImpact.riskReview.reviewAnalytics.followUpCounts?.[id] || 0}건
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {portfolioImpact.riskReview.reviewAnalytics.repeatedDeferrals?.length ? (
+                <div className="daily-intelligence-portfolio-risk-repeat">
+                  <strong>반복 보류</strong>
+                  {portfolioImpact.riskReview.reviewAnalytics.repeatedDeferrals.map((item) => (
+                    <span key={item.riskId}>
+                      {item.title} · {item.count}회 · {item.primaryReasonLabel}
+                      · 다음 {item.nextReviewDate || "미정"}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <PortfolioRiskFollowUpInbox
+            queue={portfolioImpact.riskReview.followUpQueue}
+            busy={riskReviewBusy}
+            error={riskReviewError}
+            onOpenOperations={onOpenOperations}
+            onReviewRisk={onReviewRisk}
+            onUpdateFollowUp={onUpdateFollowUp}
+          />
           {portfolioImpact.riskReview.actionChecklist?.length ? (
             <div className="daily-intelligence-portfolio-risk-actions">
               <header>
@@ -1322,6 +1666,7 @@ function PortfolioImpact({
                         note: String(formData.get("note") || ""),
                         reviewDate: String(formData.get("reviewDate") || ""),
                         reviewReportDate: item.review?.reportDate || "",
+                        deferReason: String(formData.get("deferReason") || ""),
                       });
                     }}
                   >
@@ -1347,6 +1692,18 @@ function PortfolioImpact({
                         disabled={Boolean(riskReviewBusy)}
                       />
                     </label>
+                    <label>
+                      <span>보류 원인</span>
+                      <select
+                        name="deferReason"
+                        defaultValue={item.review?.deferReason || "other"}
+                        disabled={Boolean(riskReviewBusy)}
+                      >
+                        {Object.entries(portfolioRiskDeferReasonLabels).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </label>
                     <label className="is-note">
                       <span>검토 메모</span>
                       <textarea
@@ -1370,74 +1727,18 @@ function PortfolioImpact({
                       </small>
                     ) : null}
                   </form>
+                  <PortfolioRiskNextStep
+                    nextStep={item.review?.nextStep}
+                    review={item.review}
+                    busy={riskReviewBusy === item.id}
+                    onOpenOperations={onOpenOperations}
+                    onUpdateFollowUp={onUpdateFollowUp}
+                  />
                 </details>
               ))}
               {riskReviewError ? (
                 <p className="daily-intelligence-research-date-error">{riskReviewError}</p>
               ) : null}
-            </div>
-          ) : null}
-          {portfolioImpact.riskReview.dueFollowUps?.length ? (
-            <div className="daily-intelligence-portfolio-risk-followups">
-              <header>
-                <strong>재검토 기한 도래</strong>
-                <span>{portfolioImpact.riskReview.dueFollowUps.length}건</span>
-              </header>
-              {portfolioImpact.riskReview.dueFollowUps.map((item) => (
-                <article key={`${item.reportDate}:${item.riskId}:${item.reviewDate}`}>
-                  <div>
-                    <strong>{item.title || item.riskId}</strong>
-                    <span>기한 {item.reviewDate} · 최초 검토 {item.reportDate}</span>
-                    {item.note ? <p>{item.note}</p> : null}
-                  </div>
-                  <form
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      const formData = new FormData(event.currentTarget);
-                      onReviewRisk({
-                        riskId: item.riskId,
-                        status: String(formData.get("status") || "checked"),
-                        note: String(formData.get("note") || item.note || ""),
-                        reviewDate: String(formData.get("reviewDate") || ""),
-                        reviewReportDate: item.reportDate,
-                      });
-                    }}
-                  >
-                    <select
-                      name="status"
-                      defaultValue="checked"
-                      aria-label={`${item.title || item.riskId} 재검토 상태`}
-                      disabled={Boolean(riskReviewBusy)}
-                    >
-                      <option value="checked">확인 완료</option>
-                      <option value="resolved">위험 해소</option>
-                      <option value="deferred">다시 보류</option>
-                    </select>
-                    <input
-                      type="date"
-                      name="reviewDate"
-                      min={item.reviewDate}
-                      aria-label={`${item.title || item.riskId} 다음 재검토일`}
-                      disabled={Boolean(riskReviewBusy)}
-                    />
-                    <input
-                      type="text"
-                      name="note"
-                      maxLength="500"
-                      defaultValue={item.note || ""}
-                      aria-label={`${item.title || item.riskId} 검토 메모`}
-                      placeholder="확인 결과 또는 다음 조건"
-                      disabled={Boolean(riskReviewBusy)}
-                    />
-                    <button type="submit" disabled={Boolean(riskReviewBusy)}>
-                      {riskReviewBusy === item.riskId
-                        ? <LoaderCircle size={12} className="is-spinning" />
-                        : null}
-                      반영
-                    </button>
-                  </form>
-                </article>
-              ))}
             </div>
           ) : null}
           {portfolioImpact.riskReview.stockConcentration?.map((item) => (
@@ -4295,6 +4596,7 @@ export default function DailyIntelligenceView({
     portfolioRiskReviewBusy,
     portfolioRiskReviewError,
     reviewPortfolioRisk,
+    updatePortfolioRiskFollowUp,
   } = useDailyIntelligenceController();
   const report = snapshot?.report;
   const pipeline = snapshot?.pipeline;
@@ -4718,6 +5020,8 @@ export default function DailyIntelligenceView({
             riskReviewBusy={portfolioRiskReviewBusy}
             riskReviewError={portfolioRiskReviewError}
             onReviewRisk={reviewPortfolioRisk}
+            onUpdateFollowUp={updatePortfolioRiskFollowUp}
+            onOpenOperations={onOpenOperations}
           />
         </section>
 

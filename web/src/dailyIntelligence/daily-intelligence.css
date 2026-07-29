@@ -1232,6 +1232,277 @@
   color: #28704d;
 }
 
+.daily-intelligence-portfolio-risk-analytics {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d9e0e8;
+  border-radius: 9px;
+  background: #f7f9fb;
+  padding: 9px;
+  color: #52657b;
+}
+
+.daily-intelligence-portfolio-risk-analytics.is-attention {
+  border-color: #e4c58a;
+  background: #fff8eb;
+  color: #805b1c;
+}
+
+.daily-intelligence-portfolio-risk-analytics > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.daily-intelligence-portfolio-risk-analytics > header > div {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.daily-intelligence-portfolio-risk-analytics > header span,
+.daily-intelligence-portfolio-risk-analytics > header small {
+  font-size: 8px;
+}
+
+.daily-intelligence-portfolio-risk-analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.daily-intelligence-portfolio-risk-analytics-grid article {
+  display: grid;
+  gap: 2px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 7px 8px;
+}
+
+.daily-intelligence-portfolio-risk-analytics-grid article span {
+  font-size: 8px;
+}
+
+.daily-intelligence-portfolio-risk-analytics-grid article strong {
+  font-size: 13px;
+}
+
+.daily-intelligence-portfolio-risk-analytics-grid article.is-alert {
+  background: #ffeded;
+  color: #934747;
+}
+
+.daily-intelligence-portfolio-risk-repeat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  border-top: 1px dashed currentColor;
+  padding-top: 7px;
+  font-size: 8px;
+}
+
+.daily-intelligence-portfolio-risk-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  border-top: 1px dashed currentColor;
+  padding-top: 7px;
+  font-size: 8px;
+}
+
+.daily-intelligence-portfolio-risk-reasons span {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 3px 7px;
+}
+
+.daily-intelligence-portfolio-risk-repeat span {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 3px 7px;
+}
+
+.daily-intelligence-portfolio-risk-inbox {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d8c293;
+  border-radius: 9px;
+  background: #fffaf0;
+  padding: 9px;
+}
+
+.daily-intelligence-portfolio-risk-inbox > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.daily-intelligence-portfolio-risk-inbox > header > div:first-child {
+  display: grid;
+  gap: 2px;
+  color: #6f5c42;
+}
+
+.daily-intelligence-portfolio-risk-inbox > header small {
+  font-size: 8px;
+  opacity: 0.72;
+}
+
+.daily-intelligence-portfolio-risk-inbox > header > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.daily-intelligence-portfolio-risk-inbox > header span {
+  border-radius: 999px;
+  background: #fff;
+  padding: 3px 7px;
+  color: #65768b;
+  font-size: 8px;
+}
+
+.daily-intelligence-portfolio-risk-inbox > header span.is-alert {
+  background: #ffeded;
+  color: #934747;
+}
+
+.daily-intelligence-portfolio-risk-inbox-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.daily-intelligence-portfolio-risk-inbox-list > article {
+  min-width: 0;
+  border: 1px solid rgba(111, 92, 66, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 8px;
+}
+
+.daily-intelligence-portfolio-risk-inbox-list > article.is-overdue {
+  border-color: #e0aaaa;
+  background: #fff5f5;
+}
+
+.daily-intelligence-portfolio-risk-inbox-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.daily-intelligence-portfolio-risk-inbox-title > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.daily-intelligence-portfolio-risk-inbox-title strong {
+  color: #3f5064;
+  font-size: 9px;
+}
+
+.daily-intelligence-portfolio-risk-inbox-title span,
+.daily-intelligence-portfolio-risk-inbox-list > article > p {
+  margin: 0;
+  color: #718198;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.daily-intelligence-portfolio-risk-inbox-title em {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #edf2f7;
+  padding: 3px 6px;
+  color: #65768b;
+  font-size: 8px;
+  font-style: normal;
+}
+
+.daily-intelligence-portfolio-risk-inbox-list > article.is-overdue
+  .daily-intelligence-portfolio-risk-inbox-title em {
+  background: #ffdddd;
+  color: #934747;
+}
+
+.daily-intelligence-portfolio-risk-inbox-decision {
+  display: grid;
+  grid-template-columns: auto minmax(105px, 0.7fr) minmax(115px, 0.8fr) minmax(125px, 0.8fr);
+  gap: 5px;
+  align-items: center;
+  margin-top: 7px;
+  border-top: 1px dashed rgba(67, 91, 119, 0.2);
+  padding-top: 7px;
+}
+
+.daily-intelligence-portfolio-risk-inbox-decision > strong {
+  color: #65768b;
+  font-size: 8px;
+}
+
+.daily-intelligence-portfolio-risk-inbox-decision select,
+.daily-intelligence-portfolio-risk-inbox-decision input,
+.daily-intelligence-portfolio-risk-inbox-decision textarea {
+  min-width: 0;
+  border: 1px solid rgba(67, 91, 119, 0.2);
+  border-radius: 6px;
+  background: #fff;
+  padding: 5px 6px;
+  color: #435b77;
+  font: inherit;
+  font-size: 8px;
+}
+
+.daily-intelligence-portfolio-risk-inbox-decision textarea {
+  grid-column: 1 / -2;
+  resize: vertical;
+}
+
+.daily-intelligence-portfolio-risk-inbox-decision button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  align-self: stretch;
+  border: 0;
+  border-radius: 6px;
+  background: #435b77;
+  padding: 6px 9px;
+  color: #fff;
+  font: inherit;
+  font-size: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.daily-intelligence-portfolio-risk-inbox-decision button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+@media (max-width: 900px) {
+  .daily-intelligence-portfolio-risk-inbox-list {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-intelligence-portfolio-risk-inbox-decision {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .daily-intelligence-portfolio-risk-inbox-decision > strong,
+  .daily-intelligence-portfolio-risk-inbox-decision textarea {
+    grid-column: 1 / -1;
+  }
+}
+
 .daily-intelligence-portfolio-risk-actions {
   display: grid;
   gap: 7px;
@@ -1343,7 +1614,7 @@
 
 .daily-intelligence-portfolio-risk-review-form {
   display: grid;
-  grid-template-columns: 120px 140px minmax(220px, 1fr) auto;
+  grid-template-columns: 105px 130px 135px minmax(200px, 1fr) auto;
   align-items: end;
   gap: 8px;
   margin-top: 9px;
@@ -1420,7 +1691,7 @@
 
 .daily-intelligence-portfolio-risk-followups article form {
   display: grid;
-  grid-template-columns: 105px 125px minmax(140px, 1fr) auto;
+  grid-template-columns: 95px 120px 120px minmax(140px, 1fr) auto;
   align-items: center;
   gap: 6px;
 }
@@ -1473,6 +1744,137 @@
   grid-column: 1 / -1;
   color: inherit;
   opacity: 0.68;
+}
+
+.daily-intelligence-portfolio-risk-next-step {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  margin-top: 7px;
+  border: 1px solid rgba(67, 91, 119, 0.2);
+  border-radius: 7px;
+  background: rgba(238, 244, 250, 0.9);
+  padding: 7px 9px;
+  color: #435b77;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.daily-intelligence-portfolio-risk-follow-up {
+  display: grid;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.daily-intelligence-portfolio-risk-follow-up .daily-intelligence-portfolio-risk-next-step {
+  margin-top: 0;
+}
+
+.daily-intelligence-portfolio-risk-next-step strong {
+  font-size: 9px;
+}
+
+.daily-intelligence-portfolio-risk-next-step span {
+  font-size: 8px;
+  line-height: 1.45;
+  opacity: 0.82;
+}
+
+.daily-intelligence-portfolio-risk-next-step:hover {
+  border-color: rgba(67, 91, 119, 0.42);
+  background: #e9f1f8;
+}
+
+.daily-intelligence-portfolio-risk-next-step:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.daily-intelligence-portfolio-risk-follow-up-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.daily-intelligence-portfolio-risk-follow-up-status > strong {
+  margin-right: 3px;
+  color: #65768b;
+  font-size: 8px;
+}
+
+.daily-intelligence-portfolio-risk-follow-up-status button {
+  border: 1px solid rgba(67, 91, 119, 0.18);
+  border-radius: 999px;
+  background: #fff;
+  padding: 3px 7px;
+  color: #65768b;
+  font: inherit;
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.daily-intelligence-portfolio-risk-follow-up-status button.is-active {
+  border-color: #435b77;
+  background: #435b77;
+  color: #fff;
+}
+
+.daily-intelligence-portfolio-risk-follow-up-status button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.daily-intelligence-portfolio-risk-follow-up-evidence {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1.2fr);
+  gap: 6px;
+}
+
+.daily-intelligence-portfolio-risk-follow-up-evidence label {
+  display: grid;
+  gap: 3px;
+  color: #65768b;
+  font-size: 8px;
+}
+
+.daily-intelligence-portfolio-risk-follow-up-evidence input,
+.daily-intelligence-portfolio-risk-follow-up-evidence textarea {
+  width: 100%;
+  border: 1px solid rgba(67, 91, 119, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 6px 7px;
+  color: #31465e;
+  font: inherit;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.daily-intelligence-portfolio-risk-follow-up-evidence textarea {
+  resize: vertical;
+}
+
+.daily-intelligence-portfolio-risk-follow-up-evidence > a,
+.daily-intelligence-portfolio-risk-follow-up-evidence > small {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #65768b;
+  font-size: 8px;
+}
+
+.daily-intelligence-portfolio-risk-follow-up-evidence > a {
+  font-weight: 700;
+  text-decoration: none;
+}
+
+@media (max-width: 760px) {
+  .daily-intelligence-portfolio-risk-follow-up-evidence {
+    grid-template-columns: 1fr;
+  }
 }
 
 .daily-intelligence-portfolio-risk-review > p {
@@ -5680,6 +6082,15 @@
   .daily-intelligence-portfolio-risk-followups article,
   .daily-intelligence-portfolio-risk-followups article form {
     grid-template-columns: 1fr;
+  }
+
+  .daily-intelligence-portfolio-risk-analytics > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .daily-intelligence-portfolio-risk-analytics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .daily-intelligence-portfolio-risk-review-form > small {

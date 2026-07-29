@@ -142,6 +142,7 @@ export async function reviewDailyIntelligencePortfolioRisk(
     note = "",
     reviewDate = "",
     reviewReportDate = "",
+    deferReason = "",
   },
   fetchImpl = globalThis.fetch,
 ) {
@@ -159,6 +160,40 @@ export async function reviewDailyIntelligencePortfolioRisk(
       note,
       reviewDate,
       reviewReportDate,
+      deferReason,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function updateDailyIntelligencePortfolioRiskFollowUp(
+  {
+    riskId,
+    reviewReportDate,
+    followUpStatus,
+    evidenceUrl = "",
+    evidenceNote = "",
+  },
+  fetchImpl = globalThis.fetch,
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("포트폴리오 위험 후속 작업 저장 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "updatePortfolioRiskFollowUp",
+      riskId,
+      reviewReportDate,
+      followUpStatus,
+      evidenceUrl,
+      evidenceNote,
     }),
   });
   const payload = await response.json().catch(() => ({}));

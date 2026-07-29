@@ -9,6 +9,7 @@ import {
   quickAddDailyIntelligenceWatchlistTicker,
   removeDailyIntelligencePortfolioHolding,
   reviewDailyIntelligencePortfolioRisk,
+  updateDailyIntelligencePortfolioRiskFollowUp,
 } from "../src/dailyIntelligence/dailyIntelligenceApi.js";
 
 function response(payload, { ok = true, status = 200 } = {}) {
@@ -138,6 +139,7 @@ test("Daily Intelligence portfolio risk review sends bounded status and note", a
       note: "실적과 상대성과 확인 완료",
       reviewDate: "",
       reviewReportDate: "2026-07-29",
+      deferReason: "",
     },
     async (path, options = {}) => {
       calls.push({ path, options });
@@ -153,5 +155,33 @@ test("Daily Intelligence portfolio risk review sends bounded status and note", a
     note: "실적과 상대성과 확인 완료",
     reviewDate: "",
     reviewReportDate: "2026-07-29",
+    deferReason: "",
+  });
+});
+
+test("Daily Intelligence portfolio risk follow-up sends its independent state", async () => {
+  const calls = [];
+  const result = await updateDailyIntelligencePortfolioRiskFollowUp(
+    {
+      riskId: "stock:NVDA",
+      reviewReportDate: "2026-07-29",
+      followUpStatus: "in_progress",
+      evidenceUrl: "https://www.sec.gov/Archives/example",
+      evidenceNote: "공식 공시 확인 중",
+    },
+    async (path, options = {}) => {
+      calls.push({ path, options });
+      return response({ ok: true, review: { followUpStatus: "in_progress" } });
+    },
+  );
+  assert.equal(result.review.followUpStatus, "in_progress");
+  assert.equal(calls[0].path, "/api/pb-daily-intelligence");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    action: "updatePortfolioRiskFollowUp",
+    riskId: "stock:NVDA",
+    reviewReportDate: "2026-07-29",
+    followUpStatus: "in_progress",
+    evidenceUrl: "https://www.sec.gov/Archives/example",
+    evidenceNote: "공식 공시 확인 중",
   });
 });

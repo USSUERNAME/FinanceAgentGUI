@@ -22,6 +22,7 @@ import {
 import {
   attachPortfolioRiskReviews,
   readPortfolioRiskReviews,
+  savePortfolioRiskFollowUp,
   savePortfolioRiskReview,
 } from "./portfolioRiskReviews.mjs";
 import {
@@ -3734,6 +3735,7 @@ export async function handlePbDailyIntelligenceEndpoint(req, res) {
         "quickAddPortfolioHolding",
         "removePortfolioHolding",
         "reviewPortfolioRisk",
+        "updatePortfolioRiskFollowUp",
       ].includes(body.action)) {
         sendJson(res, { ok: false, error: "unknown action" }, 422);
         return;
@@ -3756,11 +3758,7 @@ export async function handlePbDailyIntelligenceEndpoint(req, res) {
         const existingReview = readPortfolioRiskReviews({
           reportDate: reviewReportDate,
         }).find((item) => item?.riskId === riskId);
-        if (
-          reviewReportDate === snapshot.report.reportDate
-            ? !currentAction
-            : !existingReview || existingReview.status !== "deferred"
-        ) {
+        if (!currentAction && (!existingReview || existingReview.status !== "deferred")) {
           throw new Error("현재 또는 재검토 대기 목록에서 해당 위험 항목을 찾지 못했습니다.");
         }
         const result = savePortfolioRiskReview({
@@ -3769,7 +3767,19 @@ export async function handlePbDailyIntelligenceEndpoint(req, res) {
           status: body.status,
           note: body.note,
           reviewDate: body.reviewDate,
+          deferReason: body.deferReason,
           title: currentAction?.title || existingReview?.title || riskId,
+        });
+        sendJson(res, { ok: true, ...result });
+        return;
+      }
+      if (body.action === "updatePortfolioRiskFollowUp") {
+        const result = savePortfolioRiskFollowUp({
+          reportDate: body.reviewReportDate,
+          riskId: body.riskId,
+          status: body.followUpStatus,
+          evidenceUrl: body.evidenceUrl,
+          evidenceNote: body.evidenceNote,
         });
         sendJson(res, { ok: true, ...result });
         return;
@@ -3891,6 +3901,8 @@ export async function handlePbDailyIntelligenceEndpoint(req, res) {
       snapshot.portfolioImpact.riskReview.actionChecklist = riskReviews.actions;
       snapshot.portfolioImpact.riskReview.reviewSummary = riskReviews.summary;
       snapshot.portfolioImpact.riskReview.dueFollowUps = riskReviews.dueFollowUps;
+      snapshot.portfolioImpact.riskReview.followUpQueue = riskReviews.followUpQueue;
+      snapshot.portfolioImpact.riskReview.reviewAnalytics = riskReviews.analytics;
       for (const followUp of riskReviews.dueFollowUps) {
         await pushSystemNotification({
           level: "watch",
