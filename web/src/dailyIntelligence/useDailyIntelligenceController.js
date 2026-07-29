@@ -4,7 +4,12 @@ import {
   fetchDailyIntelligence,
   fetchDailyIntelligenceJobStatus,
   planDailyIntelligenceJob,
+  quickAddDailyIntelligencePortfolioHolding,
+  quickAddDailyIntelligenceWatchlistTicker,
+  removeDailyIntelligencePortfolioHolding,
+  reviewDailyIntelligencePortfolioRisk,
   syncDailyIntelligenceTheses,
+  trackDailyIntelligenceStockThesis,
 } from "./dailyIntelligenceApi.js";
 
 export function useDailyIntelligenceController() {
@@ -19,6 +24,10 @@ export function useDailyIntelligenceController() {
   const [pendingPlan, setPendingPlan] = useState(null);
   const [thesisMemoryBusy, setThesisMemoryBusy] = useState(false);
   const [thesisMemoryError, setThesisMemoryError] = useState("");
+  const [watchlistQuickAddBusy, setWatchlistQuickAddBusy] = useState("");
+  const [watchlistQuickAddError, setWatchlistQuickAddError] = useState("");
+  const [portfolioRiskReviewBusy, setPortfolioRiskReviewBusy] = useState("");
+  const [portfolioRiskReviewError, setPortfolioRiskReviewError] = useState("");
 
   const reload = useCallback(async () => {
     setBusy(true);
@@ -108,6 +117,113 @@ export function useDailyIntelligenceController() {
     }
   }, []);
 
+  const trackStockThesis = useCallback(async ({
+    ticker,
+    sectorId,
+    brokerResearchDate,
+  }) => {
+    setThesisMemoryBusy(true);
+    setThesisMemoryError("");
+    try {
+      const result = await trackDailyIntelligenceStockThesis({
+        ticker,
+        sectorId,
+        brokerResearchDate,
+      });
+      setSnapshot(await fetchDailyIntelligence(globalThis.fetch, {
+        brokerResearchDate,
+      }));
+      return result;
+    } catch (requestError) {
+      setThesisMemoryError(
+        requestError.message || "종목 투자 가설을 저장하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setThesisMemoryBusy(false);
+    }
+  }, []);
+
+  const quickAddWatchlistTicker = useCallback(async (ticker) => {
+    setWatchlistQuickAddBusy(`watchlist:${ticker}`);
+    setWatchlistQuickAddError("");
+    try {
+      const result = await quickAddDailyIntelligenceWatchlistTicker(ticker);
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setWatchlistQuickAddError(
+        requestError.message || "관심종목에 추가하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setWatchlistQuickAddBusy("");
+    }
+  }, []);
+
+  const quickAddPortfolioHolding = useCallback(async (ticker, weight) => {
+    setWatchlistQuickAddBusy(`portfolio:${ticker}`);
+    setWatchlistQuickAddError("");
+    try {
+      const result = await quickAddDailyIntelligencePortfolioHolding(ticker, weight);
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setWatchlistQuickAddError(
+        requestError.message || "보유종목에 등록하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setWatchlistQuickAddBusy("");
+    }
+  }, []);
+
+  const removePortfolioHolding = useCallback(async (ticker) => {
+    setWatchlistQuickAddBusy(`remove:${ticker}`);
+    setWatchlistQuickAddError("");
+    try {
+      const result = await removeDailyIntelligencePortfolioHolding(ticker);
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setWatchlistQuickAddError(
+        requestError.message || "보유종목을 삭제하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setWatchlistQuickAddBusy("");
+    }
+  }, []);
+
+  const reviewPortfolioRisk = useCallback(async ({
+    riskId,
+    status,
+    note,
+    reviewDate = "",
+    reviewReportDate = "",
+  }) => {
+    setPortfolioRiskReviewBusy(riskId);
+    setPortfolioRiskReviewError("");
+    try {
+      const result = await reviewDailyIntelligencePortfolioRisk({
+        riskId,
+        status,
+        note,
+        reviewDate,
+        reviewReportDate,
+      });
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setPortfolioRiskReviewError(
+        requestError.message || "위험 검토 상태를 저장하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setPortfolioRiskReviewBusy("");
+    }
+  }, []);
+
   useEffect(() => {
     void reload();
     void reloadJobStatus();
@@ -142,5 +258,14 @@ export function useDailyIntelligenceController() {
     thesisMemoryBusy,
     thesisMemoryError,
     syncThesisMemory,
+    trackStockThesis,
+    watchlistQuickAddBusy,
+    watchlistQuickAddError,
+    quickAddWatchlistTicker,
+    quickAddPortfolioHolding,
+    removePortfolioHolding,
+    portfolioRiskReviewBusy,
+    portfolioRiskReviewError,
+    reviewPortfolioRisk,
   };
 }

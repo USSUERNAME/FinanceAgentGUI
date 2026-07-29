@@ -23,6 +23,9 @@ function loadTaxonomy() {
   const payload = JSON.parse(readFileSync(taxonomyPath, "utf8"));
   const sectors = Array.isArray(payload.sectors) ? payload.sectors : [];
   const aliasMap = new Map();
+  const sectorMap = new Map(
+    sectors.map((sector) => [String(sector.id || ""), sector]),
+  );
   for (const sector of sectors) {
     const aliases = [sector.id, sector.nameKo, sector.nameEn, ...(sector.aliases || [])];
     for (const alias of aliases) {
@@ -30,10 +33,31 @@ function loadTaxonomy() {
       if (key && !aliasMap.has(key)) aliasMap.set(key, sector);
     }
   }
+  const aliasMappings = Array.isArray(payload.aliasMappings) ? payload.aliasMappings : [];
+  const mappingMap = new Map();
+  for (const mapping of aliasMappings) {
+    const alias = String(mapping?.alias || "").normalize("NFKC").trim();
+    const primarySectorId = String(mapping?.primarySectorId || "").trim();
+    const primarySector = sectorMap.get(primarySectorId);
+    if (!alias || !primarySector) continue;
+    const secondarySectorIds = [...new Set(
+      (Array.isArray(mapping?.secondarySectorIds) ? mapping.secondarySectorIds : [])
+        .map((value) => String(value || "").trim())
+        .filter((sectorId) => sectorId && sectorId !== primarySectorId && sectorMap.has(sectorId)),
+    )];
+    mappingMap.set(normalizedAlias(alias), {
+      alias,
+      primarySectorId,
+      secondarySectorIds,
+    });
+  }
   return {
     schemaVersion: String(payload.schemaVersion || ""),
     sectors,
+    sectorMap,
     aliasMap,
+    aliasMappings,
+    mappingMap,
   };
 }
 
@@ -46,28 +70,51 @@ function publicTaxonomy() {
       id: String(sector.id || ""),
       nameKo: String(sector.nameKo || ""),
       nameEn: String(sector.nameEn || ""),
+      kind: String(sector.kind || "theme"),
       aliases: Array.isArray(sector.aliases) ? sector.aliases.map(String) : [],
+    })),
+    aliasMappings: [...taxonomy.mappingMap.values()].map((mapping) => ({
+      alias: mapping.alias,
+      primarySectorId: mapping.primarySectorId,
+      secondarySectorIds: [...mapping.secondarySectorIds],
     })),
   };
 }
 
 export function classifyResearchSector(value) {
   const raw = String(value || "").trim();
-  const match = taxonomy.aliasMap.get(normalizedAlias(raw));
+  const mapping = taxonomy.mappingMap.get(normalizedAlias(raw));
+  const match = mapping
+    ? taxonomy.sectorMap.get(mapping.primarySectorId)
+    : taxonomy.aliasMap.get(normalizedAlias(raw));
   if (!match) {
     return {
       id: "",
       name: raw,
       matched: false,
       sourceLabel: raw,
+      sectorIds: [],
+      secondarySectors: [],
     };
   }
+  const secondarySectors = (mapping?.secondarySectorIds || [])
+    .map((sectorId) => taxonomy.sectorMap.get(sectorId))
+    .filter(Boolean)
+    .map((sector) => ({
+      id: String(sector.id || ""),
+      name: String(sector.nameKo || ""),
+      nameEn: String(sector.nameEn || ""),
+      kind: String(sector.kind || "theme"),
+    }));
   return {
     id: String(match.id || ""),
     name: String(match.nameKo || raw),
     nameEn: String(match.nameEn || ""),
+    kind: String(match.kind || "theme"),
     matched: true,
     sourceLabel: raw,
+    sectorIds: [String(match.id || ""), ...secondarySectors.map((sector) => sector.id)],
+    secondarySectors,
   };
 }
 
@@ -169,6 +216,72 @@ export function addResearchSectorAlias(payload = {}) {
   return addResearchSectorAliasToFile(payload, taxonomyPath, { reload: true });
 }
 
+export function setResearchSectorMappingToFile(
+  { alias, primarySectorId, secondarySectorIds = [] } = {},
+  filePath = taxonomyPath,
+  { reload = filePath === taxonomyPath } = {},
+) {
+  const normalizedInput = String(alias || "").normalize("NFKC").trim();
+  const normalizedPrimaryId = String(primarySectorId || "").trim();
+  const normalizedSecondaryIds = [...new Set(
+    (Array.isArray(secondarySectorIds) ? secondarySectorIds : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
+  )].filter((sectorId) => sectorId !== normalizedPrimaryId);
+  if (!normalizedInput) throw new Error("추가할 원문 섹터명이 없습니다.");
+  if (normalizedInput.length > 120) throw new Error("섹터 별칭은 120자 이하여야 합니다.");
+  if (!normalizedPrimaryId) throw new Error("주 섹터를 선택해 주세요.");
+  if (normalizedSecondaryIds.length > 5) throw new Error("보조 테마는 최대 5개까지 선택할 수 있습니다.");
+
+  const payload = JSON.parse(readFileSync(filePath, "utf8"));
+  const sectors = Array.isArray(payload.sectors) ? payload.sectors : [];
+  const sectorById = new Map(sectors.map((sector) => [String(sector.id || ""), sector]));
+  const primarySector = sectorById.get(normalizedPrimaryId);
+  if (!primarySector) throw new Error("선택한 주 섹터를 찾을 수 없습니다.");
+  for (const sectorId of normalizedSecondaryIds) {
+    const sector = sectorById.get(sectorId);
+    if (!sector) throw new Error(`선택한 보조 테마를 찾을 수 없습니다: ${sectorId}`);
+    if (String(sector.kind || "theme") !== "theme") {
+      throw new Error("보조 분류에는 구조적 테마만 선택할 수 있습니다.");
+    }
+  }
+
+  const aliasMappings = Array.isArray(payload.aliasMappings) ? payload.aliasMappings : [];
+  const mapping = {
+    alias: normalizedInput,
+    primarySectorId: normalizedPrimaryId,
+    secondarySectorIds: normalizedSecondaryIds,
+  };
+  const existingIndex = aliasMappings.findIndex(
+    (item) => normalizedAlias(item?.alias) === normalizedAlias(normalizedInput),
+  );
+  const existing = existingIndex >= 0 ? aliasMappings[existingIndex] : null;
+  const unchanged = existing
+    && String(existing.primarySectorId || "") === normalizedPrimaryId
+    && JSON.stringify(existing.secondarySectorIds || []) === JSON.stringify(normalizedSecondaryIds);
+  if (unchanged) {
+    return {
+      changed: false,
+      mapping,
+      taxonomy: reload ? publicTaxonomy() : payload,
+    };
+  }
+  if (existingIndex >= 0) aliasMappings[existingIndex] = mapping;
+  else aliasMappings.push(mapping);
+  payload.aliasMappings = aliasMappings;
+  writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  if (reload) taxonomy = loadTaxonomy();
+  return {
+    changed: true,
+    mapping,
+    taxonomy: reload ? publicTaxonomy() : payload,
+  };
+}
+
+export function setResearchSectorMapping(payload = {}) {
+  return setResearchSectorMappingToFile(payload, taxonomyPath, { reload: true });
+}
+
 export async function handleResearchSectorTaxonomyEndpoint(req, res) {
   try {
     if (req.method === "GET") {
@@ -180,7 +293,12 @@ export async function handleResearchSectorTaxonomyEndpoint(req, res) {
       return;
     }
     const payload = await readJsonBody(req);
-    sendJson(res, { ok: true, ...addResearchSectorAlias(payload) });
+    const isMultiMapping = Object.hasOwn(payload, "primarySectorId")
+      || Object.hasOwn(payload, "secondarySectorIds");
+    sendJson(res, {
+      ok: true,
+      ...(isMultiMapping ? setResearchSectorMapping(payload) : addResearchSectorAlias(payload)),
+    });
   } catch (error) {
     sendJson(res, { ok: false, error: error.message }, 400);
   }

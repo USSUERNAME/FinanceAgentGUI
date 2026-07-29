@@ -3,9 +3,15 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  buildBrokerSectorImpactChanges,
+  buildBrokerSectorImpactProfiles,
+  buildBrokerSectorSignalPersistence,
+  buildSectorStockShortlists,
+  buildSectorWatchlistRanking,
   buildMarketSectorStockChain,
   buildPortfolioImpact,
   extractPortfolioUniverse,
+  linkThesisAlertsToPortfolio,
   loadPbDailyIntelligenceSnapshot,
 } from "../server/pbDailyIntelligenceApi.mjs";
 
@@ -20,11 +26,320 @@ test.afterEach(async () => {
   await rm(tempRoot, { recursive: true, force: true });
 });
 
+test("PB Daily Intelligence separates direct report tickers from indirect sector candidates", () => {
+  const [sector] = buildBrokerSectorImpactProfiles({
+    coverage: [{
+      sectorId: "metals_critical_materials",
+      sector: "금속·핵심소재",
+      topTickers: [{ ticker: "FCX", reportCount: 2 }],
+      stanceCounts: { positive: 2, neutral: 0, cautious: 0, negative: 0 },
+      publisherOpinion: { ratedPublisherCount: 2 },
+      attributionRole: "primary",
+    }],
+    marketInternals: {
+      sectors: {
+        "5d": [{ ticker: "XLB", returnPct: 3.4, vsSpyPctPoint: 2.2 }],
+      },
+    },
+    stockCandidates: {
+      candidates: [
+        {
+          ticker: "FCX",
+          companyName: "Freeport-McMoRan",
+          sectorIds: ["metals_critical_materials"],
+          score: 70,
+        },
+        {
+          ticker: "NUE",
+          companyName: "Nucor",
+          sectorIds: ["metals_critical_materials"],
+          score: 55,
+        },
+      ],
+    },
+  });
+
+  assert.equal(sector.impactProfile.direction, "beneficiary");
+  assert.equal(sector.impactProfile.strength, "strong");
+  assert.equal(sector.impactProfile.evidenceState, "cross_confirmed");
+  assert.deepEqual(
+    sector.impactProfile.directTickers.map((item) => item.ticker),
+    ["FCX"],
+  );
+  assert.deepEqual(
+    sector.impactProfile.indirectTickers.map((item) => item.ticker),
+    ["NUE"],
+  );
+});
+
+test("PB Daily Intelligence alerts only on comparable sector impact changes", () => {
+  const result = buildBrokerSectorImpactChanges({
+    currentDate: "2026-07-29",
+    previousDate: "2026-07-28",
+    previousCoverage: [{
+      sectorId: "technology_hardware_services",
+      sector: "정보기술·하드웨어",
+      impactProfile: {
+        direction: "beneficiary",
+        strength: "moderate",
+        evidenceState: "cross_confirmed",
+        marketTicker: "XLK",
+        vsSpy5d: 1.4,
+      },
+    }],
+    currentCoverage: [
+      {
+        sectorId: "technology_hardware_services",
+        sector: "정보기술·하드웨어",
+        impactProfile: {
+          direction: "pressure",
+          strength: "moderate",
+          evidenceState: "cross_confirmed",
+          marketTicker: "XLK",
+          vsSpy5d: -1.6,
+        },
+      },
+      {
+        sectorId: "travel_leisure",
+        sector: "여행·레저",
+        impactProfile: {
+          direction: "beneficiary",
+          strength: "weak",
+          evidenceState: "price_only",
+          marketTicker: "XLY",
+          vsSpy5d: 1.1,
+        },
+      },
+    ],
+  });
+
+  assert.equal(result.baseline.available, true);
+  assert.equal(result.baseline.comparableSectorCount, 1);
+  assert.equal(result.alerts.length, 1);
+  assert.equal(result.alerts[0].alertType, "pressure_turn");
+  assert.equal(result.alerts[0].severity, "high");
+  assert.equal(
+    result.coverage.find((item) => item.sectorId === "travel_leisure")
+      .impactProfile.change.status,
+    "baseline_unavailable",
+  );
+});
+
+test("PB Daily Intelligence tracks signal persistence but hides rates below minimum sample", () => {
+  const sectorPoint = (date, vsSpy1d) => ({
+    date,
+    coverage: [{
+      sectorId: "semiconductors_ai_compute",
+      sector: "반도체·AI 컴퓨트",
+      impactProfile: {
+        direction: "beneficiary",
+        strength: "moderate",
+        evidenceState: "cross_confirmed",
+        marketTicker: "XLK",
+        vsSpy1d,
+      },
+    }],
+  });
+  const result = buildBrokerSectorSignalPersistence({
+    history: [
+      sectorPoint("2026-07-24", null),
+      sectorPoint("2026-07-25", 0.8),
+      sectorPoint("2026-07-28", 0.4),
+      sectorPoint("2026-07-29", -0.6),
+    ],
+  });
+  const persistence = result.coverage[0].impactProfile.persistence;
+
+  assert.equal(persistence.streakCount, 4);
+  assert.equal(persistence.state, "persistent");
+  assert.equal(persistence.hitCount, 2);
+  assert.equal(persistence.missCount, 1);
+  assert.equal(persistence.decisiveCount, 3);
+  assert.equal(persistence.hitRatePct, null);
+  assert.equal(persistence.sampleState, "insufficient_sample");
+  assert.equal(result.summary.hitRatePct, null);
+});
+
+test("PB Daily Intelligence promotes sectors only after every evidence gate passes", () => {
+  const sector = (sectorId, direction, overrides = {}) => ({
+    sectorId,
+    sector: sectorId,
+    impactProfile: {
+      direction,
+      directionLabel: direction,
+      strength: "moderate",
+      evidenceState: "cross_confirmed",
+      marketTicker: "XLK",
+      vsSpy5d: 2,
+      directTickers: [{ ticker: "NVDA", exposureType: "direct" }],
+      indirectTickers: [],
+      persistence: {
+        streakCount: 3,
+        hitCount: 1,
+        missCount: 0,
+        recentOutcome: { status: "hit" },
+      },
+      ...overrides,
+    },
+  });
+  const result = buildSectorWatchlistRanking([
+    sector("promoted-sector", "beneficiary"),
+    sector("watch-sector", "beneficiary", {
+      evidenceState: "price_only",
+      persistence: {
+        streakCount: 1,
+        hitCount: 0,
+        missCount: 0,
+        recentOutcome: null,
+      },
+    }),
+    sector("caution-sector", "pressure"),
+    sector("not-ready-sector", "neutral", {
+      directTickers: [],
+      persistence: {
+        streakCount: 0,
+        hitCount: 0,
+        missCount: 0,
+        recentOutcome: null,
+      },
+    }),
+  ]);
+
+  assert.equal(result.promoted.length, 1);
+  assert.equal(result.promoted[0].sectorId, "promoted-sector");
+  assert.equal(result.watch.length, 1);
+  assert.deepEqual(
+    result.watch[0].missingRequirements,
+    ["3회 지속", "가격·리서치 교차확인", "후속 반응 적중"],
+  );
+  assert.equal(result.caution.length, 1);
+  assert.equal(result.notReadyCount, 1);
+});
+
+test("PB Daily Intelligence re-screens sector stocks through catalyst and valuation gates", () => {
+  const result = buildSectorStockShortlists({
+    sectorWatchlist: {
+      promoted: [{
+        sectorId: "semiconductors_ai_compute",
+        sector: "반도체·AI 컴퓨트",
+        status: "promoted",
+        relatedTickers: [{ ticker: "NVDA" }],
+      }],
+      watch: [{
+        sectorId: "construction_infrastructure",
+        sector: "건설·인프라",
+        status: "watch",
+        relatedTickers: [{ ticker: "CAT" }, { ticker: "NUE" }],
+      }],
+    },
+    candidatePool: [
+      {
+        ticker: "NVDA",
+        companyName: "NVIDIA",
+        researchPriority: "A",
+        exposureState: "linked",
+        exposureType: "direct",
+        primaryEvidenceCount: 2,
+        verifiedFactCount: 3,
+        evidenceSummary: "공식 실적과 가이던스 확인",
+        estimateRevision: {
+          status: "available",
+          rows: [{ metric: "revenue" }],
+          revisionDirection: "positive_revision",
+          directionLabel: "상향",
+        },
+        valuationScreen: {
+          status: "screening_available",
+          usablePeerCount: 3,
+          minimumPeerCount: 2,
+        },
+      },
+      {
+        ticker: "CAT",
+        companyName: "Caterpillar",
+        researchPriority: "B",
+        exposureState: "linked",
+        exposureType: "indirect",
+        primaryEvidenceCount: 0,
+        verifiedFactCount: 0,
+        evidenceSummary: "가격 후보만 존재",
+        estimateRevision: {
+          status: "not_available",
+          rows: [],
+          revisionDirection: "not_stated",
+          directionLabel: "자료 없음",
+        },
+        valuationScreen: {
+          status: "not_available",
+          usablePeerCount: 0,
+          minimumPeerCount: 2,
+        },
+      },
+      {
+        ticker: "NUE",
+        companyName: "Nucor",
+        researchPriority: "C",
+        exposureState: "linked",
+        exposureType: "direct",
+        primaryEvidenceCount: 1,
+        verifiedFactCount: 1,
+        evidenceSummary: "공식 자료 확인",
+        estimateRevision: {
+          status: "available",
+          rows: [{ metric: "eps" }],
+          revisionDirection: "negative_revision",
+          directionLabel: "하향",
+        },
+        valuationScreen: {
+          status: "screening_available",
+          usablePeerCount: 2,
+          minimumPeerCount: 2,
+        },
+      },
+    ],
+  });
+
+  assert.equal(result.totals.qualified, 1);
+  assert.equal(result.totals.hold, 1);
+  assert.equal(result.totals.excluded, 1);
+  assert.equal(result.candidateCount, 3);
+  assert.equal(result.sectors[0].candidates[0].status, "qualified");
+  assert.equal(
+    result.sectors[0].candidates[0].researchProfile.readiness,
+    "research_ready",
+  );
+  assert.match(
+    result.sectors[0].candidates[0].researchProfile.researchQuestion,
+    /NVDA/,
+  );
+  assert.equal(
+    result.sectors[0].candidates[0].researchProfile.evidenceBasis.length,
+    5,
+  );
+  assert.equal(result.sectors[1].candidates[0].status, "hold");
+  assert.equal(
+    result.sectors[1].candidates[0].researchProfile.readiness,
+    "gate_blocked",
+  );
+  assert.match(
+    result.sectors[1].candidates[0].researchProfile.evidenceBoundary,
+    /투자 결론으로 승격하지 않습니다/,
+  );
+  assert.deepEqual(
+    result.sectors[1].candidates[0].missingRequirements,
+    ["섹터 승격", "공식 촉매", "추정치 지지", "비교 가능한 밸류에이션"],
+  );
+  assert.equal(result.sectors[1].candidates[1].status, "excluded");
+});
+
 test("PB Daily Intelligence links portfolio and watchlist tickers to bounded evidence", () => {
   const universe = extractPortfolioUniverse({
     transactionSettings: {
       watchlistGroups: [
         { name: "AI 관심", symbols: ["NVDA", "MSFT"] },
+      ],
+      portfolioHoldings: [
+        { ticker: "TSLA", weight: 45, label: "간편 보유" },
       ],
     },
     portfolioCanvasSnapshot: {
@@ -48,11 +363,15 @@ test("PB Daily Intelligence links portfolio and watchlist tickers to bounded evi
       },
     },
   });
-  assert.deepEqual(universe.map((item) => item.ticker), ["MSFT", "NVDA", "QQQ"]);
+  assert.deepEqual(universe.map((item) => item.ticker), ["MSFT", "NVDA", "QQQ", "TSLA"]);
   assert.deepEqual(
     universe.find((item) => item.ticker === "NVDA").roles,
     ["watchlist", "portfolio"],
   );
+  assert.deepEqual(universe.find((item) => item.ticker === "TSLA").roles, ["portfolio"]);
+  assert.deepEqual(universe.find((item) => item.ticker === "TSLA").weights, [45]);
+  assert.deepEqual(universe.find((item) => item.ticker === "TSLA").quickWeights, [45]);
+  assert.deepEqual(universe.find((item) => item.ticker === "TSLA").sources, ["quick_portfolio"]);
 
   const impact = buildPortfolioImpact({
     universe,
@@ -94,18 +413,115 @@ test("PB Daily Intelligence links portfolio and watchlist tickers to bounded evi
         },
       ],
     },
+    candidatePool: [
+      {
+        ticker: "NVDA",
+        score: 82,
+        deepAnalysisEligible: true,
+        reaction: { return1d: 4.1 },
+        linkedSectorTicker: "XLK",
+        linkedSectorLabel: "기술",
+      },
+      {
+        ticker: "TSLA",
+        score: 67,
+        linkedSectorTicker: "XLY",
+        linkedSectorLabel: "경기소비재",
+      },
+    ],
+    sectorPaths: [
+      {
+        ticker: "XLY",
+        label: "경기소비재",
+        stance: "pressure",
+        reason: "5일 상대약세가 관측됐습니다.",
+      },
+    ],
   });
 
   assert.equal(impact.configured, true);
-  assert.equal(impact.portfolioCount, 2);
+  assert.equal(impact.portfolioCount, 3);
   assert.equal(impact.watchlistCount, 2);
   assert.equal(impact.matchedCount, 2);
-  assert.equal(impact.unmatchedCount, 1);
+  assert.equal(impact.unmatchedCount, 2);
+  assert.equal(impact.quickPortfolioWeight, 45);
+  assert.deepEqual(impact.riskReview.stockConcentration, [{
+    ticker: "TSLA",
+    weight: 45,
+    severity: "high",
+  }]);
+  assert.equal(impact.riskReview.sectorConcentration[0].ticker, "XLY");
+  assert.equal(impact.riskReview.sectorConcentration[0].weight, 45);
+  assert.equal(impact.riskReview.thesisConflicts[0].ticker, "TSLA");
+  assert.equal(impact.riskReview.unmapped.length, 0);
   assert.equal(impact.assets[0].ticker, "NVDA");
   assert.equal(impact.assets[0].evidenceState, "primary_verified");
   assert.equal(impact.assets[0].relatedEvents.length, 1);
   assert.equal(impact.assets.find((item) => item.ticker === "MSFT").evidenceState, "quantitative_only");
   assert.equal(impact.assets.find((item) => item.ticker === "QQQ").evidenceState, "no_direct_evidence");
+});
+
+test("PB thesis alerts prioritize contradicted holdings and link sector paths", () => {
+  const alerts = linkThesisAlertsToPortfolio({
+    alerts: [
+      {
+        id: "pb-sector-xlk-2026-07-29-hit",
+        kind: "sector",
+        entityId: "XLK",
+        status: "hit",
+        reason: "기술 섹터 가설 확인",
+      },
+      {
+        id: "pb-stock-nvda-2026-07-29-miss",
+        kind: "stock",
+        entityId: "NVDA",
+        status: "miss",
+        reason: "NVDA 가설 반증",
+      },
+      {
+        id: "pb-stock-tsla-2026-07-29-miss",
+        kind: "stock",
+        entityId: "TSLA",
+        status: "miss",
+        reason: "TSLA 가설 반증",
+      },
+    ],
+    portfolioImpact: {
+      assets: [
+        {
+          ticker: "NVDA",
+          roles: ["portfolio", "watchlist"],
+          labels: ["미국 성장"],
+          weights: [60],
+        },
+        {
+          ticker: "MSFT",
+          roles: ["watchlist"],
+          labels: ["AI 관심"],
+          weights: [],
+        },
+      ],
+    },
+    candidatePool: [
+      { ticker: "NVDA", linkedSectorTicker: "XLK" },
+      { ticker: "MSFT", linkedSectorTicker: "XLK" },
+      { ticker: "TSLA", linkedSectorTicker: "XLY" },
+    ],
+  });
+
+  assert.equal(alerts[0].entityId, "NVDA");
+  assert.equal(alerts[0].priorityLevel, "critical");
+  assert.equal(alerts[0].holdingCount, 1);
+  assert.equal(alerts[0].directCount, 1);
+  assert.equal(alerts[1].entityId, "XLK");
+  assert.deepEqual(
+    alerts[1].affectedAssets.map((asset) => [asset.ticker, asset.relationship]),
+    [["NVDA", "sector"], ["MSFT", "sector"]],
+  );
+  assert.equal(alerts[1].holdingCount, 1);
+  assert.equal(alerts[1].watchlistCount, 2);
+  assert.equal(alerts[2].entityId, "TSLA");
+  assert.equal(alerts[2].priorityLevel, "normal");
 });
 
 test("PB Daily Intelligence builds a bounded market to sector to stock research chain", () => {
@@ -222,6 +638,89 @@ test("PB Daily Intelligence builds a bounded market to sector to stock research 
   assert.equal(chain.ideaFunnel.rejectedCandidates[0].ticker, "BAD");
   assert.match(chain.ideaFunnel.rejectedCandidates[0].rejectionReason, /무효화/);
   assert.match(chain.disclaimer, /매수·매도 추천이 아닙니다/);
+});
+
+test("PB Daily Intelligence accepts labeled peer screening only with minimum peer support", () => {
+  const buildChain = (usablePeerCount) => buildMarketSectorStockChain({
+    report: {
+      reportDate: "2026-07-29",
+      executiveSummary: ["기술주 리더십을 추정치와 비교기업으로 재검증합니다."],
+      earningsWatch: {
+        companies: [
+          {
+            ticker: "NVDA",
+            estimateRevision: {
+              rows: [{ metricId: "eps", revisionPct30d: 3.2 }],
+            },
+            guidance: [],
+            valuationScreen: {
+              status: "screening_available",
+              relativeValuationStatus: "discount_to_watchlist_peer_median",
+              primaryMetric: "forward_pe",
+              targetValue: 21.92,
+              peerMedian: 47.28,
+              premiumDiscountPct: -53.6,
+              usablePeerCount,
+              minimumPeerCount: 2,
+              evidenceLabel: "derived_screening_calculation",
+            },
+          },
+        ],
+      },
+    },
+    decisionGate: { status: "ready" },
+    scoreboard: {
+      regime: {
+        summary: "기술주 상대강세가 관측됩니다.",
+        quantitativeEvidence: ["XLK/SPY +1.2%p"],
+      },
+    },
+    marketInternals: {
+      sectors: {
+        "5d": [
+          { ticker: "XLK", sector: "Technology", returnPct: 3.4, vsSpyPctPoint: 1.2 },
+        ],
+      },
+      sectorBreadth: {
+        sectors: [{ ticker: "XLK", advancePct: 66, above50dPct: 61 }],
+      },
+    },
+    stockCandidates: {
+      candidates: [
+        {
+          ticker: "NVDA",
+          companyName: "NVIDIA",
+          score: 84,
+          sectorIds: ["semiconductors_ai_compute"],
+          reasons: ["실적 추정치 상향"],
+          deepAnalysisEligible: true,
+          reaction: {
+            close: 197.05,
+            return1d: 2.1,
+            spyRelative1d: 1.7,
+            volumeRatio20d: 1.5,
+          },
+          evidence: [{ primaryConfirmed: true, factCount: 1 }],
+        },
+      ],
+    },
+    brokerResearch: { reports: [] },
+  });
+
+  const supported = buildChain(2);
+  assert.equal(supported.sectors[0].fundamentalGate.status, "supported");
+  assert.equal(supported.sectors[0].fundamentalGate.valuationStatus, "comparable");
+  assert.equal(supported.sectors[0].fundamentalGate.comparableValuationCount, 1);
+  assert.match(supported.sectors[0].fundamentalGate.valuationLabel, /forward_pe/);
+  assert.equal(supported.candidates[0].researchPriority, "A");
+  assert.equal(supported.candidates[0].valuationScreen.primaryMetric, "forward_pe");
+  assert.equal(supported.candidates[0].valuationScreen.usablePeerCount, 2);
+  assert.equal(supported.candidates[0].estimateRevision.rows[0].revisionPct30d, 3.2);
+
+  const insufficient = buildChain(1);
+  assert.equal(insufficient.sectors[0].fundamentalGate.status, "watch");
+  assert.equal(insufficient.sectors[0].fundamentalGate.valuationStatus, "unavailable");
+  assert.equal(insufficient.candidates[0].researchPriority, "B");
 });
 
 test("PB Daily Intelligence reports an explicit disconnected state", async () => {
@@ -1076,7 +1575,7 @@ test("PB Daily Intelligence exposes a rights-safe analyst research digest", asyn
   assert.equal(snapshot.brokerResearchIndex.latest.overseasCount, 1);
   assert.equal(snapshot.brokerResearchIndex.latest.targetPriceCount, 1);
   assert.equal(snapshot.brokerResearchIndex.history.length, 1);
-  assert.equal(snapshot.brokerResearch.summary.sectorTaxonomyVersion, "research-sector-taxonomy.v1");
+  assert.equal(snapshot.brokerResearch.summary.sectorTaxonomyVersion, "research-sector-taxonomy.v3");
   assert.equal(snapshot.brokerResearch.reports[0].sectors[0], "semiconductor");
   assert.equal(
     snapshot.brokerResearch.reports[0].standardSectors[0].id,
@@ -1292,9 +1791,9 @@ test("PB Daily Intelligence separates document scope labels from transport cover
       schema_version: "broker_research_digest.v1",
       report_date: reportDate,
       summary: {
-        selected_report_count: 3,
-        structured_report_count: 3,
-        publisher_count: 3,
+        selected_report_count: 6,
+        structured_report_count: 6,
+        publisher_count: 6,
         analysis_status: "complete",
       },
       consensus: {},
@@ -1323,6 +1822,30 @@ test("PB Daily Intelligence separates document scope labels from transport cover
           sectors: ["운송"],
           processing: { structured_analysis_available: true, status: "ready" },
         },
+        {
+          report_id: "index-strategy",
+          publisher: "Index Securities",
+          title: "지수 전략",
+          report_type: "strategy",
+          sectors: ["지수"],
+          processing: { structured_analysis_available: true, status: "ready" },
+        },
+        {
+          report_id: "credit",
+          publisher: "Credit Securities",
+          title: "크레딧 위클리",
+          report_type: "fixed_income",
+          sectors: ["크레딧"],
+          processing: { structured_analysis_available: true, status: "ready" },
+        },
+        {
+          report_id: "compound-sector",
+          publisher: "Compound Securities",
+          title: "AI 인터넷 게임",
+          report_type: "sector",
+          sectors: ["AI인터넷게임"],
+          processing: { structured_analysis_available: true, status: "ready" },
+        },
       ],
     },
   );
@@ -1334,16 +1857,38 @@ test("PB Daily Intelligence separates document scope labels from transport cover
   assert.equal(reports[0].researchScope, "daily_digest");
   assert.equal(reports[1].researchScope, "multi_sector_digest");
   assert.equal(reports[2].researchScope, "sector");
+  assert.equal(reports[3].researchScope, "market_strategy");
+  assert.equal(reports[4].researchScope, "asset_class");
   assert.deepEqual(snapshot.brokerResearch.summary.researchScopeCounts, {
     daily_digest: 1,
     multi_sector_digest: 1,
-    sector: 1,
+    sector: 2,
+    market_strategy: 1,
+    asset_class: 1,
   });
-  assert.equal(snapshot.brokerResearch.consensus.coverage.length, 1);
+  assert.equal(snapshot.brokerResearch.consensus.coverage.length, 3);
+  const transportCoverage = snapshot.brokerResearch.consensus.coverage.find(
+    (item) => item.sectorId === "transportation_logistics",
+  );
   assert.equal(
-    snapshot.brokerResearch.consensus.coverage[0].sectorId,
+    transportCoverage.sectorId,
     "transportation_logistics",
   );
-  assert.equal(snapshot.brokerResearch.consensus.coverage[0].sector, "운송·물류");
-  assert.deepEqual(snapshot.brokerResearch.consensus.coverage[0].sourceLabels, ["운송"]);
+  assert.equal(transportCoverage.sector, "운송·물류");
+  assert.deepEqual(transportCoverage.sourceLabels, ["운송"]);
+  const compoundReport = reports.find((report) => report.reportId === "compound-sector");
+  assert.deepEqual(
+    compoundReport.standardSectors.map((sector) => [sector.mappingRole, sector.id]),
+    [
+      ["primary", "consumer_internet_platforms"],
+      ["secondary", "media_gaming_entertainment"],
+    ],
+  );
+  assert.deepEqual(
+    snapshot.brokerResearch.consensus.coverage
+      .filter((item) => item.sourceLabels.includes("AI인터넷게임"))
+      .map((item) => item.sectorId)
+      .sort(),
+    ["consumer_internet_platforms", "media_gaming_entertainment"],
+  );
 });

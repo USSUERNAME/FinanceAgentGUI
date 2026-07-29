@@ -127,6 +127,11 @@ export function AppNavigation({
                   const showReportsUrgentUpdateBadge =
                     item.view === "reports" && notificationStatus?.reportsUrgentUpdate?.showBadge;
                   const reportsUrgentUpdateSummary = notificationStatus?.reportsUrgentUpdate?.summary || "";
+                  const showDailyIntelligenceCriticalBadge =
+                    item.view === "daily-intelligence"
+                    && notificationStatus?.dailyIntelligenceCriticalUpdate?.showBadge;
+                  const dailyIntelligenceCriticalSummary =
+                    notificationStatus?.dailyIntelligenceCriticalUpdate?.summary || "";
                   const arcaNotificationCount =
                     item.statusKey === "arcaNotifications"
                       ? Math.max(0, Math.trunc(Number(itemStatusHealth?.count || 0)))
@@ -150,7 +155,9 @@ export function AppNavigation({
                         className={[
                           "nav-item",
                           isActiveItem ? "is-active" : "",
-                          showReportsUrgentUpdateBadge ? "is-critical-alert" : "",
+                          showReportsUrgentUpdateBadge || showDailyIntelligenceCriticalBadge
+                            ? "is-critical-alert"
+                            : "",
                           isPortfolioItem ? "has-children" : "",
                         ]
                           .filter(Boolean)
@@ -160,6 +167,8 @@ export function AppNavigation({
                         title={
                           showReportsUrgentUpdateBadge
                             ? `긴급 업데이트${reportsUrgentUpdateSummary ? `: ${reportsUrgentUpdateSummary}` : ""}`
+                            : showDailyIntelligenceCriticalBadge
+                              ? `보유종목 가설 반증${dailyIntelligenceCriticalSummary ? `: ${dailyIntelligenceCriticalSummary}` : ""}`
                             : itemStatusHealth
                               ? itemStatusHealth.title
                               : item.label
@@ -199,6 +208,14 @@ export function AppNavigation({
                               aria-label="보고서 긴급 업데이트"
                             >
                               긴급 업데이트
+                            </span>
+                          ) : null}
+                          {showDailyIntelligenceCriticalBadge ? (
+                            <span
+                              className="nav-unread-count nav-critical-update-badge"
+                              aria-label="보유종목 가설 반증 알림"
+                            >
+                              가설 반증
                             </span>
                           ) : null}
                         </span>

@@ -44,6 +44,7 @@ function defaultStore() {
     records: [],
     readState: {
       reportsOpenedAt: "",
+      dailyIntelligenceOpenedAt: "",
     },
     emergencyProcedures: {
       marketSummary: {
@@ -187,7 +188,7 @@ function reportAlertRank(value) {
   return REPORT_ALERT_LEVEL_RANK[normalizeDetectionLevel(value)] || 0;
 }
 
-function browserNotificationDelivery() {
+function browserNotificationDelivery(clickTarget = "reports") {
   return {
     ok: true,
     channel: "browser",
@@ -196,35 +197,59 @@ function browserNotificationDelivery() {
     requiresPermission: true,
     iconSupported: true,
     iconPath: "/favicon.svg",
-    clickTarget: "reports",
+    clickTarget,
     deliveredBy: "client",
   };
 }
 
-function activeReportsAlert(store) {
-  const reportsOpenedMs = new Date(store.readState?.reportsOpenedAt || 0).getTime();
+function activeTargetAlert(store, {
+  clickTarget,
+  readStateKey,
+  label,
+} = {}) {
+  const openedMs = new Date(store.readState?.[readStateKey] || 0).getTime();
   const latest = [...store.records]
     .reverse()
-    .find((record) => REPORT_ALERT_LEVELS.has(record.level));
+    .find((record) =>
+      REPORT_ALERT_LEVELS.has(record.level)
+      && (record.delivery?.clickTarget || "reports") === clickTarget);
   if (!latest) {
     return {
       showBadge: false,
-      label: "긴급 업데이트",
+      label,
       summary: "",
       level: "",
       createdAt: "",
       id: "",
+      clickTarget,
     };
   }
   const latestMs = new Date(latest.createdAt || 0).getTime();
   return {
-    showBadge: !Number.isFinite(reportsOpenedMs) || latestMs > reportsOpenedMs,
-    label: "긴급 업데이트",
+    showBadge: !Number.isFinite(openedMs) || latestMs > openedMs,
+    label,
     summary: latest.summary,
     level: latest.level,
     createdAt: latest.createdAt,
     id: latest.id,
+    clickTarget,
   };
+}
+
+function activeReportsAlert(store) {
+  return activeTargetAlert(store, {
+    clickTarget: "reports",
+    readStateKey: "reportsOpenedAt",
+    label: "긴급 업데이트",
+  });
+}
+
+function activeDailyIntelligenceAlert(store) {
+  return activeTargetAlert(store, {
+    clickTarget: "daily-intelligence",
+    readStateKey: "dailyIntelligenceOpenedAt",
+    label: "보유종목 가설 반증",
+  });
 }
 
 function readExternalMarketBriefing(payload = {}) {
@@ -685,6 +710,7 @@ function publicSnapshot(store = readStore()) {
     recordCount: store.records.length,
     latest: store.records[store.records.length - 1] || null,
     reportsUrgentUpdate: activeReportsAlert(store),
+    dailyIntelligenceCriticalUpdate: activeDailyIntelligenceAlert(store),
     readState: store.readState || defaultStore().readState,
     emergencyProcedures: store.emergencyProcedures || defaultStore().emergencyProcedures,
   };
@@ -692,6 +718,9 @@ function publicSnapshot(store = readStore()) {
 
 async function pushNotification(payload) {
   const createdAt = new Date().toISOString();
+  const clickTarget = ["reports", "daily-intelligence"].includes(payload?.clickTarget)
+    ? payload.clickTarget
+    : "reports";
   const record = {
     id: "",
     createdAt,
@@ -699,10 +728,23 @@ async function pushNotification(payload) {
     level: normalizeLevel(payload?.level || "urgent"),
     source: cleanText(payload?.source || "manual", 80),
     summary: cleanText(payload?.summary || payload?.message || "긴급 업데이트가 있습니다."),
+    dedupeKey: cleanText(payload?.dedupeKey, 240),
   };
-  record.id = notificationIdFor(record);
+  record.id = record.dedupeKey
+    ? `stock_alert_${hashText(record.dedupeKey).slice(0, 16)}`
+    : notificationIdFor(record);
 
-  const delivery = browserNotificationDelivery(record);
+  const existing = readStore().records.find((item) => item.id === record.id);
+  if (existing) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "duplicate-notification",
+      record: existing,
+      status: publicSnapshot(),
+    };
+  }
+  const delivery = browserNotificationDelivery(clickTarget);
   const nextRecord = {
     ...record,
     delivery,
@@ -718,15 +760,22 @@ async function pushNotification(payload) {
   };
 }
 
-function markReportsOpened() {
+function markTargetOpened(target = "reports") {
+  const key = target === "daily-intelligence"
+    ? "dailyIntelligenceOpenedAt"
+    : "reportsOpenedAt";
   const nextStore = mutateStore((store) => ({
     ...store,
     readState: {
       ...(store.readState || {}),
-      reportsOpenedAt: new Date().toISOString(),
+      [key]: new Date().toISOString(),
     },
   }));
   return publicSnapshot(nextStore);
+}
+
+export async function pushSystemNotification(payload = {}) {
+  return pushNotification(payload);
 }
 
 function methodNotAllowed(res) {
@@ -784,11 +833,16 @@ export async function handleNotificationsEndpoint(kind, req, res) {
       }
       const payload = await readJsonBody(req, 16 * 1024).catch(() => ({}));
       const action = String(payload?.action || "mark-reports-opened").trim();
-      if (action !== "mark-reports-opened") {
+      if (!["mark-reports-opened", "mark-daily-intelligence-opened"].includes(action)) {
         sendJson(res, { ok: false, error: "unknown notification read-state action" }, 400);
         return;
       }
-      sendJson(res, markReportsOpened());
+      sendJson(
+        res,
+        markTargetOpened(
+          action === "mark-daily-intelligence-opened" ? "daily-intelligence" : "reports",
+        ),
+      );
       return;
     }
 

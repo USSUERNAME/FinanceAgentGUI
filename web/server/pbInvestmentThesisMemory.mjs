@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +14,7 @@ const DEFAULT_LEDGER_PATH = join(
 const LEDGER_SCHEMA = "pb_investment_thesis_memory.v1";
 const MAX_HISTORY = 60;
 const MAX_OBSERVATIONS = 120;
+const ledgerWriteQueues = new Map();
 
 function cleanText(value, maxLength = 800) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -49,6 +50,13 @@ function stateLabel(state) {
   }[state] || state;
 }
 
+function metricLabel(metricId) {
+  return {
+    sector_vs_spy_5d_pct_point: "섹터의 S&P 500 대비 5일 상대수익률",
+    stock_vs_sector_5d_pct_point: "종목의 섹터 대비 5일 상대수익률",
+  }[metricId] || "상대성과 지표";
+}
+
 function emptyLedger() {
   return {
     schemaVersion: LEDGER_SCHEMA,
@@ -67,6 +75,20 @@ function stockThesis(candidate, reportDate) {
   const priority = cleanText(candidate?.researchPriority, 20) || "C";
   const ticker = cleanText(candidate?.ticker, 20).toUpperCase();
   if (!ticker) return null;
+  const revisionDirection = cleanText(
+    candidate?.estimateRevision?.revisionDirection,
+    80,
+  );
+  const negativeRevision = /negative|down|cut|lower/i.test(revisionDirection);
+  const explicitlyRejected = priority === "REJECTED" || Boolean(candidate?.rejectionReason);
+  const state = explicitlyRejected
+    ? "invalidated"
+    : negativeRevision
+      ? "weakened"
+      : priorityState(priority);
+  const stockVsSector5d = Number.isFinite(Number(candidate?.stockVsSector5d))
+    ? Number(candidate.stockVsSector5d)
+    : null;
   return {
     continuityId: `pb-stock-${ticker.toLowerCase()}`,
     kind: "stock",
@@ -75,8 +97,8 @@ function stockThesis(candidate, reportDate) {
     thesis: cleanText(
       `${candidate.whyNow || "이상 움직임 확인"} · ${candidate.linkedSectorLabel || "섹터 연결 확인 대기"}`,
     ),
-    state: priorityState(priority),
-    stateLabel: stateLabel(priorityState(priority)),
+    state,
+    stateLabel: stateLabel(state),
     priority,
     sectorTicker: cleanText(candidate.linkedSectorTicker, 20),
     sectorLabel: cleanText(candidate.linkedSectorLabel, 80),
@@ -86,7 +108,15 @@ function stockThesis(candidate, reportDate) {
       candidate.evidenceSummary,
       candidate.fundamentalGateLabel,
       candidate.whyNow,
+      stockVsSector5d === null
+        ? ""
+        : `5일 섹터 대비 상대수익률 ${stockVsSector5d >= 0 ? "+" : ""}${stockVsSector5d.toFixed(2)}%p`,
+      negativeRevision ? "30일 추정치 하향 신호" : "",
     ]),
+    direction: 1,
+    metricId: stockVsSector5d === null ? "" : "stock_vs_sector_5d_pct_point",
+    metricValue: stockVsSector5d,
+    metricUnit: "%p",
     reportDate,
   };
 }
@@ -278,13 +308,13 @@ function appendObservation(previous, candidate, reportDate) {
   return next.slice(-MAX_OBSERVATIONS);
 }
 
-export async function syncInvestmentThesisMemory({
-  decisionChain,
+async function persistInvestmentThesesUnlocked({
+  candidates,
   reportDate,
-  env = process.env,
-  now = () => new Date().toISOString(),
-} = {}) {
-  const candidates = buildTrackedInvestmentTheses({ decisionChain, reportDate });
+  env,
+  now,
+  path,
+}) {
   if (!reportDate) throw new Error("투자 가설 동기화에는 reportDate가 필요합니다.");
   if (!candidates.length) {
     throw new Error("판단 근거 게이트를 통과한 추적 가설이 없습니다.");
@@ -340,11 +370,17 @@ export async function syncInvestmentThesisMemory({
       .map(normalizeRecord)
       .sort((first, second) => first.continuityId.localeCompare(second.continuityId)),
   };
-  const path = ledgerPath(env);
   await mkdir(dirname(path), { recursive: true });
-  const tempPath = `${path}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  await rename(tempPath, path);
+  const tempPath = `${path}.${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`;
+  const serialized = `${JSON.stringify(payload, null, 2)}\n`;
+  await writeFile(tempPath, serialized, "utf8");
+  try {
+    await rename(tempPath, path);
+  } catch (error) {
+    if (!["EPERM", "EEXIST"].includes(error?.code)) throw error;
+    await writeFile(path, serialized, "utf8");
+    await rm(tempPath, { force: true });
+  }
   const snapshot = await readInvestmentThesisMemory({ env });
   return {
     ...snapshot,
@@ -353,6 +389,82 @@ export async function syncInvestmentThesisMemory({
     createdCount,
     transitionCount,
   };
+}
+
+async function persistInvestmentTheses(options) {
+  const path = ledgerPath(options.env);
+  const previous = ledgerWriteQueues.get(path) || Promise.resolve();
+  let release;
+  const current = new Promise((resolveQueue) => {
+    release = resolveQueue;
+  });
+  const queued = previous.then(() => current);
+  ledgerWriteQueues.set(path, queued);
+  await previous;
+  try {
+    return await persistInvestmentThesesUnlocked({ ...options, path });
+  } finally {
+    release();
+    if (ledgerWriteQueues.get(path) === queued) ledgerWriteQueues.delete(path);
+  }
+}
+
+export async function syncInvestmentThesisMemory({
+  decisionChain,
+  reportDate,
+  env = process.env,
+  now = () => new Date().toISOString(),
+} = {}) {
+  const candidates = buildTrackedInvestmentTheses({ decisionChain, reportDate });
+  const current = await readInvestmentThesisMemory({ env });
+  if (!current.available) throw new Error(current.error);
+  const trackedStockIds = new Set(
+    current.records
+      .filter((record) => record.kind === "stock")
+      .map((record) => record.entityId),
+  );
+  const existingCandidateIds = new Set(candidates.map((candidate) => candidate.continuityId));
+  for (const candidate of decisionChain?.ideaFunnel?.candidatePool || []) {
+    if (!trackedStockIds.has(candidate.ticker)) continue;
+    const thesis = stockThesis(candidate, reportDate);
+    if (thesis && !existingCandidateIds.has(thesis.continuityId)) {
+      candidates.push(thesis);
+      existingCandidateIds.add(thesis.continuityId);
+    }
+  }
+  return persistInvestmentTheses({ candidates, reportDate, env, now });
+}
+
+export async function syncSelectedStockThesisMemory({
+  candidate,
+  reportDate,
+  env = process.env,
+  now = () => new Date().toISOString(),
+} = {}) {
+  if (!["qualified", "research"].includes(candidate?.status)) {
+    throw new Error("심층검토 또는 근거보강 단계의 종목만 투자 가설로 저장할 수 있습니다.");
+  }
+  const thesis = stockThesis({
+    ...candidate,
+    researchPriority: candidate.status === "qualified"
+      ? "A"
+      : candidate.researchPriority === "A"
+        ? "A"
+        : "B",
+    promotionCondition: candidate.researchProfile?.confirmationCondition
+      || candidate.promotionCondition,
+    firstRejection: candidate.researchProfile?.invalidationCondition
+      || candidate.firstRejection,
+    fundamentalGateLabel: candidate.fundamentalGateLabel
+      || candidate.fundamentalGateStatus,
+  }, reportDate);
+  if (!thesis) throw new Error("저장할 종목 티커가 없습니다.");
+  return persistInvestmentTheses({
+    candidates: [thesis],
+    reportDate,
+    env,
+    now,
+  });
 }
 
 function dateFloor(value) {
@@ -366,8 +478,11 @@ function recentDateCutoff(asOfDate, windowDays) {
 }
 
 function scoreRecord(record, cutoff) {
-  if (record.kind !== "sector" || !record.direction || !record.metricId) {
-    return { status: "not_scoreable", reason: "방향과 비교 지표가 정의된 섹터 가설만 성과 판정합니다." };
+  if (!record.direction || !record.metricId) {
+    return {
+      status: "not_scoreable",
+      reason: "방향과 비교 지표가 정의된 가설만 성과 판정합니다.",
+    };
   }
   const observations = record.observations
     .filter((item) => {
@@ -379,18 +494,53 @@ function scoreRecord(record, cutoff) {
     return { status: "pending", reason: "서로 다른 거래일 관측이 2회 이상 필요합니다." };
   }
   const latest = observations.at(-1);
+  if (record.kind === "stock") {
+    if (latest.state === "invalidated") {
+      return {
+        status: "miss",
+        reason: "최신 공식 근거·펀더멘털 게이트에서 종목 가설이 무효화됐습니다.",
+        latestValue: latest.metricValue,
+      };
+    }
+    if (latest.state === "weakened") {
+      return {
+        status: "miss",
+        reason: "최신 추정치 하향 신호로 종목 가설이 약화됐습니다.",
+        latestValue: latest.metricValue,
+      };
+    }
+    if (latest.metricValue > 0.5) {
+      return {
+        status: "hit",
+        reason: `최신 5일 섹터 대비 상대수익률이 +${latest.metricValue.toFixed(2)}%p입니다.`,
+        latestValue: latest.metricValue,
+      };
+    }
+    if (latest.metricValue < -0.5) {
+      return {
+        status: "miss",
+        reason: `최신 5일 섹터 대비 상대수익률이 ${latest.metricValue.toFixed(2)}%p입니다.`,
+        latestValue: latest.metricValue,
+      };
+    }
+    return {
+      status: "inconclusive",
+      reason: "최신 종목의 섹터 대비 상대수익률이 ±0.50%p 중립 구간입니다.",
+      latestValue: latest.metricValue,
+    };
+  }
   const alignedValue = latest.metricValue * record.direction;
   if (alignedValue > 0.1) {
     return {
       status: "hit",
-      reason: `최신 ${record.metricId}가 가설 방향으로 ${latest.metricValue >= 0 ? "+" : ""}${latest.metricValue.toFixed(2)}${record.metricUnit || ""}입니다.`,
+      reason: `최신 ${metricLabel(record.metricId)}이 가설 방향으로 ${latest.metricValue >= 0 ? "+" : ""}${latest.metricValue.toFixed(2)}${record.metricUnit || ""}입니다.`,
       latestValue: latest.metricValue,
     };
   }
   if (alignedValue < -0.1) {
     return {
       status: "miss",
-      reason: `최신 ${record.metricId}가 가설 반대 방향으로 ${latest.metricValue >= 0 ? "+" : ""}${latest.metricValue.toFixed(2)}${record.metricUnit || ""}입니다.`,
+      reason: `최신 ${metricLabel(record.metricId)}이 가설 반대 방향으로 ${latest.metricValue >= 0 ? "+" : ""}${latest.metricValue.toFixed(2)}${record.metricUnit || ""}입니다.`,
       latestValue: latest.metricValue,
     };
   }
@@ -399,6 +549,52 @@ function scoreRecord(record, cutoff) {
     reason: "최신 상대성과가 ±0.10%p 중립 구간에 있어 판정을 보류합니다.",
     latestValue: latest.metricValue,
   };
+}
+
+function buildOutcomeAlerts(records, scored, cutoff, asOfDate) {
+  const scoredById = new Map(scored.map((item) => [item.continuityId, item]));
+  const alerts = records.flatMap((record) => {
+    const current = scoredById.get(record.continuityId);
+    if (!["hit", "miss"].includes(current?.status)) return [];
+    const observations = record.observations
+      .filter((item) => Number.isFinite(item.metricValue))
+      .slice()
+      .sort((first, second) => first.at.localeCompare(second.at));
+    const latestDate = observations.at(-1)?.at || "";
+    if (!latestDate || latestDate !== asOfDate) return [];
+    const priorObservations = observations.filter((item) => item.at < latestDate);
+    const priorLatest = priorObservations.at(-1);
+    const previous = scoreRecord({
+      ...record,
+      state: priorLatest?.state || record.state,
+      observations: priorObservations,
+    }, cutoff);
+    if (previous.status === current.status) return [];
+    return [{
+      id: `${record.continuityId}-${latestDate}-${current.status}`,
+      continuityId: record.continuityId,
+      kind: record.kind,
+      entityId: record.entityId,
+      title: record.title,
+      at: latestDate,
+      status: current.status,
+      previousStatus: previous.status,
+      alertType: current.status === "miss"
+        ? "thesis_contradicted"
+        : "thesis_confirmed",
+      severity: current.status === "miss" ? "high" : "positive",
+      reason: current.reason,
+      latestValue: current.latestValue ?? null,
+      confirmationCondition: record.confirmationCondition,
+      invalidationCondition: record.invalidationCondition,
+    }];
+  });
+  const severityRank = { high: 0, positive: 1 };
+  return alerts
+    .sort((first, second) =>
+      Number(severityRank[first.severity] ?? 9) - Number(severityRank[second.severity] ?? 9)
+      || first.entityId.localeCompare(second.entityId))
+    .slice(0, 8);
 }
 
 export function buildWeeklyThesisCalibration(
@@ -422,6 +618,7 @@ export function buildWeeklyThesisCalibration(
     direction: record.direction,
     ...scoreRecord(record, cutoff),
   }));
+  const alerts = buildOutcomeAlerts(recentRecords, scored, cutoff, asOfDate);
   const counts = scored.reduce(
     (result, item) => {
       result[item.status] = Number(result[item.status] || 0) + 1;
@@ -485,6 +682,7 @@ export function buildWeeklyThesisCalibration(
     concentrationPct,
     evidenceGapCount,
     scored,
+    alerts,
     transitions,
     warnings,
   };

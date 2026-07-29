@@ -266,6 +266,7 @@ function App() {
   const notificationController = useNotificationController();
   const {
     notificationStatus,
+    markDailyIntelligenceNotificationsOpened,
     markReportsNotificationsOpened,
   } = notificationController;
   const agentRuntimeController = useAgentRuntimeController();
@@ -584,10 +585,13 @@ function App() {
     if (item.view === "reports") {
       void markReportsNotificationsOpened();
     }
+    if (item.view === "daily-intelligence") {
+      void markDailyIntelligenceNotificationsOpened();
+    }
     setActiveView(item.view);
   }
 
-  function openReportsFromBrowserNotification(notification = null) {
+  function openBrowserNotificationTarget(targetView = "reports", notification = null) {
     if (notification && typeof notification.close === "function") {
       notification.close();
     }
@@ -596,9 +600,13 @@ function App() {
     } catch {
       // Focus can fail in restricted browser contexts; still navigate the app state.
     }
-    setActiveView("reports");
-    setReportRefreshSignal((value) => value + 1);
-    void markReportsNotificationsOpened();
+    setActiveView(targetView);
+    if (targetView === "daily-intelligence") {
+      void markDailyIntelligenceNotificationsOpened();
+    } else {
+      setReportRefreshSignal((value) => value + 1);
+      void markReportsNotificationsOpened();
+    }
   }
 
   function showBrowserNotificationForStatus(status = notificationStatusRef.current) {
@@ -607,7 +615,14 @@ function App() {
       return false;
     }
     setBrowserNotificationPermission(window.Notification.permission || "default");
-    const urgentUpdate = status?.reportsUrgentUpdate || {};
+    const urgentUpdate = [
+      status?.reportsUrgentUpdate,
+      status?.dailyIntelligenceCriticalUpdate,
+    ]
+      .filter((item) => item?.showBadge)
+      .sort((first, second) =>
+        new Date(second.createdAt || 0).getTime() - new Date(first.createdAt || 0).getTime())[0]
+      || {};
     const notificationId = urgentUpdate.id || status?.latest?.id || "";
     if (!urgentUpdate.showBadge || !notificationId) return false;
     if (browserNotificationLastShownRef.current === notificationId) return false;
@@ -615,6 +630,7 @@ function App() {
 
     const body = urgentUpdate.summary || status?.latest?.summary || "긴급 업데이트가 있습니다.";
     const icon = status?.delivery?.iconPath || "/favicon.svg";
+    const targetView = urgentUpdate.clickTarget || "reports";
     const notification = new window.Notification(status?.appName || "주식채널+", {
       body,
       icon,
@@ -623,12 +639,12 @@ function App() {
       renotify: true,
       data: {
         id: notificationId,
-        view: "reports",
+        view: targetView,
       },
     });
     notification.onclick = (event) => {
       event.preventDefault();
-      openReportsFromBrowserNotification(notification);
+      openBrowserNotificationTarget(targetView, notification);
     };
     browserNotificationLastShownRef.current = notificationId;
     writeLastBrowserNotificationId(notificationId);
@@ -840,7 +856,12 @@ function App() {
   useEffect(() => {
     notificationStatusRef.current = notificationStatus;
     showBrowserNotificationForStatus(notificationStatus);
-  }, [notificationStatus?.latest?.id, notificationStatus?.reportsUrgentUpdate?.showBadge]);
+  }, [
+    notificationStatus?.latest?.id,
+    notificationStatus?.reportsUrgentUpdate?.showBadge,
+    notificationStatus?.dailyIntelligenceCriticalUpdate?.id,
+    notificationStatus?.dailyIntelligenceCriticalUpdate?.showBadge,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("Notification" in window)) {

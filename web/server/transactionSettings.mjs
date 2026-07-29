@@ -21,6 +21,7 @@ const fallbackSettings = {
   mainTableColumns: [],
   sidebarManualOrder: [],
   watchlistGroups: [],
+  portfolioHoldings: [],
 };
 
 const DISPLAY_CURRENCY_IDS = new Set(["auto", "KRW", "USD"]);
@@ -291,6 +292,28 @@ function normalizeTransactionWatchlistGroups(value, fallback = fallbackSettings.
   return nextGroups;
 }
 
+function normalizeTransactionPortfolioHoldings(value, fallback = fallbackSettings.portfolioHoldings) {
+  const source = Array.isArray(value) ? value : Array.isArray(fallback) ? fallback : [];
+  const byTicker = new Map();
+  for (const item of source) {
+    const raw = item && typeof item === "object" ? item : { ticker: item };
+    const ticker = cleanWatchlistSymbol(raw.ticker ?? raw.symbol ?? raw.code);
+    if (!ticker) continue;
+    const numericWeight = Number(raw.weight ?? raw.targetWeight ?? raw.allocation);
+    const weight = Number.isFinite(numericWeight)
+      ? Math.min(100, Math.max(0.01, Math.round(numericWeight * 100) / 100))
+      : null;
+    if (weight === null) continue;
+    byTicker.set(ticker, {
+      ticker,
+      weight,
+      label: cleanWatchlistInstrumentText(raw.label ?? raw.name, 100) || "간편 보유목록",
+      updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
+    });
+  }
+  return [...byTicker.values()];
+}
+
 export function preserveTransactionWatchlistInstrumentsForLegacyPatch(value, currentGroups = []) {
   if (!Array.isArray(value)) return value;
   const currentById = new Map(
@@ -352,6 +375,10 @@ export function normalizeTransactionSettings(raw = {}) {
       source.watchlistGroups ?? source.watchlistFolders ?? source.interestGroups,
       fallbackSettings.watchlistGroups
     ),
+    portfolioHoldings: normalizeTransactionPortfolioHoldings(
+      source.portfolioHoldings ?? source.quickPortfolioHoldings ?? source.holdings,
+      fallbackSettings.portfolioHoldings,
+    ),
     updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : "",
   };
 }
@@ -407,6 +434,10 @@ export function writeTransactionSettingsPatch(patch = {}) {
     Object.prototype.hasOwnProperty.call(source, "watchlistGroups") ||
     Object.prototype.hasOwnProperty.call(source, "watchlistFolders") ||
     Object.prototype.hasOwnProperty.call(source, "interestGroups");
+  const hasPortfolioHoldings =
+    Object.prototype.hasOwnProperty.call(source, "portfolioHoldings") ||
+    Object.prototype.hasOwnProperty.call(source, "quickPortfolioHoldings") ||
+    Object.prototype.hasOwnProperty.call(source, "holdings");
   if (
     !hasMenuHidden &&
     !hasSidebarDisplayCurrency &&
@@ -417,9 +448,10 @@ export function writeTransactionSettingsPatch(patch = {}) {
     !hasInvestmentChartVolumeVisible &&
     !hasMainTableColumns &&
     !hasSidebarManualOrder &&
-    !hasWatchlistGroups
+    !hasWatchlistGroups &&
+    !hasPortfolioHoldings
   ) {
-    throw new Error("menuHidden, sidebarDisplayCurrency, mainDisplayCurrency, sidebarValueMode, investmentChartMode, investmentChartIntervalMode, investmentChartVolumeVisible, mainTableColumns, sidebarManualOrder, or watchlistGroups is required");
+    throw new Error("menuHidden, sidebarDisplayCurrency, mainDisplayCurrency, sidebarValueMode, investmentChartMode, investmentChartIntervalMode, investmentChartVolumeVisible, mainTableColumns, sidebarManualOrder, watchlistGroups, or portfolioHoldings is required");
   }
 
   const current = readTransactionSettings();
@@ -467,12 +499,167 @@ export function writeTransactionSettingsPatch(patch = {}) {
           ),
         }
       : {}),
+    ...(hasPortfolioHoldings
+      ? {
+          portfolioHoldings:
+            source.portfolioHoldings ?? source.quickPortfolioHoldings ?? source.holdings,
+        }
+      : {}),
     updatedAt: new Date().toISOString(),
   });
   const tmpPath = `${USER_SETTINGS_PATH}.tmp`;
   writeFileSync(tmpPath, `${JSON.stringify(nextSettings, null, 2)}\n`);
   renameSync(tmpPath, USER_SETTINGS_PATH);
   return nextSettings;
+}
+
+export function addTickerToTransactionWatchlistSettings(currentSettings, {
+  ticker,
+  groupId = "daily-intelligence",
+  groupName = "Daily Intelligence",
+} = {}) {
+  const symbol = cleanWatchlistSymbol(ticker);
+  if (!symbol) throw new Error("추가할 미국 주식 티커가 올바르지 않습니다.");
+  const current = normalizeTransactionSettings(currentSettings);
+  const existingGroup = current.watchlistGroups.find((group) =>
+    group.symbols.includes(symbol));
+  if (existingGroup) {
+    return {
+      added: false,
+      ticker: symbol,
+      groupId: existingGroup.id,
+      groupName: existingGroup.name,
+      settings: current,
+    };
+  }
+  const normalizedGroupId = cleanWatchlistGroupId(groupId) || "daily-intelligence";
+  const normalizedGroupName = cleanWatchlistGroupName(groupName) || "Daily Intelligence";
+  const groups = current.watchlistGroups.map((group) => ({
+    ...group,
+    symbols: [...group.symbols],
+    instruments: [...group.instruments],
+  }));
+  const targetIndex = groups.findIndex((group) => group.id === normalizedGroupId);
+  if (targetIndex === -1) {
+    groups.push({
+      id: normalizedGroupId,
+      name: normalizedGroupName,
+      createdAt: new Date().toISOString(),
+      symbols: [symbol],
+      instruments: [],
+    });
+  } else {
+    groups[targetIndex] = {
+      ...groups[targetIndex],
+      symbols: [...groups[targetIndex].symbols, symbol],
+    };
+  }
+  const settings = normalizeTransactionSettings({
+    ...current,
+    watchlistGroups: groups,
+  });
+  return {
+    added: true,
+    ticker: symbol,
+    groupId: normalizedGroupId,
+    groupName: normalizedGroupName,
+    settings,
+  };
+}
+
+export function addTransactionWatchlistTicker(options = {}) {
+  const result = addTickerToTransactionWatchlistSettings(
+    readTransactionSettings(),
+    options,
+  );
+  if (!result.added) return result;
+  return {
+    ...result,
+    settings: writeTransactionSettingsPatch({
+      watchlistGroups: result.settings.watchlistGroups,
+    }),
+  };
+}
+
+export function upsertPortfolioHoldingSettings(currentSettings, {
+  ticker,
+  weight,
+  label = "Daily Intelligence 간편 보유",
+} = {}) {
+  const symbol = cleanWatchlistSymbol(ticker);
+  if (!symbol) throw new Error("등록할 미국 주식 티커가 올바르지 않습니다.");
+  const numericWeight = Number(weight);
+  if (!Number.isFinite(numericWeight) || numericWeight <= 0 || numericWeight > 100) {
+    throw new Error("보유 비중은 0보다 크고 100 이하인 숫자여야 합니다.");
+  }
+  const current = normalizeTransactionSettings(currentSettings);
+  const normalizedWeight = Math.round(numericWeight * 100) / 100;
+  const existing = current.portfolioHoldings.find((item) => item.ticker === symbol);
+  const projectedTotal = current.portfolioHoldings
+    .filter((item) => item.ticker !== symbol)
+    .reduce((sum, item) => sum + item.weight, 0) + normalizedWeight;
+  if (projectedTotal > 100.0001) {
+    throw new Error(`보유 비중 합계가 100%를 초과합니다. 현재 등록 가능 비중은 ${Math.max(
+      0,
+      100 - current.portfolioHoldings
+        .filter((item) => item.ticker !== symbol)
+        .reduce((sum, item) => sum + item.weight, 0),
+    ).toFixed(2)}%입니다.`);
+  }
+  const portfolioHoldings = current.portfolioHoldings
+    .filter((item) => item.ticker !== symbol)
+    .concat({
+      ticker: symbol,
+      weight: normalizedWeight,
+      label: cleanWatchlistInstrumentText(label, 100) || "Daily Intelligence 간편 보유",
+      updatedAt: new Date().toISOString(),
+    });
+  return {
+    added: !existing,
+    updated: Boolean(existing),
+    ticker: symbol,
+    weight: normalizedWeight,
+    settings: normalizeTransactionSettings({
+      ...current,
+      portfolioHoldings,
+    }),
+  };
+}
+
+export function upsertTransactionPortfolioHolding(options = {}) {
+  const result = upsertPortfolioHoldingSettings(readTransactionSettings(), options);
+  return {
+    ...result,
+    settings: writeTransactionSettingsPatch({
+      portfolioHoldings: result.settings.portfolioHoldings,
+    }),
+  };
+}
+
+export function removePortfolioHoldingSettings(currentSettings, { ticker } = {}) {
+  const symbol = cleanWatchlistSymbol(ticker);
+  if (!symbol) throw new Error("삭제할 미국 주식 티커가 올바르지 않습니다.");
+  const current = normalizeTransactionSettings(currentSettings);
+  const exists = current.portfolioHoldings.some((item) => item.ticker === symbol);
+  return {
+    removed: exists,
+    ticker: symbol,
+    settings: normalizeTransactionSettings({
+      ...current,
+      portfolioHoldings: current.portfolioHoldings.filter((item) => item.ticker !== symbol),
+    }),
+  };
+}
+
+export function removeTransactionPortfolioHolding(options = {}) {
+  const result = removePortfolioHoldingSettings(readTransactionSettings(), options);
+  if (!result.removed) return result;
+  return {
+    ...result,
+    settings: writeTransactionSettingsPatch({
+      portfolioHoldings: result.settings.portfolioHoldings,
+    }),
+  };
 }
 
 export function publicTransactionSettingsSnapshot() {

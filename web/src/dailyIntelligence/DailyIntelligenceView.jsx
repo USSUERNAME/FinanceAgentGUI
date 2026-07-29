@@ -97,6 +97,24 @@ const sectorSignalLabels = {
   evidence_only: "방향성 미제시",
 };
 
+const valuationMetricLabels = {
+  forward_pe: "선행 P/E",
+  ev_to_ebitda: "EV/EBITDA",
+};
+
+const estimateMetricLabels = {
+  diluted_eps: "EPS",
+  eps: "EPS",
+  revenue: "매출",
+};
+
+const valuationRelativeLabels = {
+  discount_to_watchlist_peer_median: "비교기업 중앙값 하회",
+  premium_to_watchlist_peer_median: "비교기업 중앙값 상회",
+  near_watchlist_peer_median: "비교기업 중앙값 부근",
+  insufficient_usable_peers: "비교기업 부족",
+};
+
 const researchAnalysisStatusLabels = {
   complete: "분석 완료",
   partial: "일부 분석",
@@ -171,6 +189,11 @@ function signed(value, digits = 2, suffix = "") {
   const number = Number(value);
   if (!Number.isFinite(number)) return "—";
   return `${number > 0 ? "+" : ""}${number.toFixed(digits)}${suffix}`;
+}
+
+function multiple(value, digits = 2) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(digits)}배` : "—";
 }
 
 function metricTone(value) {
@@ -390,6 +413,52 @@ function MarketSectorStockChain({ chain }) {
                     <dd>{candidate.promotionCondition}</dd>
                   </div>
                 </dl>
+                {candidate.valuationScreen?.status === "screening_available" ? (
+                  <section className="daily-intelligence-candidate-valuation">
+                    <header>
+                      <div>
+                        <span>밸류에이션 스크리닝</span>
+                        <strong>
+                          {valuationRelativeLabels[candidate.valuationScreen.relativeStatus]
+                            || candidate.valuationScreen.relativeStatus}
+                        </strong>
+                      </div>
+                      <small>
+                        비교기업 {candidate.valuationScreen.usablePeerCount}개
+                      </small>
+                    </header>
+                    <div>
+                      <p>
+                        <span>{valuationMetricLabels[candidate.valuationScreen.primaryMetric]
+                          || candidate.valuationScreen.primaryMetric}</span>
+                        <strong>{multiple(candidate.valuationScreen.targetValue)}</strong>
+                      </p>
+                      <p>
+                        <span>비교기업 중앙</span>
+                        <strong>{multiple(candidate.valuationScreen.peerMedian)}</strong>
+                      </p>
+                      <p className={metricTone(candidate.valuationScreen.premiumDiscountPct)}>
+                        <span>중앙값 괴리</span>
+                        <strong>{signed(candidate.valuationScreen.premiumDiscountPct, 1, "%")}</strong>
+                      </p>
+                    </div>
+                    {candidate.estimateRevision?.rows?.length ? (
+                      <p className="daily-intelligence-candidate-revision">
+                        <b>30일 전망치</b>
+                        {candidate.estimateRevision.rows.slice(0, 2).map((row) => (
+                          <span key={`${row.metricId}-${row.periodEnd}`}>
+                            {estimateMetricLabels[row.metricId] || row.metricId || "지표"}{" "}
+                            {signed(row.revisionPct30d, 1, "%")}
+                          </span>
+                        ))}
+                      </p>
+                    ) : null}
+                    <p className="daily-intelligence-candidate-valuation-limit">
+                      현재가와 제3자 연간 EPS 추정치로 산출한 비교 스크리닝입니다.
+                      비교기업의 회계기간·사업구조가 달라 적정가치나 목표가격으로 해석하지 않습니다.
+                    </p>
+                  </section>
+                ) : null}
                 <footer>
                   <span>
                     {candidate.evidenceSummary} · {candidate.fundamentalGateLabel}
@@ -427,6 +496,97 @@ const thesisStateLabels = {
   archived: "보관",
 };
 
+function ThesisOutcomeAlerts({ calibration, compact = false }) {
+  const alerts = calibration?.alerts || [];
+  if (compact && !alerts.length) return null;
+  const outcomeLabels = {
+    hit: "가설 확인",
+    miss: "가설 반증",
+  };
+  const previousLabels = {
+    hit: "확인",
+    miss: "반증",
+    inconclusive: "판정 보류",
+    pending: "관측 누적",
+    not_scoreable: "평가 전",
+  };
+  return (
+    <section className={`daily-intelligence-panel daily-intelligence-wide daily-intelligence-thesis-alerts${compact ? " is-compact" : ""}`}>
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>THESIS CHANGE ALERT</span>
+          <h2>{compact ? "오늘 바뀐 투자 가설" : "가설 판정 변화 알림"}</h2>
+        </div>
+        <span className="daily-intelligence-count">{alerts.length}</span>
+      </div>
+      {alerts.length ? (
+        <div className="daily-intelligence-thesis-alert-list">
+          {alerts.map((alert) => (
+            <article
+              key={alert.id}
+              className={`is-${alert.status} is-priority-${alert.priorityLevel || "normal"}`}
+            >
+              <div className="daily-intelligence-thesis-alert-icon">
+                {alert.status === "miss"
+                  ? <AlertTriangle size={18} />
+                  : <CheckCircle2 size={18} />}
+              </div>
+              <div>
+                <header>
+                  <strong>{alert.entityId} · {outcomeLabels[alert.status]}</strong>
+                  <span>
+                    {previousLabels[alert.previousStatus] || alert.previousStatus}
+                    {" → "}
+                    {outcomeLabels[alert.status]}
+                  </span>
+                </header>
+                <p>{alert.reason}</p>
+                {alert.affectedAssets?.length ? (
+                  <div className="daily-intelligence-thesis-alert-assets">
+                    {alert.affectedAssets.map((asset) => (
+                      <span
+                        key={`${alert.id}-${asset.ticker}`}
+                        className={asset.roles.includes("portfolio") ? "is-portfolio" : "is-watchlist"}
+                        title={asset.relationshipLabel}
+                      >
+                        {asset.roles.includes("portfolio") ? "보유" : "관심"} {asset.ticker}
+                        {asset.relationship === "sector" ? ` · ${alert.entityId} 경유` : ""}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {!compact ? (
+                  <dl>
+                    <div>
+                      <dt>확인 조건</dt>
+                      <dd>{alert.confirmationCondition || "추가 정의 필요"}</dd>
+                    </div>
+                    <div>
+                      <dt>무효화 조건</dt>
+                      <dd>{alert.invalidationCondition || "추가 정의 필요"}</dd>
+                    </div>
+                  </dl>
+                ) : null}
+              </div>
+              <time>{alert.at}</time>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="daily-intelligence-muted">
+          오늘 새로 확인되거나 반증된 투자 가설이 없습니다.
+        </p>
+      )}
+      {!compact ? (
+        <p className="daily-intelligence-panel-note">
+          직전 거래일 판정과 달라진 경우에만 표시합니다. 같은 판정이 유지되는 동안에는
+          중복 알림을 만들지 않습니다.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function InvestmentThesisMemory({
   memory,
   busy,
@@ -437,6 +597,16 @@ function InvestmentThesisMemory({
   const records = memory.activeRecords || [];
   const pendingCount = memory.pendingCandidates?.length || 0;
   const calibration = memory.weeklyCalibration;
+  const outcomeById = new Map(
+    (calibration?.scored || []).map((item) => [item.continuityId, item]),
+  );
+  const outcomeLabels = {
+    hit: "확인",
+    miss: "반증",
+    inconclusive: "판정 보류",
+    pending: "관측 누적 중",
+    not_scoreable: "평가 지표 없음",
+  };
   return (
     <section className="daily-intelligence-panel daily-intelligence-wide daily-intelligence-thesis-memory">
       <div className="daily-intelligence-panel-title">
@@ -522,6 +692,7 @@ function InvestmentThesisMemory({
         <div className="daily-intelligence-thesis-memory-grid">
           {records.map((record) => {
             const latestTransition = record.history?.[record.history.length - 1];
+            const latestOutcome = outcomeById.get(record.continuityId);
             return (
               <article key={record.continuityId}>
                 <header>
@@ -534,6 +705,12 @@ function InvestmentThesisMemory({
                   </strong>
                 </header>
                 <p>{record.thesis}</p>
+                {latestOutcome ? (
+                  <div className={`daily-intelligence-thesis-outcome is-${latestOutcome.status}`}>
+                    <strong>{outcomeLabels[latestOutcome.status] || latestOutcome.status}</strong>
+                    <span>{latestOutcome.reason}</span>
+                  </div>
+                ) : null}
                 <dl>
                   <div>
                     <dt>확인 조건</dt>
@@ -856,7 +1033,133 @@ const portfolioEvidenceLabels = {
   no_direct_evidence: "직접 근거 없음",
 };
 
-function PortfolioImpact({ portfolioImpact }) {
+const portfolioRiskReviewStatusLabels = {
+  pending: "미검토",
+  checked: "확인 완료",
+  deferred: "보류",
+  resolved: "위험 해소",
+};
+
+function PortfolioQuickAdd({
+  candidates = [],
+  busy = "",
+  error = "",
+  onQuickAddWatchlist,
+  onQuickAddPortfolio,
+}) {
+  const quickCandidates = candidates
+    .filter((candidate) =>
+      candidate.deepAnalysisEligible
+      || ["A", "B"].includes(candidate.researchPriority))
+    .slice(0, 5);
+  if (!quickCandidates.length) return null;
+  return (
+    <div className="daily-intelligence-watchlist-quick-add">
+      <span>오늘 후보를 관심 또는 실제 보유로 연결</span>
+      <div className="daily-intelligence-portfolio-quick-grid">
+        {quickCandidates.map((candidate) => (
+          <form
+            key={candidate.ticker}
+            onSubmit={(event) => {
+              event.preventDefault();
+              const formData = new FormData(event.currentTarget);
+              onQuickAddPortfolio(candidate.ticker, Number(formData.get("weight")));
+            }}
+          >
+            <strong>{candidate.ticker}</strong>
+            <button
+              type="button"
+              onClick={() => onQuickAddWatchlist(candidate.ticker)}
+              disabled={Boolean(busy)}
+              title={`${candidate.ticker}를 Daily Intelligence 관심종목 그룹에 추가`}
+            >
+              {busy === `watchlist:${candidate.ticker}`
+                ? <LoaderCircle size={13} className="is-spinning" />
+                : <BriefcaseBusiness size={13} />}
+              관심
+            </button>
+            <label>
+              <input
+                type="number"
+                name="weight"
+                min="0.01"
+                max="100"
+                step="0.01"
+                defaultValue="5"
+                aria-label={`${candidate.ticker} 보유 비중`}
+                disabled={Boolean(busy)}
+              />
+              <span>%</span>
+            </label>
+            <button
+              type="submit"
+              className="is-portfolio"
+              disabled={Boolean(busy)}
+              title={`${candidate.ticker}를 입력 비중으로 실제 보유종목에 등록`}
+            >
+              {busy === `portfolio:${candidate.ticker}`
+                ? <LoaderCircle size={13} className="is-spinning" />
+                : <BriefcaseBusiness size={13} />}
+              보유
+            </button>
+          </form>
+        ))}
+      </div>
+      <small>
+        비중은 포트폴리오 전체 대비 백분율입니다. 같은 종목을 다시 등록하면 비중만 갱신합니다.
+      </small>
+      {error ? (
+        <p className="daily-intelligence-research-date-error">{error}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function portfolioRiskTrendOption(trend = {}) {
+  const rows = Array.isArray(trend?.rows) ? trend.rows : [];
+  return {
+    animation: false,
+    color: ["#c75b5b", "#d9923b", "#7a6bc2", "#8795a8"],
+    tooltip: { trigger: "axis" },
+    legend: {
+      bottom: 0,
+      textStyle: { color: "#65768b", fontSize: 9 },
+      data: ["종목 고위험", "섹터 고위험", "가설 충돌", "매핑 대기"],
+    },
+    grid: { left: 34, right: 12, top: 12, bottom: 38 },
+    xAxis: {
+      type: "category",
+      data: rows.map((row) => row.reportDate.slice(5)),
+      axisLabel: { color: "#718198", fontSize: 9 },
+      axisLine: { lineStyle: { color: "#d9e2eb" } },
+    },
+    yAxis: {
+      type: "value",
+      minInterval: 1,
+      axisLabel: { color: "#718198", fontSize: 9 },
+      splitLine: { lineStyle: { color: "#edf1f5" } },
+    },
+    series: [
+      { name: "종목 고위험", type: "bar", stack: "risk", data: rows.map((row) => row.stockHigh) },
+      { name: "섹터 고위험", type: "bar", stack: "risk", data: rows.map((row) => row.sectorHigh) },
+      { name: "가설 충돌", type: "bar", stack: "risk", data: rows.map((row) => row.thesisConflicts) },
+      { name: "매핑 대기", type: "bar", stack: "risk", data: rows.map((row) => row.unmapped) },
+    ],
+  };
+}
+
+function PortfolioImpact({
+  portfolioImpact,
+  candidates = [],
+  quickAddBusy = "",
+  quickAddError = "",
+  onQuickAddWatchlist,
+  onQuickAddPortfolio,
+  onRemovePortfolio,
+  riskReviewBusy = "",
+  riskReviewError = "",
+  onReviewRisk,
+}) {
   if (!portfolioImpact?.configured) {
     return (
       <div className="daily-intelligence-portfolio-empty">
@@ -867,18 +1170,310 @@ function PortfolioImpact({ portfolioImpact }) {
             포트폴리오 캔버스에 비중을 입력하거나 주식현황의 관심종목 그룹에 티커를
             추가하면, 다음 새로고침부터 관련 사건과 실적 일정을 이곳에 연결합니다.
           </p>
+          <PortfolioQuickAdd
+            candidates={candidates}
+            busy={quickAddBusy}
+            error={quickAddError}
+            onQuickAddWatchlist={onQuickAddWatchlist}
+            onQuickAddPortfolio={onQuickAddPortfolio}
+          />
         </div>
       </div>
     );
   }
   return (
     <>
+      <PortfolioQuickAdd
+        candidates={candidates}
+        busy={quickAddBusy}
+        error={quickAddError}
+        onQuickAddWatchlist={onQuickAddWatchlist}
+        onQuickAddPortfolio={onQuickAddPortfolio}
+      />
       <div className="daily-intelligence-portfolio-summary">
         <span>포트폴리오 {portfolioImpact.portfolioCount}종목</span>
         <span>관심종목 {portfolioImpact.watchlistCount}종목</span>
         <span>오늘 연결 {portfolioImpact.matchedCount}종목</span>
         <span>직접 근거 없음 {portfolioImpact.unmatchedCount}종목</span>
       </div>
+      <div className="daily-intelligence-portfolio-weight-summary">
+        <div>
+          <strong>간편 보유 비중 합계</strong>
+          <span>{portfolioImpact.quickPortfolioWeight || 0}% / 100%</span>
+        </div>
+        <div className="daily-intelligence-portfolio-weight-track">
+          <span
+            style={{ width: `${Math.min(100, portfolioImpact.quickPortfolioWeight || 0)}%` }}
+          />
+        </div>
+        <small>
+          남은 등록 가능 비중 {Math.max(0, 100 - (portfolioImpact.quickPortfolioWeight || 0)).toFixed(2)}%
+        </small>
+      </div>
+      {portfolioImpact.riskReview?.hasWarnings
+      || portfolioImpact.riskReview?.history?.trend?.sampleCount ? (
+        <div className="daily-intelligence-portfolio-risk-review">
+          <div className="daily-intelligence-portfolio-risk-title">
+            <AlertTriangle size={15} />
+            <strong>보유 집중도와 현재 시장 가설 점검</strong>
+          </div>
+          {portfolioImpact.riskReview.history?.comparison ? (
+            <div className={`daily-intelligence-portfolio-risk-change is-${
+              portfolioImpact.riskReview.history.comparison.direction
+            }`}>
+              <strong>전일 대비</strong>
+              <span>{portfolioImpact.riskReview.history.comparison.summary}</span>
+              {portfolioImpact.riskReview.history.comparison.previousDate ? (
+                <small>비교 기준 {portfolioImpact.riskReview.history.comparison.previousDate}</small>
+              ) : null}
+            </div>
+          ) : null}
+          {portfolioImpact.riskReview.history?.trend ? (
+            <div className={`daily-intelligence-portfolio-weekly-review is-${
+              portfolioImpact.riskReview.history.trend.status
+            }`}>
+              <div>
+                <span>7일 포트폴리오 위험 리뷰</span>
+                <strong>{portfolioImpact.riskReview.history.trend.label}</strong>
+                <small>{portfolioImpact.riskReview.history.trend.summary}</small>
+              </div>
+              {portfolioImpact.riskReview.history.trend.rows?.length ? (
+                <PortfolioEChart
+                  option={portfolioRiskTrendOption(portfolioImpact.riskReview.history.trend)}
+                  className="daily-intelligence-portfolio-risk-chart"
+                  ariaLabel="최근 7일 포트폴리오 위험 경고 추이"
+                />
+              ) : null}
+              {portfolioImpact.riskReview.history.trend.drivers?.added?.length
+              || portfolioImpact.riskReview.history.trend.drivers?.removed?.length ? (
+                <div className="daily-intelligence-portfolio-risk-drivers">
+                  {portfolioImpact.riskReview.history.trend.drivers.added?.length ? (
+                    <p className="is-added">
+                      <strong>새로 발생</strong>
+                      <span>
+                        {portfolioImpact.riskReview.history.trend.drivers.added
+                          .map((item) => `${item.kindLabel} · ${item.value}`)
+                          .join(" / ")}
+                      </span>
+                    </p>
+                  ) : null}
+                  {portfolioImpact.riskReview.history.trend.drivers.removed?.length ? (
+                    <p className="is-removed">
+                      <strong>해소</strong>
+                      <span>
+                        {portfolioImpact.riskReview.history.trend.drivers.removed
+                          .map((item) => `${item.kindLabel} · ${item.value}`)
+                          .join(" / ")}
+                      </span>
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {portfolioImpact.riskReview.actionChecklist?.length ? (
+            <div className="daily-intelligence-portfolio-risk-actions">
+              <header>
+                <div>
+                  <strong>원인별 확인·대응 체크리스트</strong>
+                  <small>고위험 항목부터 재검토 순서로 정렬</small>
+                </div>
+                {portfolioImpact.riskReview.reviewSummary ? (
+                  <span>
+                    완료 {portfolioImpact.riskReview.reviewSummary.completed}
+                    /{portfolioImpact.riskReview.reviewSummary.total}
+                  </span>
+                ) : null}
+              </header>
+              {portfolioImpact.riskReview.actionChecklist.map((item) => (
+                <details
+                  key={item.id}
+                  className={`is-${item.severity}`}
+                  open={item.severity === "high" && item.review?.status !== "resolved"}
+                >
+                  <summary>
+                    <span>{item.title}</span>
+                    <small className={`is-${item.review?.status || "pending"}`}>
+                      {portfolioRiskReviewStatusLabels[item.review?.status]
+                        || (item.severity === "high" ? "우선 확인" : "모니터링")}
+                    </small>
+                  </summary>
+                  <p>{item.cause}</p>
+                  <div>
+                    <strong>확인할 것</strong>
+                    <ul>
+                      {item.checks.map((check) => <li key={check}>{check}</li>)}
+                    </ul>
+                  </div>
+                  <div>
+                    <strong>검토 행동</strong>
+                    <ul>
+                      {item.actions.map((action) => <li key={action}>{action}</li>)}
+                    </ul>
+                  </div>
+                  <form
+                    className="daily-intelligence-portfolio-risk-review-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const formData = new FormData(event.currentTarget);
+                      onReviewRisk({
+                        riskId: item.id,
+                        status: String(formData.get("status") || "pending"),
+                        note: String(formData.get("note") || ""),
+                        reviewDate: String(formData.get("reviewDate") || ""),
+                        reviewReportDate: item.review?.reportDate || "",
+                      });
+                    }}
+                  >
+                    <label>
+                      <span>검토 상태</span>
+                      <select
+                        name="status"
+                        defaultValue={item.review?.status || "pending"}
+                        disabled={Boolean(riskReviewBusy)}
+                      >
+                        {Object.entries(portfolioRiskReviewStatusLabels).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>재검토일</span>
+                      <input
+                        type="date"
+                        name="reviewDate"
+                        min={item.review?.reportDate || undefined}
+                        defaultValue={item.review?.reviewDate || ""}
+                        disabled={Boolean(riskReviewBusy)}
+                      />
+                    </label>
+                    <label className="is-note">
+                      <span>검토 메모</span>
+                      <textarea
+                        name="note"
+                        rows="2"
+                        maxLength="500"
+                        defaultValue={item.review?.note || ""}
+                        placeholder="확인한 근거, 다시 볼 조건, 검토 기한을 기록"
+                        disabled={Boolean(riskReviewBusy)}
+                      />
+                    </label>
+                    <button type="submit" disabled={Boolean(riskReviewBusy)}>
+                      {riskReviewBusy === item.id
+                        ? <LoaderCircle size={12} className="is-spinning" />
+                        : null}
+                      저장
+                    </button>
+                    {item.review?.updatedAt ? (
+                      <small>
+                        마지막 저장 {new Date(item.review.updatedAt).toLocaleString("ko-KR")}
+                      </small>
+                    ) : null}
+                  </form>
+                </details>
+              ))}
+              {riskReviewError ? (
+                <p className="daily-intelligence-research-date-error">{riskReviewError}</p>
+              ) : null}
+            </div>
+          ) : null}
+          {portfolioImpact.riskReview.dueFollowUps?.length ? (
+            <div className="daily-intelligence-portfolio-risk-followups">
+              <header>
+                <strong>재검토 기한 도래</strong>
+                <span>{portfolioImpact.riskReview.dueFollowUps.length}건</span>
+              </header>
+              {portfolioImpact.riskReview.dueFollowUps.map((item) => (
+                <article key={`${item.reportDate}:${item.riskId}:${item.reviewDate}`}>
+                  <div>
+                    <strong>{item.title || item.riskId}</strong>
+                    <span>기한 {item.reviewDate} · 최초 검토 {item.reportDate}</span>
+                    {item.note ? <p>{item.note}</p> : null}
+                  </div>
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const formData = new FormData(event.currentTarget);
+                      onReviewRisk({
+                        riskId: item.riskId,
+                        status: String(formData.get("status") || "checked"),
+                        note: String(formData.get("note") || item.note || ""),
+                        reviewDate: String(formData.get("reviewDate") || ""),
+                        reviewReportDate: item.reportDate,
+                      });
+                    }}
+                  >
+                    <select
+                      name="status"
+                      defaultValue="checked"
+                      aria-label={`${item.title || item.riskId} 재검토 상태`}
+                      disabled={Boolean(riskReviewBusy)}
+                    >
+                      <option value="checked">확인 완료</option>
+                      <option value="resolved">위험 해소</option>
+                      <option value="deferred">다시 보류</option>
+                    </select>
+                    <input
+                      type="date"
+                      name="reviewDate"
+                      min={item.reviewDate}
+                      aria-label={`${item.title || item.riskId} 다음 재검토일`}
+                      disabled={Boolean(riskReviewBusy)}
+                    />
+                    <input
+                      type="text"
+                      name="note"
+                      maxLength="500"
+                      defaultValue={item.note || ""}
+                      aria-label={`${item.title || item.riskId} 검토 메모`}
+                      placeholder="확인 결과 또는 다음 조건"
+                      disabled={Boolean(riskReviewBusy)}
+                    />
+                    <button type="submit" disabled={Boolean(riskReviewBusy)}>
+                      {riskReviewBusy === item.riskId
+                        ? <LoaderCircle size={12} className="is-spinning" />
+                        : null}
+                      반영
+                    </button>
+                  </form>
+                </article>
+              ))}
+            </div>
+          ) : null}
+          {portfolioImpact.riskReview.stockConcentration?.map((item) => (
+            <p key={`stock-${item.ticker}`} className={`is-${item.severity}`}>
+              <strong>{item.ticker} 종목 집중</strong>
+              <span>간편 보유 비중 {item.weight}% · 기준 25% 이상</span>
+            </p>
+          ))}
+          {portfolioImpact.riskReview.sectorConcentration?.map((item) => (
+            <p key={`sector-${item.ticker}`} className={`is-${item.severity}`}>
+              <strong>{item.label} 섹터 집중</strong>
+              <span>{item.weight}% · {item.tickers.join(", ")} · 기준 40% 이상</span>
+            </p>
+          ))}
+          {portfolioImpact.riskReview.thesisConflicts?.map((item) => (
+            <p key={`conflict-${item.ticker}`} className="is-high">
+              <strong>{item.ticker} · 현재 {item.sectorLabel} 부담 경로와 충돌</strong>
+              <span>{item.reason}</span>
+              <small>재확인: {item.confirmationCondition}</small>
+            </p>
+          ))}
+          {portfolioImpact.riskReview.unmapped?.length ? (
+            <p className="is-monitor">
+              <strong>섹터 확인 필요</strong>
+              <span>
+                {portfolioImpact.riskReview.unmapped
+                  .map((item) => `${item.ticker} ${item.weight}%`)
+                  .join(" · ")}
+              </span>
+            </p>
+          ) : null}
+          <small className="daily-intelligence-panel-note">
+            집중도와 가설 충돌은 자동 매매 신호가 아니라 재검토 우선순위입니다.
+          </small>
+        </div>
+      ) : null}
       <p className="daily-intelligence-panel-note">
         리포트 결론을 종목별 매수·매도 신호로 바꾸지 않고, 관련 사건·가격 이상·실적
         일정과 근거 상태만 연결합니다.
@@ -902,6 +1497,53 @@ function PortfolioImpact({ portfolioImpact }) {
             </header>
             {asset.labels?.length ? (
               <p className="daily-intelligence-muted">{asset.labels.join(" · ")}</p>
+            ) : null}
+            {asset.roles.includes("portfolio") && asset.weights?.length ? (
+              <p className="daily-intelligence-portfolio-weight">
+                등록 비중 {asset.weights.map((weight) => `${weight}%`).join(" · ")}
+              </p>
+            ) : null}
+            {asset.sources?.includes("quick_portfolio") ? (
+              <form
+                className="daily-intelligence-portfolio-manage"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const formData = new FormData(event.currentTarget);
+                  onQuickAddPortfolio(asset.ticker, Number(formData.get("weight")));
+                }}
+              >
+                <label>
+                  <span>간편 보유 비중</span>
+                  <input
+                    type="number"
+                    name="weight"
+                    min="0.01"
+                    max="100"
+                    step="0.01"
+                    defaultValue={asset.quickWeights?.[0] || 0}
+                    aria-label={`${asset.ticker} 간편 보유 비중 수정`}
+                    disabled={Boolean(quickAddBusy)}
+                  />
+                  <em>%</em>
+                </label>
+                <button type="submit" disabled={Boolean(quickAddBusy)}>
+                  {quickAddBusy === `portfolio:${asset.ticker}`
+                    ? <LoaderCircle size={13} className="is-spinning" />
+                    : null}
+                  비중 저장
+                </button>
+                <button
+                  type="button"
+                  className="is-remove"
+                  disabled={Boolean(quickAddBusy)}
+                  onClick={() => onRemovePortfolio(asset.ticker)}
+                >
+                  {quickAddBusy === `remove:${asset.ticker}`
+                    ? <LoaderCircle size={13} className="is-spinning" />
+                    : <X size={13} />}
+                  삭제
+                </button>
+              </form>
             ) : null}
             {asset.candidate ? (
               <div className="daily-intelligence-portfolio-signal">
@@ -1583,7 +2225,12 @@ function SectorMappingQueue({ coverage, onChanged }) {
         const recommended = item.suggestion?.confidence === "high"
           ? item.suggestion.candidates?.[0]?.sectorId
           : "";
-        if (!next[item.sourceLabel] && recommended) next[item.sourceLabel] = recommended;
+        if (!next[item.sourceLabel] && recommended) {
+          next[item.sourceLabel] = {
+            primarySectorId: recommended,
+            secondarySectorIds: [],
+          };
+        }
       }
       return next;
     });
@@ -1614,10 +2261,63 @@ function SectorMappingQueue({ coverage, onChanged }) {
 
   if (!queue.length) return null;
 
+  const taxonomyGroups = [
+    {
+      id: "cross_market",
+      label: "시장·자산군",
+      sectors: (taxonomy?.sectors || []).filter((sector) => sector.kind === "cross_market"),
+    },
+    {
+      id: "sector",
+      label: "기본 업종",
+      sectors: (taxonomy?.sectors || []).filter((sector) => sector.kind === "sector"),
+    },
+    {
+      id: "theme",
+      label: "구조적 테마",
+      sectors: (taxonomy?.sectors || []).filter(
+        (sector) => !["cross_market", "sector"].includes(sector.kind),
+      ),
+    },
+  ];
+
+  const selectionFor = (sourceLabel) => selections[sourceLabel] || {
+    primarySectorId: "",
+    secondarySectorIds: [],
+  };
+  const updateSelection = (sourceLabel, patch) => {
+    setSelections((current) => ({
+      ...current,
+      [sourceLabel]: {
+        primarySectorId: "",
+        secondarySectorIds: [],
+        ...(current[sourceLabel] || {}),
+        ...patch,
+      },
+    }));
+  };
+  const addSecondaryTheme = (sourceLabel, sectorId) => {
+    if (!sectorId) return;
+    const selection = selectionFor(sourceLabel);
+    if (
+      selection.primarySectorId === sectorId
+      || selection.secondarySectorIds.includes(sectorId)
+    ) return;
+    updateSelection(sourceLabel, {
+      secondarySectorIds: [...selection.secondarySectorIds, sectorId],
+    });
+  };
+  const removeSecondaryTheme = (sourceLabel, sectorId) => {
+    const selection = selectionFor(sourceLabel);
+    updateSelection(sourceLabel, {
+      secondarySectorIds: selection.secondarySectorIds.filter((id) => id !== sectorId),
+    });
+  };
+
   const saveAlias = async (sourceLabel) => {
-    const sectorId = selections[sourceLabel] || "";
-    if (!sectorId) {
-      setError("표준 섹터를 먼저 선택해 주세요.");
+    const selection = selectionFor(sourceLabel);
+    if (!selection.primarySectorId) {
+      setError("주 섹터를 먼저 선택해 주세요.");
       return;
     }
     setBusyLabel(sourceLabel);
@@ -1626,7 +2326,11 @@ function SectorMappingQueue({ coverage, onChanged }) {
       const response = await fetch("/api/pb-daily-intelligence/sector-taxonomy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ alias: sourceLabel, sectorId }),
+        body: JSON.stringify({
+          alias: sourceLabel,
+          primarySectorId: selection.primarySectorId,
+          secondarySectorIds: selection.secondarySectorIds,
+        }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.ok === false) {
@@ -1645,7 +2349,7 @@ function SectorMappingQueue({ coverage, onChanged }) {
     <div className="daily-intelligence-sector-mapping">
       <div className="daily-intelligence-broker-subtitle">
         <strong>섹터 매핑 대기</strong>
-        <span>원문 섹터명을 표준 섹터에 연결하면 이후 리포트부터 자동 통합됩니다.</span>
+        <span>주 섹터 하나와 관련 구조적 테마를 함께 지정할 수 있습니다.</span>
       </div>
       {error ? <p className="daily-intelligence-research-date-error">{error}</p> : null}
       <div className="daily-intelligence-sector-mapping-list">
@@ -1663,10 +2367,9 @@ function SectorMappingQueue({ coverage, onChanged }) {
                     <button
                       type="button"
                       key={candidate.sectorId}
-                      onClick={() => setSelections((current) => ({
-                        ...current,
-                        [item.sourceLabel]: candidate.sectorId,
-                      }))}
+                      onClick={() => updateSelection(item.sourceLabel, {
+                        primarySectorId: candidate.sectorId,
+                      })}
                       title={`${candidate.reason} · ${(candidate.score * 100).toFixed(0)}점`}
                     >
                       {candidate.nameKo}
@@ -1675,26 +2378,76 @@ function SectorMappingQueue({ coverage, onChanged }) {
                 </div>
               ) : null}
             </div>
-            <select
-              value={selections[item.sourceLabel] || ""}
-              onChange={(event) => setSelections((current) => ({
-                ...current,
-                [item.sourceLabel]: event.target.value,
-              }))}
-              aria-label={`${item.sourceLabel} 표준 섹터`}
-              disabled={!taxonomy || busyLabel === item.sourceLabel}
-            >
-              <option value="">표준 섹터 선택</option>
-              {(taxonomy?.sectors || []).map((sector) => (
-                <option key={sector.id} value={sector.id}>
-                  {sector.nameKo}
-                </option>
-              ))}
-            </select>
+            <div className="daily-intelligence-sector-mapping-controls">
+              <select
+                value={selectionFor(item.sourceLabel).primarySectorId}
+                onChange={(event) => {
+                  const primarySectorId = event.target.value;
+                  updateSelection(item.sourceLabel, {
+                    primarySectorId,
+                    secondarySectorIds: selectionFor(item.sourceLabel).secondarySectorIds
+                      .filter((sectorId) => sectorId !== primarySectorId),
+                  });
+                }}
+                aria-label={`${item.sourceLabel} 주 섹터`}
+                disabled={!taxonomy || busyLabel === item.sourceLabel}
+              >
+                <option value="">주 섹터 선택</option>
+                {taxonomyGroups
+                  .filter((group) => group.id !== "cross_market")
+                  .map((group) => (
+                    <optgroup key={group.id} label={group.label}>
+                      {group.sectors.map((sector) => (
+                        <option key={sector.id} value={sector.id}>
+                          {sector.nameKo}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+              </select>
+              <select
+                value=""
+                onChange={(event) => addSecondaryTheme(item.sourceLabel, event.target.value)}
+                aria-label={`${item.sourceLabel} 보조 테마 추가`}
+                disabled={!taxonomy || busyLabel === item.sourceLabel}
+              >
+                <option value="">+ 보조 테마 추가</option>
+                {taxonomyGroups.find((group) => group.id === "theme")?.sectors
+                  .filter((sector) => (
+                    sector.id !== selectionFor(item.sourceLabel).primarySectorId
+                    && !selectionFor(item.sourceLabel).secondarySectorIds.includes(sector.id)
+                  ))
+                  .map((sector) => (
+                    <option key={sector.id} value={sector.id}>
+                      {sector.nameKo}
+                    </option>
+                  ))}
+              </select>
+              {selectionFor(item.sourceLabel).secondarySectorIds.length ? (
+                <div className="daily-intelligence-sector-theme-chips">
+                  {selectionFor(item.sourceLabel).secondarySectorIds.map((sectorId) => {
+                    const sector = taxonomy?.sectors?.find((row) => row.id === sectorId);
+                    return (
+                      <button
+                        type="button"
+                        key={sectorId}
+                        onClick={() => removeSecondaryTheme(item.sourceLabel, sectorId)}
+                        title="보조 테마 제거"
+                      >
+                        {sector?.nameKo || sectorId} ×
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
               onClick={() => saveAlias(item.sourceLabel)}
-              disabled={!selections[item.sourceLabel] || busyLabel === item.sourceLabel}
+              disabled={
+                !selectionFor(item.sourceLabel).primarySectorId
+                || busyLabel === item.sourceLabel
+              }
             >
               {busyLabel === item.sourceLabel
                 ? <LoaderCircle size={14} className="is-spinning" />
@@ -1706,8 +2459,416 @@ function SectorMappingQueue({ coverage, onChanged }) {
       </div>
       <p className="daily-intelligence-panel-note">
         저장 결과는 <code>config/research-sector-taxonomy.json</code>에 남습니다.
-        원문 리포트와 원래 섹터명은 변경하지 않습니다.
+        원문 리포트와 원래 섹터명은 변경하지 않으며, 보조 테마는 중복 집계 근거로 표시됩니다.
       </p>
+    </div>
+  );
+}
+
+function SectorImpactAlerts({ alerts = [], baseline = null, persistence = null }) {
+  const directionLabels = {
+    beneficiary: "우호",
+    pressure: "부담",
+    mixed: "상충",
+    neutral: "미확인",
+  };
+  const strengthLabels = {
+    strong: "강함",
+    moderate: "보통",
+    weak: "약함",
+    unconfirmed: "미확인",
+  };
+  if (!baseline?.available) {
+    return (
+      <div className="daily-intelligence-sector-impact-alerts is-empty">
+        <div>
+          <strong>섹터 영향도 변화</strong>
+          <span>직전 리서치 날짜와 같은 날짜의 시장 데이터가 쌓이면 전환 알림을 표시합니다.</span>
+        </div>
+        <em>비교 기준 축적 중</em>
+      </div>
+    );
+  }
+  return (
+    <div className="daily-intelligence-sector-impact-alerts">
+      <div className="daily-intelligence-broker-subtitle">
+        <strong>섹터 영향도 변화</strong>
+        <span>
+          {baseline.previousDate} → {baseline.currentDate}
+          {" · "}비교 가능 {baseline.comparableSectorCount}개
+        </span>
+      </div>
+      {alerts.length ? (
+        <div className="daily-intelligence-sector-impact-alert-list">
+          {alerts.map((alert) => (
+            <article key={`${alert.sectorId}-${alert.alertType}`} className={`is-${alert.severity}`}>
+              <div>
+                <span>{alert.title}</span>
+                <strong>{alert.sector}</strong>
+              </div>
+              <p>
+                {directionLabels[alert.previousDirection]} → {directionLabels[alert.currentDirection]}
+                {" · "}{strengthLabels[alert.previousStrength]} → {strengthLabels[alert.currentStrength]}
+                {alert.marketTicker ? ` · ${alert.marketTicker}` : ""}
+              </p>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="daily-intelligence-muted">
+          비교 가능한 섹터에서 방향·강도·가격/리서치 괴리 변화가 없습니다.
+        </p>
+      )}
+      <p className="daily-intelligence-panel-note">
+        같은 날짜의 시장 내부지표가 없으면 가격 변화는 비교하지 않습니다.
+        {" "}지속성 표본 {persistence?.historyPointCount || 0}회 ·
+        판정 완료 {persistence?.decisiveCount || 0}건
+        {persistence?.hitRatePct === null || persistence?.hitRatePct === undefined
+          ? ` · 최소 ${persistence?.minimumPublicSample || 10}건 전 적중률 비공개`
+          : ` · 적중률 ${persistence.hitRatePct}%`}
+      </p>
+    </div>
+  );
+}
+
+function SectorWatchlistRanking({ watchlist = null }) {
+  if (!watchlist) return null;
+  const strengthLabels = {
+    strong: "강함",
+    moderate: "보통",
+    weak: "약함",
+    unconfirmed: "미확인",
+  };
+  const groups = [
+    {
+      id: "promoted",
+      label: "승격",
+      description: "모든 근거 게이트 통과",
+      items: watchlist.promoted || [],
+    },
+    {
+      id: "watch",
+      label: "관찰",
+      description: "우호 방향·종목 연결 확인",
+      items: watchlist.watch || [],
+    },
+    {
+      id: "caution",
+      label: "경계",
+      description: "부담 또는 상충 신호",
+      items: watchlist.caution || [],
+    },
+  ];
+  return (
+    <div className="daily-intelligence-sector-watchlist">
+      <div className="daily-intelligence-broker-subtitle">
+        <strong>관심 섹터 승격 큐</strong>
+        <span>{watchlist.summary?.promotionRule}</span>
+      </div>
+      <div className="daily-intelligence-sector-watchlist-grid">
+        {groups.map((group) => (
+          <section key={group.id} className={`is-${group.id}`}>
+            <header>
+              <div>
+                <strong>{group.label}</strong>
+                <small>{group.description}</small>
+              </div>
+              <em>{group.items.length}</em>
+            </header>
+            {group.items.length ? group.items.slice(0, 5).map((item) => (
+              <article key={item.sectorId}>
+                <div>
+                  <span>#{item.rank}</span>
+                  <strong>{item.sector}</strong>
+                  <small>
+                    {item.marketTicker || "ETF 연결 대기"}
+                    {" · "}{strengthLabels[item.strength] || item.strength}
+                    {" · "}{item.streakCount}회 지속
+                  </small>
+                </div>
+                {item.relatedTickers?.length ? (
+                  <p>{item.relatedTickers.map((ticker) => ticker.ticker).join(" · ")}</p>
+                ) : null}
+                <p>{item.rationale}</p>
+                {item.missingRequirements?.length ? (
+                  <small>보강: {item.missingRequirements.join(" · ")}</small>
+                ) : null}
+              </article>
+            )) : (
+              <p className="daily-intelligence-muted">
+                {group.id === "promoted"
+                  ? "현재 모든 승격 조건을 통과한 섹터가 없습니다."
+                  : "해당 상태의 섹터가 없습니다."}
+              </p>
+            )}
+          </section>
+        ))}
+      </div>
+      {watchlist.notReadyCount ? (
+        <p className="daily-intelligence-panel-note">
+          활성 방향 또는 종목 근거가 부족한 {watchlist.notReadyCount}개 섹터는 순위에서 제외했습니다.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function SectorStockShortlists({
+  shortlists = null,
+  thesisMemory = null,
+  thesisBusy = false,
+  thesisError = "",
+  brokerResearchDate = "",
+  onTrackStock,
+}) {
+  const [selectedKey, setSelectedKey] = React.useState("");
+  if (!shortlists?.sectors?.length) return null;
+  const statusLabels = {
+    qualified: "심층검토",
+    research: "근거보강",
+    hold: "관찰",
+    excluded: "제외",
+  };
+  const revisionLabels = {
+    positive_revision: "추정치 상향",
+    negative_revision: "추정치 하향",
+    mixed_revision: "추정치 혼재",
+    not_available: "추정치 없음",
+  };
+  const candidateRows = shortlists.sectors.flatMap((sector) =>
+    sector.candidates.map((candidate) => ({
+      ...candidate,
+      sectorId: sector.sectorId,
+      sector: sector.sector,
+      sectorStatus: sector.sectorStatus,
+      selectionKey: `${sector.sectorId}:${candidate.ticker}`,
+    })),
+  );
+  const selectedCandidate = candidateRows.find(
+    (candidate) => candidate.selectionKey === selectedKey,
+  );
+  const trackedContinuityIds = new Set(
+    (thesisMemory?.records || []).map((record) => record.continuityId),
+  );
+  const selectedTracked = selectedCandidate
+    ? trackedContinuityIds.has(`pb-stock-${selectedCandidate.ticker.toLowerCase()}`)
+    : false;
+  const selectedTrackable = selectedCandidate
+    ? ["qualified", "research"].includes(selectedCandidate.status)
+    : false;
+  return (
+    <div className="daily-intelligence-sector-shortlists">
+      <div className="daily-intelligence-broker-subtitle">
+        <strong>섹터별 종목 쇼트리스트</strong>
+        <span>{shortlists.qualificationRule}</span>
+      </div>
+      <div className="daily-intelligence-sector-shortlist-summary">
+        {[
+          ["qualified", "심층검토"],
+          ["research", "근거보강"],
+          ["hold", "관찰"],
+          ["excluded", "제외"],
+        ].map(([status, label]) => (
+          <article key={status} className={`is-${status}`}>
+            <span>{label}</span>
+            <strong>{shortlists.totals?.[status] || 0}</strong>
+          </article>
+        ))}
+      </div>
+      <div className="daily-intelligence-sector-shortlist-grid">
+        {shortlists.sectors.map((sector) => (
+          <section key={sector.sectorId}>
+            <header>
+              <div>
+                <span>{sector.sectorStatus === "promoted" ? "승격 섹터" : "관찰 섹터"}</span>
+                <strong>{sector.sector}</strong>
+              </div>
+              <em>{sector.marketTicker || "ETF 미연결"}</em>
+            </header>
+            {sector.candidates.length ? sector.candidates.map((candidate) => {
+              const selectionKey = `${sector.sectorId}:${candidate.ticker}`;
+              return (
+              <article
+                key={candidate.ticker}
+                className={`is-${candidate.status} ${selectedKey === selectionKey ? "is-selected" : ""}`}
+              >
+                <header>
+                  <div>
+                    <strong>{candidate.ticker}</strong>
+                    <small>{candidate.companyName || candidate.exposureLabel}</small>
+                  </div>
+                  <em>{statusLabels[candidate.status]}</em>
+                </header>
+                <p>
+                  {candidate.evidenceSummary}
+                  {" · "}{revisionLabels[candidate.estimateRevision?.revisionDirection]
+                    || candidate.estimateRevision?.revisionDirection
+                    || "추정치 없음"}
+                </p>
+                <p>
+                  밸류에이션 비교기업 {candidate.valuationScreen?.usablePeerCount || 0}개
+                  {" · "}{candidate.exposureType === "direct" ? "리포트 직접 언급" : "섹터 간접 연결"}
+                </p>
+                {candidate.missingRequirements?.length ? (
+                  <small>보강: {candidate.missingRequirements.join(" · ")}</small>
+                ) : null}
+                <footer>{candidate.nextAction}</footer>
+                <button
+                  type="button"
+                  className="daily-intelligence-sector-shortlist-open"
+                  aria-expanded={selectedKey === selectionKey}
+                  onClick={() => setSelectedKey(
+                    selectedKey === selectionKey ? "" : selectionKey,
+                  )}
+                >
+                  {selectedKey === selectionKey ? "상세 닫기" : "심층분석 보기"}
+                </button>
+              </article>
+              );
+            }) : (
+              <p className="daily-intelligence-muted">연결된 종목 후보가 없습니다.</p>
+            )}
+          </section>
+        ))}
+      </div>
+      {selectedCandidate ? (
+        <section className={`daily-intelligence-stock-deep-dive is-${selectedCandidate.status}`}>
+          <header>
+            <div>
+              <span>STOCK RESEARCH GATE</span>
+              <h3>{selectedCandidate.ticker} <small>{selectedCandidate.companyName}</small></h3>
+              <p>{selectedCandidate.researchProfile?.researchQuestion}</p>
+            </div>
+            <button
+              type="button"
+              aria-label="종목 심층분석 닫기"
+              onClick={() => setSelectedKey("")}
+            >
+              <X size={16} />
+            </button>
+          </header>
+
+          <div className="daily-intelligence-stock-deep-dive-status">
+            <article>
+              <span>분석 상태</span>
+              <strong>{selectedCandidate.researchProfile?.readinessLabel}</strong>
+              <small>연구 우선순위 {selectedCandidate.researchPriority}</small>
+            </article>
+            <article>
+              <span>공식 근거</span>
+              <strong>{selectedCandidate.primaryEvidenceCount || 0}건</strong>
+              <small>확인 사실 {selectedCandidate.verifiedFactCount || 0}개</small>
+            </article>
+            <article>
+              <span>추정치</span>
+              <strong>
+                {revisionLabels[selectedCandidate.estimateRevision?.revisionDirection]
+                  || selectedCandidate.estimateRevision?.revisionDirection
+                  || "자료 없음"}
+              </strong>
+              <small>기준 {selectedCandidate.estimateRevision?.freezeAsOf || "미확인"}</small>
+            </article>
+            <article>
+              <span>밸류에이션</span>
+              <strong>{selectedCandidate.valuationScreen?.usablePeerCount || 0}개 비교</strong>
+              <small>
+                {valuationRelativeLabels[selectedCandidate.valuationScreen?.relativeStatus]
+                  || "비교 불가"}
+              </small>
+            </article>
+          </div>
+
+          <div className="daily-intelligence-stock-deep-dive-grid">
+            <article>
+              <span>왜 지금 보는가</span>
+              <p>{selectedCandidate.researchProfile?.whyNow}</p>
+            </article>
+            <article>
+              <span>확인된 근거 경계</span>
+              <ul>
+                {selectedCandidate.researchProfile?.evidenceBasis?.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </article>
+            <article>
+              <span>승격 조건</span>
+              <p>{selectedCandidate.researchProfile?.confirmationCondition}</p>
+            </article>
+            <article>
+              <span>무효화 조건</span>
+              <p>{selectedCandidate.researchProfile?.invalidationCondition}</p>
+            </article>
+          </div>
+
+          {selectedCandidate.estimateRevision?.rows?.length ? (
+            <div className="daily-intelligence-stock-deep-dive-estimates">
+              <strong>추정치 변화</strong>
+              {selectedCandidate.estimateRevision.rows.slice(0, 4).map((row) => (
+                <article key={`${row.metricId}-${row.periodEnd}`}>
+                  <span>{estimateMetricLabels[row.metricId] || row.metricId || "지표"}</span>
+                  <b>{row.periodEnd || "기간 미확인"}</b>
+                  <em>{signed(row.revisionPct30d, 1, "%")}</em>
+                  <small>표본 {row.analystCount || 0}</small>
+                </article>
+              ))}
+            </div>
+          ) : null}
+
+          {selectedCandidate.valuationScreen?.status === "screening_available" ? (
+            <div className="daily-intelligence-stock-deep-dive-valuation">
+              <p>
+                <span>{valuationMetricLabels[selectedCandidate.valuationScreen.primaryMetric]
+                  || selectedCandidate.valuationScreen.primaryMetric}</span>
+                <strong>{multiple(selectedCandidate.valuationScreen.targetValue)}</strong>
+              </p>
+              <p>
+                <span>비교기업 중앙</span>
+                <strong>{multiple(selectedCandidate.valuationScreen.peerMedian)}</strong>
+              </p>
+              <p>
+                <span>중앙값 괴리</span>
+                <strong>{signed(selectedCandidate.valuationScreen.premiumDiscountPct, 1, "%")}</strong>
+              </p>
+            </div>
+          ) : null}
+
+          <div className="daily-intelligence-stock-deep-dive-actions">
+            <button
+              type="button"
+              disabled={!selectedTrackable || thesisBusy || !onTrackStock}
+              onClick={() => onTrackStock?.({
+                ticker: selectedCandidate.ticker,
+                sectorId: selectedCandidate.sectorId,
+                brokerResearchDate,
+              })}
+            >
+              <Database size={15} />
+              {thesisBusy
+                ? "저장 중"
+                : selectedTracked
+                  ? "오늘 관측 갱신"
+                  : selectedTrackable
+                    ? "투자 가설 후보 저장"
+                    : "근거 충족 후 저장"}
+            </button>
+            <span>
+              {selectedTracked
+                ? "World Memory에서 같은 continuity ID로 추적 중입니다."
+                : "저장 후 같은 종목의 상태 변화가 날짜별 관측으로 누적됩니다."}
+            </span>
+          </div>
+          {thesisError ? (
+            <p className="daily-intelligence-research-date-error">{thesisError}</p>
+          ) : null}
+
+          <footer>
+            <ShieldCheck size={15} />
+            <span>{selectedCandidate.researchProfile?.evidenceBoundary}</span>
+          </footer>
+        </section>
+      ) : null}
+      <p className="daily-intelligence-panel-note">{shortlists.disclaimer}</p>
     </div>
   );
 }
@@ -1822,6 +2983,22 @@ function SectorCoverageExplorer({ coverage, reports, sectorHistory, selectedDate
   };
   const visiblePublisherStances = Object.entries(publisherOpinion.stances || {})
     .filter(([, publishers]) => publishers?.length);
+  const impact = selected.impactProfile || null;
+  const persistence = impact?.persistence || null;
+  const impactStrengthLabels = {
+    strong: "강함",
+    moderate: "보통",
+    weak: "약함",
+    unconfirmed: "미확인",
+  };
+  const impactEvidenceLabels = {
+    cross_confirmed: "가격·리서치 교차 확인",
+    partial_alignment: "부분 정렬",
+    price_only: "가격 신호만 확인",
+    research_only: "리서치 의견만 확인",
+    conflicting: "가격·의견 상충",
+    insufficient: "근거 부족",
+  };
   const trendOption = trend.length >= 2 ? {
     animation: false,
     tooltip: { trigger: "axis" },
@@ -1943,6 +3120,124 @@ function SectorCoverageExplorer({ coverage, reports, sectorHistory, selectedDate
             {selectedReports.length}건 · {[...new Set(selectedReports.map((report) => report.publisher))].length}개 발행사
           </p>
         </header>
+        {impact ? (
+          <section className={`daily-intelligence-sector-impact is-${impact.direction}`}>
+            <header>
+              <div>
+                <span>IMPACT & EXPOSURE</span>
+                <h4>섹터 영향도와 종목 노출</h4>
+              </div>
+              <strong>{impact.directionLabel}</strong>
+            </header>
+            <div className="daily-intelligence-sector-impact-summary">
+              <article>
+                <span>신호 강도</span>
+                <strong>{impactStrengthLabels[impact.strength] || impact.strength}</strong>
+                <small>{impactEvidenceLabels[impact.evidenceState] || impact.evidenceState}</small>
+              </article>
+              <article>
+                <span>시장 확인</span>
+                <strong>{impact.marketTicker || "연결 대기"}</strong>
+                <small>
+                  {impact.vsSpy5d === null
+                    ? "5일 상대성과 없음"
+                    : `SPY 대비 ${impact.vsSpy5d >= 0 ? "+" : ""}${impact.vsSpy5d.toFixed(2)}%p`}
+                </small>
+              </article>
+              <article>
+                <span>리서치 분류</span>
+                <strong>{impact.attributionLabel}</strong>
+                <small>명시적 의견 {impact.ratedOpinionCount}건</small>
+              </article>
+            </div>
+            <div className="daily-intelligence-sector-exposure-grid">
+              <div>
+                <strong>직접 노출 종목</strong>
+                {impact.directTickers?.length ? (
+                  <ul>
+                    {impact.directTickers.map((ticker) => (
+                      <li key={ticker.ticker}>
+                        <span>{ticker.ticker}</span>
+                        <small>
+                          {ticker.companyName || ticker.exposureLabel}
+                          {ticker.reportCount ? ` · ${ticker.reportCount}건` : ""}
+                        </small>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p>리포트에 명시된 종목 없음</p>}
+              </div>
+              <div>
+                <strong>간접 연결 후보</strong>
+                {impact.indirectTickers?.length ? (
+                  <ul>
+                    {impact.indirectTickers.map((ticker) => (
+                      <li key={ticker.ticker}>
+                        <span>{ticker.ticker}</span>
+                        <small>
+                          {ticker.companyName || ticker.exposureLabel}
+                          {ticker.candidateScore !== null ? ` · 후보점수 ${ticker.candidateScore}` : ""}
+                        </small>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p>후보 스캐너 연결 종목 없음</p>}
+              </div>
+            </div>
+            {persistence ? (
+              <div className="daily-intelligence-sector-persistence">
+                <article>
+                  <span>현재 지속성</span>
+                  <strong>
+                    {persistence.state === "persistent"
+                      ? `${persistence.streakCount}회 연속`
+                      : persistence.state === "emerging"
+                        ? `${persistence.streakCount}회 관측`
+                        : persistence.state === "inactive"
+                          ? "활성 방향 없음"
+                          : "표본 부족"}
+                  </strong>
+                  <small>
+                    {persistence.streakStartDate
+                      ? `${persistence.streakStartDate}부터`
+                      : `관측 ${persistence.observationCount}회`}
+                  </small>
+                </article>
+                <article>
+                  <span>차기 반응 평가</span>
+                  <strong>
+                    {persistence.recentOutcome?.status === "hit"
+                      ? "적중"
+                      : persistence.recentOutcome?.status === "miss"
+                        ? "실패"
+                        : persistence.recentOutcome?.status === "inconclusive"
+                          ? "불명확"
+                          : "평가 대기"}
+                  </strong>
+                  <small>
+                    {persistence.recentOutcome
+                      ? `${persistence.recentOutcome.responseDate} · SPY 대비 ${persistence.recentOutcome.responseVsSpy1d >= 0 ? "+" : ""}${persistence.recentOutcome.responseVsSpy1d.toFixed(2)}%p`
+                      : "다음 비교일 데이터 필요"}
+                  </small>
+                </article>
+                <article>
+                  <span>누적 성과</span>
+                  <strong>
+                    {persistence.hitRatePct === null
+                      ? "표본 축적 중"
+                      : `적중률 ${persistence.hitRatePct}%`}
+                  </strong>
+                  <small>
+                    적중 {persistence.hitCount} · 실패 {persistence.missCount}
+                    {" · "}불명확 {persistence.inconclusiveCount}
+                  </small>
+                </article>
+              </div>
+            ) : null}
+            <p>{impact.limitation}</p>
+            {persistence ? <p>{persistence.limitation}</p> : null}
+          </section>
+        ) : null}
         <div className="daily-intelligence-sector-trend-summary">
           <article>
             <span>리포트 변화</span>
@@ -2136,6 +3431,10 @@ function BrokerResearchMonitor({
   error,
   onDateChange,
   onTaxonomyChanged,
+  thesisMemory,
+  thesisBusy,
+  thesisError,
+  onTrackStock,
 }) {
   const [marketScopeFilter, setMarketScopeFilter] = React.useState("all");
   const availableDates = history?.availableDates || [];
@@ -2270,6 +3569,23 @@ function BrokerResearchMonitor({
       </div>
 
       <BrokerResearchIndex index={researchIndex} brokerResearch={brokerResearch} />
+
+      <SectorImpactAlerts
+        alerts={brokerResearch.consensus?.impactAlerts}
+        baseline={brokerResearch.consensus?.impactBaseline}
+        persistence={brokerResearch.consensus?.signalPersistence}
+      />
+
+      <SectorWatchlistRanking watchlist={brokerResearch.consensus?.sectorWatchlist} />
+
+      <SectorStockShortlists
+        shortlists={brokerResearch.consensus?.sectorStockShortlists}
+        thesisMemory={thesisMemory}
+        thesisBusy={thesisBusy}
+        thesisError={thesisError}
+        brokerResearchDate={selectedDate}
+        onTrackStock={onTrackStock}
+      />
 
       <SectorMappingQueue
         coverage={researchCoverage}
@@ -2970,6 +4286,15 @@ export default function DailyIntelligenceView({
     thesisMemoryBusy,
     thesisMemoryError,
     syncThesisMemory,
+    trackStockThesis,
+    watchlistQuickAddBusy,
+    watchlistQuickAddError,
+    quickAddWatchlistTicker,
+    quickAddPortfolioHolding,
+    removePortfolioHolding,
+    portfolioRiskReviewBusy,
+    portfolioRiskReviewError,
+    reviewPortfolioRisk,
   } = useDailyIntelligenceController();
   const report = snapshot?.report;
   const pipeline = snapshot?.pipeline;
@@ -3179,6 +4504,8 @@ export default function DailyIntelligenceView({
         </section>
 
         <main className="daily-intelligence-grid research-operations-grid">
+          <ThesisOutcomeAlerts calibration={thesisMemory?.weeklyCalibration} />
+
           <ResearchIntelligenceShortcuts
             telegramSources={telegramSources}
             brokerResearch={brokerResearch}
@@ -3217,6 +4544,10 @@ export default function DailyIntelligenceView({
             error={brokerResearchError}
             onDateChange={selectBrokerResearchDate}
             onTaxonomyChanged={reload}
+            thesisMemory={thesisMemory}
+            thesisBusy={thesisMemoryBusy}
+            thesisError={thesisMemoryError}
+            onTrackStock={trackStockThesis}
           />
 
           <TelegramSourceMonitor
@@ -3330,6 +4661,11 @@ export default function DailyIntelligenceView({
       <main className="daily-intelligence-grid">
         <DecisionGate gate={decisionGate} />
 
+        <ThesisOutcomeAlerts
+          calibration={thesisMemory?.weeklyCalibration}
+          compact
+        />
+
         <section className="daily-intelligence-panel daily-intelligence-summary">
           <div className="daily-intelligence-panel-title">
             <div>
@@ -3371,7 +4707,18 @@ export default function DailyIntelligenceView({
               {portfolioImpact?.matchedCount || 0}
             </span>
           </div>
-          <PortfolioImpact portfolioImpact={portfolioImpact} />
+          <PortfolioImpact
+            portfolioImpact={portfolioImpact}
+            candidates={decisionChain?.ideaFunnel?.candidatePool || []}
+            quickAddBusy={watchlistQuickAddBusy}
+            quickAddError={watchlistQuickAddError}
+            onQuickAddWatchlist={quickAddWatchlistTicker}
+            onQuickAddPortfolio={quickAddPortfolioHolding}
+            onRemovePortfolio={removePortfolioHolding}
+            riskReviewBusy={portfolioRiskReviewBusy}
+            riskReviewError={portfolioRiskReviewError}
+            onReviewRisk={reviewPortfolioRisk}
+          />
         </section>
 
         <section className="daily-intelligence-panel daily-intelligence-wide">
