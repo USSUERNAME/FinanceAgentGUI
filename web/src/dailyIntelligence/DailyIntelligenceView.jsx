@@ -254,6 +254,317 @@ function DecisionGate({ gate }) {
   );
 }
 
+function MarketSectorStockChain({ chain }) {
+  if (!chain) return null;
+  const blocked = chain.status === "blocked";
+  return (
+    <section className={`daily-intelligence-panel daily-intelligence-wide daily-intelligence-chain ${blocked ? "is-blocked" : ""}`}>
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>MARKET → SECTOR → STOCK</span>
+          <h2>오늘의 투자 판단 연결 보드</h2>
+        </div>
+        <StatusPill status={blocked ? "판단 보류" : chain.status} />
+      </div>
+      <p className="daily-intelligence-chain-disclaimer">{chain.disclaimer}</p>
+
+      <div className="daily-intelligence-chain-driver">
+        <span>1 · 시장 동인</span>
+        <h3>{chain.regime.label}</h3>
+        <p>{chain.regime.primaryDriver}</p>
+        {chain.regime.evidence?.length ? (
+          <ul>
+            {chain.regime.evidence.map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        ) : null}
+        {chain.regime.counterEvidence?.length ? (
+          <div className="daily-intelligence-chain-counter">
+            <strong>반대 근거</strong>
+            {chain.regime.counterEvidence.map((item) => <p key={item}>{item}</p>)}
+          </div>
+        ) : null}
+        <small>무효화 조건 · {chain.regime.invalidationCondition}</small>
+      </div>
+
+      {blocked ? (
+        <div className="daily-intelligence-chain-blocked">
+          데이터 근거 게이트가 해제되기 전에는 수혜·부담 섹터 연결을 제시하지 않습니다.
+        </div>
+      ) : (
+        <div className="daily-intelligence-chain-sectors">
+          <div className="daily-intelligence-chain-step">
+            <span>2 · 섹터 경로</span>
+            <strong>가격 리더십과 내부 확산</strong>
+          </div>
+          <div className="daily-intelligence-chain-sector-grid">
+            {chain.sectors.map((sector) => (
+              <article className={`is-${sector.stance}`} key={`${sector.stance}-${sector.ticker}`}>
+                <header>
+                  <div>
+                    <span>{sector.stanceLabel}</span>
+                    <h3>{sector.label} <small>{sector.ticker}</small></h3>
+                  </div>
+                  <strong>{signed(sector.return5d, 2, "%")}</strong>
+                </header>
+                <p>{sector.reason}</p>
+                <ul>
+                  {sector.evidence.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+                {sector.fundamentalGate ? (
+                  <div className={`daily-intelligence-fundamental-gate is-${sector.fundamentalGate.status}`}>
+                    <header>
+                      <span>추정치·밸류에이션 게이트</span>
+                      <strong>{sector.fundamentalGate.label}</strong>
+                    </header>
+                    <p>{sector.fundamentalGate.estimateLabel}</p>
+                    <p>{sector.fundamentalGate.valuationLabel}</p>
+                    <footer>
+                      <span>
+                        가이던스 {sector.fundamentalGate.guidanceCount}건 ·
+                        리서치 {sector.fundamentalGate.researchReportCount}건
+                      </span>
+                      <small>기준 {sector.fundamentalGate.asOf || "미확인"}</small>
+                    </footer>
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="daily-intelligence-chain-candidates">
+        <div className="daily-intelligence-chain-step">
+          <span>3 · 조사 우선 종목</span>
+          <strong>Why now와 첫 기각 조건</strong>
+        </div>
+        {chain.ideaFunnel ? (
+          <>
+            <div className="daily-intelligence-idea-funnel-summary">
+              <p>
+                이상 움직임 {chain.ideaFunnel.inputCount}개 중
+                {" "}{chain.ideaFunnel.classifiedCount}개를 근거 수준별로 분류했습니다.
+              </p>
+              <div>
+                {chain.ideaFunnel.stages.map((stage) => (
+                  <article className={`is-${stage.id.toLowerCase()}`} key={stage.id}>
+                    <span>{stage.label}</span>
+                    <strong>{stage.count}</strong>
+                    <small>{stage.rule}</small>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : null}
+        {chain.candidates?.length ? (
+          <div className="daily-intelligence-chain-candidate-grid">
+            {chain.candidates.map((candidate) => (
+              <article key={candidate.ticker}>
+                <header>
+                  <div>
+                    <span className={`priority-${candidate.researchPriority.toLowerCase()}`}>
+                      연구 {candidate.researchPriority}
+                    </span>
+                    <h3>{candidate.ticker} <small>{candidate.companyName}</small></h3>
+                  </div>
+                  <em className={candidate.exposureState === "linked" ? "is-linked" : ""}>
+                    {candidate.exposureLabel}
+                  </em>
+                </header>
+                <dl>
+                  <div>
+                    <dt>연결 섹터</dt>
+                    <dd>{candidate.linkedSectorLabel}{candidate.linkedSectorTicker ? ` · ${candidate.linkedSectorTicker}` : ""}</dd>
+                  </div>
+                  <div>
+                    <dt>Why now</dt>
+                    <dd>{candidate.whyNow}</dd>
+                  </div>
+                  <div>
+                    <dt>첫 기각 조건</dt>
+                    <dd>{candidate.firstRejection}</dd>
+                  </div>
+                  <div>
+                    <dt>승격 조건</dt>
+                    <dd>{candidate.promotionCondition}</dd>
+                  </div>
+                </dl>
+                <footer>
+                  <span>
+                    {candidate.evidenceSummary} · {candidate.fundamentalGateLabel}
+                  </span>
+                  <strong>다음 · {candidate.nextWorkflow}</strong>
+                </footer>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="daily-intelligence-muted">조사 우선순위를 부여할 종목 후보가 없습니다.</p>
+        )}
+        {chain.ideaFunnel?.rejectedCandidates?.length ? (
+          <div className="daily-intelligence-idea-rejections">
+            <strong>제외 후보</strong>
+            {chain.ideaFunnel.rejectedCandidates.map((candidate) => (
+              <p key={candidate.ticker}>
+                <span>{candidate.ticker}</span>
+                {candidate.rejectionReason}
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+const thesisStateLabels = {
+  confirmed: "근거 확인",
+  watching: "추적 중",
+  candidate: "후보",
+  weakened: "약화",
+  invalidated: "무효화",
+  archived: "보관",
+};
+
+function InvestmentThesisMemory({
+  memory,
+  busy,
+  error,
+  onSync,
+}) {
+  if (!memory) return null;
+  const records = memory.activeRecords || [];
+  const pendingCount = memory.pendingCandidates?.length || 0;
+  const calibration = memory.weeklyCalibration;
+  return (
+    <section className="daily-intelligence-panel daily-intelligence-wide daily-intelligence-thesis-memory">
+      <div className="daily-intelligence-panel-title">
+        <div>
+          <span>WORLD MEMORY · THESIS LEDGER</span>
+          <h2>투자 가설과 승격·강등 이력</h2>
+        </div>
+        <button
+          type="button"
+          className="daily-intelligence-refresh"
+          onClick={onSync}
+          disabled={busy || !pendingCount}
+        >
+          <Database size={16} />
+          {busy ? "반영 중" : "오늘 가설 반영"}
+        </button>
+      </div>
+      <p className="daily-intelligence-panel-note">
+        원문 뉴스와 전체 스캔 후보는 저장하지 않습니다. 화면에 선별된 섹터·종목 가설의
+        확인 조건, 무효화 조건, 상태 변화만 로컬 World Memory에 누적합니다.
+      </p>
+      <div className="daily-intelligence-thesis-memory-meta">
+        <span>누적 {memory.recordCount || 0}개</span>
+        <span>오늘 반영 후보 {pendingCount}개</span>
+        <span>최근 동기화 {memory.lastSyncedReportDate || "아직 없음"}</span>
+      </div>
+      {calibration ? (
+        <div className="daily-intelligence-calibration">
+          <header>
+            <div>
+              <span>7-DAY CALIBRATION</span>
+              <strong>{calibration.windowStart} ~ {calibration.asOfDate}</strong>
+            </div>
+            <em className={calibration.successRateVisible ? "is-ready" : ""}>
+              {calibration.successRateVisible
+                ? `적중률 ${calibration.successRatePct.toFixed(0)}%`
+                : `최소 표본 ${calibration.resolvedCount}/${calibration.minimumResolvedSample}`}
+            </em>
+          </header>
+          <div className="daily-intelligence-calibration-kpis">
+            <article>
+              <span>최근 가설</span>
+              <strong>{calibration.recentThesisCount}</strong>
+            </article>
+            <article>
+              <span>적중 / 실패</span>
+              <strong>{calibration.counts.hit} / {calibration.counts.miss}</strong>
+            </article>
+            <article>
+              <span>보류</span>
+              <strong>{calibration.counts.pending + calibration.counts.inconclusive}</strong>
+            </article>
+            <article>
+              <span>비점수 대상</span>
+              <strong>{calibration.counts.not_scoreable}</strong>
+            </article>
+          </div>
+          {calibration.warnings?.length ? (
+            <ul>
+              {calibration.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+            </ul>
+          ) : null}
+          {calibration.transitions?.length ? (
+            <div className="daily-intelligence-calibration-transitions">
+              <strong>이번 주 승격·강등</strong>
+              {calibration.transitions.slice(0, 4).map((transition) => (
+                <p key={`${transition.continuityId}-${transition.at}`}>
+                  <span>{transition.entityId}</span>
+                  {thesisStateLabels[transition.fromState] || transition.fromState}
+                  {" → "}
+                  {thesisStateLabels[transition.toState] || transition.toState}
+                  <small>{transition.at}</small>
+                </p>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {error ? <p className="daily-intelligence-research-date-error">{error}</p> : null}
+      {!memory.available ? (
+        <p className="daily-intelligence-muted">{memory.error}</p>
+      ) : records.length ? (
+        <div className="daily-intelligence-thesis-memory-grid">
+          {records.map((record) => {
+            const latestTransition = record.history?.[record.history.length - 1];
+            return (
+              <article key={record.continuityId}>
+                <header>
+                  <div>
+                    <span>{record.kind === "sector" ? "SECTOR" : "STOCK"}</span>
+                    <h3>{record.entityId} <small>{record.sectorLabel}</small></h3>
+                  </div>
+                  <strong className={`is-${record.state}`}>
+                    {thesisStateLabels[record.state] || record.stateLabel}
+                  </strong>
+                </header>
+                <p>{record.thesis}</p>
+                <dl>
+                  <div>
+                    <dt>확인 조건</dt>
+                    <dd>{record.confirmationCondition || "추가 정의 필요"}</dd>
+                  </div>
+                  <div>
+                    <dt>무효화 조건</dt>
+                    <dd>{record.invalidationCondition || "추가 정의 필요"}</dd>
+                  </div>
+                </dl>
+                <footer>
+                  <span>최초 {record.firstSeenAt} · 관측 {record.observationCount}회</span>
+                  <small>
+                    {latestTransition
+                      ? `${latestTransition.at} · ${thesisStateLabels[latestTransition.toState] || latestTransition.toState}`
+                      : "상태 변화 없음"}
+                  </small>
+                </footer>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="daily-intelligence-muted">
+          아직 누적된 가설이 없습니다. 판단 근거 게이트를 통과한 날의 선별 가설만 반영됩니다.
+        </p>
+      )}
+    </section>
+  );
+}
+
 function SectorLeadership({ marketInternals }) {
   if (!marketInternals) {
     return <p className="daily-intelligence-muted">섹터 리더십 데이터가 없습니다.</p>;
@@ -848,6 +1159,23 @@ function OperationsPanel({
             <strong>{run.label || "PB 파이프라인"}</strong>
             <span>{run.message || runLabels[run.status]}</span>
           </div>
+          {run.thesisSync?.status && run.thesisSync.status !== "idle" ? (
+            <div className={`daily-intelligence-thesis-sync is-${run.thesisSync.status}`}>
+              <Database size={15} />
+              <span>
+                <strong>투자 가설 자동 반영</strong>
+                <small>{run.thesisSync.message}</small>
+              </span>
+              {run.thesisSync.status === "succeeded" ? (
+                <em>
+                  {run.thesisSync.reportDate} · {run.thesisSync.candidateCount}개
+                  {run.thesisSync.transitionCount
+                    ? ` · 상태 변화 ${run.thesisSync.transitionCount}건`
+                    : ""}
+                </em>
+              ) : null}
+            </div>
+          ) : null}
           {run.logTail?.length ? (
             <pre>{run.logTail.slice(-12).join("\n")}</pre>
           ) : null}
@@ -2639,10 +2967,15 @@ export default function DailyIntelligenceView({
     requestJobPlan,
     executePendingPlan,
     cancelPendingPlan,
+    thesisMemoryBusy,
+    thesisMemoryError,
+    syncThesisMemory,
   } = useDailyIntelligenceController();
   const report = snapshot?.report;
   const pipeline = snapshot?.pipeline;
   const decisionGate = snapshot?.decisionGate;
+  const decisionChain = snapshot?.decisionChain;
+  const thesisMemory = snapshot?.thesisMemory;
   const scoreboard = snapshot?.scoreboard;
   const marketInternals = snapshot?.marketInternals;
   const sectorMetrics = snapshot?.sectorMetrics;
@@ -3018,6 +3351,15 @@ export default function DailyIntelligenceView({
             </ol>
           )}
         </section>
+
+        <MarketSectorStockChain chain={decisionChain} />
+
+        <InvestmentThesisMemory
+          memory={thesisMemory}
+          busy={thesisMemoryBusy}
+          error={thesisMemoryError}
+          onSync={syncThesisMemory}
+        />
 
         <section className="daily-intelligence-panel daily-intelligence-wide">
           <div className="daily-intelligence-panel-title">

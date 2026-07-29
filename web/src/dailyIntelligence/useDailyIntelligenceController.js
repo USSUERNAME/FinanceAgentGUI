@@ -4,6 +4,7 @@ import {
   fetchDailyIntelligence,
   fetchDailyIntelligenceJobStatus,
   planDailyIntelligenceJob,
+  syncDailyIntelligenceTheses,
 } from "./dailyIntelligenceApi.js";
 
 export function useDailyIntelligenceController() {
@@ -16,6 +17,8 @@ export function useDailyIntelligenceController() {
   const [jobBusy, setJobBusy] = useState(false);
   const [jobError, setJobError] = useState("");
   const [pendingPlan, setPendingPlan] = useState(null);
+  const [thesisMemoryBusy, setThesisMemoryBusy] = useState(false);
+  const [thesisMemoryError, setThesisMemoryError] = useState("");
 
   const reload = useCallback(async () => {
     setBusy(true);
@@ -90,6 +93,21 @@ export function useDailyIntelligenceController() {
     setPendingPlan(null);
   }, []);
 
+  const syncThesisMemory = useCallback(async () => {
+    setThesisMemoryBusy(true);
+    setThesisMemoryError("");
+    try {
+      await syncDailyIntelligenceTheses();
+      setSnapshot(await fetchDailyIntelligence());
+    } catch (requestError) {
+      setThesisMemoryError(
+        requestError.message || "투자 가설을 World Memory에 반영하지 못했습니다.",
+      );
+    } finally {
+      setThesisMemoryBusy(false);
+    }
+  }, []);
+
   useEffect(() => {
     void reload();
     void reloadJobStatus();
@@ -121,5 +139,8 @@ export function useDailyIntelligenceController() {
     requestJobPlan,
     executePendingPlan,
     cancelPendingPlan,
+    thesisMemoryBusy,
+    thesisMemoryError,
+    syncThesisMemory,
   };
 }

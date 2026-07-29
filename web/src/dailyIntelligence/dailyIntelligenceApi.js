@@ -18,6 +18,23 @@ export async function fetchDailyIntelligence(
   return payload;
 }
 
+export async function syncDailyIntelligenceTheses(fetchImpl = globalThis.fetch) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("투자 가설 동기화 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "syncInvestmentTheses" }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
 async function requestDailyIntelligenceJob(payload = null, fetchImpl = globalThis.fetch) {
   if (typeof fetchImpl !== "function") {
     throw new Error("Daily Intelligence 작업 요청에 fetch가 필요합니다.");

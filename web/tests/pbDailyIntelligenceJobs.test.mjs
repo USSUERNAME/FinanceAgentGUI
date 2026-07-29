@@ -226,3 +226,73 @@ test("PB job service preserves the concrete failure cause after process close", 
   assert.match(status.run.message, /종료 코드 1/);
   assert.match(status.run.message, /OpenAI returned HTTP 520/);
 });
+
+test("PB job service syncs investment theses only after a successful report job", async () => {
+  await createEngine();
+  const syncCalls = [];
+  const service = createPbDailyIntelligenceJobService({
+    env: {
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_DIR: join(tempRoot, "workspace"),
+      PB_DAILY_INTELLIGENCE_PYTHON: "python-test",
+    },
+    uuid: () => "auto-sync-id",
+    spawnImpl() {
+      return fakeChild({ code: 0, output: "Dry run complete\n" });
+    },
+    async syncThesesImpl(context) {
+      syncCalls.push(context);
+      return {
+        status: "succeeded",
+        reportDate: "2026-07-29",
+        candidateCount: 7,
+        createdCount: 2,
+        transitionCount: 1,
+        message: "가설 7개를 World Memory에 반영했습니다.",
+      };
+    },
+  });
+
+  const plan = service.plan("dry_run");
+  service.execute(plan.token);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const status = service.status();
+  assert.equal(syncCalls.length, 1);
+  assert.equal(syncCalls[0].jobId, "dry_run");
+  assert.equal(status.run.status, "succeeded");
+  assert.equal(status.run.thesisSync.status, "succeeded");
+  assert.equal(status.run.thesisSync.candidateCount, 7);
+  assert.equal(status.run.thesisSync.transitionCount, 1);
+  assert.match(status.run.message, /World Memory에 반영/);
+});
+
+test("PB job service never syncs investment theses after a failed report job", async () => {
+  await createEngine();
+  let syncCount = 0;
+  const service = createPbDailyIntelligenceJobService({
+    env: {
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_DIR: join(tempRoot, "workspace"),
+      PB_DAILY_INTELLIGENCE_PYTHON: "python-test",
+    },
+    uuid: () => "failed-auto-sync-id",
+    spawnImpl() {
+      return fakeChild({ code: 1, output: "report failed\n" });
+    },
+    async syncThesesImpl() {
+      syncCount += 1;
+      return { status: "succeeded" };
+    },
+  });
+
+  const plan = service.plan("publish");
+  service.execute(plan.token);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const status = service.status();
+  assert.equal(syncCount, 0);
+  assert.equal(status.run.status, "failed");
+  assert.equal(status.run.thesisSync.status, "idle");
+});

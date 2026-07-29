@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { sendJson } from "./codexProbe.mjs";
+import { readJsonBody, sendJson } from "./codexProbe.mjs";
 import {
   classifyResearchSector,
   researchSectorTaxonomyVersion,
@@ -9,6 +9,12 @@ import {
 } from "./researchSectorTaxonomy.mjs";
 import { readPortfolioCanvasStoreSnapshot } from "./portfolioApi.mjs";
 import { readTransactionSettings } from "./transactionSettings.mjs";
+import {
+  buildTrackedInvestmentTheses,
+  buildWeeklyThesisCalibration,
+  readInvestmentThesisMemory,
+  syncInvestmentThesisMemory,
+} from "./pbInvestmentThesisMemory.mjs";
 
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
 const READER_SCHEMA = "v2_reader_report.v1";
@@ -1120,6 +1126,460 @@ function normalizeStockCandidates(payload = {}) {
   };
 }
 
+const RESEARCH_SECTOR_TO_MARKET_SECTOR = {
+  semiconductors_ai_compute: "XLK",
+  data_center_networking: "XLK",
+  cloud_saas_cybersecurity: "XLK",
+  data_center_power_cooling: "XLI",
+  grid_electrification: "XLI",
+  industrial_automation_robotics: "XLI",
+  aerospace_defense: "XLI",
+  shipbuilding_marine: "XLI",
+  transportation_logistics: "XLI",
+  nuclear_generation: "XLU",
+  batteries_energy_storage: "XLY",
+  electric_vehicles_autonomy: "XLY",
+  biotech_healthcare_innovation: "XLV",
+  financials_capital_markets: "XLF",
+  consumer_internet_platforms: "XLC",
+  energy_oil_gas: "XLE",
+};
+
+const MARKET_SECTOR_LABELS = {
+  XLC: "커뮤니케이션",
+  XLY: "경기소비재",
+  XLP: "필수소비재",
+  XLE: "에너지",
+  XLF: "금융",
+  XLV: "헬스케어",
+  XLI: "산업재",
+  XLB: "소재",
+  XLRE: "부동산",
+  XLK: "기술",
+  XLU: "유틸리티",
+};
+
+const CANDIDATE_REASON_LABELS = {
+  abnormal_spy_relative_move: "시장 대비 비정상 상대수익",
+  abnormal_sector_relative_move: "섹터 대비 비정상 상대수익",
+  volume_anomaly: "거래량 이상",
+  material_price_move: "유의미한 가격 변동",
+  earnings_event: "실적 사건",
+  filing_event: "주요 공시",
+  verified_news_event: "검증된 뉴스 사건",
+};
+
+function readerEvidence(value) {
+  return cleanText(value, 500)
+    .replace(/\bAdvance_pct\b/gi, "상승 종목 비율")
+    .replace(/\babove_50d_pct\b/gi, "50일선 상회 비율")
+    .replace(/\bRSP\s+vs\s+SPY\b/gi, "RSP/SPY")
+    .replace(/\bSPY\s+5일\s+수익률\b/gi, "SPY 5일 수익률")
+    .replace(/-?\d+\.\d{3,}/g, (number) => Number(number).toFixed(2));
+}
+
+function candidateWhyNow(candidate) {
+  if (candidate.reasons.length) {
+    return candidate.reasons
+      .slice(0, 2)
+      .map((reason) => CANDIDATE_REASON_LABELS[reason] || reason.replaceAll("_", " "))
+      .join(" · ");
+  }
+  const signals = [];
+  if (candidate.reaction.return1d !== null) {
+    signals.push(`1일 수익률 ${candidate.reaction.return1d >= 0 ? "+" : ""}${candidate.reaction.return1d.toFixed(2)}%`);
+  }
+  if (candidate.reaction.spyRelative1d !== null) {
+    signals.push(`SPY 대비 ${candidate.reaction.spyRelative1d >= 0 ? "+" : ""}${candidate.reaction.spyRelative1d.toFixed(2)}%p`);
+  }
+  if (candidate.reaction.volumeRatio20d !== null) {
+    signals.push(`20일 평균 대비 거래량 ${candidate.reaction.volumeRatio20d.toFixed(2)}배`);
+  }
+  return signals.join(" · ") || "가격·공시·뉴스 후보 스크린을 통과했습니다.";
+}
+
+function marketSectorTickersForCandidate(candidate) {
+  return [...new Set(
+    cleanList(candidate?.sectorIds, 20)
+      .map((sectorId) => RESEARCH_SECTOR_TO_MARKET_SECTOR[sectorId])
+      .filter(Boolean),
+  )];
+}
+
+function researchReportIsAvailableAsOf(researchReport, reportDate) {
+  const publishedDate = cleanText(researchReport?.publishedAt, 40).slice(0, 10);
+  if (!publishedDate || !reportDate) return false;
+  return publishedDate <= reportDate;
+}
+
+function median(values) {
+  const sorted = values.filter(Number.isFinite).sort((first, second) => first - second);
+  if (!sorted.length) return null;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function buildSectorFundamentalGate({
+  sectorTicker,
+  report,
+  stockCandidates,
+  brokerResearch,
+}) {
+  const candidates = cleanList(stockCandidates?.candidates, 100);
+  const candidateByTicker = new Map(
+    candidates.filter((item) => item.ticker).map((item) => [item.ticker, item]),
+  );
+  const tickersInSector = new Set(
+    candidates
+      .filter((candidate) => marketSectorTickersForCandidate(candidate).includes(sectorTicker))
+      .map((candidate) => candidate.ticker),
+  );
+  const reportDate = cleanText(report?.reportDate, 20);
+  const availableResearch = cleanList(brokerResearch?.reports, 50)
+    .filter((researchReport) => researchReportIsAvailableAsOf(researchReport, reportDate));
+  for (const researchReport of availableResearch) {
+    const standardizedTickers = cleanList(researchReport.standardSectors, 20)
+      .map((sector) => RESEARCH_SECTOR_TO_MARKET_SECTOR[sector.id])
+      .filter(Boolean);
+    if (!standardizedTickers.includes(sectorTicker)) continue;
+    for (const ticker of cleanList(researchReport.tickers, 20)) {
+      if (ticker) tickersInSector.add(ticker);
+    }
+  }
+  const revisions = [];
+  let guidanceCount = 0;
+  for (const company of cleanList(report?.earningsWatch?.companies, 30)) {
+    if (!tickersInSector.has(company.ticker)) continue;
+    for (const row of cleanList(company.estimateRevision?.rows, 10)) {
+      if (row.revisionPct30d !== null) {
+        revisions.push({
+          ticker: company.ticker,
+          metricId: row.metricId,
+          revisionPct30d: row.revisionPct30d,
+        });
+      }
+    }
+    guidanceCount += cleanList(company.guidance, 10).length;
+  }
+  const eligibleResearch = availableResearch.filter((researchReport) => {
+      const standardizedTickers = cleanList(researchReport.standardSectors, 20)
+        .map((sector) => RESEARCH_SECTOR_TO_MARKET_SECTOR[sector.id])
+        .filter(Boolean);
+      if (standardizedTickers.includes(sectorTicker)) return true;
+      return cleanList(researchReport.tickers, 20).some(
+        (ticker) => tickersInSector.has(ticker),
+      );
+    });
+  const valuationComparisons = [];
+  let targetPriceCoverage = 0;
+  for (const researchReport of eligibleResearch) {
+    const target = researchReport.targetPrice || {};
+    if (!(target.value > 0)) continue;
+    targetPriceCoverage += 1;
+    const comparableTicker = cleanList(researchReport.tickers, 20).find((ticker) => {
+      const close = candidateByTicker.get(ticker)?.reaction?.close;
+      return tickersInSector.has(ticker) && close > 0;
+    });
+    if (!comparableTicker) continue;
+    const currentClose = candidateByTicker.get(comparableTicker).reaction.close;
+    if (target.currency !== "USD") continue;
+    valuationComparisons.push({
+      ticker: comparableTicker,
+      upsidePct: ((target.value / currentClose) - 1) * 100,
+    });
+  }
+  const positiveRevisionCount = revisions.filter((item) => item.revisionPct30d > 0).length;
+  const negativeRevisionCount = revisions.filter((item) => item.revisionPct30d < 0).length;
+  const estimateStatus = revisions.length
+    ? positiveRevisionCount > negativeRevisionCount
+      ? "positive"
+      : negativeRevisionCount > positiveRevisionCount
+        ? "negative"
+        : "mixed"
+    : "unavailable";
+  const valuationStatus = valuationComparisons.length
+    ? "comparable"
+    : targetPriceCoverage
+      ? "coverage_only"
+      : "unavailable";
+  const gateStatus = estimateStatus === "negative"
+    ? "caution"
+    : estimateStatus === "positive" && valuationStatus !== "unavailable"
+      ? "supported"
+      : revisions.length || guidanceCount || eligibleResearch.length
+        ? "watch"
+        : "price_only";
+  const gateLabels = {
+    supported: "펀더멘털 확인",
+    caution: "추정치 하향 경계",
+    watch: "추가 확인 필요",
+    price_only: "가격 신호만",
+  };
+  const medianRevisionPct30d = median(revisions.map((item) => item.revisionPct30d));
+  const medianTargetUpsidePct = median(
+    valuationComparisons.map((item) => item.upsidePct),
+  );
+  return {
+    status: gateStatus,
+    label: gateLabels[gateStatus],
+    estimateStatus,
+    estimateLabel: revisions.length
+      ? `30일 추정치 ${positiveRevisionCount}건 상향 · ${negativeRevisionCount}건 하향`
+      : "비교 가능한 30일 추정치 변화 없음",
+    revisionCount: revisions.length,
+    medianRevisionPct30d,
+    guidanceCount,
+    valuationStatus,
+    valuationLabel: valuationComparisons.length
+      ? `비교 가능 ${valuationComparisons.length}건 · 목표가격 중앙 상승여력 ${medianTargetUpsidePct >= 0 ? "+" : ""}${medianTargetUpsidePct.toFixed(1)}%`
+      : targetPriceCoverage
+        ? `목표가격 ${targetPriceCoverage}건 · 동일 통화 현재가 비교 대기`
+        : "비교 가능한 밸류에이션 근거 없음",
+    targetPriceCoverage,
+    comparableValuationCount: valuationComparisons.length,
+    medianTargetUpsidePct,
+    researchReportCount: eligibleResearch.length,
+    evidenceTickers: [...tickersInSector].slice(0, 6),
+    asOf: reportDate,
+    limitation: "목표가격은 증권사 의견이며, 현재가·통화·발행일이 일치할 때만 비교했습니다.",
+  };
+}
+
+export function buildMarketSectorStockChain({
+  report,
+  decisionGate,
+  scoreboard,
+  marketInternals,
+  stockCandidates,
+  brokerResearch,
+}) {
+  if (!marketInternals) return null;
+  const fiveDaySectors = cleanList(marketInternals.sectors?.["5d"], 20)
+    .filter((item) => item.ticker && item.returnPct !== null)
+    .sort((first, second) => second.returnPct - first.returnPct);
+  const breadthByTicker = new Map(
+    cleanList(marketInternals.sectorBreadth?.sectors, 20)
+      .map((item) => [item.ticker, item]),
+  );
+  const sectorPathway = (item, stance) => {
+    const breadth = breadthByTicker.get(item.ticker);
+    const versusMarket = item.vsSpyPctPoint;
+    const direction = stance === "beneficiary" ? "상대강세" : "상대약세";
+    const evidence = [
+      `5일 ${item.returnPct >= 0 ? "+" : ""}${item.returnPct.toFixed(2)}%`,
+      versusMarket === null
+        ? ""
+        : `SPY 대비 ${versusMarket >= 0 ? "+" : ""}${versusMarket.toFixed(2)}%p`,
+      breadth?.advancePct === null || breadth?.advancePct === undefined
+        ? ""
+        : `상승 종목 ${breadth.advancePct.toFixed(1)}%`,
+    ].filter(Boolean);
+    return {
+      ticker: item.ticker,
+      label: MARKET_SECTOR_LABELS[item.ticker] || item.sector || item.ticker,
+      stance,
+      stanceLabel: stance === "beneficiary" ? "수혜 경로" : "부담 경로",
+      reason: `${direction}가 관측됐습니다. 가격 리더십이 실제 업종 펀더멘털로 이어지는지 확인해야 합니다.`,
+      evidence,
+      return5d: item.returnPct,
+      vsSpy5d: versusMarket,
+      advancePct: breadth?.advancePct ?? null,
+      above50dPct: breadth?.above50dPct ?? null,
+      fundamentalGate: buildSectorFundamentalGate({
+        sectorTicker: item.ticker,
+        report,
+        stockCandidates,
+        brokerResearch,
+      }),
+    };
+  };
+  const leaders = fiveDaySectors.slice(0, 2).map((item) => sectorPathway(item, "beneficiary"));
+  const leaderTickers = new Set(leaders.map((item) => item.ticker));
+  const laggards = [...fiveDaySectors]
+    .reverse()
+    .filter((item) => !leaderTickers.has(item.ticker))
+    .slice(0, 2)
+    .map((item) => sectorPathway(item, "pressure"));
+  const blocked = decisionGate?.status !== "ready";
+  const sectorGateCache = new Map(
+    [...leaders, ...laggards].map((sector) => [sector.ticker, sector.fundamentalGate]),
+  );
+  const gateForSector = (sectorTicker) => {
+    if (!sectorTicker) return null;
+    if (!sectorGateCache.has(sectorTicker)) {
+      sectorGateCache.set(
+        sectorTicker,
+        buildSectorFundamentalGate({
+          sectorTicker,
+          report,
+          stockCandidates,
+          brokerResearch,
+        }),
+      );
+    }
+    return sectorGateCache.get(sectorTicker);
+  };
+  const allCandidates = cleanList(stockCandidates?.candidates, 30)
+    .slice()
+    .sort((first, second) => second.score - first.score)
+    .map((candidate) => {
+      const linkedSectorTicker = candidate.sectorIds
+        .map((sectorId) => RESEARCH_SECTOR_TO_MARKET_SECTOR[sectorId])
+        .find(Boolean) || "";
+      const fundamentalGate = gateForSector(linkedSectorTicker);
+      const primaryEvidenceCount = candidate.evidence.filter(
+        (item) => item.primaryConfirmed,
+      ).length;
+      const verifiedFactCount = candidate.evidence.reduce(
+        (sum, item) => sum + item.factCount,
+        0,
+      );
+      const exposureVerified = Boolean(linkedSectorTicker);
+      const explicitRejection = /rejected|invalidated|false_positive|not_eligible/i
+        .test(candidate.evidenceStatus);
+      const fundamentalCaution = fundamentalGate?.status === "caution";
+      const rejected = explicitRejection
+        || (fundamentalCaution && primaryEvidenceCount === 0);
+      const priority = rejected
+        ? "REJECTED"
+        : !blocked
+          && candidate.deepAnalysisEligible
+          && primaryEvidenceCount > 0
+          && exposureVerified
+          && fundamentalGate?.status === "supported"
+          ? "A"
+          : (primaryEvidenceCount > 0 || candidate.deepAnalysisEligible)
+            && exposureVerified
+            && !fundamentalCaution
+            ? "B"
+            : "C";
+      const missingRequirements = [
+        primaryEvidenceCount ? "" : "공식 촉매",
+        exposureVerified ? "" : "표준 섹터 노출",
+        candidate.deepAnalysisEligible ? "" : "심층분석 자격",
+        fundamentalGate?.status === "supported" ? "" : "추정치·밸류에이션 확인",
+      ].filter(Boolean);
+      const rejectionReason = explicitRejection
+        ? "입력 데이터에서 무효화 또는 분석 제외 상태로 판정됐습니다."
+        : fundamentalCaution && primaryEvidenceCount === 0
+          ? "추정치 하향 경계 상태이며 이를 상쇄할 공식 기업 근거가 없습니다."
+          : "";
+      return {
+        ticker: candidate.ticker,
+        companyName: candidate.companyName,
+        score: candidate.score,
+        deepAnalysisEligible: candidate.deepAnalysisEligible,
+        researchPriority: priority,
+        linkedSectorTicker,
+        linkedSectorLabel: linkedSectorTicker
+          ? MARKET_SECTOR_LABELS[linkedSectorTicker] || linkedSectorTicker
+          : "연결 섹터 확인 필요",
+        whyNow: candidateWhyNow(candidate),
+        exposureState: exposureVerified ? "linked" : "needs_exposure_attribution",
+        exposureLabel: exposureVerified ? "섹터 노출 연결" : "노출 근거 확인 필요",
+        fundamentalGateStatus: fundamentalGate?.status || "not_available",
+        fundamentalGateLabel: fundamentalGate?.label || "펀더멘털 연결 대기",
+        evidenceSummary: primaryEvidenceCount
+          ? `공식 근거 ${primaryEvidenceCount}건 · 확인 사실 ${verifiedFactCount}개`
+          : "공식 원문 근거 확인 대기",
+        firstRejection: exposureVerified
+          ? "해당 섹터 상대강도가 꺾이거나 기업 고유의 공식 촉매가 확인되지 않으면 우선순위를 낮춥니다."
+          : "표준 섹터 노출과 기업 고유 촉매가 확인되기 전에는 방향성 아이디어로 승격하지 않습니다.",
+        missingRequirements,
+        promotionCondition: priority === "A"
+          ? "핵심 가정과 밸류에이션 민감도를 검증한 뒤 투자 논제로 전환"
+          : missingRequirements.length
+            ? `${missingRequirements.slice(0, 2).join("·")} 확보 시 상위 단계 재평가`
+            : "공식 반증 여부를 재검토",
+        rejectionReason,
+        nextWorkflow: priority === "A"
+          ? "실적·가이던스·밸류에이션 심층검토"
+          : priority === "REJECTED"
+            ? "신규 공식 근거 발생 전 보관"
+            : "공식자료와 섹터 노출 확인",
+      };
+    });
+  const funnelOrder = { A: 0, B: 1, C: 2, REJECTED: 3 };
+  const funnelCandidates = allCandidates
+    .slice()
+    .sort(
+      (first, second) =>
+        funnelOrder[first.researchPriority] - funnelOrder[second.researchPriority]
+        || second.score - first.score,
+    );
+  const candidates = funnelCandidates
+    .filter((candidate) => candidate.researchPriority !== "REJECTED")
+    .slice(0, 3);
+  const rejectedCandidates = funnelCandidates
+    .filter((candidate) => candidate.researchPriority === "REJECTED")
+    .slice(0, 5);
+  const priorityCounts = funnelCandidates.reduce(
+    (counts, candidate) => {
+      counts[candidate.researchPriority] += 1;
+      return counts;
+    },
+    { A: 0, B: 0, C: 0, REJECTED: 0 },
+  );
+  const quantitativeEvidence = cleanList(scoreboard?.regime?.quantitativeEvidence, 8);
+  const bottomSector = laggards[0];
+  return {
+    status: blocked ? "blocked" : candidates.length && fiveDaySectors.length ? "ready" : "partial",
+    regime: {
+      label: blocked ? "판단 보류" : scoreboard?.regime?.summary || report?.executiveSummary?.[0] || "시장 체제 확인 필요",
+      primaryDriver: blocked
+        ? decisionGate?.summary || "데이터 근거 게이트를 통과하지 못했습니다."
+        : scoreboard?.regime?.summary || report?.executiveSummary?.[0] || "가격·브레드스 기반 시장 체제를 확인합니다.",
+      evidence: blocked
+        ? cleanList(decisionGate?.blockers, 4).map((item) => item.message)
+        : quantitativeEvidence.slice(0, 4).map(readerEvidence),
+      counterEvidence: bottomSector
+        ? [`${bottomSector.label} 5일 ${bottomSector.return5d >= 0 ? "+" : ""}${bottomSector.return5d.toFixed(2)}%로 리더십 확산을 제약합니다.`]
+        : [],
+      invalidationCondition: "시장 폭과 현재 리더 섹터의 5일 상대강도가 함께 반전되면 이 연결 가설을 재검토합니다.",
+    },
+    sectors: blocked ? [] : [...leaders, ...laggards],
+    ideaFunnel: {
+      inputCount: Number(stockCandidates?.materialCandidateCount || funnelCandidates.length),
+      classifiedCount: funnelCandidates.length,
+      deepAnalysisEligibleCount: allCandidates.filter(
+        (candidate) => candidate.deepAnalysisEligible,
+      ).length,
+      priorityCounts,
+      stages: [
+        {
+          id: "A",
+          label: "A · 심층검토",
+          count: priorityCounts.A,
+          rule: "공식 촉매·섹터 노출·추정치와 밸류에이션 근거를 모두 확인",
+        },
+        {
+          id: "B",
+          label: "B · 근거보강",
+          count: priorityCounts.B,
+          rule: "공식 근거나 심층분석 자격은 있으나 펀더멘털 연결이 일부 부족",
+        },
+        {
+          id: "C",
+          label: "C · 관찰",
+          count: priorityCounts.C,
+          rule: "가격·거래량 이상 신호 중심으로 공식 촉매와 섹터 노출 확인 대기",
+        },
+        {
+          id: "REJECTED",
+          label: "제외",
+          count: priorityCounts.REJECTED,
+          rule: "명시적 무효화 또는 추정치 하향을 상쇄할 공식 근거 부재",
+        },
+      ],
+      rejectedCandidates,
+    },
+    candidates,
+    disclaimer: "종목 표시는 연구 우선순위이며 매수·매도 추천이 아닙니다.",
+  };
+}
+
 function cleanTicker(value) {
   const ticker = String(value || "").trim().toUpperCase();
   return /^[A-Z][A-Z0-9.-]{0,14}$/.test(ticker) ? ticker : "";
@@ -1931,6 +2391,22 @@ export async function loadPbDailyIntelligenceSnapshot({
   const stockCandidates = stockCandidatesArtifact
     ? normalizeStockCandidates(stockCandidatesArtifact.payload)
     : null;
+  const decisionChain = buildMarketSectorStockChain({
+    report,
+    decisionGate,
+    scoreboard,
+    marketInternals,
+    stockCandidates,
+    brokerResearch: brokerResearchNormalized,
+  });
+  const thesisMemory = await readInvestmentThesisMemory({ env });
+  thesisMemory.pendingCandidates = buildTrackedInvestmentTheses({
+    decisionChain,
+    reportDate: report.reportDate,
+  });
+  thesisMemory.weeklyCalibration = buildWeeklyThesisCalibration(thesisMemory, {
+    asOfDate: report.reportDate,
+  });
   let transactionSettings = {};
   let portfolioCanvasSnapshot = {};
   try {
@@ -1972,6 +2448,8 @@ export async function loadPbDailyIntelligenceSnapshot({
     pipeline,
     scoreboard,
     marketInternals,
+    decisionChain,
+    thesisMemory,
     sectorMetrics: sectorMetricsArtifact ? normalizeSectorMetrics(sectorMetricsArtifact.payload) : null,
     stockCandidates,
     portfolioImpact,
@@ -1988,11 +2466,29 @@ export async function loadPbDailyIntelligenceSnapshot({
 }
 
 export async function handlePbDailyIntelligenceEndpoint(req, res) {
-  if (req.method !== "GET") {
-    sendJson(res, { ok: false, error: "method not allowed" }, 405);
-    return;
-  }
   try {
+    if (req.method === "POST") {
+      const body = await readJsonBody(req);
+      if (body.action !== "syncInvestmentTheses") {
+        sendJson(res, { ok: false, error: "unknown action" }, 422);
+        return;
+      }
+      const snapshot = await loadPbDailyIntelligenceSnapshot({ env: process.env });
+      if (!snapshot.connection?.available || !snapshot.report?.reportDate) {
+        throw new Error("동기화할 Daily Intelligence가 없습니다.");
+      }
+      const thesisMemory = await syncInvestmentThesisMemory({
+        decisionChain: snapshot.decisionChain,
+        reportDate: snapshot.report.reportDate,
+        env: process.env,
+      });
+      sendJson(res, { ok: true, thesisMemory });
+      return;
+    }
+    if (req.method !== "GET") {
+      sendJson(res, { ok: false, error: "method not allowed" }, 405);
+      return;
+    }
     const requestUrl = new URL(req.url || "/api/pb-daily-intelligence", "http://127.0.0.1");
     sendJson(res, {
       ok: true,

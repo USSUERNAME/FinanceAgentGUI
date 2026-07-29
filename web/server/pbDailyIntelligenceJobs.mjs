@@ -3,6 +3,8 @@ import { existsSync } from "node:fs";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { readJsonBody, sendJson } from "./codexProbe.mjs";
+import { loadPbDailyIntelligenceSnapshot } from "./pbDailyIntelligenceApi.mjs";
+import { syncInvestmentThesisMemory } from "./pbInvestmentThesisMemory.mjs";
 
 const PLAN_TTL_MS = 5 * 60 * 1000;
 const MAX_LOG_LINES = 80;
@@ -36,6 +38,7 @@ const JOB_CATALOG = Object.freeze({
     args: ["--verification-dry-run"],
     effect: "Gmail 수집 및 승인 리서치 요약·핵심 주장·촉매·위험 갱신 · 외부 발행 없음",
     publish: false,
+    syncTheses: true,
   }),
   collect: Object.freeze({
     id: "collect",
@@ -54,6 +57,7 @@ const JOB_CATALOG = Object.freeze({
     args: ["--dry-run"],
     effect: "로컬 산출물 생성·검증, 외부 발행 없음",
     publish: false,
+    syncTheses: true,
   }),
   verification_dry_run: Object.freeze({
     id: "verification_dry_run",
@@ -64,6 +68,7 @@ const JOB_CATALOG = Object.freeze({
     args: ["--verification-dry-run"],
     effect: "공식 근거·사건 분석 산출물 갱신 · 외부 발행 없음",
     publish: false,
+    syncTheses: true,
   }),
   publish: Object.freeze({
     id: "publish",
@@ -73,6 +78,7 @@ const JOB_CATALOG = Object.freeze({
     args: [],
     effect: "로컬 산출물 갱신 및 구성된 외부 발행 대상 변경",
     publish: true,
+    syncTheses: true,
   }),
 });
 
@@ -145,6 +151,50 @@ function emptyRun() {
     message: "",
     errorSummary: "",
     logTail: [],
+    thesisSync: {
+      status: "idle",
+      reportDate: "",
+      candidateCount: 0,
+      createdCount: 0,
+      transitionCount: 0,
+      message: "",
+    },
+  };
+}
+
+async function syncLatestInvestmentTheses({ env }) {
+  if (!cleanText(env.PB_DAILY_INTELLIGENCE_DIR, 4000)) {
+    return {
+      status: "skipped",
+      message: "PB_DAILY_INTELLIGENCE_DIR가 없어 가설 자동 반영을 건너뛰었습니다.",
+    };
+  }
+  const snapshot = await loadPbDailyIntelligenceSnapshot({ env });
+  if (!snapshot.connection?.available || !snapshot.report?.reportDate) {
+    return {
+      status: "skipped",
+      message: "완성된 Daily Intelligence를 찾지 못해 가설 자동 반영을 건너뛰었습니다.",
+    };
+  }
+  if (snapshot.decisionChain?.status === "blocked") {
+    return {
+      status: "skipped",
+      reportDate: snapshot.report.reportDate,
+      message: "판단 근거 게이트가 차단되어 가설 자동 반영을 건너뛰었습니다.",
+    };
+  }
+  const memory = await syncInvestmentThesisMemory({
+    decisionChain: snapshot.decisionChain,
+    reportDate: snapshot.report.reportDate,
+    env,
+  });
+  return {
+    status: "succeeded",
+    reportDate: snapshot.report.reportDate,
+    candidateCount: memory.candidateCount,
+    createdCount: memory.createdCount,
+    transitionCount: memory.transitionCount,
+    message: `가설 ${memory.candidateCount}개를 World Memory에 반영했습니다.`,
   };
 }
 
@@ -171,6 +221,7 @@ export function createPbDailyIntelligenceJobService({
   now = () => Date.now(),
   uuid = () => randomUUID(),
   spawnImpl = spawn,
+  syncThesesImpl = syncLatestInvestmentTheses,
 } = {}) {
   let config = configuredEngine(env);
   let run = emptyRun();
@@ -309,21 +360,59 @@ export function createPbDailyIntelligenceJobService({
       };
       child = null;
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       const succeeded = Number(code) === 0;
       const failureMessage = `${job.label} 작업이 종료 코드 ${code ?? "미확인"}로 실패했습니다.`;
       run = {
         ...run,
-        status: succeeded ? "succeeded" : "failed",
-        finishedAt: new Date(now()).toISOString(),
+        status: succeeded && job.syncTheses ? "running" : succeeded ? "succeeded" : "failed",
+        finishedAt: succeeded && job.syncTheses ? "" : new Date(now()).toISOString(),
         exitCode: Number.isInteger(code) ? Number(code) : null,
         message: succeeded
-          ? `${job.label} 작업이 완료됐습니다.`
+          ? job.syncTheses
+            ? `${job.label} 작업이 완료되어 투자 가설을 자동 반영하고 있습니다.`
+            : `${job.label} 작업이 완료됐습니다.`
           : run.errorSummary
             ? `${failureMessage} 원인: ${run.errorSummary}`
             : failureMessage,
       };
       child = null;
+      if (!succeeded || !job.syncTheses) return;
+      run = {
+        ...run,
+        thesisSync: {
+          ...run.thesisSync,
+          status: "running",
+          message: "최신 가설을 World Memory에 반영하고 있습니다.",
+        },
+      };
+      try {
+        const thesisSync = await syncThesesImpl({ env, jobId: job.id });
+        run = {
+          ...run,
+          status: "succeeded",
+          finishedAt: new Date(now()).toISOString(),
+          thesisSync: {
+            ...emptyRun().thesisSync,
+            ...thesisSync,
+          },
+          message: thesisSync.status === "succeeded"
+            ? `${job.label} 작업이 완료됐고 ${thesisSync.message}`
+            : `${job.label} 작업이 완료됐습니다. ${thesisSync.message}`,
+        };
+      } catch (error) {
+        run = {
+          ...run,
+          status: "succeeded",
+          finishedAt: new Date(now()).toISOString(),
+          thesisSync: {
+            ...emptyRun().thesisSync,
+            status: "failed",
+            message: `가설 자동 반영 실패: ${cleanText(error.message || error, 400)}`,
+          },
+          message: `${job.label} 작업은 완료됐지만 가설 자동 반영에 실패했습니다.`,
+        };
+      }
     });
     return { ...run, logTail: [...run.logTail] };
   }

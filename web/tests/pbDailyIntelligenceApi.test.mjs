@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  buildMarketSectorStockChain,
   buildPortfolioImpact,
   extractPortfolioUniverse,
   loadPbDailyIntelligenceSnapshot,
@@ -105,6 +106,122 @@ test("PB Daily Intelligence links portfolio and watchlist tickers to bounded evi
   assert.equal(impact.assets[0].relatedEvents.length, 1);
   assert.equal(impact.assets.find((item) => item.ticker === "MSFT").evidenceState, "quantitative_only");
   assert.equal(impact.assets.find((item) => item.ticker === "QQQ").evidenceState, "no_direct_evidence");
+});
+
+test("PB Daily Intelligence builds a bounded market to sector to stock research chain", () => {
+  const chain = buildMarketSectorStockChain({
+    report: {
+      reportDate: "2026-07-28",
+      executiveSummary: ["시장 폭이 확산되고 있습니다."],
+      earningsWatch: {
+        companies: [
+          {
+            ticker: "NVDA",
+            estimateRevision: {
+              rows: [
+                { metricId: "eps", revisionPct30d: 4.5 },
+              ],
+            },
+            guidance: [{ metricId: "revenue" }],
+          },
+        ],
+      },
+    },
+    decisionGate: { status: "ready" },
+    scoreboard: {
+      regime: {
+        summary: "시장 폭 확산과 기술주 리더십이 함께 관측됩니다.",
+        quantitativeEvidence: ["RSP/SPY +0.8%p", "상승 종목 62%"],
+      },
+    },
+    marketInternals: {
+      sectors: {
+        "5d": [
+          { ticker: "XLK", sector: "Technology", returnPct: 4.2, vsSpyPctPoint: 2.1 },
+          { ticker: "XLI", sector: "Industrials", returnPct: 2.3, vsSpyPctPoint: 0.2 },
+          { ticker: "XLP", sector: "Staples", returnPct: -1.4, vsSpyPctPoint: -3.5 },
+        ],
+      },
+      sectorBreadth: {
+        sectors: [
+          { ticker: "XLK", advancePct: 70, above50dPct: 68 },
+          { ticker: "XLP", advancePct: 34, above50dPct: 40 },
+        ],
+      },
+    },
+    stockCandidates: {
+      candidates: [
+        {
+          ticker: "NVDA",
+          companyName: "NVIDIA",
+          score: 84,
+          sectorIds: ["semiconductors_ai_compute"],
+          reasons: ["실적 발표 후 거래량 급증"],
+          deepAnalysisEligible: true,
+          reaction: {
+            close: 100,
+            return1d: 5.2,
+            spyRelative1d: 4.8,
+            volumeRatio20d: 2.7,
+          },
+          evidence: [
+            { primaryConfirmed: true, factCount: 2 },
+          ],
+        },
+        {
+          ticker: "BAD",
+          companyName: "Invalidated Candidate",
+          score: 12,
+          sectorIds: [],
+          reasons: ["material_price_move"],
+          deepAnalysisEligible: false,
+          evidenceStatus: "invalidated",
+          reaction: {
+            close: 10,
+            return1d: -8,
+            spyRelative1d: -7.5,
+            volumeRatio20d: 3,
+          },
+          evidence: [],
+        },
+      ],
+    },
+    brokerResearch: {
+      reports: [
+        {
+          publishedAt: "2026-07-27",
+          tickers: ["NVDA"],
+          standardSectors: [{ id: "semiconductors_ai_compute" }],
+          targetPrice: { value: 125, currency: "USD" },
+        },
+        {
+          publishedAt: "2026-07-29",
+          tickers: ["NVDA"],
+          standardSectors: [{ id: "semiconductors_ai_compute" }],
+          targetPrice: { value: 200, currency: "USD" },
+        },
+      ],
+    },
+  });
+
+  assert.equal(chain.status, "ready");
+  assert.equal(chain.sectors[0].ticker, "XLK");
+  assert.equal(chain.sectors[0].stance, "beneficiary");
+  assert.equal(chain.sectors[0].fundamentalGate.status, "supported");
+  assert.equal(chain.sectors[0].fundamentalGate.revisionCount, 1);
+  assert.equal(chain.sectors[0].fundamentalGate.researchReportCount, 1);
+  assert.equal(chain.sectors[0].fundamentalGate.medianTargetUpsidePct, 25);
+  assert.equal(chain.sectors.at(-1).ticker, "XLP");
+  assert.equal(chain.sectors.at(-1).stance, "pressure");
+  assert.equal(chain.sectors.at(-1).fundamentalGate.status, "price_only");
+  assert.equal(chain.candidates[0].researchPriority, "A");
+  assert.equal(chain.candidates[0].linkedSectorTicker, "XLK");
+  assert.equal(chain.candidates[0].exposureState, "linked");
+  assert.equal(chain.ideaFunnel.priorityCounts.A, 1);
+  assert.equal(chain.ideaFunnel.priorityCounts.REJECTED, 1);
+  assert.equal(chain.ideaFunnel.rejectedCandidates[0].ticker, "BAD");
+  assert.match(chain.ideaFunnel.rejectedCandidates[0].rejectionReason, /무효화/);
+  assert.match(chain.disclaimer, /매수·매도 추천이 아닙니다/);
 });
 
 test("PB Daily Intelligence reports an explicit disconnected state", async () => {
@@ -636,6 +753,16 @@ test("PB Daily Intelligence separates verified reader content from review queue"
   assert.equal(snapshot.stockCandidates.materialCandidateCount, 25);
   assert.equal(snapshot.stockCandidates.universeCoverage.sp500Count, 500);
   assert.equal(snapshot.stockCandidates.universeCoverage.nasdaq100Count, 0);
+  assert.equal(snapshot.decisionChain.status, "blocked");
+  assert.equal(snapshot.decisionChain.sectors.length, 0);
+  assert.equal(snapshot.decisionChain.candidates[0].researchPriority, "C");
+  assert.equal(snapshot.decisionChain.ideaFunnel.priorityCounts.C, 1);
+  assert.equal(snapshot.thesisMemory.available, true);
+  assert.equal(snapshot.thesisMemory.pendingCandidates.length, 0);
+  assert.equal(
+    snapshot.decisionChain.candidates[0].exposureState,
+    "needs_exposure_attribution",
+  );
   assert.equal(snapshot.report.earningsWatch.status, "ready");
   assert.equal(snapshot.report.earningsWatch.companies[0].ticker, "NVDA");
   assert.equal(

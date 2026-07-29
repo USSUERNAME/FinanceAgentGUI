@@ -23,6 +23,8 @@ test("Daily Intelligence leads with decisions and links to a separate operations
   const readingPath = [
     "<DecisionGate",
     "<h2>30초 결론</h2>",
+    "<MarketSectorStockChain",
+    "<InvestmentThesisMemory",
     "<h2>내 종목과 오늘의 리포트</h2>",
     "<h2>결론을 지지하는 시장 근거</h2>",
     "<h2>검증된 핵심 사건</h2>",
@@ -34,6 +36,15 @@ test("Daily Intelligence leads with decisions and links to a separate operations
   assert.deepEqual(readingPath, [...readingPath].sort((a, b) => a - b));
   assert.doesNotMatch(readerView, /<GmailResearchStatus|<BrokerResearchMonitor|<TelegramSourceMonitor/);
   assert.doesNotMatch(readerView, /<details className="daily-intelligence-operations">/);
+  assert.match(viewSource, /오늘의 투자 판단 연결 보드/);
+  assert.match(viewSource, /Why now와 첫 기각 조건/);
+  assert.match(viewSource, /추정치·밸류에이션 게이트/);
+  assert.match(viewSource, /이상 움직임/);
+  assert.match(viewSource, /근거 수준별로 분류/);
+  assert.match(viewSource, /승격 조건/);
+  assert.match(viewSource, /제외 후보/);
+  assert.match(viewSource, /7-DAY CALIBRATION/);
+  assert.match(viewSource, /최소 표본/);
 });
 
 test("Research Operations owns collection, approval, and verification controls", () => {
@@ -47,6 +58,7 @@ test("Research Operations owns collection, approval, and verification controls",
   assert.match(operationsView, /id="verification-review-queue"/);
   assert.match(operationsView, /검증 대기 사건 확인 방법/);
   assert.match(operationsView, /href="#pipeline-operations"/);
+  assert.match(viewSource, /투자 가설 자동 반영/);
   assert.match(viewSource, /if \(!operationsMode\) return;/);
 });
 
