@@ -88,6 +88,10 @@ test("Research Operations owns collection, approval, and verification controls",
   );
   assert.match(viewSource, /승인 전에는 PDF 원문을 다운로드하지 않음/);
   assert.match(viewSource, /승인 PDF 수집·분석/);
+  assert.match(viewSource, /구조화 분석 결과가 애널리스트 리포트에 반영됨/);
+  assert.match(viewSource, /분석 결과 보기/);
+  assert.match(viewSource, /daily-intelligence-attachment-analysis-preview/);
+  assert.match(cssSource, /\.daily-intelligence-attachment-analysis-preview/);
   assert.match(
     viewSource,
     /daily-intelligence-approval-text-button daily-intelligence-approval-run-button/,

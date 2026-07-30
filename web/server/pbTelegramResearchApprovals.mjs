@@ -71,6 +71,43 @@ function attachmentItems(snapshot) {
     }));
 }
 
+function analyzedAttachments(snapshot) {
+  const results = new Map();
+  const reports = Array.isArray(snapshot?.brokerResearch?.reports)
+    ? snapshot.brokerResearch.reports
+    : [];
+  for (const report of reports) {
+    const reference = cleanText(report?.source?.reference, 500);
+    const match = reference.match(/:attachment:([a-f0-9]{32,128})$/i);
+    if (!match) continue;
+    const standardSectors = Array.isArray(report?.standardSectors)
+      ? report.standardSectors
+        .map((item) => cleanText(item?.name, 120))
+        .filter(Boolean)
+      : [];
+    results.set(match[1].toLowerCase(), {
+      reportId: cleanText(report?.reportId, 160),
+      title: cleanText(report?.title, 240),
+      summary: cleanText(report?.summary, 700),
+      stance: cleanText(report?.stance, 40) || "not_stated",
+      tickers: (Array.isArray(report?.tickers) ? report.tickers : [])
+        .map((item) => cleanText(item, 24))
+        .filter(Boolean)
+        .slice(0, 8),
+      sectors: (
+        standardSectors.length
+          ? standardSectors
+          : (Array.isArray(report?.sectors) ? report.sectors : [])
+            .map((item) => cleanText(item, 120))
+            .filter(Boolean)
+      ).slice(0, 6),
+      structuredAnalysisAvailable: report?.structuredAnalysisAvailable === true,
+      processingStatus: cleanText(report?.processingStatus, 80),
+    });
+  }
+  return results;
+}
+
 export function createPbTelegramResearchApprovalService({
   env = process.env,
   now = () => new Date().toISOString(),
@@ -88,15 +125,24 @@ export function createPbTelegramResearchApprovalService({
         .filter((item) => item && typeof item === "object")
         .map((item) => [cleanText(item.attachment_key, 128), item]),
     );
+    const analysisResults = analyzedAttachments(snapshot);
     const items = attachmentItems(snapshot).map((item) => {
       const decision = decisions.get(item.attachmentKey);
-      const state = ["approved", "excluded"].includes(cleanText(decision?.decision, 40))
+      const decisionState = ["approved", "excluded"].includes(cleanText(decision?.decision, 40))
         ? cleanText(decision.decision, 40)
         : "pending";
+      const analysis = analysisResults.get(item.attachmentKey.toLowerCase()) || null;
+      const state = decisionState === "approved" && analysis
+        ? analysis.structuredAnalysisAvailable
+          ? "ready"
+          : "processing"
+        : decisionState;
       return {
         ...item,
         state,
+        decisionState,
         decidedAt: cleanText(decision?.decided_at, 80),
+        analysis,
       };
     });
     return { approvalPath, registry, items };
@@ -111,6 +157,8 @@ export function createPbTelegramResearchApprovalService({
         total: state.items.length,
         pending: count("pending"),
         approved: count("approved"),
+        processing: count("processing"),
+        ready: count("ready"),
         excluded: count("excluded"),
       },
       items: state.items,

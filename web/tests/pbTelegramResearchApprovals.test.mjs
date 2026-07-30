@@ -45,12 +45,85 @@ test("Telegram PDF approval service exposes discovered attachments as pending", 
     total: 1,
     pending: 1,
     approved: 0,
+    processing: 0,
+    ready: 0,
     excluded: 0,
   });
   assert.equal(state.items[0].attachmentKey, attachmentKey);
   assert.equal(state.items[0].filename, "20260730_global_strategy.pdf");
   assert.equal(state.items[0].channelUsername, "HanaResearch");
   assert.equal(state.items[0].state, "pending");
+});
+
+test("Telegram PDF approval service marks analyzed attachments as ready", async () => {
+  const readySnapshot = snapshot();
+  readySnapshot.brokerResearch = {
+    reports: [
+      {
+        reportId: "telegram-report-1",
+        title: "글로벌 전략 구조화 분석",
+        summary: "금리 경로와 위험자산 민감도를 함께 점검한 리포트입니다.",
+        stance: "cautious",
+        tickers: ["TLT", "SPY"],
+        standardSectors: [
+          { id: "fixed_income", name: "채권" },
+        ],
+        structuredAnalysisAvailable: true,
+        processingStatus: "ready",
+        source: {
+          reference: `telegram:HanaResearch:1234:attachment:${attachmentKey}`,
+        },
+      },
+    ],
+  };
+  const service = createPbTelegramResearchApprovalService({
+    env: { PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot },
+    loadSnapshot: async () => readySnapshot,
+  });
+
+  await service.decide({ attachmentKey, decision: "approved" });
+  const state = await service.status();
+
+  assert.equal(state.counts.ready, 1);
+  assert.equal(state.counts.approved, 0);
+  assert.equal(state.items[0].state, "ready");
+  assert.equal(state.items[0].decisionState, "approved");
+  assert.deepEqual(state.items[0].analysis, {
+    reportId: "telegram-report-1",
+    title: "글로벌 전략 구조화 분석",
+    summary: "금리 경로와 위험자산 민감도를 함께 점검한 리포트입니다.",
+    stance: "cautious",
+    tickers: ["TLT", "SPY"],
+    sectors: ["채권"],
+    structuredAnalysisAvailable: true,
+    processingStatus: "ready",
+  });
+});
+
+test("Telegram PDF approval service exposes collected reports awaiting analysis", async () => {
+  const processingSnapshot = snapshot();
+  processingSnapshot.brokerResearch = {
+    reports: [
+      {
+        reportId: "telegram-report-2",
+        structuredAnalysisAvailable: false,
+        processingStatus: "awaiting_structured_analysis",
+        source: {
+          reference: `telegram:HanaResearch:1234:attachment:${attachmentKey}`,
+        },
+      },
+    ],
+  };
+  const service = createPbTelegramResearchApprovalService({
+    env: { PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot },
+    loadSnapshot: async () => processingSnapshot,
+  });
+
+  await service.decide({ attachmentKey, decision: "approved" });
+  const state = await service.status();
+
+  assert.equal(state.counts.processing, 1);
+  assert.equal(state.items[0].state, "processing");
 });
 
 test("Telegram PDF approval service persists and replaces an explicit decision", async () => {

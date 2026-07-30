@@ -4483,6 +4483,39 @@
   white-space: nowrap;
 }
 
+.daily-intelligence-attachment-analysis-preview {
+  max-width: 720px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #c9ded6;
+  border-radius: 10px;
+  background: #f1f8f5;
+}
+
+.daily-intelligence-attachment-analysis-preview p {
+  margin: 0;
+  color: #334b43;
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.daily-intelligence-attachment-analysis-preview > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.daily-intelligence-attachment-analysis-preview span {
+  padding: 3px 7px;
+  border: 1px solid #c9ded6;
+  border-radius: 999px;
+  background: #fff;
+  color: #3f6658;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
 .daily-intelligence-approval-actions {
   flex: 0 0 auto;
 }

@@ -3323,6 +3323,8 @@ function TelegramSourceMonitor({
             <small>
               대기 {attachmentQueue?.counts?.pending || 0} ·
               승인 {attachmentQueue?.counts?.approved || 0} ·
+              처리 {attachmentQueue?.counts?.processing || 0} ·
+              완료 {attachmentQueue?.counts?.ready || 0} ·
               제외 {attachmentQueue?.counts?.excluded || 0}
             </small>
             <button
@@ -3410,27 +3412,69 @@ function TelegramSourceMonitor({
                       </>
                     ) : null}
                   </small>
+                  {item.state === "ready" && item.analysis ? (
+                    <div className="daily-intelligence-attachment-analysis-preview">
+                      <p>
+                        {item.analysis.summary
+                          || item.analysis.title
+                          || "구조화 분석이 완료되었습니다."}
+                      </p>
+                      <div>
+                        <span>
+                          {researchStanceLabels[item.analysis.stance]
+                            || item.analysis.stance
+                            || "명시적 의견 없음"}
+                        </span>
+                        {(item.analysis.tickers || []).map((ticker) => (
+                          <span key={`ticker-${item.attachmentKey}-${ticker}`}>
+                            {ticker}
+                          </span>
+                        ))}
+                        {(item.analysis.sectors || []).map((sector) => (
+                          <span key={`sector-${item.attachmentKey}-${sector}`}>
+                            {sector}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="daily-intelligence-approval-actions">
                   <span className="daily-intelligence-approval-status">
                     <span>
-                      {item.state === "approved"
-                        ? "분석 승인"
-                        : item.state === "excluded"
-                          ? "분석 제외"
-                          : "승인 대기"}
+                      {item.state === "ready"
+                        ? "분석 완료"
+                        : item.state === "processing"
+                          ? "수집 완료·분석 대기"
+                          : item.state === "approved"
+                            ? "분석 승인"
+                            : item.state === "excluded"
+                              ? "분석 제외"
+                              : "승인 대기"}
                     </span>
                     <small>
-                      {item.state === "approved"
-                        ? "다음 Telegram 수집에서 PDF 다운로드·OCR, 이후 드라이런에서 분석 반영"
-                        : "승인 전에는 PDF 원문을 다운로드하지 않음"}
+                      {item.state === "ready"
+                        ? "구조화 분석 결과가 애널리스트 리포트에 반영됨"
+                        : item.state === "processing"
+                          ? "PDF 수집·OCR 완료, 구조화 분석 결과 대기"
+                          : item.state === "approved"
+                            ? "다음 Telegram 수집에서 PDF 다운로드·OCR, 이후 드라이런에서 분석 반영"
+                            : "승인 전에는 PDF 원문을 다운로드하지 않음"}
                     </small>
+                    {item.state === "ready" ? (
+                      <a href="#broker-research-analysis">
+                        분석 결과 보기 <ArrowUpRight size={12} />
+                      </a>
+                    ) : null}
                   </span>
                   <button
                     type="button"
                     className="is-approve"
                     onClick={() => decideAttachment(item.attachmentKey, "approved")}
-                    disabled={attachmentBusy || item.state === "approved"}
+                    disabled={
+                      attachmentBusy
+                      || ["approved", "processing", "ready"].includes(item.state)
+                    }
                   >
                     <ShieldCheck size={14} /> 분석 승인
                   </button>
