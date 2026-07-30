@@ -10,12 +10,19 @@ import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
 import Pause from "lucide-react/dist/esm/icons/pause.js";
 import Play from "lucide-react/dist/esm/icons/play.js";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
+import Target from "lucide-react/dist/esm/icons/target.js";
 import X from "lucide-react/dist/esm/icons/x.js";
 import { MarkdownText } from "../utils/MarkdownText.jsx";
 import { formatDateTime } from "../utils/formatters.js";
 import { worldMemoryActionCatalog } from "./actionCatalog.js";
 import { worldMemoryActionText, worldMemoryStatusLabel } from "./statusHelpers.js";
 import { normalizeMemoryChangeSuggestionItem, worldMemorySuggestionCanAskAgent } from "./suggestionStatus.js";
+import {
+  activeInvestmentTheses,
+  investmentThesisDomId,
+  investmentThesisStateLabel,
+  relatedInvestmentTheses,
+} from "./thesisHelpers.js";
 import "./world-memory.css";
 
 function worldMemorySignalToneClass(tone) {
@@ -90,7 +97,15 @@ function WorldMemoryChangeSuggestionRow({ item, index, agentIcon, agentAskLabel,
   );
 }
 
-function WorldMemoryRichReport({ report, agentIcon = "", agentAskLabel = "Codex에게 질문하기", askDisabled = false, onAskItem }) {
+function WorldMemoryRichReport({
+  report,
+  relatedTheses = [],
+  agentIcon = "",
+  agentAskLabel = "Codex에게 질문하기",
+  askDisabled = false,
+  onAskItem,
+  onOpenThesis,
+}) {
   const view = report?.view || null;
   if (!view) return null;
   const signals = Array.isArray(view.signalRadar) ? view.signalRadar : [];
@@ -115,6 +130,30 @@ function WorldMemoryRichReport({ report, agentIcon = "", agentAskLabel = "Codex�
       </div>
 
       {view.narrative ? <p className="world-memory-report-narrative">{view.narrative}</p> : null}
+
+      {relatedTheses.length ? (
+        <section className="world-memory-report-group" aria-labelledby="world-memory-related-thesis-title">
+          <h4 id="world-memory-related-thesis-title" className="world-memory-subsection-title">
+            이 보고서와 연결된 PB 투자 가설
+          </h4>
+          <div className="world-memory-related-thesis-list">
+            {relatedTheses.map((record) => (
+              <button
+                type="button"
+                key={record.continuityId}
+                onClick={() => onOpenThesis?.(record)}
+              >
+                <Target size={15} strokeWidth={2.2} />
+                <span>
+                  <strong>{record.title}</strong>
+                  <small>{investmentThesisStateLabel(record)} · {record.lastSeenAt || "관측일 미상"}</small>
+                </span>
+                <ChevronsRight size={14} strokeWidth={2.2} />
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {signals.length ? (
         <section className="world-memory-report-group" aria-labelledby="world-memory-signal-title">
@@ -233,6 +272,120 @@ function WorldMemoryRichReport({ report, agentIcon = "", agentAskLabel = "Codex�
   );
 }
 
+function formatThesisMetric(record = {}) {
+  const value = Number(record.metricValue);
+  if (!Number.isFinite(value)) return "관측값 없음";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(2)}${record.metricUnit || ""}`;
+}
+
+function WorldMemoryInvestmentTheses({ memory = {}, focusedThesisId = "" }) {
+  const records = Array.isArray(memory.records) ? memory.records : [];
+  const activeRecords = activeInvestmentTheses(memory);
+  const watchingCount = records.filter((record) => record.state === "watching").length;
+  const candidateCount = records.filter((record) => record.state === "candidate").length;
+
+  return (
+    <section className="world-memory-section world-memory-thesis-section" aria-labelledby="world-memory-thesis-title">
+      <div className="world-memory-section-header">
+        <div>
+          <h2 id="world-memory-thesis-title">PB 투자 가설 메모리</h2>
+          <span>
+            {memory.lastSyncedReportDate
+              ? `${memory.lastSyncedReportDate} Daily Intelligence와 동기화`
+              : "아직 Daily Intelligence와 동기화되지 않았습니다."}
+          </span>
+        </div>
+        <span className={memory.available === false ? "world-memory-badge is-warn" : "world-memory-badge is-ok"}>
+          {memory.available === false ? "연결 오류" : `${records.length}건`}
+        </span>
+      </div>
+
+      {memory.error ? (
+        <div className="news-feed-alert">
+          <AlertTriangle size={16} strokeWidth={2.2} />
+          <span>{memory.error}</span>
+        </div>
+      ) : null}
+
+      <div className="world-memory-thesis-summary" aria-label="PB 투자 가설 현황">
+        <article>
+          <span>활성 가설</span>
+          <strong>{activeRecords.length}</strong>
+        </article>
+        <article>
+          <span>추적 중</span>
+          <strong>{watchingCount}</strong>
+        </article>
+        <article>
+          <span>후보</span>
+          <strong>{candidateCount}</strong>
+        </article>
+      </div>
+
+      {records.length ? (
+        <div className="world-memory-thesis-grid">
+          {records.map((record) => {
+            const transition = Array.isArray(record.history) && record.history.length
+              ? record.history[record.history.length - 1]
+              : null;
+            const focused = record.continuityId === focusedThesisId;
+            return (
+              <article
+                id={investmentThesisDomId(record)}
+                className={`world-memory-thesis-card is-${record.state || "unknown"}${focused ? " is-focused" : ""}`}
+                key={record.continuityId}
+              >
+                <header>
+                  <div>
+                    <span>{record.kind === "sector" ? "섹터" : "종목"} · {record.entityId}</span>
+                    <h3>{record.title}</h3>
+                  </div>
+                  <span className="world-memory-thesis-state">{investmentThesisStateLabel(record)}</span>
+                </header>
+                <p className="world-memory-thesis-copy">{record.thesis || "가설 설명이 아직 없습니다."}</p>
+                <div className="world-memory-thesis-metric">
+                  <span>{record.metricId || "평가 지표"}</span>
+                  <strong>{formatThesisMetric(record)}</strong>
+                </div>
+                <dl>
+                  <div>
+                    <dt>확인 조건</dt>
+                    <dd>{record.confirmationCondition || "아직 설정되지 않았습니다."}</dd>
+                  </div>
+                  <div>
+                    <dt>무효화 조건</dt>
+                    <dd>{record.invalidationCondition || "아직 설정되지 않았습니다."}</dd>
+                  </div>
+                </dl>
+                {Array.isArray(record.evidence) && record.evidence.length ? (
+                  <div className="world-memory-thesis-evidence">
+                    {record.evidence.slice(0, 5).map((item, index) => (
+                      <span key={`${record.continuityId}-evidence-${index}`}>{item}</span>
+                    ))}
+                  </div>
+                ) : null}
+                <footer>
+                  <span>최근 관측 {record.lastSeenAt || "없음"} · 누적 {record.observationCount || 0}회</span>
+                  {transition ? (
+                    <span>최근 변화 {transition.fromState || "신규"} → {transition.toState || record.state}</span>
+                  ) : null}
+                </footer>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="world-memory-empty-report">
+          <Target size={20} strokeWidth={2.1} />
+          <strong>아직 저장된 PB 투자 가설이 없습니다.</strong>
+          <p>Daily Intelligence 생성 후 가설 동기화를 실행하면 여기에 누적됩니다.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function WorldMemoryAgentActionCard({
   action,
   busy,
@@ -299,6 +452,8 @@ export default function WorldMemoryView({
   onReload,
   onRunAction,
 }) {
+  const [activeMemoryTab, setActiveMemoryTab] = React.useState("events");
+  const [focusedThesisId, setFocusedThesisId] = React.useState("");
   const actionText = worldMemoryActionText(actionResult);
   const canRun = !busy && !actionBusy;
   const collector = status?.collector || {};
@@ -314,6 +469,28 @@ export default function WorldMemoryView({
   const reportBusy = activeAction === "refreshReport" || collectorStatus === "writing_report";
   const askDisabled = !agentOptionsReady || isSending;
   const agentAskLabel = worldMemoryAskAgentLabel(agentProvider);
+  const investmentTheses = status?.investmentTheses || {};
+  const thesisRecords = Array.isArray(investmentTheses.records) ? investmentTheses.records : [];
+  const relatedTheses = relatedInvestmentTheses(report, investmentTheses);
+  const eventCount = Number(status?.list?.json?.count) || 0;
+
+  React.useEffect(() => {
+    if (activeMemoryTab !== "theses" || !focusedThesisId) return;
+    const selected = thesisRecords.find((record) => record.continuityId === focusedThesisId);
+    if (!selected) return;
+    const timer = window.setTimeout(() => {
+      document.getElementById(investmentThesisDomId(selected))?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeMemoryTab, focusedThesisId, thesisRecords]);
+
+  function openInvestmentThesis(record = null) {
+    setFocusedThesisId(record?.continuityId || "");
+    setActiveMemoryTab("theses");
+  }
 
   return (
     <div className="world-memory-shell">
@@ -364,87 +541,121 @@ export default function WorldMemoryView({
           </article>
         </section>
 
-        <WorldMemoryAgentActionCard
-          action={agentAction}
-          busy={agentActionBusy}
-          disabled={actionBusy}
-          onExecute={onExecuteAgentAction}
-          onClear={onClearAgentAction}
-        />
+        <nav className="world-memory-tabs" aria-label="월드메모리 보기">
+          <button
+            type="button"
+            className={activeMemoryTab === "events" ? "is-active" : ""}
+            aria-selected={activeMemoryTab === "events"}
+            onClick={() => setActiveMemoryTab("events")}
+          >
+            <Activity size={16} strokeWidth={2.2} />
+            <span>시장 사건</span>
+            <strong>{eventCount}</strong>
+          </button>
+          <button
+            type="button"
+            className={activeMemoryTab === "theses" ? "is-active" : ""}
+            aria-selected={activeMemoryTab === "theses"}
+            onClick={() => openInvestmentThesis()}
+          >
+            <Target size={16} strokeWidth={2.2} />
+            <span>PB 투자 가설</span>
+            <strong>{investmentTheses.recordCount ?? thesisRecords.length}</strong>
+          </button>
+        </nav>
 
-        <section className="world-memory-section world-memory-report-section" aria-labelledby="world-memory-report-title">
-          <div className="world-memory-section-header">
-            <div>
-              <h2 id="world-memory-report-title">현재 시장 상황 인식</h2>
-              <span>{report.generatedAt ? `${formatDateTime(report.generatedAt)} 작성` : "아직 작성된 보고서 없음"}</span>
-            </div>
-            <span className={report.status === "ready" ? "world-memory-badge is-ok" : "world-memory-badge"}>
-              {report.status === "ready" ? "ready" : "waiting"}
-            </span>
-          </div>
-          {hasRichReport ? (
-            <WorldMemoryRichReport
-              report={report}
-              agentIcon={agentIcon}
-              agentAskLabel={agentAskLabel}
-              askDisabled={askDisabled}
-              onAskItem={onAskReportItem}
+        {activeMemoryTab === "events" ? (
+          <>
+            <WorldMemoryAgentActionCard
+              action={agentAction}
+              busy={agentActionBusy}
+              disabled={actionBusy}
+              onExecute={onExecuteAgentAction}
+              onClear={onClearAgentAction}
             />
-          ) : reportText ? (
-            <div className="world-memory-report-body">
-              <MarkdownText text={reportText} />
-            </div>
-          ) : (
-            <div className="world-memory-empty-report">
-              <Activity size={20} strokeWidth={2.1} />
-              <strong>수집이 끝나면 여기에 현재 시장 상황 보고서가 표시됩니다.</strong>
-              <p>상단의 수동 수집을 눌러 첫 회차를 바로 시작할 수 있습니다.</p>
-            </div>
-          )}
-        </section>
 
-        {!hasRichReport ? (
-          <section className="world-memory-section" aria-labelledby="world-memory-suggestions-title">
-            <div className="world-memory-section-header">
-              <div>
-                <h2 id="world-memory-suggestions-title">변경 제안</h2>
-                <span>수집 이후 memory/taxonomy 조정 후보</span>
+            <section className="world-memory-section world-memory-report-section" aria-labelledby="world-memory-report-title">
+              <div className="world-memory-section-header">
+                <div>
+                  <h2 id="world-memory-report-title">현재 시장 상황 인식</h2>
+                  <span>{report.generatedAt ? `${formatDateTime(report.generatedAt)} 작성` : "아직 작성된 보고서 없음"}</span>
+                </div>
+                <span className={report.status === "ready" ? "world-memory-badge is-ok" : "world-memory-badge"}>
+                  {report.status === "ready" ? "ready" : "waiting"}
+                </span>
               </div>
-            </div>
-            {legacySuggestions.length ? (
-              <div className="world-memory-suggestion-list">
-                {legacySuggestions.map((item, index) => (
-                  <div className="world-memory-suggestion" key={`${item}-${index}`}>
-                    <CheckCircle2 size={15} strokeWidth={2.2} />
-                    <span>{item}</span>
+              {hasRichReport ? (
+                <WorldMemoryRichReport
+                  report={report}
+                  relatedTheses={relatedTheses}
+                  agentIcon={agentIcon}
+                  agentAskLabel={agentAskLabel}
+                  askDisabled={askDisabled}
+                  onAskItem={onAskReportItem}
+                  onOpenThesis={openInvestmentThesis}
+                />
+              ) : reportText ? (
+                <div className="world-memory-report-body">
+                  <MarkdownText text={reportText} />
+                </div>
+              ) : (
+                <div className="world-memory-empty-report">
+                  <Activity size={20} strokeWidth={2.1} />
+                  <strong>수집이 끝나면 여기에 현재 시장 상황 보고서가 표시됩니다.</strong>
+                  <p>상단의 수동 수집을 눌러 첫 회차를 바로 시작할 수 있습니다.</p>
+                </div>
+              )}
+            </section>
+
+            {!hasRichReport ? (
+              <section className="world-memory-section" aria-labelledby="world-memory-suggestions-title">
+                <div className="world-memory-section-header">
+                  <div>
+                    <h2 id="world-memory-suggestions-title">변경 제안</h2>
+                    <span>수집 이후 memory/taxonomy 조정 후보</span>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="settings-empty">아직 표시할 변경 제안이 없습니다.</div>
-            )}
-          </section>
-        ) : null}
-
-        <section className="world-memory-section" aria-labelledby="world-memory-last-run-title">
-          <div className="world-memory-section-header">
-            <div>
-              <h2 id="world-memory-last-run-title">최근 실행</h2>
-              <span>{actionResult?.command || actionResult?.action || "아직 실행한 명령이 없습니다."}</span>
-            </div>
-            {actionResult ? (
-              <span className={actionResult.ok ? "world-memory-badge is-ok" : "world-memory-badge is-warn"}>
-                {actionResult.ok ? "ok" : "error"}
-              </span>
+                </div>
+                {legacySuggestions.length ? (
+                  <div className="world-memory-suggestion-list">
+                    {legacySuggestions.map((item, index) => (
+                      <div className="world-memory-suggestion" key={`${item}-${index}`}>
+                        <CheckCircle2 size={15} strokeWidth={2.2} />
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="settings-empty">아직 표시할 변경 제안이 없습니다.</div>
+                )}
+              </section>
             ) : null}
-          </div>
-          <p className="world-memory-last-run">
-            {actionText || collector.lastAction || "월드 메모리 수집 상태가 여기에 표시됩니다."}
-          </p>
-          {actionResult?.artifact?.path ? (
-            <p className="world-memory-artifact">artifact: {actionResult.artifact.path}</p>
-          ) : null}
-        </section>
+
+            <section className="world-memory-section" aria-labelledby="world-memory-last-run-title">
+              <div className="world-memory-section-header">
+                <div>
+                  <h2 id="world-memory-last-run-title">최근 실행</h2>
+                  <span>{actionResult?.command || actionResult?.action || "아직 실행한 명령이 없습니다."}</span>
+                </div>
+                {actionResult ? (
+                  <span className={actionResult.ok ? "world-memory-badge is-ok" : "world-memory-badge is-warn"}>
+                    {actionResult.ok ? "ok" : "error"}
+                  </span>
+                ) : null}
+              </div>
+              <p className="world-memory-last-run">
+                {actionText || collector.lastAction || "월드 메모리 수집 상태가 여기에 표시됩니다."}
+              </p>
+              {actionResult?.artifact?.path ? (
+                <p className="world-memory-artifact">artifact: {actionResult.artifact.path}</p>
+              ) : null}
+            </section>
+          </>
+        ) : (
+          <WorldMemoryInvestmentTheses
+            memory={investmentTheses}
+            focusedThesisId={focusedThesisId}
+          />
+        )}
       </section>
     </div>
   );

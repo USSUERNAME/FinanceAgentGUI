@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   codexCommandInvocation,
   codexCommandSpec,
+  codexExecStdinInvocation,
   resolveCodexCommandPath,
 } from "../server/codexProbe.mjs";
 
@@ -103,6 +104,21 @@ test("Codex chat invocation keeps the Windows JavaScript entrypoint as the first
       ],
     },
   );
+});
+
+test("Codex exec sends long prompts through stdin instead of Windows command arguments", () => {
+  const prompt = "시장 데이터 ".repeat(20_000);
+  const invocation = codexExecStdinInvocation(
+    "C:\\Tools\\codex.exe",
+    ["exec", "--ephemeral"],
+    prompt,
+    { platform: "win32" },
+  );
+
+  assert.equal(invocation.command, "C:\\Tools\\codex.exe");
+  assert.deepEqual(invocation.args, ["exec", "--ephemeral", "-"]);
+  assert.equal(invocation.args.includes(prompt), false);
+  assert.equal(invocation.stdin, prompt);
 });
 
 test("Codex path resolution honors an explicit service path without probing", () => {

@@ -13,6 +13,7 @@ import {
 } from "./worldMemorySettings.mjs";
 import { disableMagazineSettings } from "./magazineSettings.mjs";
 import { stopMagazineScheduler } from "./magazineApi.mjs";
+import { readInvestmentThesisMemory } from "./pbInvestmentThesisMemory.mjs";
 
 const WEB_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const GUIBUILD_ROOT = resolve(WEB_ROOT, "..");
@@ -3437,6 +3438,7 @@ async function buildWorldMemoryStatus() {
     collectorState.report,
     collectorState.changeSuggestionLedger?.handled || []
   );
+  const investmentTheses = await readInvestmentThesisMemory();
 
   return {
     ok: dependencies.ok && (!init || init.ok),
@@ -3474,6 +3476,7 @@ async function buildWorldMemoryStatus() {
     autopilot: collectorState.autopilot,
     modelPolicy: collectorState.modelPolicy,
     report: publicReport,
+    investmentTheses,
     changeSuggestionLedger: collectorState.changeSuggestionLedger,
     history: collectorState.history,
     dependencies,

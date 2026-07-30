@@ -837,6 +837,292 @@
   font-size: 12px;
 }
 
+.world-memory-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px;
+  border: 1px solid #e3e3de;
+  border-radius: 10px;
+  background: #f7f7f4;
+}
+
+.world-memory-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #65655f;
+  font-size: 13px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.world-memory-tabs button:hover {
+  background: #ffffff;
+  color: #29372f;
+}
+
+.world-memory-tabs button.is-active {
+  border-color: #d4ddd7;
+  background: #ffffff;
+  color: #244d39;
+  box-shadow: 0 1px 3px rgb(27 54 41 / 7%);
+}
+
+.world-memory-tabs button strong {
+  min-width: 23px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #e9eeeb;
+  color: #466052;
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.world-memory-related-thesis-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.world-memory-related-thesis-list button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid #dde4df;
+  border-radius: 8px;
+  background: #f8faf8;
+  color: #30503f;
+  text-align: left;
+  cursor: pointer;
+}
+
+.world-memory-related-thesis-list button:hover {
+  border-color: #bfcfc5;
+  background: #f1f6f3;
+}
+
+.world-memory-related-thesis-list button > svg {
+  flex: 0 0 auto;
+}
+
+.world-memory-related-thesis-list button > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.world-memory-related-thesis-list strong,
+.world-memory-related-thesis-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-memory-related-thesis-list strong {
+  color: #20372b;
+  font-size: 13px;
+}
+
+.world-memory-related-thesis-list small {
+  color: #6d786f;
+  font-size: 11px;
+}
+
+.world-memory-thesis-section {
+  gap: 18px;
+}
+
+.world-memory-thesis-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.world-memory-thesis-summary article {
+  display: grid;
+  gap: 5px;
+  padding: 13px;
+  border: 1px solid #e4e6e3;
+  border-radius: 8px;
+  background: #f9faf8;
+}
+
+.world-memory-thesis-summary span {
+  color: #72756f;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.world-memory-thesis-summary strong {
+  color: #1e3027;
+  font-size: 22px;
+}
+
+.world-memory-thesis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 14px;
+}
+
+.world-memory-thesis-card {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid #dedfdc;
+  border-left: 4px solid #7f8d85;
+  border-radius: 8px;
+  background: #ffffff;
+  scroll-margin: 30px;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.world-memory-thesis-card.is-watching {
+  border-left-color: #d28a35;
+}
+
+.world-memory-thesis-card.is-confirmed {
+  border-left-color: #3f8c59;
+}
+
+.world-memory-thesis-card.is-weakened,
+.world-memory-thesis-card.is-invalidated {
+  border-left-color: #ad5c44;
+}
+
+.world-memory-thesis-card.is-focused {
+  border-color: #669579;
+  box-shadow: 0 0 0 3px rgb(66 126 92 / 12%);
+  transform: translateY(-1px);
+}
+
+.world-memory-thesis-card header,
+.world-memory-thesis-card footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.world-memory-thesis-card header > div {
+  min-width: 0;
+}
+
+.world-memory-thesis-card header div > span,
+.world-memory-thesis-card footer span {
+  color: #747a75;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.world-memory-thesis-card h3 {
+  margin: 3px 0 0;
+  color: #18251f;
+  font-size: 17px;
+  line-height: 1.3;
+}
+
+.world-memory-thesis-state {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #eef2ef;
+  color: #405a4b;
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.world-memory-thesis-copy {
+  margin: 0;
+  color: #3f4742;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.world-memory-thesis-metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+  border-radius: 8px;
+  background: #f4f6f4;
+}
+
+.world-memory-thesis-metric span {
+  min-width: 0;
+  overflow: hidden;
+  color: #70736f;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-memory-thesis-metric strong {
+  flex: 0 0 auto;
+  color: #253b30;
+  font-size: 14px;
+}
+
+.world-memory-thesis-card dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.world-memory-thesis-card dl > div {
+  display: grid;
+  gap: 4px;
+}
+
+.world-memory-thesis-card dt {
+  color: #536a5e;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.world-memory-thesis-card dd {
+  margin: 0;
+  color: #4d514e;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.world-memory-thesis-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.world-memory-thesis-evidence span {
+  padding: 5px 7px;
+  border: 1px solid #e0e4e1;
+  border-radius: 999px;
+  background: #fafbfa;
+  color: #626a65;
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+
+.world-memory-thesis-card footer {
+  padding-top: 10px;
+  border-top: 1px solid #eceeeb;
+}
+
 @media (max-width: 760px) {
 
   .world-memory-shell {
@@ -849,5 +1135,28 @@
 
   .world-memory-report-hero strong {
     justify-self: start;
+  }
+
+  .world-memory-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .world-memory-tabs button {
+    justify-content: center;
+    padding: 0 8px;
+  }
+
+  .world-memory-thesis-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .world-memory-thesis-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .world-memory-thesis-card header,
+  .world-memory-thesis-card footer {
+    display: grid;
   }
 }
