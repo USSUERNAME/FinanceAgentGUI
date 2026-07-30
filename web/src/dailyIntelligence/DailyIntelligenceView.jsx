@@ -3146,7 +3146,12 @@ function TelegramSourceMonitor({
   const credentials = telegramSources.credentials || {};
   const collection = telegramSources.collection || {};
   const deduplication = telegramSources.deduplication || {};
-  const attachmentItems = attachmentQueue?.items || [];
+  const attachmentItems = [...(attachmentQueue?.items || [])].sort((left, right) => {
+    const stateOrder = { pending: 0, approved: 1, processing: 2, ready: 3, excluded: 4 };
+    const stateDifference = (stateOrder[left.state] ?? 5) - (stateOrder[right.state] ?? 5);
+    if (stateDifference) return stateDifference;
+    return Number(right.priority?.score || 0) - Number(left.priority?.score || 0);
+  });
   const collectionReady = credentials.ready === true;
   const telegramRun = jobStatus?.run?.jobId === "telegram_refresh"
     ? jobStatus.run
@@ -3322,6 +3327,7 @@ function TelegramSourceMonitor({
           <div className="daily-intelligence-approval-title-actions">
             <small>
               대기 {attachmentQueue?.counts?.pending || 0} ·
+              우선 추천 {attachmentQueue?.recommendations?.high || 0} ·
               승인 {attachmentQueue?.counts?.approved || 0} ·
               처리 {attachmentQueue?.counts?.processing || 0} ·
               완료 {attachmentQueue?.counts?.ready || 0} ·
@@ -3396,6 +3402,10 @@ function TelegramSourceMonitor({
             {attachmentItems.map((item) => (
               <article key={item.attachmentKey}>
                 <div>
+                  <div className={`daily-intelligence-approval-priority is-${item.priority?.level || "low"}`}>
+                    <span>{item.priority?.label || "후순위"}</span>
+                    <small>{item.priority?.reason || "미국주식 관련성을 검토하세요."}</small>
+                  </div>
                   <span>{item.channelName || `@${item.channelUsername}`} · 공식 채널 PDF</span>
                   <h3>{item.filename}</h3>
                   <small>

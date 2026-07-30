@@ -4475,6 +4475,45 @@
   font-size: 0.96rem;
 }
 
+.daily-intelligence-approval-priority {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.daily-intelligence-approval-priority span {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.daily-intelligence-approval-priority small {
+  white-space: normal;
+  color: var(--daily-muted);
+  font-size: 0.72rem;
+}
+
+.daily-intelligence-approval-priority.is-high span {
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  background: rgba(6, 78, 59, 0.38);
+  color: #6ee7b7;
+}
+
+.daily-intelligence-approval-priority.is-medium span {
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(120, 53, 15, 0.3);
+  color: #fcd34d;
+}
+
+.daily-intelligence-approval-priority.is-low span {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(30, 41, 59, 0.42);
+  color: #cbd5e1;
+}
+
 .daily-intelligence-approval-list small {
   display: block;
   max-width: 720px;
@@ -7902,6 +7941,26 @@
   .daily-intelligence-confirmation {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .daily-intelligence-approval-list article {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .daily-intelligence-approval-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .daily-intelligence-approval-status {
+    flex: 1 1 100%;
+    align-items: flex-start;
+  }
+
+  .daily-intelligence-approval-status small {
+    margin-left: 0;
+    white-space: normal;
   }
 }
 

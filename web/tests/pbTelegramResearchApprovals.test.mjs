@@ -3,6 +3,7 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  classifyAttachmentPriority,
   createPbTelegramResearchApprovalService,
 } from "../server/pbTelegramResearchApprovals.mjs";
 
@@ -49,10 +50,36 @@ test("Telegram PDF approval service exposes discovered attachments as pending", 
     ready: 0,
     excluded: 0,
   });
+  assert.deepEqual(state.recommendations, {
+    high: 0,
+    medium: 1,
+    low: 0,
+  });
   assert.equal(state.items[0].attachmentKey, attachmentKey);
   assert.equal(state.items[0].filename, "20260730_global_strategy.pdf");
   assert.equal(state.items[0].channelUsername, "HanaResearch");
   assert.equal(state.items[0].state, "pending");
+  assert.equal(state.items[0].priority.level, "medium");
+});
+
+test("Telegram PDF approval priority favors direct U.S. equity research", () => {
+  const high = classifyAttachmentPriority({
+    title: "메타 플랫폼스(META.US); AI CapEx 전략 점검",
+    filename: "meta.pdf",
+    channelUsername: "shinhanresearch",
+    channelName: "신한투자증권 리서치",
+  });
+  const low = classifyAttachmentPriority({
+    title: "국내 주식 마감 시황 - 코스피 수급 점검",
+    filename: "domestic_close.pdf",
+    channelUsername: "shinhanresearch",
+    channelName: "신한투자증권 리서치",
+  });
+
+  assert.equal(high.level, "high");
+  assert.match(high.reason, /미국 상장 종목/);
+  assert.equal(low.level, "low");
+  assert.match(low.reason, /국내시장 중심/);
 });
 
 test("Telegram PDF approval service marks analyzed attachments as ready", async () => {

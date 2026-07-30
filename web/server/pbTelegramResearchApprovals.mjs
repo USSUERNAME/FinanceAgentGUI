@@ -19,6 +19,70 @@ function cleanText(value, maxLength = 1000) {
     .slice(0, maxLength);
 }
 
+export function classifyAttachmentPriority(attachment) {
+  const username = cleanText(attachment?.channelUsername, 80).toLowerCase();
+  const haystack = cleanText(
+    [
+      attachment?.title,
+      attachment?.filename,
+      attachment?.channelName,
+      username,
+    ].join(" "),
+    1200,
+  );
+  let score = 0;
+  const reasons = [];
+  const add = (points, reason) => {
+    score += points;
+    if (reason && !reasons.includes(reason)) reasons.push(reason);
+  };
+
+  if (/\b[A-Z]{1,5}\.US\b/i.test(haystack)) {
+    add(65, "미국 상장 종목 티커가 명시됨");
+  }
+  if (/(?:미국\s*(?:전략|주식|증시|시장)|S&P\s*500|NASDAQ|나스닥|FOMC|Federal Reserve|연준)/i.test(haystack)) {
+    add(55, "미국 시장·정책을 직접 다룸");
+  }
+  if (/(?:미국채|미\s*국채|달러|채권시장|기준금리|금리\s*경로)/i.test(haystack)) {
+    add(25, "미국 주식의 할인율·유동성 판단에 연결됨");
+  }
+  if (/(?:글로벌\s*(?:전략|시장|자산배분)|global\s*(?:strategy|markets?))/i.test(haystack)) {
+    add(30, "글로벌 자산배분·시장 전략 자료");
+  }
+  if (/(?:AI|인공지능|반도체|데이터센터|전력|원전|로보틱스)/i.test(haystack)) {
+    add(18, "미국 성장주 핵심 구조 테마와 관련됨");
+  }
+  if (username === "hana_us_stock") {
+    add(30, "미국주식 전용 공식 리서치 채널");
+  }
+  if (/(?:국내\s*주식|코스피|KOSPI|코스닥|KOSDAQ|\b\d{6}\.KS\b)/i.test(haystack)) {
+    add(-35, "국내시장 중심 자료");
+  }
+
+  if (score >= 50) {
+    return {
+      level: "high",
+      label: "우선 분석",
+      score,
+      reason: reasons.slice(0, 3).join(" · ") || "미국주식 판단과 직접 연결됨",
+    };
+  }
+  if (score >= 20) {
+    return {
+      level: "medium",
+      label: "검토 추천",
+      score,
+      reason: reasons.slice(0, 3).join(" · ") || "시장·섹터 연결 가능성 확인 필요",
+    };
+  }
+  return {
+    level: "low",
+    label: "후순위",
+    score,
+    reason: reasons.slice(0, 3).join(" · ") || "미국주식 방향성과의 직접 연결 근거가 약함",
+  };
+}
+
 function configuredEngineRoot(env = process.env) {
   const raw = cleanText(env.PB_DAILY_INTELLIGENCE_ENGINE_DIR, 4000);
   if (!raw) throw new Error("PB_DAILY_INTELLIGENCE_ENGINE_DIR가 설정되지 않았습니다.");
@@ -139,6 +203,7 @@ export function createPbTelegramResearchApprovalService({
         : decisionState;
       return {
         ...item,
+        priority: classifyAttachmentPriority(item),
         state,
         decisionState,
         decidedAt: cleanText(decision?.decided_at, 80),
@@ -151,6 +216,10 @@ export function createPbTelegramResearchApprovalService({
   async function status() {
     const state = await loadState();
     const count = (value) => state.items.filter((item) => item.state === value).length;
+    const pendingItems = state.items.filter((item) => item.state === "pending");
+    const recommendationCount = (level) => pendingItems
+      .filter((item) => item.priority?.level === level)
+      .length;
     return {
       configured: true,
       counts: {
@@ -160,6 +229,11 @@ export function createPbTelegramResearchApprovalService({
         processing: count("processing"),
         ready: count("ready"),
         excluded: count("excluded"),
+      },
+      recommendations: {
+        high: recommendationCount("high"),
+        medium: recommendationCount("medium"),
+        low: recommendationCount("low"),
       },
       items: state.items,
     };
