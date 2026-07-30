@@ -14,6 +14,10 @@ const routesSource = readFileSync(
   new URL("../src/shell/AppRoutes.jsx", import.meta.url),
   "utf8",
 );
+const cssSource = readFileSync(
+  new URL("../src/dailyIntelligence/daily-intelligence.css", import.meta.url),
+  "utf8",
+);
 const operationsStart = viewSource.indexOf("if (operationsMode)");
 const readerStart = viewSource.indexOf("PB DAILY MARKET INTELLIGENCE", operationsStart);
 const operationsView = viewSource.slice(operationsStart, readerStart);
@@ -58,6 +62,10 @@ test("Daily Intelligence leads with decisions and links to a separate operations
   assert.match(viewSource, /첫 기각 조건/);
   assert.match(viewSource, /candidatePool=\{decisionChain\?\.ideaFunnel\?\.candidatePool \|\| \[\]\}/);
   assert.match(viewSource, /shortlistTrackable: false/);
+  assert.match(
+    viewSource,
+    /key=\{`\$\{candidate\.ticker\}-\$\{item\.sourceUrl \|\| item\.title\}-\$\{evidenceIndex\}`\}/,
+  );
 });
 
 test("Research Operations owns collection, approval, and verification controls", () => {
@@ -73,6 +81,22 @@ test("Research Operations owns collection, approval, and verification controls",
   assert.match(operationsView, /href="#pipeline-operations"/);
   assert.match(viewSource, /투자 가설 자동 반영/);
   assert.match(viewSource, /if \(!operationsMode\) return;/);
+  assert.match(viewSource, /공식 증권사 채널 PDF 승인 대기/);
+  assert.match(
+    viewSource,
+    /\/api\/pb-daily-intelligence\/telegram-attachment-approvals/,
+  );
+  assert.match(viewSource, /승인 전에는 PDF 원문을 다운로드하지 않음/);
+  assert.match(viewSource, /승인 PDF 수집·분석/);
+  assert.match(
+    viewSource,
+    /daily-intelligence-approval-text-button daily-intelligence-approval-run-button/,
+  );
+  assert.match(
+    cssSource,
+    /\.daily-intelligence-approval-title-actions \.daily-intelligence-approval-run-button/,
+  );
+  assert.match(viewSource, /pendingPlan\?\.job\?\.id === "telegram_analyze"/);
 });
 
 test("sidebar and routes expose Research Operations as an independent screen", () => {

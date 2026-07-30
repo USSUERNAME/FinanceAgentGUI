@@ -1654,16 +1654,29 @@ test("PB Daily Intelligence prefers the latest Telegram-only refresh artifact", 
     }
   );
   await writeJson(
-    join(tempRoot, "telegram_refresh", reportDate, "telegram_intelligence.json"),
+    join(tempRoot, "telegram_refresh", "2026-07-28", "telegram_intelligence.json"),
     {
       schema_version: "telegram_intelligence_refresh.v1",
-      generated_at: "2026-07-27T12:34:56+09:00",
+      generated_at: "2026-07-28T12:34:56+09:00",
       status: "ok",
       raw_post_count: 12,
       deduplicated_post_count: 9,
       duplicate_post_count: 3,
       event_cluster_count: 2,
       represented_channel_count: 1,
+      pdf_attachment_count: 1,
+      pdf_attachments: [{
+        attachment_key: "telegram-pdf-key",
+        filename: "global-strategy.pdf",
+        mime_type: "application/pdf",
+        size: 2048,
+        channel_username: "pb_channel_one",
+        channel_name: "PB 채널 1",
+        message_id: 11,
+        post_url: "https://t.me/pb_channel_one/11",
+        published_at: "2026-07-28T03:00:00Z",
+        title: "글로벌 전략",
+      }],
       clusters: [{
         event_id: "event-live",
         title: "실시간 텔레그램 사건",
@@ -1683,10 +1696,13 @@ test("PB Daily Intelligence prefers the latest Telegram-only refresh artifact", 
       PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
     },
   });
-  assert.equal(snapshot.telegramSources.collection.lastCollectedAt, "2026-07-27T12:34:56+09:00");
+  assert.equal(snapshot.telegramSources.collection.reportDate, "2026-07-28");
+  assert.equal(snapshot.telegramSources.collection.lastCollectedAt, "2026-07-28T12:34:56+09:00");
   assert.equal(snapshot.telegramSources.collection.itemCount, 12);
   assert.equal(snapshot.telegramSources.deduplication.consolidatedPostCount, 3);
   assert.equal(snapshot.telegramSources.clusters[0].eventId, "event-live");
+  assert.equal(snapshot.telegramSources.pdfAttachmentCount, 1);
+  assert.equal(snapshot.telegramSources.pdfAttachments[0].filename, "global-strategy.pdf");
 });
 
 test("PB Daily Intelligence exposes a rights-safe analyst research digest", async () => {

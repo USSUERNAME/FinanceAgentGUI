@@ -110,6 +110,30 @@ test("PB job service exposes an allowlisted Telegram-only refresh", async () => 
   );
 });
 
+test("PB job service exposes a confirmed Telegram PDF analysis run", async () => {
+  await createEngine();
+  const service = createPbDailyIntelligenceJobService({
+    env: {
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_PYTHON: "python-test",
+    },
+    uuid: () => "telegram-analysis-plan",
+    spawnImpl() {
+      return fakeChild();
+    },
+  });
+
+  const plan = service.plan("telegram_analyze");
+  assert.equal(plan.token, "telegram-analysis-plan");
+  assert.equal(plan.job.id, "telegram_analyze");
+  assert.equal(plan.job.label, "Telegram 승인 PDF 수집·분석");
+  assert.equal(plan.job.publish, false);
+  assert.equal(
+    plan.commandPreview,
+    "python-test run_daily_report.py --verification-dry-run"
+  );
+});
+
 test("PB job service exposes an allowlisted Gmail-only refresh", async () => {
   await createEngine();
   const service = createPbDailyIntelligenceJobService({

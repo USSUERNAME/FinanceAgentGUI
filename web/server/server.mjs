@@ -16,6 +16,7 @@ import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
 import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
 import { handlePbDailyIntelligenceEndpoint } from "./pbDailyIntelligenceApi.mjs";
 import { handlePbDailyIntelligenceJobsEndpoint } from "./pbDailyIntelligenceJobs.mjs";
+import { handlePbTelegramResearchApprovalsEndpoint } from "./pbTelegramResearchApprovals.mjs";
 import { handleResearchSectorTaxonomyEndpoint } from "./researchSectorTaxonomy.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
@@ -412,6 +413,11 @@ const server = createServer(async (req, res) => {
 
   if (req.url?.startsWith("/api/pb-daily-intelligence/jobs")) {
     await handlePbDailyIntelligenceJobsEndpoint(req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/pb-daily-intelligence/telegram-attachment-approvals")) {
+    await handlePbTelegramResearchApprovalsEndpoint(req, res);
     return;
   }
 

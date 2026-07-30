@@ -20,6 +20,17 @@ const JOB_CATALOG = Object.freeze({
     effect: "텔레그램 후보·중복 제거·사건 클러스터 로컬 갱신",
     publish: false,
   }),
+  telegram_analyze: Object.freeze({
+    id: "telegram_analyze",
+    label: "Telegram 승인 PDF 수집·분석",
+    description:
+      "승인된 공식 증권사 채널 PDF를 수집하고 구조화 분석한 뒤 로컬 결과를 갱신합니다.",
+    script: "run_daily_report.py",
+    args: ["--verification-dry-run"],
+    effect: "승인 Telegram PDF 다운로드·OCR·구조화 분석 · 외부 발행 없음",
+    publish: false,
+    syncTheses: true,
+  }),
   gmail_refresh: Object.freeze({
     id: "gmail_refresh",
     label: "Gmail 리서치 지금 수집",

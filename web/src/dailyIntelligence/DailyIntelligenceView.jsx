@@ -1904,8 +1904,13 @@ function StockCandidates({ stockCandidates }) {
               확인 사실 {candidate.evidence.reduce((sum, item) => sum + item.factCount, 0)}개
             </p>
             <div className="daily-intelligence-stock-sources">
-              {candidate.evidence.map((item) => (
-                <a key={`${candidate.ticker}-${item.title}`} href={item.sourceUrl} target="_blank" rel="noreferrer">
+              {candidate.evidence.map((item, evidenceIndex) => (
+                <a
+                  key={`${candidate.ticker}-${item.sourceUrl || item.title}-${evidenceIndex}`}
+                  href={item.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   {item.title} <ArrowUpRight size={13} />
                 </a>
               ))}
@@ -2959,7 +2964,12 @@ function OperationsPanel({
       ) : (
         <div className="daily-intelligence-operation-actions">
           {(jobStatus?.jobs || [])
-            .filter((job) => !["telegram_refresh", "gmail_refresh", "gmail_analyze"].includes(job.id))
+            .filter((job) => ![
+              "telegram_refresh",
+              "telegram_analyze",
+              "gmail_refresh",
+              "gmail_analyze",
+            ].includes(job.id))
             .map((job) => (
             <button
               type="button"
@@ -2980,7 +2990,12 @@ function OperationsPanel({
 
       {jobError ? <p className="daily-intelligence-operation-error">{jobError}</p> : null}
 
-      {pendingPlan && !["telegram_refresh", "gmail_refresh", "gmail_analyze"].includes(pendingPlan.job?.id) ? (
+      {pendingPlan && ![
+        "telegram_refresh",
+        "telegram_analyze",
+        "gmail_refresh",
+        "gmail_analyze",
+      ].includes(pendingPlan.job?.id) ? (
         <div className={`daily-intelligence-confirmation ${pendingPlan.job?.publish ? "is-publish" : ""}`}>
           <div>
             <span>실행 전 확인</span>
@@ -3050,6 +3065,64 @@ function TelegramSourceMonitor({
   onExecute,
   onCancel,
 }) {
+  const [attachmentQueue, setAttachmentQueue] = React.useState(null);
+  const [attachmentBusy, setAttachmentBusy] = React.useState(false);
+  const [attachmentError, setAttachmentError] = React.useState("");
+  const loadAttachmentQueue = React.useCallback(async () => {
+    setAttachmentBusy(true);
+    setAttachmentError("");
+    try {
+      const response = await fetch(
+        "/api/pb-daily-intelligence/telegram-attachment-approvals",
+        { cache: "no-store" },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setAttachmentQueue(payload);
+    } catch (error) {
+      setAttachmentError(
+        error.message || "Telegram PDF 승인 목록을 불러오지 못했습니다.",
+      );
+    } finally {
+      setAttachmentBusy(false);
+    }
+  }, []);
+  const decideAttachment = React.useCallback(async (attachmentKey, decision) => {
+    setAttachmentBusy(true);
+    setAttachmentError("");
+    try {
+      const response = await fetch(
+        "/api/pb-daily-intelligence/telegram-attachment-approvals",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ attachmentKey, decision }),
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setAttachmentQueue(payload);
+    } catch (error) {
+      setAttachmentError(
+        error.message || "Telegram PDF 승인 결정을 저장하지 못했습니다.",
+      );
+    } finally {
+      setAttachmentBusy(false);
+    }
+  }, []);
+  React.useEffect(() => {
+    if (!telegramSources?.configured) return;
+    void loadAttachmentQueue();
+  }, [
+    loadAttachmentQueue,
+    telegramSources?.collection?.lastCollectedAt,
+    telegramSources?.configured,
+  ]);
+
   if (!telegramSources?.configured) {
     return (
       <section
@@ -3073,12 +3146,19 @@ function TelegramSourceMonitor({
   const credentials = telegramSources.credentials || {};
   const collection = telegramSources.collection || {};
   const deduplication = telegramSources.deduplication || {};
+  const attachmentItems = attachmentQueue?.items || [];
   const collectionReady = credentials.ready === true;
   const telegramRun = jobStatus?.run?.jobId === "telegram_refresh"
     ? jobStatus.run
     : null;
   const refreshing = telegramRun?.status === "running";
   const telegramPlanPending = pendingPlan?.job?.id === "telegram_refresh";
+  const telegramAnalysisRun = jobStatus?.run?.jobId === "telegram_analyze"
+    ? jobStatus.run
+    : null;
+  const analyzingAttachments = telegramAnalysisRun?.status === "running";
+  const telegramAnalysisPlanPending = pendingPlan?.job?.id === "telegram_analyze";
+  const approvedAttachmentCount = Number(attachmentQueue?.counts?.approved || 0);
   const collectionLabels = {
     ok: "수집 완료",
     skipped_or_notice: "설정 확인",
@@ -3232,6 +3312,151 @@ function TelegramSourceMonitor({
           최근 수집 결과에 사건 클러스터가 없습니다. 후보 데이터 수집 후 드라이런 또는 사건 분류를 실행하세요.
         </p>
       )}
+
+      <div className="daily-intelligence-gmail-attachment-approvals">
+        <div className="daily-intelligence-subsection-heading">
+          <div>
+            <span>BROKER PDF INTAKE</span>
+            <h3>공식 증권사 채널 PDF 승인 대기</h3>
+          </div>
+          <div className="daily-intelligence-approval-title-actions">
+            <small>
+              대기 {attachmentQueue?.counts?.pending || 0} ·
+              승인 {attachmentQueue?.counts?.approved || 0} ·
+              제외 {attachmentQueue?.counts?.excluded || 0}
+            </small>
+            <button
+              type="button"
+              className="daily-intelligence-approval-text-button"
+              onClick={loadAttachmentQueue}
+              disabled={attachmentBusy}
+            >
+              <RefreshCw size={14} className={attachmentBusy ? "is-spinning" : ""} />
+              새로고침
+            </button>
+            <button
+              type="button"
+              className="daily-intelligence-approval-text-button daily-intelligence-approval-run-button"
+              onClick={() => onPlan("telegram_analyze")}
+              disabled={
+                !approvedAttachmentCount
+                || attachmentBusy
+                || jobBusy
+                || analyzingAttachments
+              }
+            >
+              {analyzingAttachments
+                ? <LoaderCircle size={14} className="is-spinning" />
+                : <Play size={14} />}
+              {analyzingAttachments ? "분석 중" : "승인 PDF 수집·분석"}
+            </button>
+          </div>
+        </div>
+        {telegramAnalysisPlanPending ? (
+          <div className="daily-intelligence-confirmation">
+            <div>
+              <span>승인 PDF 분석 실행 확인</span>
+              <h3>{pendingPlan.job?.label}</h3>
+              <p>{pendingPlan.job?.effect}</p>
+              <dl>
+                <div><dt>승인 자료</dt><dd>{approvedAttachmentCount}건</dd></div>
+                <div><dt>외부 발행</dt><dd>없음 · 로컬 분석 결과만 갱신</dd></div>
+              </dl>
+            </div>
+            <div className="daily-intelligence-confirmation-actions">
+              <button type="button" onClick={onCancel} disabled={jobBusy}>
+                <X size={15} /> 취소
+              </button>
+              <button type="button" onClick={onExecute} disabled={jobBusy}>
+                {jobBusy
+                  ? <LoaderCircle size={15} className="is-spinning" />
+                  : <Play size={15} />}
+                확인 후 수집·분석
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {telegramAnalysisRun && telegramAnalysisRun.status !== "idle" ? (
+          <div className="daily-intelligence-telegram-run-detail">
+            <strong>{telegramAnalysisRun.message || "승인 PDF 분석 상태 확인 중"}</strong>
+            {telegramAnalysisRun.finishedAt ? (
+              <span>완료 {formatGeneratedAt(telegramAnalysisRun.finishedAt)}</span>
+            ) : null}
+          </div>
+        ) : null}
+        {attachmentError ? (
+          <p className="daily-intelligence-approval-error">
+            <AlertTriangle size={15} /> {attachmentError}
+          </p>
+        ) : null}
+        {attachmentItems.length ? (
+          <div className="daily-intelligence-approval-list">
+            {attachmentItems.map((item) => (
+              <article key={item.attachmentKey}>
+                <div>
+                  <span>{item.channelName || `@${item.channelUsername}`} · 공식 채널 PDF</span>
+                  <h3>{item.filename}</h3>
+                  <small>
+                    {item.title || "게시물 제목 없음"} ·
+                    {item.size
+                      ? ` ${Math.max(1, Math.round(item.size / 1024))}KB`
+                      : " 크기 미확인"}
+                    {item.postUrl ? (
+                      <>
+                        {" · "}
+                        <a href={item.postUrl} target="_blank" rel="noreferrer">
+                          게시물 확인 <ArrowUpRight size={12} />
+                        </a>
+                      </>
+                    ) : null}
+                  </small>
+                </div>
+                <div className="daily-intelligence-approval-actions">
+                  <span className="daily-intelligence-approval-status">
+                    <span>
+                      {item.state === "approved"
+                        ? "분석 승인"
+                        : item.state === "excluded"
+                          ? "분석 제외"
+                          : "승인 대기"}
+                    </span>
+                    <small>
+                      {item.state === "approved"
+                        ? "다음 Telegram 수집에서 PDF 다운로드·OCR, 이후 드라이런에서 분석 반영"
+                        : "승인 전에는 PDF 원문을 다운로드하지 않음"}
+                    </small>
+                  </span>
+                  <button
+                    type="button"
+                    className="is-approve"
+                    onClick={() => decideAttachment(item.attachmentKey, "approved")}
+                    disabled={attachmentBusy || item.state === "approved"}
+                  >
+                    <ShieldCheck size={14} /> 분석 승인
+                  </button>
+                  <button
+                    type="button"
+                    className="is-exclude"
+                    onClick={() => decideAttachment(item.attachmentKey, "excluded")}
+                    disabled={attachmentBusy || item.state === "excluded"}
+                  >
+                    <X size={14} /> 제외
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="daily-intelligence-muted">
+            최근 공식 증권사 채널에서 수집된 PDF 첨부가 없습니다.
+            텔레그램 수집 후 새로고침하면 승인 대상이 표시됩니다.
+          </p>
+        )}
+        <p className="daily-intelligence-panel-note">
+          PDF 자동 수집은 레지스트리에서 명시적으로 허용한 공식 증권사 채널에만 적용됩니다.
+          분석 승인 전에는 파일을 내려받지 않으며, 승인 후에도 원문은 재배포하지 않습니다.
+        </p>
+      </div>
 
       <div className="daily-intelligence-telegram-channel-title">
         <strong>수집 대상 채널</strong>
@@ -5450,6 +5675,7 @@ function GmailResearchStatus({
               </small>
               <button
                 type="button"
+                className="daily-intelligence-approval-text-button"
                 onClick={onReloadAttachmentApprovals}
                 disabled={attachmentApprovalBusy}
               >

@@ -4407,6 +4407,44 @@
   cursor: pointer;
 }
 
+.daily-intelligence-subsection-heading > .daily-intelligence-approval-title-actions {
+  align-items: center;
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: flex-end;
+}
+
+.daily-intelligence-subsection-heading > .daily-intelligence-approval-title-actions small {
+  grid-column: 1 / -1;
+}
+
+.daily-intelligence-approval-title-actions .daily-intelligence-approval-text-button {
+  width: auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  color: var(--daily-text);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.daily-intelligence-approval-title-actions .daily-intelligence-approval-run-button {
+  border-color: #a8d8c6;
+  background: #e6f4ee;
+  color: #1e6f54;
+}
+
+.daily-intelligence-approval-title-actions .daily-intelligence-approval-run-button:not(:disabled):hover {
+  border-color: #79bfa6;
+  background: #d8eee5;
+}
+
 .daily-intelligence-approval-list {
   display: grid;
   gap: 10px;
@@ -7835,6 +7873,26 @@
 }
 
 @container (max-width: 480px) {
+  .daily-intelligence-subsection-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .daily-intelligence-subsection-heading > .daily-intelligence-approval-title-actions {
+    align-items: stretch;
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-content: flex-start;
+  }
+
+  .daily-intelligence-approval-title-actions small {
+    width: 100%;
+    text-align: left;
+  }
+
+  .daily-intelligence-approval-title-actions .daily-intelligence-approval-run-button {
+    width: 100%;
+  }
+
   .daily-intelligence-metrics,
   .daily-intelligence-broker-summary,
   .daily-intelligence-research-index-kpis,

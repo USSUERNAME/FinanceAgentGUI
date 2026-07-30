@@ -358,8 +358,7 @@ async function loadTelegramOverview({ root, reportDate, engineRoot, env }) {
     root,
     "telegram_refresh",
     "telegram_intelligence.json",
-    TELEGRAM_REFRESH_SCHEMA,
-    reportDate
+    TELEGRAM_REFRESH_SCHEMA
   );
 
   const triagedPath = join(root, "triaged", reportDate, "triaged_inbox.json");
@@ -505,6 +504,27 @@ async function loadTelegramOverview({ root, reportDate, engineRoot, env }) {
         ?? channelsRepresented.size
       ),
     },
+    pdfAttachmentCount: Number(
+      liveRefreshArtifact?.payload?.pdf_attachment_count
+      ?? 0
+    ),
+    pdfAttachments: cleanList(
+      liveRefreshArtifact?.payload?.pdf_attachments,
+      100
+    ).map((attachment) => ({
+      attachmentKey: cleanText(attachment?.attachment_key, 128),
+      filename: cleanText(attachment?.filename, 500),
+      mimeType: cleanText(attachment?.mime_type, 120),
+      size: Math.max(0, Number(attachment?.size) || 0),
+      channelUsername: cleanText(attachment?.channel_username, 80),
+      channelName: cleanText(attachment?.channel_name, 160),
+      messageId: Number(attachment?.message_id || 0),
+      postUrl: /^https:\/\/t\.me\//i.test(String(attachment?.post_url || ""))
+        ? String(attachment.post_url)
+        : "",
+      publishedAt: cleanText(attachment?.published_at, 80),
+      title: cleanText(attachment?.title, 240),
+    })).filter((attachment) => attachment.attachmentKey && attachment.filename),
     clusters,
   };
 }
