@@ -82,6 +82,9 @@ test("PB thesis memory is idempotent per date and records only real transitions"
   });
   assert.equal(first.createdCount, 2);
   assert.equal(first.transitionCount, 0);
+  const firstStock = first.records.find((row) => row.entityId === "NVDA");
+  assert.equal(firstStock.metricValue, null);
+  assert.equal(firstStock.observations[0].metricValue, null);
 
   const sameDay = await syncInvestmentThesisMemory({
     decisionChain: chain(),

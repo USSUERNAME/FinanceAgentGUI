@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   activeInvestmentTheses,
   investmentThesisDomId,
+  investmentThesisHistorySummary,
   investmentThesisStateLabel,
+  investmentThesisTimeline,
   relatedInvestmentTheses,
 } from "../src/worldMemory/thesisHelpers.js";
 
@@ -75,4 +77,51 @@ test("World Memory report links sector theses through bounded market themes", ()
     { records },
   );
   assert.deepEqual(related.map((record) => record.entityId), ["XLK", "XLI"]);
+});
+
+test("World Memory thesis timeline separates state changes from daily observations", () => {
+  const memory = {
+    records: [{
+      ...records[0],
+      metricId: "sector_vs_spy_5d_pct_point",
+      metricUnit: "%p",
+      history: [
+        { at: "2026-07-28", fromState: "", toState: "candidate", reason: "최초 추적 등록" },
+        { at: "2026-07-29", fromState: "candidate", toState: "watching", reason: "상대강도 확인" },
+      ],
+      observations: [
+        { at: "2026-07-28", state: "candidate", metricId: "", metricValue: 0, evidenceCount: 1 },
+        { at: "2026-07-29", state: "watching", metricId: "sector_vs_spy_5d_pct_point", metricValue: 0.42, evidenceCount: 2 },
+        { at: "2026-07-30", state: "watching", metricId: "sector_vs_spy_5d_pct_point", metricValue: 0.61, evidenceCount: 2 },
+      ],
+    }, {
+      ...records[1],
+      kind: "stock",
+      observations: [
+        { at: "2026-07-30", state: "candidate", metricId: "stock_vs_sector_5d_pct_point", metricValue: -0.2, evidenceCount: 1 },
+      ],
+      history: [],
+    }],
+  };
+
+  const timeline = investmentThesisTimeline(memory);
+  assert.deepEqual(timeline.map((item) => [item.at, item.entityId, item.changeType]), [
+    ["2026-07-30", "XLK", "observation"],
+    ["2026-07-30", "NVDA", "observation"],
+    ["2026-07-29", "XLK", "transition"],
+    ["2026-07-28", "XLK", "created"],
+  ]);
+  assert.equal(timeline.at(-1).metricValue, null);
+  assert.deepEqual(
+    investmentThesisTimeline(memory, { changesOnly: true, kind: "sector" })
+      .map((item) => item.changeType),
+    ["transition", "created"],
+  );
+  assert.deepEqual(investmentThesisHistorySummary(memory), {
+    latestDate: "2026-07-30",
+    trackedDays: 3,
+    changeCount: 1,
+    createdCount: 1,
+    observationCount: 4,
+  });
 });

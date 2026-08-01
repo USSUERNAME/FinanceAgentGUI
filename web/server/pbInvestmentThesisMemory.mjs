@@ -23,6 +23,12 @@ function cleanText(value, maxLength = 800) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1).trim()}…` : text;
 }
 
+function optionalFiniteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 function uniqueTextList(value, limit = 8) {
   return [...new Set(
     (Array.isArray(value) ? value : [])
@@ -87,9 +93,7 @@ function stockThesis(candidate, reportDate) {
     : negativeRevision
       ? "weakened"
       : priorityState(priority);
-  const stockVsSector5d = Number.isFinite(Number(candidate?.stockVsSector5d))
-    ? Number(candidate.stockVsSector5d)
-    : null;
+  const stockVsSector5d = optionalFiniteNumber(candidate?.stockVsSector5d);
   return {
     continuityId: `pb-stock-${ticker.toLowerCase()}`,
     kind: "stock",
@@ -163,9 +167,7 @@ function sectorThesis(sector, reportDate) {
     ]),
     direction: pressure ? -1 : 1,
     metricId: "sector_vs_spy_5d_pct_point",
-    metricValue: Number.isFinite(Number(sector.vsSpy5d))
-      ? Number(sector.vsSpy5d)
-      : null,
+    metricValue: optionalFiniteNumber(sector.vsSpy5d),
     metricUnit: "%p",
     reportDate,
   };
@@ -193,9 +195,7 @@ function normalizeRecord(record) {
       state: cleanText(item.state, 40),
       priority: cleanText(item.priority, 30),
       metricId: cleanText(item.metricId, 80),
-      metricValue: Number.isFinite(Number(item.metricValue))
-        ? Number(item.metricValue)
-        : null,
+      metricValue: optionalFiniteNumber(item.metricValue),
       evidenceCount: Math.max(0, Number(item.evidenceCount || 0)),
     }));
   const reviewEvidence = (Array.isArray(record?.reviewEvidence) ? record.reviewEvidence : [])
@@ -228,9 +228,7 @@ function normalizeRecord(record) {
       ? Number(record.direction)
       : 0,
     metricId: cleanText(record?.metricId, 80),
-    metricValue: Number.isFinite(Number(record?.metricValue))
-      ? Number(record.metricValue)
-      : null,
+    metricValue: optionalFiniteNumber(record?.metricValue),
     metricUnit: cleanText(record?.metricUnit, 20),
     firstSeenAt: cleanText(record?.firstSeenAt, 20),
     lastSeenAt: cleanText(record?.lastSeenAt, 20),
@@ -419,9 +417,7 @@ function observationFor(candidate, reportDate) {
     state: candidate.state,
     priority: candidate.priority,
     metricId: candidate.metricId || "",
-    metricValue: Number.isFinite(Number(candidate.metricValue))
-      ? Number(candidate.metricValue)
-      : null,
+    metricValue: optionalFiniteNumber(candidate.metricValue),
     evidenceCount: candidate.evidence.length,
   };
 }

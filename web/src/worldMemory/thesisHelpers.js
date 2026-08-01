@@ -112,3 +112,79 @@ export function investmentThesisDomId(record = {}) {
     .replace(/^-+|-+$/g, "");
   return `world-memory-thesis-${safeId || "unknown"}`;
 }
+
+function normalizedHistoryRows(record = {}) {
+  const transitionsByDate = (Array.isArray(record?.history) ? record.history : [])
+    .filter((item) => cleanText(item?.at))
+    .reduce((byDate, item) => {
+      const at = cleanText(item.at).slice(0, 10);
+      if (!byDate.has(at)) byDate.set(at, []);
+      byDate.get(at).push(item);
+      return byDate;
+    }, new Map());
+  const observationsByDate = new Map(
+    (Array.isArray(record?.observations) ? record.observations : [])
+      .filter((item) => cleanText(item?.at))
+      .map((item) => [cleanText(item.at).slice(0, 10), item]),
+  );
+  const dates = new Set([...transitionsByDate.keys(), ...observationsByDate.keys()]);
+  return [...dates].flatMap((at) => {
+    const transitions = transitionsByDate.get(at) || [];
+    const observation = observationsByDate.get(at) || null;
+    const metricId = cleanText(observation ? observation.metricId : record.metricId);
+    const row = (transition = null) => ({
+      at,
+      continuityId: cleanText(record.continuityId),
+      kind: record.kind === "sector" ? "sector" : "stock",
+      entityId: cleanText(record.entityId),
+      title: cleanText(record.title),
+      state: cleanText(observation?.state || transition?.toState || record.state),
+      priority: cleanText(observation?.priority || transition?.toPriority || record.priority),
+      fromState: cleanText(transition?.fromState),
+      toState: cleanText(transition?.toState),
+      fromPriority: cleanText(transition?.fromPriority),
+      toPriority: cleanText(transition?.toPriority),
+      reason: cleanText(transition?.reason),
+      metricId,
+      metricValue: metricId
+        && observation?.metricValue !== null
+        && observation?.metricValue !== ""
+        && Number.isFinite(Number(observation?.metricValue))
+        ? Number(observation.metricValue)
+        : null,
+      metricUnit: cleanText(record.metricUnit),
+      evidenceCount: Math.max(0, Number(observation?.evidenceCount || 0)),
+      changeType: transition
+        ? cleanText(transition.fromState) ? "transition" : "created"
+        : "observation",
+    });
+    return transitions.length ? transitions.map(row) : [row()];
+  });
+}
+
+export function investmentThesisTimeline(memory = {}, { changesOnly = false, kind = "all" } = {}) {
+  return (Array.isArray(memory?.records) ? memory.records : [])
+    .flatMap(normalizedHistoryRows)
+    .filter((item) => !changesOnly || item.changeType !== "observation")
+    .filter((item) => kind === "all" || item.kind === kind)
+    .sort((first, second) => {
+      const dateOrder = second.at.localeCompare(first.at);
+      if (dateOrder) return dateOrder;
+      const changeRank = { transition: 0, created: 1, observation: 2 };
+      const typeOrder = Number(changeRank[first.changeType] ?? 9) - Number(changeRank[second.changeType] ?? 9);
+      if (typeOrder) return typeOrder;
+      return first.title.localeCompare(second.title, "ko");
+    });
+}
+
+export function investmentThesisHistorySummary(memory = {}) {
+  const timeline = investmentThesisTimeline(memory);
+  const changes = timeline.filter((item) => item.changeType !== "observation");
+  return {
+    latestDate: timeline[0]?.at || "",
+    trackedDays: new Set(timeline.map((item) => item.at)).size,
+    changeCount: changes.filter((item) => item.changeType === "transition").length,
+    createdCount: changes.filter((item) => item.changeType === "created").length,
+    observationCount: timeline.length,
+  };
+}

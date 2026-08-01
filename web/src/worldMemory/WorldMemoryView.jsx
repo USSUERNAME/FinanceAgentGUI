@@ -6,6 +6,7 @@ import ChevronsRight from "lucide-react/dist/esm/icons/chevrons-right.js";
 import Circle from "lucide-react/dist/esm/icons/circle.js";
 import Database from "lucide-react/dist/esm/icons/database.js";
 import Eye from "lucide-react/dist/esm/icons/eye.js";
+import History from "lucide-react/dist/esm/icons/history.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
 import Pause from "lucide-react/dist/esm/icons/pause.js";
 import Play from "lucide-react/dist/esm/icons/play.js";
@@ -20,7 +21,9 @@ import { normalizeMemoryChangeSuggestionItem, worldMemorySuggestionCanAskAgent }
 import {
   activeInvestmentTheses,
   investmentThesisDomId,
+  investmentThesisHistorySummary,
   investmentThesisStateLabel,
+  investmentThesisTimeline,
   relatedInvestmentTheses,
 } from "./thesisHelpers.js";
 import "./world-memory.css";
@@ -273,10 +276,140 @@ function WorldMemoryRichReport({
 }
 
 function formatThesisMetric(record = {}) {
+  if (!record.metricId || record.metricValue === null || record.metricValue === "") return "관측값 없음";
   const value = Number(record.metricValue);
   if (!Number.isFinite(value)) return "관측값 없음";
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(2)}${record.metricUnit || ""}`;
+}
+
+function thesisHistoryChangeLabel(item = {}) {
+  if (item.changeType === "created") return "추적 시작";
+  if (item.changeType === "transition") {
+    const from = investmentThesisStateLabel({ state: item.fromState });
+    const to = investmentThesisStateLabel({ state: item.toState || item.state });
+    return `${from} → ${to}`;
+  }
+  return "정기 관측";
+}
+
+function WorldMemoryThesisHistory({ memory = {}, onOpenThesis }) {
+  const [kind, setKind] = React.useState("all");
+  const [changesOnly, setChangesOnly] = React.useState(true);
+  const summary = investmentThesisHistorySummary(memory);
+  const timeline = investmentThesisTimeline(memory, { changesOnly, kind });
+  const groupedTimeline = timeline.reduce((groups, item) => {
+    if (!groups.has(item.at)) groups.set(item.at, []);
+    groups.get(item.at).push(item);
+    return groups;
+  }, new Map());
+  const recordsById = new Map(
+    (Array.isArray(memory.records) ? memory.records : [])
+      .map((record) => [record.continuityId, record]),
+  );
+
+  return (
+    <section className="world-memory-section world-memory-history-section" aria-labelledby="world-memory-history-title">
+      <div className="world-memory-section-header">
+        <div>
+          <h2 id="world-memory-history-title">PB 투자 가설 이력</h2>
+          <span>날짜별 관측과 실제 상태 변화를 분리해 확인합니다.</span>
+        </div>
+        <span className="world-memory-badge">{summary.trackedDays}일</span>
+      </div>
+
+      <div className="world-memory-history-summary" aria-label="투자 가설 이력 요약">
+        <article>
+          <span>최근 관측일</span>
+          <strong>{summary.latestDate || "없음"}</strong>
+        </article>
+        <article>
+          <span>추적 거래일</span>
+          <strong>{summary.trackedDays}</strong>
+        </article>
+        <article>
+          <span>상태 변화</span>
+          <strong>{summary.changeCount}</strong>
+        </article>
+        <article>
+          <span>누적 관측</span>
+          <strong>{summary.observationCount}</strong>
+        </article>
+      </div>
+
+      <div className="world-memory-history-filters" aria-label="투자 가설 이력 필터">
+        <div>
+          {[
+            ["all", "전체"],
+            ["sector", "섹터"],
+            ["stock", "종목"],
+          ].map(([value, label]) => (
+            <button
+              type="button"
+              className={kind === value ? "is-active" : ""}
+              aria-pressed={kind === value}
+              key={value}
+              onClick={() => setKind(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <label>
+          <input
+            type="checkbox"
+            checked={changesOnly}
+            onChange={(event) => setChangesOnly(event.target.checked)}
+          />
+          <span>상태 변화만 보기</span>
+        </label>
+      </div>
+
+      {timeline.length ? (
+        <div className="world-memory-history-timeline">
+          {[...groupedTimeline.entries()].map(([date, items]) => (
+            <section key={date} aria-labelledby={`world-memory-history-${date}`}>
+              <header>
+                <time id={`world-memory-history-${date}`} dateTime={date}>{date}</time>
+                <span>{items.length}건</span>
+              </header>
+              <div>
+                {items.map((item) => {
+                  const record = recordsById.get(item.continuityId);
+                  return (
+                    <button
+                      type="button"
+                      className={`world-memory-history-row is-${item.changeType}`}
+                      key={`${item.continuityId}-${item.at}-${item.changeType}`}
+                      onClick={() => onOpenThesis?.(record)}
+                    >
+                      <span className="world-memory-history-dot" aria-hidden="true" />
+                      <span className="world-memory-history-copy">
+                        <span>{item.kind === "sector" ? "섹터" : "종목"} · {item.entityId}</span>
+                        <strong>{item.title}</strong>
+                        <small>{item.reason || `${item.metricId || "평가 지표"}를 다시 관측했습니다.`}</small>
+                      </span>
+                      <span className="world-memory-history-result">
+                        <strong>{thesisHistoryChangeLabel(item)}</strong>
+                        <small>{formatThesisMetric(item)}</small>
+                      </span>
+                      <ChevronsRight size={15} strokeWidth={2.2} aria-hidden="true" />
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <div className="world-memory-empty-report">
+          <History size={20} strokeWidth={2.1} />
+          <strong>선택한 조건에 해당하는 가설 이력이 없습니다.</strong>
+          <p>전체 관측을 켜거나 다른 유형을 선택해 보세요.</p>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function WorldMemoryInvestmentTheses({ memory = {}, focusedThesisId = "" }) {
@@ -472,6 +605,7 @@ export default function WorldMemoryView({
   const investmentTheses = status?.investmentTheses || {};
   const thesisRecords = Array.isArray(investmentTheses.records) ? investmentTheses.records : [];
   const relatedTheses = relatedInvestmentTheses(report, investmentTheses);
+  const thesisHistorySummary = investmentThesisHistorySummary(investmentTheses);
   const eventCount = Number(status?.list?.json?.count) || 0;
 
   React.useEffect(() => {
@@ -562,6 +696,16 @@ export default function WorldMemoryView({
             <span>PB 투자 가설</span>
             <strong>{investmentTheses.recordCount ?? thesisRecords.length}</strong>
           </button>
+          <button
+            type="button"
+            className={activeMemoryTab === "history" ? "is-active" : ""}
+            aria-selected={activeMemoryTab === "history"}
+            onClick={() => setActiveMemoryTab("history")}
+          >
+            <History size={16} strokeWidth={2.2} />
+            <span>가설 이력</span>
+            <strong>{thesisHistorySummary.observationCount}</strong>
+          </button>
         </nav>
 
         {activeMemoryTab === "events" ? (
@@ -650,10 +794,15 @@ export default function WorldMemoryView({
               ) : null}
             </section>
           </>
-        ) : (
+        ) : activeMemoryTab === "theses" ? (
           <WorldMemoryInvestmentTheses
             memory={investmentTheses}
             focusedThesisId={focusedThesisId}
+          />
+        ) : (
+          <WorldMemoryThesisHistory
+            memory={investmentTheses}
+            onOpenThesis={openInvestmentThesis}
           />
         )}
       </section>
