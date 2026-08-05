@@ -1,0 +1,69 @@
+{
+  "sources": [
+    {
+      "id": "semianalysis",
+      "name": "SemiAnalysis",
+      "domains": ["semianalysis.com", "newsletter.semianalysis.com"],
+      "themes": ["AI 인프라", "반도체", "공급망"],
+      "discovery_mode": "newsapi_metadata",
+      "access_mode": "link_only"
+    },
+    {
+      "id": "the_diff",
+      "name": "The Diff",
+      "domains": ["thediff.co", "the-diff.com"],
+      "themes": ["기술", "금융", "장기 테마"],
+      "discovery_mode": "newsapi_metadata",
+      "access_mode": "link_only"
+    },
+    {
+      "id": "the_miilk",
+      "name": "더밀크",
+      "domains": ["themiilk.com"],
+      "themes": ["미국 기술", "투자", "실리콘밸리"],
+      "discovery_mode": "newsapi_metadata",
+      "access_mode": "link_only"
+    },
+    {
+      "id": "blackrock_institute",
+      "name": "BlackRock Investment Institute",
+      "domains": ["blackrock.com"],
+      "query": "market OR equity OR AI OR rates OR geopolitical",
+      "themes": ["주간 시장 견해", "AI", "금리", "지정학"],
+      "discovery_mode": "newsapi_metadata",
+      "access_mode": "link_only"
+    },
+    {
+      "id": "jpmam_market_insights",
+      "name": "J.P. Morgan AM Market Insights",
+      "domains": ["am.jpmorgan.com"],
+      "query": "market OR equity OR AI OR inflation OR rates",
+      "themes": ["주간 시장 요약", "주식", "금리", "AI"],
+      "discovery_mode": "newsapi_metadata",
+      "access_mode": "link_only"
+    },
+    {
+      "id": "pimco_insights",
+      "name": "PIMCO Insights",
+      "domains": ["pimco.com"],
+      "query": "market OR macro OR AI OR inflation OR geopolitical",
+      "themes": ["거시", "금리", "신용", "지정학"],
+      "discovery_mode": "newsapi_metadata",
+      "access_mode": "link_only"
+    },
+    {
+      "id": "fed_speeches",
+      "name": "Federal Reserve Speeches & Testimony",
+      "feed_url": "https://www.federalreserve.gov/feeds/speeches_and_testimony.xml",
+      "max_items": 5,
+      "themes": ["통화정책", "금리", "인플레이션"],
+      "candidate_kind": "official_policy_signal",
+      "discovery_mode": "rss",
+      "access_mode": "official_rss_link_only"
+    }
+  ],
+  "newsapi": {
+    "page_size_per_source": 5,
+    "query": "technology OR market OR semiconductor OR AI"
+  }
+}

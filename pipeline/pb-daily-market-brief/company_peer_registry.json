@@ -1,0 +1,86 @@
+{
+  "schema_version": "company_peer_registry.v1",
+  "version_date": "2026-07-20",
+  "minimum_usable_peers": 2,
+  "maximum_provider_peer_requests": 4,
+  "source_policy": {
+    "selection_evidence_label": "analyst_assumption_needs_review",
+    "market_data_provider": "Alpha Vantage",
+    "provider_documentation_url": "https://www.alphavantage.co/documentation/",
+    "historical_band_required_for_cycle_valuation": true
+  },
+  "target_peer_sets": [
+    {
+      "target_ticker": "NVDA",
+      "sector_id": "semiconductors_ai_compute",
+      "peers": [
+        {"ticker": "AMD", "company_name": "Advanced Micro Devices", "role": "core_peer", "rationale": "Accelerated-compute and data-center processor exposure provides the closest listed product-market comparison."},
+        {"ticker": "AVGO", "company_name": "Broadcom", "role": "secondary_peer", "rationale": "AI connectivity and accelerator exposure is relevant, but software and diversified semiconductor mix reduce comparability."},
+        {"ticker": "TSM", "company_name": "Taiwan Semiconductor Manufacturing ADR", "role": "not_clean_comp", "rationale": "Foundry economics are a supply-chain read-through rather than a direct product-margin comparison."}
+      ]
+    },
+    {
+      "target_ticker": "TSM",
+      "sector_id": "semiconductors_ai_compute",
+      "peers": [
+        {"ticker": "UMC", "company_name": "United Microelectronics ADR", "role": "core_peer", "rationale": "Pure-play listed foundry with comparable manufacturing economics, though node mix differs."},
+        {"ticker": "GFS", "company_name": "GlobalFoundries", "role": "core_peer", "rationale": "Pure-play foundry with a public listing and comparable capital-intensive manufacturing model."},
+        {"ticker": "NVDA", "company_name": "NVIDIA", "role": "negative_peer", "rationale": "Fabless product economics make NVIDIA unsuitable as a direct valuation anchor for a foundry."}
+      ]
+    },
+    {
+      "target_ticker": "GEV",
+      "sector_id": "grid_electrification",
+      "peers": [
+        {"ticker": "ETN", "company_name": "Eaton", "role": "core_peer", "rationale": "Electrical equipment, grid reliability, and data-center power exposure overlap with Electrification demand."},
+        {"ticker": "HUBB", "company_name": "Hubbell", "role": "core_peer", "rationale": "Utility and electrical solutions provide a narrower grid-equipment comparison."},
+        {"ticker": "EMR", "company_name": "Emerson Electric", "role": "secondary_peer", "rationale": "Automation and electrical exposure offer industrial context, but portfolio mix is less direct."}
+      ]
+    },
+    {
+      "target_ticker": "ETN",
+      "sector_id": "grid_electrification",
+      "peers": [
+        {"ticker": "HUBB", "company_name": "Hubbell", "role": "core_peer", "rationale": "Utility and electrical equipment exposure provides a direct power-distribution comparison."},
+        {"ticker": "ROK", "company_name": "Rockwell Automation", "role": "secondary_peer", "rationale": "Electrical and automation exposure is relevant, with a different recurring-services and factory mix."},
+        {"ticker": "EMR", "company_name": "Emerson Electric", "role": "secondary_peer", "rationale": "Diversified automation and electrical economics provide context but are not a pure distribution-equipment comp."}
+      ]
+    },
+    {
+      "target_ticker": "CCJ",
+      "sector_id": "nuclear_generation",
+      "peers": [
+        {"ticker": "UEC", "company_name": "Uranium Energy", "role": "secondary_peer", "rationale": "Uranium supply exposure is relevant, but scale, production status, and downstream mix differ."},
+        {"ticker": "NXE", "company_name": "NexGen Energy", "role": "secondary_peer", "rationale": "Uranium resource exposure informs commodity optionality but development-stage economics limit comparability."},
+        {"ticker": "LEU", "company_name": "Centrus Energy", "role": "not_clean_comp", "rationale": "Fuel-cycle exposure is relevant but enrichment economics differ from integrated uranium production."}
+      ]
+    },
+    {
+      "target_ticker": "CEG",
+      "sector_id": "nuclear_generation",
+      "peers": [
+        {"ticker": "VST", "company_name": "Vistra", "role": "core_peer", "rationale": "Competitive generation and retail exposure provide the closest listed power-market comparison."},
+        {"ticker": "NRG", "company_name": "NRG Energy", "role": "secondary_peer", "rationale": "Competitive power and retail exposure is relevant, though nuclear fleet and generation mix differ."},
+        {"ticker": "TLN", "company_name": "Talen Energy", "role": "secondary_peer", "rationale": "Merchant generation and nuclear-linked power exposure provide context with a smaller and less diversified base."}
+      ]
+    },
+    {
+      "target_ticker": "LMT",
+      "sector_id": "aerospace_defense",
+      "peers": [
+        {"ticker": "NOC", "company_name": "Northrop Grumman", "role": "core_peer", "rationale": "Prime-contractor backlog, program duration, and U.S. defense exposure are closely comparable."},
+        {"ticker": "GD", "company_name": "General Dynamics", "role": "core_peer", "rationale": "Defense prime and long-cycle backlog economics provide a direct comparison, with business-jet mix caveats."},
+        {"ticker": "RTX", "company_name": "RTX", "role": "secondary_peer", "rationale": "Defense systems overlap is material, while commercial aerospace changes the earnings mix."}
+      ]
+    },
+    {
+      "target_ticker": "RTX",
+      "sector_id": "aerospace_defense",
+      "peers": [
+        {"ticker": "LMT", "company_name": "Lockheed Martin", "role": "secondary_peer", "rationale": "Defense systems and backlog are relevant, though commercial aerospace exposure differs."},
+        {"ticker": "NOC", "company_name": "Northrop Grumman", "role": "secondary_peer", "rationale": "Defense-prime economics provide a useful anchor with less commercial aerospace exposure."},
+        {"ticker": "GE", "company_name": "GE Aerospace", "role": "secondary_peer", "rationale": "Commercial aerospace economics are relevant, while the absence of a defense-systems mix limits direct comparability."}
+      ]
+    }
+  ]
+}

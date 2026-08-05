@@ -1,0 +1,42 @@
+{
+  "schema_version": "krx_official_market_input.v1",
+  "report_date": "YYYY-MM-DD",
+  "source_provider": "Korea Exchange",
+  "source_url": "https://openapi.krx.co.kr/",
+  "source_grade": "A",
+  "primary_source_confirmed": true,
+  "metrics": {
+    "kospi": {
+      "value": 0.0,
+      "unit": "index points",
+      "as_of": "YYYY-MM-DD",
+      "change_1d_pct": null,
+      "change_5d_pct": null,
+      "market_cutoff": "official_close"
+    },
+    "kosdaq": {
+      "value": 0.0,
+      "unit": "index points",
+      "as_of": "YYYY-MM-DD",
+      "change_1d_pct": null,
+      "change_5d_pct": null,
+      "market_cutoff": "official_close"
+    },
+    "foreign_kospi_cash_net_buy_krw": {
+      "value": 0.0,
+      "unit": "KRW",
+      "as_of": "YYYY-MM-DD",
+      "change_1d_pct": null,
+      "change_5d_pct": null,
+      "market_cutoff": "official_close"
+    },
+    "foreign_kospi200_futures_net_buy_contracts": {
+      "value": 0.0,
+      "unit": "contracts",
+      "as_of": "YYYY-MM-DD",
+      "change_1d_pct": null,
+      "change_5d_pct": null,
+      "market_cutoff": "official_close"
+    }
+  }
+}

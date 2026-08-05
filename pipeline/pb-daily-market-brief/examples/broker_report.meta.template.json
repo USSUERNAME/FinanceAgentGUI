@@ -1,0 +1,42 @@
+{
+  "publisher": "Example Securities",
+  "title": "Semiconductor industry outlook",
+  "published_at": "2026-07-24T00:00:00+09:00",
+  "source_reference": "EXAMPLE-20260724-001",
+  "source_url": "https://research.example.com/report/001",
+  "acquisition_mode": "operator_authorized_drive",
+  "analysis_allowed": true,
+  "redistribution_allowed": false,
+  "publication_policy": "summary_and_link_only",
+  "rights_review_status": "operator_confirmed",
+  "rights_label": "Private analysis permitted; original report text and images may not be redistributed.",
+  "link_required": true,
+  "tickers": [],
+  "tags": [
+    "semiconductor",
+    "industry_outlook"
+  ],
+  "research": {
+    "analyst": "Analyst name",
+    "report_type": "sector",
+    "stance": "positive",
+    "summary": "Operator-authored or model-generated paraphrase for the internal digest.",
+    "key_claims": [
+      "A concise paraphrased claim with no copied report passage."
+    ],
+    "catalysts": [
+      "Demand or earnings catalyst to monitor."
+    ],
+    "risks": [
+      "The principal downside or invalidation risk."
+    ],
+    "sectors": [
+      "semiconductor"
+    ],
+    "rating": "",
+    "previous_rating": "",
+    "target_price": null,
+    "previous_target_price": null,
+    "currency": "KRW"
+  }
+}

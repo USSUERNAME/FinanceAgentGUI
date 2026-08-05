@@ -1,0 +1,23 @@
+{
+  "completion_id": "completion:company-review-alert:example",
+  "alert_key": "0000000000000000000000000000000000000000000000000000000000000000",
+  "followup_id": "followup:company-review-alert:example",
+  "review_id": "company-review:EXAMPLE:2026-10-30",
+  "ticker": "EXAMPLE",
+  "status": "completed_with_evidence",
+  "completed_by": "research_analyst",
+  "completed_at": "2026-11-01T08:30:00+09:00",
+  "completion_outcome": "evidence_review_completed",
+  "evidence_summary": "Primary evidence was reviewed and the required operational note was logged.",
+  "evidence_references": [
+    {
+      "evidence_id": "workpaper-note-001",
+      "source_type": "internal_workpaper",
+      "source_reference": "workspace/internal_notes/GEV_followup.md",
+      "limitation": "Operational completion evidence only; it does not change the company thesis or position action."
+    }
+  ],
+  "reviewed_followup_hash": "Copy from complete_company_review_alert_followup.py --list-open output.",
+  "completion_scope": "operational_review_only",
+  "automatic_position_action_allowed": false
+}

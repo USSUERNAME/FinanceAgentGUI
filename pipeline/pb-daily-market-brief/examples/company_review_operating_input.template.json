@@ -1,0 +1,52 @@
+{
+  "operating_config_id": "company:GEV:review-operations:v1",
+  "ticker": "GEV",
+  "company_name": "GE Vernova",
+  "version": 1,
+  "effective_from": "2026-07-21",
+  "approval": {
+    "status": "draft_pending_user_or_pm_approval",
+    "approved_by": null,
+    "approved_at": null,
+    "approval_note": "Replace every placeholder and explicitly approve before use."
+  },
+  "owners": {
+    "decision_authority": "REPLACE_WITH_NAME_OR_ROLE",
+    "pm_owner": "REPLACE_WITH_NAME_OR_ROLE",
+    "analyst_owner": "REPLACE_WITH_NAME_OR_ROLE",
+    "evidence_owner": "REPLACE_WITH_NAME_OR_ROLE",
+    "kpi_owner": "REPLACE_WITH_NAME_OR_ROLE",
+    "model_owner": "REPLACE_WITH_NAME_OR_ROLE",
+    "decision_log_owner": "REPLACE_WITH_NAME_OR_ROLE"
+  },
+  "review_policy": {
+    "cadence": "event_driven",
+    "next_scheduled_review_date": null,
+    "prep_lead_time": {
+      "value": 5,
+      "unit": "calendar_days"
+    },
+    "post_event_update_sla": {
+      "value": 24,
+      "unit": "hours",
+      "start_condition": "verified_primary_results_available"
+    },
+    "escalation_triggers": [
+      "Confirmed event date changes",
+      "Source-verified result matches an approved kill criterion",
+      "Required primary evidence is unavailable after the event"
+    ]
+  },
+  "automatic_position_action_allowed": false,
+  "source_index": [
+    {
+      "source_id": "OPS-GEV-V1",
+      "source_name": "GEV approved review operating configuration v1",
+      "source_type": "user_provided_internal_operating_policy",
+      "as_of_date": "2026-07-21",
+      "source_location": "company_review_operating_registry.json",
+      "reliability": "explicit_user_or_pm_approval",
+      "limitation": "Operating ownership and timing policy only; not a public-company fact or investment action."
+    }
+  ]
+}

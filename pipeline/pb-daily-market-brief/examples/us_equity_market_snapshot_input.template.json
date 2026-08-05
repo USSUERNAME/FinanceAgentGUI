@@ -1,0 +1,165 @@
+{
+  "schema_version": "us_equity_market_snapshot_input.v1",
+  "report_date": "2026-07-23",
+  "source_provider": "Replace with licensed batch market-data provider",
+  "source_url": "https://provider.example/documentation",
+  "source_grade": "B",
+  "rights_label": "licensed_internal_use",
+  "as_of": "2026-07-22",
+  "market_cutoff": "official_close",
+  "benchmarks": [
+    {
+      "ticker": "SPY",
+      "close": 700.0,
+      "previous_close": 695.0,
+      "close_5_sessions_ago": 690.0,
+      "close_20_sessions_ago": 680.0
+    },
+    {
+      "ticker": "SOXX",
+      "close": 310.0,
+      "previous_close": 305.0,
+      "close_5_sessions_ago": 300.0,
+      "close_20_sessions_ago": 290.0
+    },
+    {
+      "ticker": "RSP",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "IWM",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "MDY",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "IWF",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "IWD",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "MTUM",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "USMV",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "XLC",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "XLY",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "XLP",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "XLE",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "XLF",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "XLV",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "XLI",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "XLB",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "XLRE",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "XLK",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    },
+    {
+      "ticker": "XLU",
+      "close": 100.0,
+      "previous_close": 99.0,
+      "close_5_sessions_ago": 98.0,
+      "close_20_sessions_ago": 95.0
+    }
+  ],
+  "securities": [
+    {
+      "ticker": "NVDA",
+      "company_name": "NVIDIA Corporation",
+      "sector_etf": "SOXX",
+      "close": 200.0,
+      "previous_close": 215.0,
+      "close_5_sessions_ago": 220.0,
+      "close_20_sessions_ago": 190.0,
+      "volume": 200000000,
+      "avg_volume_20d": 70000000
+    }
+  ]
+}

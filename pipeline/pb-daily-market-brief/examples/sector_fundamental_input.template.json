@@ -1,0 +1,27 @@
+{
+  "records": [
+    {
+      "record_id": "REPLACE_WITH_STABLE_ID",
+      "sector_id": "semiconductors_ai_compute",
+      "market": "US",
+      "ticker": "REPLACE_WITH_MASTER_TICKER",
+      "company_name": "REPLACE_WITH_COMPANY_NAME",
+      "metric_type": "new_orders",
+      "current_value": "REPLACE_WITH_NUMBER",
+      "prior_value": "REPLACE_WITH_COMPARABLE_NUMBER",
+      "unit": "REPLACE_WITH_UNIT",
+      "currency": "REPLACE_WITH_CURRENCY",
+      "current_period": "REPLACE_WITH_PERIOD",
+      "prior_period": "REPLACE_WITH_COMPARABLE_PERIOD",
+      "source_type": "company_filing",
+      "source_url": "https://REPLACE_WITH_PRIMARY_DOCUMENT_URL",
+      "source_date": "YYYY-MM-DD",
+      "body_location": "REPLACE_WITH_PAGE_TABLE_OR_SECTION",
+      "primary_source_confirmed": true,
+      "body_verified": true,
+      "exposure_verified": true,
+      "exposure_source_url": "https://REPLACE_WITH_PRIMARY_EXPOSURE_SOURCE_URL",
+      "exposure_body_location": "REPLACE_WITH_PAGE_OR_SECTION"
+    }
+  ]
+}

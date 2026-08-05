@@ -1,0 +1,103 @@
+{
+  "schema_version": "official_source_registry.v1",
+  "routes": {
+    "monetary_policy": {
+      "origin_domains": ["federalreserve.gov", "newyorkfed.org"],
+      "provider_domains": ["fred.stlouisfed.org"],
+      "preferred_source_ids": ["fed_speeches"],
+      "landing_pages": [
+        "https://www.federalreserve.gov/newsevents.htm",
+        "https://www.federalreserve.gov/newsevents/speeches-testimony.htm"
+      ]
+    },
+    "economic_data": {
+      "origin_domains": ["bls.gov", "bea.gov", "census.gov", "federalreserve.gov"],
+      "provider_domains": ["fred.stlouisfed.org"],
+      "preferred_source_ids": ["fred"],
+      "landing_pages": [
+        "https://www.bls.gov/newsroom/",
+        "https://www.bea.gov/news/schedule/",
+        "https://www.federalreserve.gov/releases/"
+      ]
+    },
+    "earnings_guidance": {
+      "origin_domains": ["sec.gov", "dart.fss.or.kr"],
+      "provider_domains": [],
+      "preferred_source_ids": ["sec_inbox", "opendart"],
+      "landing_pages": [
+        "https://www.sec.gov/search-filings",
+        "https://dart.fss.or.kr/"
+      ]
+    },
+    "corporate_action": {
+      "origin_domains": ["sec.gov", "dart.fss.or.kr", "ftc.gov", "justice.gov"],
+      "provider_domains": [],
+      "preferred_source_ids": ["sec_inbox", "opendart"],
+      "landing_pages": [
+        "https://www.sec.gov/search-filings",
+        "https://dart.fss.or.kr/",
+        "https://www.ftc.gov/news-events/news/press-releases"
+      ]
+    },
+    "regulation_policy": {
+      "origin_domains": [
+        "sec.gov",
+        "ftc.gov",
+        "justice.gov",
+        "treasury.gov",
+        "federalreserve.gov",
+        "fsc.go.kr"
+      ],
+      "provider_domains": [],
+      "preferred_source_ids": [],
+      "landing_pages": [
+        "https://www.sec.gov/newsroom",
+        "https://www.ftc.gov/news-events/news/press-releases",
+        "https://home.treasury.gov/news/press-releases"
+      ]
+    },
+    "commodity_supply": {
+      "origin_domains": ["eia.gov", "opec.org", "iea.org"],
+      "provider_domains": [],
+      "preferred_source_ids": [],
+      "landing_pages": [
+        "https://www.eia.gov/petroleum/supply/weekly/",
+        "https://www.eia.gov/petroleum/data.php"
+      ]
+    },
+    "geopolitics": {
+      "origin_domains": ["whitehouse.gov", "state.gov", "treasury.gov", "ofac.treasury.gov", "defense.gov"],
+      "provider_domains": [],
+      "preferred_source_ids": [],
+      "landing_pages": [
+        "https://www.whitehouse.gov/briefing-room/",
+        "https://www.state.gov/press-releases/",
+        "https://ofac.treasury.gov/press-releases",
+        "https://www.defense.gov/News/Contracts/"
+      ]
+    },
+    "market_structure": {
+      "origin_domains": ["sec.gov", "cftc.gov", "finra.org", "federalreserve.gov"],
+      "provider_domains": [],
+      "preferred_source_ids": [],
+      "landing_pages": [
+        "https://www.sec.gov/newsroom",
+        "https://www.cftc.gov/PressRoom/PressReleases"
+      ]
+    },
+    "other": {
+      "origin_domains": [
+        "sec.gov",
+        "dart.fss.or.kr",
+        "federalreserve.gov",
+        "bls.gov",
+        "bea.gov",
+        "eia.gov",
+        "treasury.gov"
+      ],
+      "provider_domains": ["fred.stlouisfed.org"],
+      "preferred_source_ids": ["sec_inbox", "opendart", "fred", "fed_speeches"],
+      "landing_pages": []
+    }
+  }
+}

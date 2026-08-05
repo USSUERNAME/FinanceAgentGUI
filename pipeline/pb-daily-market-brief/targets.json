@@ -1,0 +1,8 @@
+{
+  "targets": [
+    {"ticker": "NVDA", "name": "NVIDIA Corporation", "cik": "0001045810"},
+    {"ticker": "MSFT", "name": "Microsoft Corporation", "cik": "0000789019"},
+    {"ticker": "TSLA", "name": "Tesla, Inc.", "cik": "0001318605"}
+  ],
+  "forms": ["8-K", "10-Q", "10-K"]
+}

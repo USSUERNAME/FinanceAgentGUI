@@ -1,0 +1,11 @@
+{
+  "manual_review_scope": "Verify that the named external URL was reviewed by a user or PM. This records operational reference review only; it does not change a company thesis, position, or investment decision.",
+  "cli_confirmation_phrase": "VERIFY_COMPANY_REVIEW_ALERT_EXTERNAL_EVIDENCE",
+  "required_cli_fields": [
+    "completion_id",
+    "evidence_id",
+    "verified_by",
+    "verification_note",
+    "expected_evidence_hash"
+  ]
+}

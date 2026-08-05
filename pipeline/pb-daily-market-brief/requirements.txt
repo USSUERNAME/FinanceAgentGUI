@@ -1,0 +1,5 @@
+Pillow>=10.0,<12
+Telethon>=1.40,<2
+pypdf>=5.0,<7
+pytesseract>=0.3.13,<0.4
+tzdata>=2024.1,<2027

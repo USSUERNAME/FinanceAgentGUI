@@ -1,0 +1,266 @@
+name: Daily market brief
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_mode:
+        description: "publish publishes; dry_run is offline evidence validation; verification_dry_run verifies official evidence without publishing; publish_cached reuses a prior artifact"
+        required: true
+        default: publish
+        type: choice
+        options:
+          - publish
+          - dry_run
+          - verification_dry_run
+          - publish_cached
+      source_run_id:
+        description: "Required for publish_cached: successful dry-run Actions run ID"
+        required: false
+        default: ""
+        type: string
+  schedule:
+    # 22:30 UTC, Sunday through Thursday = 07:30 KST, Monday through Friday.
+    - cron: "30 22 * * 0-4"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publish-brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BRIEF_TIMEZONE: Asia/Seoul
+      SEC_LOOKBACK_DAYS: "2"
+      SEC_REQUEST_DELAY_SECONDS: "0.25"
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      KRX_OPEN_API_KEY: ${{ secrets.KRX_OPEN_API_KEY }}
+      ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+      ALPHAVANTAGE_REQUEST_DELAY_SECONDS: "13"
+      APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+      APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+      ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+      ALPACA_MARKET_DATA_FEED: "iex"
+      NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
+      OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
+      OPENDART_LOOKBACK_DAYS: "3"
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
+      QUALITATIVE_INBOX_DATA_SOURCE_ID: ${{ secrets.QUALITATIVE_INBOX_DATA_SOURCE_ID }}
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      TELEGRAM_SESSION_STRING: ${{ secrets.TELEGRAM_SESSION_STRING }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_CLIENT_ID }}
+      GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GOOGLE_DRIVE_CLIENT_SECRET }}
+      GOOGLE_DRIVE_REFRESH_TOKEN: ${{ secrets.GOOGLE_DRIVE_REFRESH_TOKEN }}
+      GOOGLE_DRIVE_RESEARCH_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_RESEARCH_FOLDER_ID }}
+      GOOGLE_DRIVE_RESEARCH_MAX_FILES: "40"
+      GOOGLE_GMAIL_CLIENT_ID: ${{ secrets.GOOGLE_GMAIL_CLIENT_ID }}
+      GOOGLE_GMAIL_CLIENT_SECRET: ${{ secrets.GOOGLE_GMAIL_CLIENT_SECRET }}
+      GOOGLE_GMAIL_REFRESH_TOKEN: ${{ secrets.GOOGLE_GMAIL_REFRESH_TOKEN }}
+      GOOGLE_GMAIL_RESEARCH_LABEL: "Stocks"
+      COLLECTOR_TIMEOUT_AUTHORIZED_REPORT_DROP_SECONDS: "300"
+      COLLECTOR_TIMEOUT_GOOGLE_DRIVE_RESEARCH_INBOX_SECONDS: "300"
+      COLLECTOR_TIMEOUT_GMAIL_RESEARCH_SECONDS: "120"
+      COMPANY_REVIEW_ALERTS_ENABLED: ${{ secrets.COMPANY_REVIEW_ALERTS_ENABLED }}
+      OPENAI_BRIEF_MODEL: gpt-5-mini
+      OPENAI_BRIEF_MAX_OUTPUT_TOKENS: "8000"
+      OPENAI_BRIEF_TIMEOUT_SECONDS: "180"
+      OPENAI_BRIEF_MAX_ATTEMPTS: "2"
+      OPENAI_BRIEF_BROKER_REPORT_LIMIT: "5"
+      OPENAI_BRIEF_BROKER_REPORT_CHARS: "6000"
+      OPENAI_BROKER_RESEARCH_MAX_REPORTS: "25"
+      OPENAI_ANALYSIS_MODEL: gpt-5-mini
+      BRIEF_RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_mode || 'publish' }}
+      FINANCIAL_JUICE_RADAR_RSS_URL: ${{ secrets.FINANCIAL_JUICE_RADAR_RSS_URL }}
+      WALTER_BLOOMBERG_RADAR_RSS_URL: ${{ secrets.WALTER_BLOOMBERG_RADAR_RSS_URL }}
+      FIRST_SQUAWK_RADAR_RSS_URL: ${{ secrets.FIRST_SQUAWK_RADAR_RSS_URL }}
+      UNUSUAL_WHALES_RADAR_RSS_URL: ${{ secrets.UNUSUAL_WHALES_RADAR_RSS_URL }}
+      BREAKING_NEWS_RADAR_5_RSS_URL: ${{ secrets.BREAKING_NEWS_RADAR_5_RSS_URL }}
+    steps:
+      - name: Check out private brief code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Korean font for report images
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk poppler-utils tesseract-ocr tesseract-ocr-kor
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Restore report history
+        if: env.BRIEF_RUN_MODE != 'publish_cached'
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/history
+          key: ${{ runner.os }}-hypothesis-history-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-hypothesis-history-
+
+      - name: Restore broker research structured analysis cache
+        if: env.BRIEF_RUN_MODE != 'publish_cached'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/broker_research_cache/structured_analysis
+          key: ${{ runner.os }}-broker-research-v1-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-broker-research-v1-
+
+      - name: Validate cached publication input
+        if: env.BRIEF_RUN_MODE == 'publish_cached'
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          if ! [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "source_run_id is required for publish_cached"
+            exit 1
+          fi
+
+      - name: Download validated dry-run artifact
+        if: env.BRIEF_RUN_MODE == 'publish_cached'
+        uses: actions/download-artifact@v4
+        with:
+          name: daily-market-evidence-${{ inputs.source_run_id }}
+          path: workspace
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+
+      - name: Run publication preflight
+        id: preflight
+        continue-on-error: true
+        run: |
+          python -m compileall -q .
+          python -m unittest discover -s tests
+
+      - name: Create and publish the Korean brief
+        id: brief
+        continue-on-error: true
+        if: steps.preflight.outcome == 'success'
+        run: |
+          if [ "$BRIEF_RUN_MODE" = "dry_run" ]; then
+            python run_daily_report.py --dry-run
+          elif [ "$BRIEF_RUN_MODE" = "verification_dry_run" ]; then
+            python run_daily_report.py --verification-dry-run
+          elif [ "$BRIEF_RUN_MODE" = "publish_cached" ]; then
+            python publish_cached_brief.py
+          else
+            python run_daily_report.py
+          fi
+
+      - name: Save report history
+        if: env.BRIEF_RUN_MODE == 'publish' && steps.brief.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/history
+          key: ${{ runner.os }}-hypothesis-history-${{ github.run_id }}
+
+      - name: Save broker research structured analysis cache
+        if: env.BRIEF_RUN_MODE != 'publish_cached' && steps.brief.outcome == 'success'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/broker_research_cache/structured_analysis
+          key: ${{ runner.os }}-broker-research-v1-${{ github.run_id }}
+
+      - name: Preserve structured evidence and analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-market-evidence-${{ github.run_id }}
+          path: |
+            workspace/snapshots/
+            workspace/analysis/
+            workspace/briefs/
+            workspace/charts/
+            workspace/source_status/
+            workspace/triaged/
+            workspace/event_evidence/
+            workspace/market_calendar/
+            workspace/korea_market/
+            workspace/provider_budget/
+            workspace/us_equity_universe/
+            workspace/us_equity_market_inputs/
+            workspace/us_equity_candidate_screen/
+            workspace/us_market_internals/
+            workspace/history/
+            workspace/operations_reports/
+            workspace/operations_manifest/
+            workspace/intelligence/
+            workspace/v2_reader_reports/
+            workspace/broker_research_analysis/
+            workspace/broker_research_digest/
+            workspace/cross_source_events/
+            workspace/sector_metrics/
+            workspace/sector_fundamentals/
+            workspace/sector_drivers/
+            workspace/company_research_queue/
+            workspace/company_market_context/
+            workspace/company_peer_context/
+            workspace/company_valuation_expectations/
+            workspace/company_primary_facts/
+            workspace/company_guidance_inputs/
+            workspace/company_operating_bridge/
+            workspace/company_operating_inputs/
+            workspace/company_tearsheets/
+            workspace/company_earnings_events/
+            workspace/company_earnings_event_inputs/
+            workspace/company_earnings_reaction_context/
+            workspace/company_option_inputs/
+            workspace/company_earnings_driver_review/
+            workspace/company_earnings_scenarios/
+            workspace/company_earnings_result_inputs/
+            workspace/company_earnings_results/
+            workspace/company_earnings_deep_dive/
+            workspace/earnings_intelligence/
+            workspace/company_underwriting_inputs/
+            workspace/company_underwriting/
+            workspace/company_underwriting_drafts/
+            workspace/company_underwriting_approvals/
+            workspace/company_thesis_updates/
+            workspace/company_review_operating_inputs/
+            workspace/company_review_operating_drafts/
+            workspace/company_review_operating_review_queue/
+            workspace/company_review_operating_config/
+            workspace/company_review_operating_approvals/
+            workspace/company_thesis_review_calendar/
+            workspace/company_review_operations_monitor/
+            workspace/company_review_alert_delivery_plans/
+            workspace/company_review_alert_delivery_policy_approvals/
+            workspace/company_review_alert_acknowledgements/
+            workspace/company_review_alert_followup_assignments/
+            workspace/company_review_alert_followup_completions/
+            workspace/company_review_alert_followup_monitor/
+            workspace/company_review_alert_sla_summary/
+            workspace/company_review_alert_owner_queue/
+            workspace/company_review_alert_sla_trend/
+            workspace/company_review_alert_completion_evidence_integrity/
+            workspace/company_review_alert_completion_evidence_verifications/
+            workspace/company_review_alert_external_evidence_backlog/
+            workspace/company_review_alert_external_evidence_backlog_reviews/
+            workspace/company_review_alert_external_evidence_review_summary/
+            workspace/company_review_alert_external_evidence_operation_audit/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Notify Telegram on success
+        if: (env.BRIEF_RUN_MODE == 'publish' || env.BRIEF_RUN_MODE == 'publish_cached') && steps.preflight.outcome == 'success' && steps.brief.outcome == 'success'
+        run: python send_telegram_notification.py --status success --notion-url "${{ steps.brief.outputs.notion_url }}"
+
+      - name: Notify Telegram on failure
+        if: (env.BRIEF_RUN_MODE == 'publish' || env.BRIEF_RUN_MODE == 'publish_cached') && (steps.preflight.outcome == 'failure' || steps.brief.outcome == 'failure')
+        run: python send_telegram_notification.py --status failure --run-url "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Mark failed brief as failed
+        if: steps.preflight.outcome == 'failure' || steps.brief.outcome == 'failure'
+        run: exit 1

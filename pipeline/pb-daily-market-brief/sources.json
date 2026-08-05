@@ -1,0 +1,323 @@
+{
+  "watchlist": ["NVDA", "MSFT", "TSLA"],
+  "etf_watchlist": [
+    {"ticker": "SPY", "name": "미국 S&P 500 대형주"},
+    {"ticker": "QQQ", "name": "미국 나스닥 100"},
+    {"ticker": "IWM", "name": "미국 중소형주"},
+    {"ticker": "XLF", "name": "미국 금융주"},
+    {"ticker": "XLE", "name": "미국 에너지주"},
+    {"ticker": "XLK", "name": "미국 기술주"},
+    {"ticker": "SMH", "name": "반도체"},
+    {"ticker": "TLT", "name": "미국 장기국채"},
+    {"ticker": "GLD", "name": "금"},
+    {"ticker": "HYG", "name": "미국 하이일드 회사채"}
+  ],
+  "fred_series": [
+    {"id": "FEDFUNDS", "label": "Federal Funds Effective Rate", "chart_label": "Federal Funds Rate", "unit": "percent"},
+    {"id": "CPIAUCSL", "label": "Consumer Price Index for All Urban Consumers", "chart_label": "US Consumer Price Index", "unit": "index"},
+    {"id": "UNRATE", "label": "Civilian Unemployment Rate", "chart_label": "US Unemployment Rate", "unit": "percent"},
+    {"id": "DGS10", "label": "Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity", "chart_label": "US 10Y Treasury Yield", "unit": "percent"}
+  ],
+  "alpha_vantage": {
+    "topics": ["economy_macro", "economy_monetary", "financial_markets"],
+    "limit": 25
+  },
+  "newsapi": {
+    "endpoint": "top_headlines",
+    "country": "us",
+    "category": "business",
+    "page_size": 12
+  },
+  "gdelt": {
+    "enabled": true,
+    "query": "(\"stock market\" OR inflation OR \"interest rates\" OR earnings OR semiconductor) sourcelang:english",
+    "timespan": "24h",
+    "max_records": 25,
+    "sort": "datedesc"
+  },
+  "rss_candidates": [
+    {
+      "id": "fed_speeches",
+      "publisher": "Federal Reserve",
+      "feed_url": "https://www.federalreserve.gov/feeds/speeches_and_testimony.xml",
+      "max_items": 8,
+      "source_grade": "A",
+      "primary_source_confirmed": true,
+      "official_domains": ["federalreserve.gov"],
+      "source_type": "official_release_metadata",
+      "tags": ["monetary_policy", "rates"],
+      "rights_label": "Federal Reserve RSS metadata and official source links."
+    },
+    {
+      "id": "radar_financial_juice",
+      "publisher": "FinancialJuice radar",
+      "feed_url_env": "FINANCIAL_JUICE_RADAR_RSS_URL",
+      "feed_role": "breaking_news_radar",
+      "max_items": 15,
+      "tags": ["breaking_news", "global_markets"],
+      "rights_label": "Operator-authorized RSS link metadata only; do not reproduce post or article text."
+    },
+    {
+      "id": "radar_walter_bloomberg",
+      "publisher": "Walter Bloomberg radar",
+      "feed_url_env": "WALTER_BLOOMBERG_RADAR_RSS_URL",
+      "feed_role": "breaking_news_radar",
+      "max_items": 15,
+      "tags": ["breaking_news", "global_markets"],
+      "rights_label": "Operator-authorized RSS link metadata only; do not reproduce post or article text."
+    },
+    {
+      "id": "radar_first_squawk",
+      "publisher": "First Squawk radar",
+      "feed_url_env": "FIRST_SQUAWK_RADAR_RSS_URL",
+      "feed_role": "breaking_news_radar",
+      "max_items": 15,
+      "tags": ["breaking_news", "global_markets"],
+      "rights_label": "Operator-authorized RSS link metadata only; do not reproduce post or article text."
+    },
+    {
+      "id": "radar_unusual_whales",
+      "publisher": "Unusual Whales radar",
+      "feed_url_env": "UNUSUAL_WHALES_RADAR_RSS_URL",
+      "feed_role": "breaking_news_radar",
+      "max_items": 15,
+      "tags": ["breaking_news", "us_equities"],
+      "rights_label": "Operator-authorized RSS link metadata only; do not reproduce post or article text."
+    },
+    {
+      "id": "radar_operator_slot_5",
+      "publisher": "Operator-configured radar",
+      "feed_url_env": "BREAKING_NEWS_RADAR_5_RSS_URL",
+      "feed_role": "breaking_news_radar",
+      "max_items": 15,
+      "tags": ["breaking_news"],
+      "rights_label": "Operator-authorized RSS link metadata only; do not reproduce post or article text."
+    }
+  ],
+  "institutional_insights": [
+    {
+      "id": "morgan_stanley_public_insights",
+      "publisher": "Morgan Stanley",
+      "sitemap_url": "https://www.morganstanley.com/sitemap.xml",
+      "official_domains": ["morganstanley.com"],
+      "path_patterns": ["^/insights/(articles|topics)/", "^/what-we-do/research/"],
+      "max_age_days": 21,
+      "max_items": 8,
+      "market_scope": "US",
+      "tags": ["us_equities", "macro", "sectors"],
+      "include_title_keywords": [
+        "market", "stock", "equity", "bond", "fed", "inflation", "econom",
+        "earnings", "invest", "oil", "energy", "AI", "capex", "fiscal",
+        "robotaxi", "streaming", "technology", "sector"
+      ],
+      "exclude_title_keywords": [
+        "donor-advised", "philanthrop", "charitable", "retirement planning",
+        "estate planning", "personal finance"
+      ],
+      "rights_label": "Morgan Stanley official public-page title, date, and link metadata only."
+    },
+    {
+      "id": "goldman_sachs_public_insights",
+      "publisher": "Goldman Sachs",
+      "sitemap_url": "https://www.goldmansachs.com/sitemap.xml",
+      "official_domains": ["goldmansachs.com"],
+      "path_patterns": ["^/insights/articles/", "^/insights/goldman-sachs-research/"],
+      "max_age_days": 21,
+      "max_items": 8,
+      "market_scope": "GLOBAL",
+      "tags": ["global_markets", "macro", "equities"],
+      "include_title_keywords": [
+        "market", "stock", "equity", "bond", "rates", "inflation", "econom",
+        "earnings", "invest", "oil", "energy", "AI", "capex", "valuation",
+        "biotech", "trading", "commodity", "currency"
+      ],
+      "exclude_title_keywords": [
+        "career", "philanthrop", "charitable", "personal finance"
+      ],
+      "rights_label": "Goldman Sachs official public-page title, date, and link metadata only."
+    }
+  ],
+  "official_research_documents": [
+    {
+      "id": "jpmorgan_weekly_market_recap",
+      "publisher": "J.P. Morgan Asset Management",
+      "title": "Weekly Market Recap",
+      "document_url": "https://am.jpmorgan.com/content/dam/jpm-am-aem/americas/us/en/insights/market-insights/wmr/weekly_market_recap.pdf",
+      "landing_page_url": "https://am.jpmorgan.com/us/en/asset-management/adv/insights/market-insights/market-updates/weekly-market-recap/",
+      "official_domains": ["am.jpmorgan.com"],
+      "file_name": "jpmorgan_weekly_market_recap.pdf",
+      "max_bytes": 20000000,
+      "market_scope": "US",
+      "issuer_country": "US",
+      "original_language": "en",
+      "base_currency": "USD",
+      "report_type": "market_strategy",
+      "research_path": ["미국", "시장전략·종합"],
+      "sectors": ["시장전략·종합"],
+      "tags": [
+        "us_equities", "market_breadth", "style_returns",
+        "valuation", "rates", "credit", "commodities"
+      ],
+      "rights_label": "J.P. Morgan Asset Management official public Weekly Market Recap; summary and source link only."
+    }
+  ],
+  "gmail_research": {
+    "enabled": true,
+    "label_name": "Stocks",
+    "lookback_days": 14,
+    "max_messages": 40,
+    "sender_sources": [
+      {
+        "id": "morgan_stanley_newsletter",
+        "publisher": "Morgan Stanley",
+        "sender_domains": ["morganstanley.com"],
+        "market_scope": "US",
+        "issuer_country": "US",
+        "original_language": "en",
+        "base_currency": "USD",
+        "report_type": "market_strategy",
+        "research_path": ["미국", "시장전략·종합"],
+        "sectors": ["시장전략·종합"],
+        "tags": ["us_equities", "macro", "sectors"]
+      },
+      {
+        "id": "blackrock_investment_institute_newsletter",
+        "publisher": "BlackRock Investment Institute",
+        "sender_domains": ["blackrock.com"],
+        "market_scope": "GLOBAL",
+        "issuer_country": "US",
+        "original_language": "en",
+        "base_currency": "USD",
+        "report_type": "macro",
+        "research_path": ["글로벌", "자산배분·크로스애셋"],
+        "sectors": ["시장전략·종합"],
+        "tags": ["global_markets", "asset_allocation", "cross_asset"]
+      },
+      {
+        "id": "apollo_daily_spark_newsletter",
+        "publisher": "Apollo Global Management",
+        "sender_domains": ["apollo.com"],
+        "market_scope": "US",
+        "issuer_country": "US",
+        "original_language": "en",
+        "base_currency": "USD",
+        "report_type": "macro",
+        "research_path": ["미국", "매크로·크레딧"],
+        "sectors": ["시장전략·종합"],
+        "tags": ["us_economy", "rates", "credit", "liquidity"]
+      }
+    ]
+  },
+  "candidate_pipeline": {
+    "max_age_hours": 96,
+    "title_similarity_threshold": 0.92,
+    "title_time_window_hours": 36,
+    "cluster_title_similarity_threshold": 0.58,
+    "cluster_time_window_hours": 48,
+    "primary_domains": [
+      "federalreserve.gov",
+      "sec.gov",
+      "bls.gov",
+      "bea.gov",
+      "treasury.gov",
+      "dart.fss.or.kr",
+      "bok.or.kr"
+    ],
+    "trusted_domains": [
+      "reuters.com",
+      "apnews.com",
+      "bloomberg.com",
+      "ft.com",
+      "wsj.com",
+      "cnbc.com",
+      "marketwatch.com"
+      ,"morganstanley.com"
+      ,"goldmansachs.com"
+    ],
+    "blocked_domains": [],
+    "include_keywords": [
+      "market",
+      "stocks",
+      "equity",
+      "earnings",
+      "guidance",
+      "inflation",
+      "rates",
+      "federal reserve",
+      "treasury",
+      "oil",
+      "gold",
+      "semiconductor",
+      "artificial intelligence",
+      "tariff",
+      "regulation"
+    ],
+    "hard_exclude_keywords": [
+      "celebrity",
+      "lottery",
+      "recipe",
+      "box office",
+      "sports score"
+    ]
+  },
+  "event_evidence": {
+    "max_events": 10,
+    "max_representatives_per_event": 2,
+    "max_official_fetches": 3,
+    "max_official_body_chars": 12000
+  },
+  "opendart": {
+    "lookback_days": 3,
+    "max_items": 8,
+    "fetch_bodies": true,
+    "max_body_fetches": 3,
+    "max_body_chars": 6000,
+    "body_request_delay_seconds": 0.2,
+    "disclosure_types": ["B", "I", "C", "A"]
+  },
+  "sec_filings": {
+    "fetch_bodies": true,
+    "max_body_fetches": 3,
+    "max_body_chars": 6000
+  },
+  "official_market_calendar": {
+    "enabled": true,
+    "lookahead_days": 7,
+    "include_titles": [
+      "Consumer Price Index",
+      "Employment Situation",
+      "Producer Price Index",
+      "Job Openings and Labor Turnover",
+      "Employment Cost Index",
+      "U.S. Import and Export Price Indexes",
+      "Productivity and Costs",
+      "GDP",
+      "Personal Income and Outlays"
+    ],
+    "sources": [
+      {
+        "id": "bls_release_calendar",
+        "publisher": "U.S. Bureau of Labor Statistics",
+        "url": "https://www.bls.gov/schedule/news_release/bls.ics",
+        "time_zone": "America/New_York",
+        "format": "ics",
+        "fallback_format": "bls_html",
+        "fallback_url_template": "https://www.bls.gov/schedule/{year}/{month}_sched_list.htm"
+      },
+      {
+        "id": "bea_release_calendar",
+        "publisher": "U.S. Bureau of Economic Analysis",
+        "url": "https://www.bea.gov/news/schedule",
+        "time_zone": "America/New_York",
+        "format": "bea_html"
+      }
+    ]
+  },
+  "market_calendar": [
+    {"date": "2026-07-17", "time": "09:15 ET", "category": "거시", "title": "미국 산업생산·설비가동률", "source": "Federal Reserve G.17", "source_url": "https://www.federalreserve.gov/releases/g17/current/default.htm", "date_confidence": "confirmed_primary"},
+    {"date": "2026-07-21", "time": "10:00 ET", "category": "거시", "title": "미국 주·지역 고용 및 실업", "source": "BLS", "source_url": "https://www.bls.gov/schedule/2026/home.htm", "date_confidence": "confirmed_primary"},
+    {"date": "2026-07-21", "time": "10:00 ET", "category": "거시", "title": "미국 2026년 2분기 통상 주급", "source": "BLS CPS", "source_url": "https://www.bls.gov/cps/publications/release-calendar.htm", "date_confidence": "confirmed_primary"},
+    {"date": "2026-07-22", "time": "10:00 ET", "category": "거시", "title": "미국 주(州)별 구인·이직 연례 자료", "source": "BLS", "source_url": "https://www.bls.gov/newsroom/home.htm", "date_confidence": "confirmed_primary"},
+    {"date": "2026-07-22", "time": "After close", "category": "실적", "title": "테슬라 2026년 2분기 실적·Q&A", "source": "Tesla IR", "source_url": "https://ir.tesla.com/_flysystem/s3/sec/000162828026046717/tsla-20260702-gen.pdf", "date_confidence": "confirmed_primary"}
+  ]
+}

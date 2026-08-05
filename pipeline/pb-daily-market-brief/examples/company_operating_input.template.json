@@ -1,0 +1,39 @@
+{
+  "records": [
+    {
+      "record_id": "ticker-segment-or-kpi-period",
+      "sector_id": "semiconductors_ai_compute",
+      "ticker": "NVDA",
+      "company_name": "NVIDIA",
+      "statement": "segment",
+      "line_item_original": "Data Center revenue",
+      "line_item_standard": "Data Center Revenue",
+      "line_item_id": "segment.data_center.revenue",
+      "metric_basis": "reported",
+      "definition": "Replace with the issuer's exact segment or KPI definition.",
+      "current_value": 10000,
+      "prior_value": 8000,
+      "current_period_start": "2026-02-01",
+      "current_period_end": "2026-04-30",
+      "current_period_label": "Q1 FY2027",
+      "prior_period_start": "2025-02-01",
+      "prior_period_end": "2025-04-30",
+      "prior_period_label": "Q1 FY2026",
+      "period_type": "quarterly",
+      "currency": "USD",
+      "units": "USD millions",
+      "source_type": "company_filing",
+      "source_url": "https://www.sec.gov/Archives/replace-with-primary-filing",
+      "source_date": "2026-05-20",
+      "body_location": "Replace with filing section and table row",
+      "primary_source_confirmed": true,
+      "body_verified": true,
+      "exposure_verified": true,
+      "exposure_source_url": "https://www.sec.gov/Archives/replace-with-exposure-source",
+      "exposure_body_location": "Replace with exact business exposure section",
+      "comparison_status": "comparable",
+      "model_treatment": "audit_only_pending_full_segment_schedule",
+      "note": "For management_adjusted metrics also supply reported_metric_reference, adjustment_description, reconciliation_status=body_verified, and reconciliation_location."
+    }
+  ]
+}

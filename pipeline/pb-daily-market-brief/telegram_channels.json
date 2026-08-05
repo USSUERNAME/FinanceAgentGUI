@@ -1,0 +1,248 @@
+{
+  "schema_version": "telegram_channel_registry.v1",
+  "collection_policy": {
+    "lookback_hours": 72,
+    "max_messages_per_channel": 12,
+    "max_analysis_chars_per_post": 1600,
+    "max_external_links_per_post": 8,
+    "require_public_username": true,
+    "default_source_grade": "D",
+    "default_evidence_scope": "telegram_channel_post",
+    "decision_limit": "Telegram posts are discovery and viewpoint leads. Verify material claims with official or trusted independent sources before using them as facts."
+  },
+  "channels": [
+    {
+      "username": "WoosanXNNN",
+      "name": "우산 X NNN의 아이디어",
+      "category": "domestic_sector_company_ideas",
+      "origin": "user_supplied",
+      "priority": 1,
+      "enabled": true,
+      "publication_policy": "internal_summary_with_attribution",
+      "rights_label": "Public Telegram commentary; bounded internal paraphrase with channel attribution and post link. Do not reproduce the post."
+    },
+    {
+      "username": "aetherjapanresearch",
+      "name": "에테르의 일본&미국 리서치",
+      "category": "japan_us_company_research",
+      "origin": "user_supplied",
+      "priority": 1,
+      "enabled": true,
+      "publication_policy": "internal_summary_with_attribution",
+      "rights_label": "Public Telegram commentary; bounded internal paraphrase with channel attribution and post link. Do not reproduce the post."
+    },
+    {
+      "username": "cahier_de_market",
+      "name": "카이에 de market",
+      "category": "macro_company_interpretation",
+      "origin": "user_supplied",
+      "priority": 1,
+      "enabled": true,
+      "publication_policy": "internal_summary_with_attribution",
+      "rights_label": "Public subjective market commentary; bounded internal paraphrase with attribution and post link. Treat all claims as unverified viewpoints."
+    },
+    {
+      "username": "insidertracking",
+      "name": "미국 주식 인사이더",
+      "category": "us_global_breaking_news",
+      "origin": "user_supplied",
+      "priority": 2,
+      "enabled": true,
+      "publication_policy": "discovery_only",
+      "rights_label": "Public Telegram discovery lead; retain the post link and independently verify before publication."
+    },
+    {
+      "username": "bumgore",
+      "name": "시장 이야기 by 제이슨",
+      "category": "market_commentary_ideas",
+      "origin": "user_supplied",
+      "priority": 1,
+      "enabled": true,
+      "publication_policy": "internal_summary_with_attribution",
+      "rights_label": "Public market commentary; bounded internal paraphrase with attribution and post link. Do not reproduce the post."
+    },
+    {
+      "username": "GoUpstock",
+      "name": "오를주식(GoUp)",
+      "category": "general_market_news",
+      "origin": "user_supplied",
+      "priority": 3,
+      "enabled": true,
+      "publication_policy": "discovery_only",
+      "rights_label": "Public Telegram discovery lead; retain the post link and independently verify before publication."
+    },
+    {
+      "username": "HanaResearch",
+      "name": "하나증권 리서치",
+      "category": "broker_research",
+      "origin": "recommended",
+      "priority": 1,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Publicly shared broker-research notice; link and bounded internal summary only. Do not reproduce report text, ratings, or target prices."
+    },
+    {
+      "username": "hana_us_stock",
+      "name": "하나증권 미국주식",
+      "category": "broker_us_equity_research",
+      "origin": "recommended",
+      "priority": 1,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Publicly shared broker-research notice; link and bounded internal summary only. Do not reproduce report text, ratings, or target prices."
+    },
+    {
+      "username": "SK_Research_Asset",
+      "name": "SK증권 리서치 자산전략팀",
+      "category": "broker_asset_strategy",
+      "origin": "recommended",
+      "priority": 1,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Publicly shared broker-research notice; link and bounded internal summary only. Do not reproduce report text, ratings, or target prices."
+    },
+    {
+      "username": "meritz_research",
+      "name": "메리츠증권 리서치",
+      "category": "broker_research",
+      "origin": "recommended",
+      "priority": 1,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Publicly shared broker-research notice; link and bounded internal summary only. Do not reproduce report text, ratings, or target prices."
+    },
+    {
+      "username": "Meritz_strategy",
+      "name": "메리츠 투자전략",
+      "category": "broker_market_strategy",
+      "origin": "recommended",
+      "priority": 1,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Publicly shared broker-strategy notice; link and bounded internal summary only. Do not reproduce report text, ratings, or target prices."
+    },
+    {
+      "username": "darthacking",
+      "name": "AWAKE 실시간 주식 공시 정리채널",
+      "category": "domestic_filing_discovery",
+      "origin": "recommended",
+      "priority": 2,
+      "enabled": true,
+      "publication_policy": "link_only_no_republication",
+      "rights_label": "Channel states unauthorized reproduction and distribution are prohibited. Use only as a discovery lead; publish only channel name, topic label, and post link."
+    },
+    {
+      "username": "finter_gpt",
+      "name": "머니터링 국내공시요약",
+      "category": "domestic_filing_discovery",
+      "origin": "recommended",
+      "priority": 2,
+      "enabled": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Public disclosure-summary channel; use as a discovery lead and verify against OpenDART. Do not reproduce the post."
+    },
+    {
+      "username": "fastest_info1",
+      "name": "빠르고 정확한 주식정보방",
+      "category": "general_market_news",
+      "origin": "recommended",
+      "priority": 3,
+      "enabled": true,
+      "publication_policy": "discovery_only",
+      "rights_label": "Public Telegram discovery lead; retain the post link and independently verify before publication."
+    },
+    {
+      "username": "KiwoomResearch",
+      "name": "키움증권 리서치센터",
+      "category": "broker_global_equity_research",
+      "origin": "recommended",
+      "priority": 1,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Publicly shared broker-research notice; link and bounded internal summary only. Do not reproduce report text, ratings, target prices, or charts."
+    },
+    {
+      "username": "shinhanresearch",
+      "name": "신한투자증권 리서치",
+      "category": "broker_research",
+      "origin": "recommended",
+      "priority": 1,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Publicly shared broker-research notice; link and bounded internal summary only. Do not reproduce report text, ratings, target prices, or charts."
+    },
+    {
+      "username": "SHICGLOBAL",
+      "name": "신한투자증권 박석중의 글로벌전략",
+      "category": "broker_global_strategy",
+      "origin": "recommended",
+      "priority": 1,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Public analyst-attributed strategy channel; link and bounded internal summary only. Verify material claims against the linked compliance-approved report."
+    },
+    {
+      "username": "hanwhastrategy",
+      "name": "한화투자증권 리서치센터 투자전략팀",
+      "category": "broker_market_strategy",
+      "origin": "recommended",
+      "priority": 1,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Publicly shared broker-strategy notice; link and bounded internal summary only. Do not reproduce report text, ratings, target prices, or charts."
+    },
+    {
+      "username": "hmsecresearch",
+      "name": "현대차증권 리서치센터",
+      "category": "broker_research",
+      "origin": "recommended",
+      "priority": 1,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Publicly shared broker-research notice; link and bounded internal summary only. Verify forwarded analyst commentary against its linked report."
+    },
+    {
+      "username": "sk_smallcap",
+      "name": "SK증권 미드스몰캡 리서치",
+      "category": "broker_small_mid_cap_research",
+      "origin": "recommended",
+      "priority": 2,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Publicly shared broker-research notice; link and bounded internal summary only. Do not reproduce report text, ratings, target prices, or charts."
+    },
+    {
+      "username": "sksresearch",
+      "name": "SK증권 리서치센터",
+      "category": "broker_research",
+      "origin": "recommended",
+      "priority": 1,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Publicly shared broker-research notice; link and bounded internal summary only. Do not reproduce report text, ratings, target prices, or charts."
+    },
+    {
+      "username": "leadingR",
+      "name": "리딩투자증권 리서치센터",
+      "category": "broker_company_research",
+      "origin": "recommended",
+      "priority": 2,
+      "enabled": true,
+      "attachment_collection_allowed": true,
+      "publication_policy": "link_only_bounded_summary",
+      "rights_label": "Publicly shared compliance-reviewed broker research; link and bounded internal summary only. Do not reproduce report text, ratings, target prices, or charts."
+    }
+  ]
+}
