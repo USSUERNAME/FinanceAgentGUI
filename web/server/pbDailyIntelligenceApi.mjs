@@ -170,7 +170,7 @@ async function latestJsonInDateFolder(root, folderName, preferredDate, filePatte
 }
 
 async function latestGmailResearchCandidates(root, preferredDate, limit = 20) {
-  const parent = join(root, "normalized_inbox");
+  const parent = join(root, "normalized");
   const dates = await dateFolders(parent);
   const selectedDate =
     preferredDate && dates.includes(preferredDate)

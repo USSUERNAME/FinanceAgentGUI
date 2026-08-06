@@ -16,6 +16,11 @@ async function createEngine() {
     "utf8"
   );
   await writeFile(join(tempRoot, "run_daily_report.py"), "print('report')\n", "utf8");
+  await writeFile(
+    join(tempRoot, "run_research_inbox_analysis.py"),
+    "print('research inbox analysis')\n",
+    "utf8"
+  );
 }
 
 function fakeChild({ code = 0, output = "" } = {}) {
@@ -177,7 +182,7 @@ test("PB job service exposes an unpublished Gmail-inclusive analysis run", async
   assert.equal(plan.job.publish, false);
   assert.equal(
     plan.commandPreview,
-    "python-test run_daily_report.py --verification-dry-run"
+    "python-test run_research_inbox_analysis.py"
   );
 });
 

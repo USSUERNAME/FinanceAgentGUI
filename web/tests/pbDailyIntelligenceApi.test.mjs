@@ -1005,7 +1005,7 @@ test("PB Daily Intelligence exposes Gmail research collection status without sec
     }
   );
   await writeJson(
-    join(tempRoot, "normalized_inbox", reportDate, "inbox_190241.json"),
+    join(tempRoot, "normalized", reportDate, "inbox_190241.json"),
     [
       {
         id: "gmail-1",
