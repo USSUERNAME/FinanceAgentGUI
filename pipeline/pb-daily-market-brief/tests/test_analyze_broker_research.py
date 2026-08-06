@@ -89,6 +89,15 @@ class AnalyzeBrokerResearchTests(unittest.TestCase):
         self.assertEqual(len(rows), 12)
         self.assertEqual(rows[0]["report_id"], "report-11")
 
+    def test_bounded_reports_keeps_hard_cap_for_explicit_large_runs(self) -> None:
+        records = []
+        for index in range(120):
+            item = record()
+            item["id"] = f"report-{index:03d}"
+            records.append(item)
+        rows = bounded_reports(records, max_reports=120)
+        self.assertEqual(len(rows), 100)
+
     def test_schema_requires_each_authorized_report_once(self) -> None:
         schema = analysis_schema(["a", "b"])
         reports = schema["properties"]["reports"]

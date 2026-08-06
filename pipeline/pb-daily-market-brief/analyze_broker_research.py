@@ -25,7 +25,7 @@ ANALYSIS_CACHE_DIR = (
 )
 MAX_REPORTS_PER_REQUEST = 5
 MAX_REPORTS_PER_RUN = 25
-HARD_MAX_REPORTS_PER_RUN = 40
+HARD_MAX_REPORTS_PER_RUN = 100
 MAX_INPUT_CHARS = 8_000
 ANALYSIS_INSTRUCTIONS = """You analyze operator-authorized sell-side research for a private Korean PB workflow.
 Use only the supplied report text and metadata. Produce concise Korean paraphrases; never copy long passages, tables, charts, or distinctive wording. Separate the analyst's stated view from facts verified elsewhere. A broker opinion is attributed analysis, not a confirmed company fact.
