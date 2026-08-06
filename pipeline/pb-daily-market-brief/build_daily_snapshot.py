@@ -336,7 +336,18 @@ def source_quality_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
 
         link_required = bool(item.get("link_required", source_type != "broker_report"))
         is_primary = bool(item.get("primary_source_confirmed")) or grade == "A"
-        if not canonical_url and is_primary:
+        acquisition_mode = str(
+            (item.get("research_rights") or {}).get("acquisition_mode") or ""
+        )
+        authenticated_email_reference = (
+            source_type == "broker_report"
+            and acquisition_mode == "official_email"
+            and str(item.get("evidence_label") or "") == "attributed_analysis"
+            and bool(str(item.get("source_reference") or "").strip())
+        )
+        if not canonical_url and authenticated_email_reference:
+            warning_codes.append("broker_report_reference_only")
+        elif not canonical_url and is_primary:
             blocker_codes.append("primary_source_missing_url")
         elif not canonical_url and source_type == "broker_report":
             warning_codes.append("broker_report_reference_only")

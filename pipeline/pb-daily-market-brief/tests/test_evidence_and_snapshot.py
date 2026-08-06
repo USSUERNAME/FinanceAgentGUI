@@ -340,6 +340,36 @@ class SnapshotCalculationTests(unittest.TestCase):
         self.assertEqual(quality["evidence_posture"], "monitoring_only")
         self.assertEqual(quality["warnings"]["broker_report_reference_only"], 1)
 
+    def test_authenticated_newsletter_reference_does_not_require_public_url(self) -> None:
+        quality = source_quality_summary([{
+            "source_grade": "B", "source_type": "broker_report",
+            "primary_source_confirmed": True, "url": "",
+            "publisher": "Institutional Publisher",
+            "rights_label": "Subscribed newsletter; paraphrase only",
+            "link_required": False,
+            "source_reference": "gmail:message-1",
+            "evidence_label": "attributed_analysis",
+            "research_rights": {"acquisition_mode": "official_email"},
+        }])
+        self.assertTrue(quality["publication_allowed"])
+        self.assertEqual(quality["evidence_posture"], "monitoring_only")
+        self.assertEqual(quality["warnings"]["broker_report_reference_only"], 1)
+        self.assertNotIn("primary_source_missing_url", quality["blockers"])
+
+    def test_public_official_report_still_requires_url(self) -> None:
+        quality = source_quality_summary([{
+            "source_grade": "B", "source_type": "broker_report",
+            "primary_source_confirmed": True, "url": "",
+            "publisher": "Institutional Publisher",
+            "rights_label": "Official public research document",
+            "link_required": True,
+            "source_reference": "drive:report-1",
+            "evidence_label": "attributed_analysis",
+            "research_rights": {"acquisition_mode": "official_public_document"},
+        }])
+        self.assertFalse(quality["publication_allowed"])
+        self.assertEqual(quality["blockers"]["primary_source_missing_url"], 1)
+
     def test_duplicate_urls_and_confirmed_event_links_are_gated(self) -> None:
         records = [{
             "id": str(index), "source_grade": "C", "source_type": "market_news",
