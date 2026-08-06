@@ -1,4 +1,7 @@
 {
+  "collector_timeouts": {
+    "google_drive_research_inbox": 300
+  },
   "watchlist": ["NVDA", "MSFT", "TSLA"],
   "etf_watchlist": [
     {"ticker": "SPY", "name": "미국 S&P 500 대형주"},

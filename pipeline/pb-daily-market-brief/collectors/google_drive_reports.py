@@ -20,6 +20,7 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 DRIVE_API = "https://www.googleapis.com/drive/v3/files"
 DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 MAX_DRIVE_FOLDERS = 100
+DEFAULT_MAX_FILES = 100
 MARKET_SCOPE_FOLDER_ALIASES = {
     "KR": "KR",
     "KOREA": "KR",
@@ -268,7 +269,13 @@ def collect(_: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
     credentials, missing = _credentials()
     if missing:
         return [], "Google Drive research inbox not configured"
-    max_files = max(2, min(int(os.getenv("GOOGLE_DRIVE_RESEARCH_MAX_FILES", "40")), 100))
+    max_files = max(
+        2,
+        min(
+            int(os.getenv("GOOGLE_DRIVE_RESEARCH_MAX_FILES", str(DEFAULT_MAX_FILES))),
+            100,
+        ),
+    )
     token = refresh_access_token(credentials)
     files = list_folder_files(
         token,
