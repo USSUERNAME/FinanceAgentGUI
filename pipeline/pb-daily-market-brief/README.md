@@ -455,6 +455,10 @@ logs.
     --folder-id 1h7GhI-wAMZ-Vr9-Bcrcv4OFaipVnU-1-
   ```
 
+  When an ignored `.env` already contains the restored Drive OAuth client id,
+  client secret, and research folder id, rerun `python authorize_google_drive.py`
+  without those arguments to issue only a fresh read-only refresh token.
+
   The helper opens a localhost callback, requests read-only Drive access,
   validates the configured folder, and updates the ignored `.env` without
   printing the client secret or refresh token.

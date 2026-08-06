@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import threading
 import webbrowser
@@ -13,10 +14,12 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-from collectors.common import ROOT
+from collectors.common import ROOT, load_dotenv
 from collectors.google_drive_reports import list_folder_files
 
 SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
+TOKEN_URI = "https://oauth2.googleapis.com/token"
 DEFAULT_PORT = 53682
 ENV_KEYS = (
     "GOOGLE_DRIVE_CLIENT_ID",
@@ -50,6 +53,21 @@ def load_client_config(path: Path) -> dict[str, str]:
         "client_secret": client_secret,
         "auth_uri": auth_uri,
         "token_uri": token_uri,
+    }
+
+
+def load_client_config_from_env() -> dict[str, str]:
+    client_id = os.getenv("GOOGLE_DRIVE_CLIENT_ID", "").strip()
+    client_secret = os.getenv("GOOGLE_DRIVE_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        raise ValueError(
+            "Google Drive OAuth client id and secret are not configured in .env"
+        )
+    return {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "auth_uri": AUTH_URI,
+        "token_uri": TOKEN_URI,
     }
 
 
@@ -160,7 +178,7 @@ def update_env_file(path: Path, values: dict[str, str]) -> None:
 
 def authorize(
     *,
-    client_config_path: Path,
+    client_config: dict[str, str],
     folder_id: str,
     env_path: Path,
     port: int,
@@ -168,7 +186,7 @@ def authorize(
     timeout_seconds: int,
     authorization_url_path: Path | None = None,
 ) -> tuple[int, int]:
-    config = load_client_config(client_config_path)
+    config = client_config
     redirect_uri = f"http://127.0.0.1:{port}/"
     expected_state = secrets.token_urlsafe(24)
     result = CallbackResult()
@@ -230,8 +248,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Authorize a read-only Google Drive broker-research folder"
     )
-    parser.add_argument("--client-secret-json", required=True)
-    parser.add_argument("--folder-id", required=True)
+    parser.add_argument("--client-secret-json")
+    parser.add_argument("--folder-id")
     parser.add_argument("--env-file", default=str(ROOT / ".env"))
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--timeout-seconds", type=int, default=300)
@@ -242,16 +260,29 @@ def main() -> None:
     )
     parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args()
-    config_path = Path(args.client_secret_json).expanduser().resolve()
-    if not config_path.exists():
-        raise SystemExit(f"OAuth client JSON does not exist: {config_path}")
-    load_client_config(config_path)
+    load_dotenv()
+    if args.client_secret_json:
+        config_path = Path(args.client_secret_json).expanduser().resolve()
+        if not config_path.exists():
+            raise SystemExit(f"OAuth client JSON does not exist: {config_path}")
+        config = load_client_config(config_path)
+    else:
+        config = load_client_config_from_env()
+    folder_id = (
+        str(args.folder_id or "").strip()
+        or os.getenv("GOOGLE_DRIVE_RESEARCH_FOLDER_ID", "").strip()
+    )
+    if not folder_id:
+        raise SystemExit(
+            "Drive folder id is required via --folder-id or "
+            "GOOGLE_DRIVE_RESEARCH_FOLDER_ID"
+        )
     if args.validate_only:
-        print("Google OAuth client JSON is valid. No authorization was performed.")
+        print("Google Drive OAuth configuration is valid. No authorization was performed.")
         return
     total, documents = authorize(
-        client_config_path=config_path,
-        folder_id=args.folder_id.strip(),
+        client_config=config,
+        folder_id=folder_id,
         env_path=Path(args.env_file).expanduser().resolve(),
         port=args.port,
         open_browser=not args.no_browser,

@@ -52,6 +52,8 @@ const FETCH_TIMEOUT_MS = 20000;
 const FEED_FETCH_STAGGER_WINDOW_MS = 60000;
 const TRANSLATION_TEXT_MAX_CHARS = 1200;
 const ANTIGRAVITY_PROVIDER_ID = "antigravity-cli";
+const OPENAI_API_PROVIDER_ID = "openai-api";
+const DEFAULT_OPENAI_TRANSLATION_MODEL = "gpt-5.6-luna";
 const UNICODE_REPLACEMENT_CHARACTER = "\uFFFD";
 const UNTRANSLATED_COPY_LATIN_WORDS = 2;
 const runtimeKey = Symbol.for("financeAgentGui.newsFeedCollector");
@@ -1222,7 +1224,27 @@ function antigravityTranslationModel(options) {
   };
 }
 
+function openAiApiTranslationModel() {
+  const model = String(
+    process.env.NEWS_FEED_OPENAI_MODEL || DEFAULT_OPENAI_TRANSLATION_MODEL,
+  ).trim();
+  return {
+    provider: OPENAI_API_PROVIDER_ID,
+    providerLabel: "OpenAI API",
+    model,
+    modelLabel: `OpenAI API · ${model}`,
+    reasoning: String(process.env.NEWS_FEED_OPENAI_REASONING || "none").trim(),
+  };
+}
+
 function chooseTranslationModel() {
+  if (
+    String(process.env.OPENAI_API_KEY || "").trim() &&
+    process.env.NEWS_FEED_OPENAI_API_DISABLED !== "1"
+  ) {
+    return openAiApiTranslationModel();
+  }
+
   const options = getCodexOptions();
   const selectedProvider = options.selected?.provider || "";
 
@@ -1307,6 +1329,89 @@ function hasKoreanText(value) {
   return /[가-힣]/.test(String(value || ""));
 }
 
+function translationSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      translations: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string" },
+            textKo: { type: "string" },
+          },
+          required: ["id", "textKo"],
+        },
+      },
+    },
+    required: ["translations"],
+  };
+}
+
+function openAiResponseText(payload = {}) {
+  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text;
+  }
+  for (const output of toArray(payload.output)) {
+    for (const content of toArray(output?.content)) {
+      if (content?.type === "output_text" && typeof content.text === "string") {
+        return content.text;
+      }
+    }
+  }
+  return "";
+}
+
+async function runOpenAiStructuredOutput({ prompt, schema, schemaName, modelInfo, timeoutMs }) {
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) throw new Error("OPENAI_API_KEY가 설정되지 않았습니다.");
+  const baseUrl = String(process.env.OPENAI_BASE_URL || "https://api.openai.com/v1")
+    .trim()
+    .replace(/\/+$/, "");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${baseUrl}/responses`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: modelInfo.model,
+        input: prompt,
+        store: false,
+        reasoning: { effort: modelInfo.reasoning },
+        text: {
+          verbosity: "low",
+          format: {
+            type: "json_schema",
+            name: schemaName,
+            strict: true,
+            schema,
+          },
+        },
+      }),
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error?.message || `OpenAI API HTTP ${response.status}`);
+    }
+    return parseJsonPayload(openAiResponseText(payload));
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("OpenAI API 응답 시간이 초과됐습니다.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function normalizeNewsFeedTranslationCandidate(item = {}, translation = {}) {
   const sourceText = translationSourceText(item);
   const textKo = compactTranslationText(translation?.textKo);
@@ -1335,25 +1440,7 @@ function runCodexTranslationBatch(items, modelInfo) {
     const tempDir = mkdtempSync(join(tmpdir(), "finance-agent-news-feed-"));
     const outputPath = join(tempDir, "translation.json");
     const schemaPath = join(tempDir, "schema.json");
-    const schema = {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        translations: {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              id: { type: "string" },
-              textKo: { type: "string" },
-            },
-            required: ["id", "textKo"],
-          },
-        },
-      },
-      required: ["translations"],
-    };
+    const schema = translationSchema();
     writeFileSync(schemaPath, `${JSON.stringify(schema, null, 2)}\n`);
 
     const args = [
@@ -1458,10 +1545,20 @@ async function runAntigravityTranslationBatch(items, modelInfo) {
 
 async function translateBatch(items, modelInfo) {
   if (!items.length) return { translations: [], model: "", reasoning: "" };
-  const payload =
-    modelInfo.provider === ANTIGRAVITY_PROVIDER_ID
-      ? await runAntigravityTranslationBatch(items, modelInfo)
-      : await runCodexTranslationBatch(items, modelInfo);
+  let payload;
+  if (modelInfo.provider === OPENAI_API_PROVIDER_ID) {
+    payload = await runOpenAiStructuredOutput({
+      prompt: translationPrompt(items),
+      schema: translationSchema(),
+      schemaName: "news_feed_translations",
+      modelInfo,
+      timeoutMs: TRANSLATION_TIMEOUT_MS,
+    });
+  } else if (modelInfo.provider === ANTIGRAVITY_PROVIDER_ID) {
+    payload = await runAntigravityTranslationBatch(items, modelInfo);
+  } else {
+    payload = await runCodexTranslationBatch(items, modelInfo);
+  }
   return {
     translations: toArray(payload.translations),
     model: modelInfo.modelLabel || modelInfo.model,
@@ -1646,6 +1743,15 @@ function runCodexDailyDigest(clusters, window, modelInfo) {
 }
 
 async function runDailyDigestModel(clusters, window, modelInfo) {
+  if (modelInfo.provider === OPENAI_API_PROVIDER_ID) {
+    return runOpenAiStructuredOutput({
+      prompt: dailyDigestPrompt({ window, clusters }),
+      schema: dailyDigestSchema(),
+      schemaName: "news_feed_daily_digest",
+      modelInfo,
+      timeoutMs: DAILY_DIGEST_TIMEOUT_MS,
+    });
+  }
   if (modelInfo.provider === ANTIGRAVITY_PROVIDER_ID) {
     const result = await runAntigravityGenerate({
       prompt: dailyDigestPrompt({ window, clusters }),

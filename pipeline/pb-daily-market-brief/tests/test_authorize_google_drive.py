@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from authorize_google_drive import (
     authorization_url,
     load_client_config,
+    load_client_config_from_env,
     update_env_file,
 )
 
@@ -41,6 +44,19 @@ class AuthorizeGoogleDriveTests(unittest.TestCase):
         self.assertIn("access_type=offline", url)
         self.assertIn("prompt=consent", url)
         self.assertIn("state=state-value", url)
+
+    def test_loads_restored_client_configuration_from_environment(self) -> None:
+        with patch.dict(os.environ, {
+            "GOOGLE_DRIVE_CLIENT_ID": "restored-client",
+            "GOOGLE_DRIVE_CLIENT_SECRET": "restored-secret",
+        }, clear=False):
+            config = load_client_config_from_env()
+        self.assertEqual(config["client_id"], "restored-client")
+        self.assertEqual(config["client_secret"], "restored-secret")
+        self.assertEqual(
+            config["token_uri"],
+            "https://oauth2.googleapis.com/token",
+        )
 
     def test_env_update_preserves_unrelated_values_and_replaces_drive_keys(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
