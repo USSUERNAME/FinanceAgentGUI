@@ -1355,7 +1355,48 @@ function asArray(value) {
   return [];
 }
 
-function normalizeBriefRows(payload) {
+const WORLD_MEMORY_SUBJECT_TYPES = new Set([
+  "person",
+  "politician",
+  "business_leader",
+  "company",
+  "institution",
+  "industry",
+  "market_actor",
+  "other",
+]);
+
+const WORLD_MEMORY_SUBJECT_TYPE_ALIASES = new Map([
+  ["market", "market_actor"],
+  ["investor", "market_actor"],
+  ["fund", "market_actor"],
+  ["bank", "market_actor"],
+  ["country", "institution"],
+  ["nation", "institution"],
+  ["government", "institution"],
+  ["government_entity", "institution"],
+  ["organization", "institution"],
+  ["agency", "institution"],
+  ["sector", "industry"],
+]);
+
+function normalizeBriefSubject(subject) {
+  if (!subject || typeof subject !== "object") return null;
+  const name = String(subject.name || subject.label || "").trim();
+  if (!name) return null;
+  const rawType = String(subject.type || subject.subject_type || "other")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  const aliasedType = WORLD_MEMORY_SUBJECT_TYPE_ALIASES.get(rawType) || rawType;
+  return {
+    ...subject,
+    name,
+    type: WORLD_MEMORY_SUBJECT_TYPES.has(aliasedType) ? aliasedType : "other",
+  };
+}
+
+export function normalizeWorldMemoryBriefRows(payload) {
   const rows = asArray(payload)
     .filter((item) => item && typeof item === "object")
     .map((item) => ({
@@ -1366,6 +1407,9 @@ function normalizeBriefRows(payload) {
       portfolio_link: String(item.portfolio_link || item.portfolioLink || "").trim(),
       dedupe_key: String(item.dedupe_key || item.dedupeKey || item.title || "").trim(),
       sources: Array.isArray(item.sources) ? item.sources : [],
+      subjects: Array.isArray(item.subjects)
+        ? item.subjects.map(normalizeBriefSubject).filter(Boolean)
+        : [],
     }))
     .filter((item) => item.title && item.summary && item.sources.length);
 
@@ -1426,7 +1470,8 @@ function probePythonDependencies(python) {
   });
   const parsed = tryParseJson(result.stdout);
   const modules = parsed?.modules || {};
-  const missingRequired = ["pandas"].filter((name) => !modules[name]);
+  const missingRequired = ["pandas", "requests", "yfinance"]
+    .filter((name) => !modules[name]);
   const issues = [];
   if (result.error || result.status !== 0) {
     issues.push({
@@ -1443,15 +1488,12 @@ function probePythonDependencies(python) {
       installCommand: `${python.display} -m pip install -r requirements.txt`,
     });
   }
-  for (const name of ["yfinance", "sentence_transformers"]) {
+  for (const name of ["sentence_transformers"]) {
     if (!modules[name]) {
       issues.push({
         code: "WORLD_MEMORY_OPTIONAL_DEP_MISSING",
         status: "warning",
-        message:
-          name === "yfinance"
-            ? "yfinance가 없어 FEED 스캔의 시장 스냅샷과 일부 자료수집이 제한됩니다."
-            : "sentence-transformers가 없어 semantic-search/embed-build는 설치 전까지 사용할 수 없습니다.",
+        message: "sentence-transformers가 없어 semantic-search/embed-build는 설치 전까지 사용할 수 없습니다.",
         installCommand: `${python.display} -m pip install -r requirements.txt`,
       });
     }
@@ -2247,7 +2289,7 @@ async function runBriefGeneration({ preflight, feedScan, modelPolicy }) {
     modelPolicy,
   });
   const parsed = parseJsonPayload(result.answer);
-  const rows = normalizeBriefRows(parsed);
+  const rows = normalizeWorldMemoryBriefRows(parsed);
   return {
     ok: true,
     rows,

@@ -1,4 +1,5 @@
 yfinance
+requests
 pandas
 matplotlib
 Pillow

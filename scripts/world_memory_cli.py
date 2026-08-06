@@ -513,6 +513,7 @@ def _normalize_subject_type(value: str) -> str:
         "central_bank": "institution",
         "industry": "industry",
         "sector": "industry",
+        "market": "market_actor",
         "market_actor": "market_actor",
         "investor": "market_actor",
         "fund": "market_actor",
