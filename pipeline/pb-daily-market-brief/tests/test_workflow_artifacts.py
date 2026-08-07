@@ -86,6 +86,26 @@ class WorkflowArtifactTests(unittest.TestCase):
             workflow,
         )
 
+    def test_drive_approval_registry_is_restored_and_removed_ephemerally(self) -> None:
+        workflow = APP_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("Restore Drive approval registry", workflow)
+        self.assertIn(
+            "secrets.GOOGLE_DRIVE_APPROVALS_GZIP_BASE64",
+            workflow,
+        )
+        self.assertIn(
+            'google_drive_broker_research_approvals.v1',
+            workflow,
+        )
+        self.assertIn(
+            'workspace/broker_research_approvals/google_drive.json',
+            workflow,
+        )
+        self.assertIn("Remove ephemeral Drive approval registry", workflow)
+        cleanup = workflow.index("Remove ephemeral Drive approval registry")
+        preserve = workflow.index("Preserve structured evidence and analysis")
+        self.assertLess(cleanup, preserve)
+
     def test_broker_analysis_artifacts_are_preserved_without_cache_payload(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("workspace/broker_research_analysis/", workflow)
