@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   fetchNotificationStatus,
+  markDailyIntelligenceNotificationsOpened as markDailyIntelligenceOpenedRequest,
   markReportsNotificationsOpened as markReportsOpenedRequest,
 } from "./notificationApi.js";
 
@@ -26,6 +27,16 @@ export function useNotificationController() {
     }
   }, []);
 
+  const markDailyIntelligenceNotificationsOpened = useCallback(async () => {
+    try {
+      const payload = await markDailyIntelligenceOpenedRequest();
+      setNotificationStatus(payload);
+      return payload;
+    } catch {
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     async function pollNotificationStatus() {
@@ -47,6 +58,7 @@ export function useNotificationController() {
   return {
     notificationStatus,
     refreshNotificationStatus,
+    markDailyIntelligenceNotificationsOpened,
     markReportsNotificationsOpened,
   };
 }

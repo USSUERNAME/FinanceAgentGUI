@@ -78,6 +78,7 @@ import { useNotificationController } from "./reports/useNotificationController.j
 import { AppNavigation } from "./shell/AppNavigation.jsx";
 import { AppRoutes, RouteLoading } from "./shell/AppRoutes.jsx";
 import { collectVisibleScreenSnapshot } from "./shell/screenSnapshot.js";
+import { hashForView, viewFromHash } from "./shell/viewHash.js";
 import { buildWorldMemoryAskRequest } from "./worldMemory/askRequest.js";
 import { buildWorldMemoryPageContextSnapshot } from "./worldMemory/contextSnapshot.js";
 import { worldMemoryHealthState } from "./worldMemory/statusHelpers.js";
@@ -124,7 +125,9 @@ const NEWS_FEED_POLL_INTERVAL_OPTIONS = Array.from({ length: 10 }, (_, index) =>
 });
 
 function App() {
-  const [activeView, setActiveView] = useState("stock");
+  const [activeView, setActiveView] = useState(() =>
+    typeof window === "undefined" ? "stock" : viewFromHash(window.location.hash, "stock")
+  );
   const newsFeedController = useNewsFeedController({ activeView });
   const {
     newsFeedStatus,
@@ -263,6 +266,7 @@ function App() {
   const notificationController = useNotificationController();
   const {
     notificationStatus,
+    markDailyIntelligenceNotificationsOpened,
     markReportsNotificationsOpened,
   } = notificationController;
   const agentRuntimeController = useAgentRuntimeController();
@@ -581,10 +585,13 @@ function App() {
     if (item.view === "reports") {
       void markReportsNotificationsOpened();
     }
+    if (item.view === "daily-intelligence") {
+      void markDailyIntelligenceNotificationsOpened();
+    }
     setActiveView(item.view);
   }
 
-  function openReportsFromBrowserNotification(notification = null) {
+  function openBrowserNotificationTarget(targetView = "reports", notification = null) {
     if (notification && typeof notification.close === "function") {
       notification.close();
     }
@@ -593,9 +600,13 @@ function App() {
     } catch {
       // Focus can fail in restricted browser contexts; still navigate the app state.
     }
-    setActiveView("reports");
-    setReportRefreshSignal((value) => value + 1);
-    void markReportsNotificationsOpened();
+    setActiveView(targetView);
+    if (targetView === "daily-intelligence") {
+      void markDailyIntelligenceNotificationsOpened();
+    } else {
+      setReportRefreshSignal((value) => value + 1);
+      void markReportsNotificationsOpened();
+    }
   }
 
   function showBrowserNotificationForStatus(status = notificationStatusRef.current) {
@@ -604,7 +615,14 @@ function App() {
       return false;
     }
     setBrowserNotificationPermission(window.Notification.permission || "default");
-    const urgentUpdate = status?.reportsUrgentUpdate || {};
+    const urgentUpdate = [
+      status?.reportsUrgentUpdate,
+      status?.dailyIntelligenceCriticalUpdate,
+    ]
+      .filter((item) => item?.showBadge)
+      .sort((first, second) =>
+        new Date(second.createdAt || 0).getTime() - new Date(first.createdAt || 0).getTime())[0]
+      || {};
     const notificationId = urgentUpdate.id || status?.latest?.id || "";
     if (!urgentUpdate.showBadge || !notificationId) return false;
     if (browserNotificationLastShownRef.current === notificationId) return false;
@@ -612,6 +630,7 @@ function App() {
 
     const body = urgentUpdate.summary || status?.latest?.summary || "긴급 업데이트가 있습니다.";
     const icon = status?.delivery?.iconPath || "/favicon.svg";
+    const targetView = urgentUpdate.clickTarget || "reports";
     const notification = new window.Notification(status?.appName || "주식채널+", {
       body,
       icon,
@@ -620,12 +639,12 @@ function App() {
       renotify: true,
       data: {
         id: notificationId,
-        view: "reports",
+        view: targetView,
       },
     });
     notification.onclick = (event) => {
       event.preventDefault();
-      openReportsFromBrowserNotification(notification);
+      openBrowserNotificationTarget(targetView, notification);
     };
     browserNotificationLastShownRef.current = notificationId;
     writeLastBrowserNotificationId(notificationId);
@@ -810,11 +829,39 @@ function App() {
     activeViewRef.current = activeView;
   }, [activeView]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const expectedHash = hashForView(activeView);
+    const currentHashView = viewFromHash(window.location.hash, null);
+    if (currentHashView !== activeView && window.location.hash !== expectedHash) {
+      window.history.pushState(null, "", expectedHash);
+    }
+  }, [activeView]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const handleHashChange = () => {
+      const nextView = viewFromHash(window.location.hash, "stock");
+      if (nextView !== activeViewRef.current) {
+        setActiveView(nextView);
+      }
+    };
+
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
 
   useEffect(() => {
     notificationStatusRef.current = notificationStatus;
     showBrowserNotificationForStatus(notificationStatus);
-  }, [notificationStatus?.latest?.id, notificationStatus?.reportsUrgentUpdate?.showBadge]);
+  }, [
+    notificationStatus?.latest?.id,
+    notificationStatus?.reportsUrgentUpdate?.showBadge,
+    notificationStatus?.dailyIntelligenceCriticalUpdate?.id,
+    notificationStatus?.dailyIntelligenceCriticalUpdate?.showBadge,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("Notification" in window)) {
@@ -1817,6 +1864,12 @@ function App() {
     onRunSync: () => void runTossInvestOrderSync(),
   };
   const routeModels = {
+    dailyIntelligence: () => ({
+      onOpenOperations: () => setActiveView("research-operations"),
+    }),
+    researchOperations: () => ({
+      onOpenDailyIntelligence: () => setActiveView("daily-intelligence"),
+    }),
     settings: () => ({
       newsFeed: newsFeedController,
       sharedMemory: sharedMemoryController,

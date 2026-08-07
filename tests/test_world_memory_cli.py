@@ -23,6 +23,9 @@ class WorldMemoryCliTests(unittest.TestCase):
     def _sources(self) -> list[dict[str, str]]:
         return [{"name": "Test Source", "url": "https://example.com"}]
 
+    def test_market_subject_alias_normalizes_to_market_actor(self) -> None:
+        self.assertEqual(wm._normalize_subject_type("market"), "market_actor")
+
     def _make_issue_payload(
         self,
         *,

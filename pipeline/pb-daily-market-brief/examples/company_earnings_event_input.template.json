@@ -1,0 +1,21 @@
+{
+  "records": [
+    {
+      "event_id": "ticker-earnings-period",
+      "ticker": "NVDA",
+      "issuer": "NVIDIA Corporation",
+      "reported_period": "FY2027 Q2",
+      "fiscal_period_end": "2026-07-31",
+      "event_date": "2026-08-19",
+      "time_of_day": "after_market",
+      "time_zone": "America/New_York",
+      "source_type": "company_ir_calendar",
+      "source_url": "https://investor.example.com/replace-with-company-event-source",
+      "source_date": "2026-07-20",
+      "body_location": "Events page, quarterly results event row",
+      "primary_source_confirmed": true,
+      "body_verified": true,
+      "note": "Replace every placeholder. Provider calendars and media reports cannot confirm this record."
+    }
+  ]
+}

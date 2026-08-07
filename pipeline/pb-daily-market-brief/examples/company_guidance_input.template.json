@@ -1,0 +1,21 @@
+{
+  "records": [
+    {
+      "record_id": "ticker-revenue-guidance-period",
+      "ticker": "NVDA",
+      "metric_id": "revenue",
+      "period_end": "2026-10-31",
+      "value_low": 49000000000,
+      "value_high": 51000000000,
+      "unit": "USD",
+      "currency": "USD",
+      "source_type": "company_earnings_release",
+      "source_url": "https://investor.example.com/replace-with-company-source",
+      "source_date": "2026-07-20",
+      "body_location": "Replace with page, table, paragraph, or section",
+      "primary_source_confirmed": true,
+      "body_verified": true,
+      "note": "Replace every placeholder. Do not use media summaries or filing-title metadata."
+    }
+  ]
+}

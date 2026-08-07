@@ -377,6 +377,20 @@ export function codexCommandInvocation(path, args = [], options = {}) {
   };
 }
 
+export function codexExecStdinInvocation(
+  path,
+  args = [],
+  prompt = "",
+  options = {},
+) {
+  const invocation = codexCommandInvocation(path, args, options);
+  return {
+    ...invocation,
+    args: [...invocation.args, "-"],
+    stdin: String(prompt || ""),
+  };
+}
+
 function findCodexPath() {
   return resolveCodexCommandPath({
     platform: process.platform,
@@ -3659,19 +3673,19 @@ export function runCodexChat(payload = {}) {
       ...codexServiceTierArgs(speed),
       "-o",
       outputPath,
-      buildChatPrompt(payload, preparedAttachments),
     ];
+    const chatPrompt = buildChatPrompt(payload, preparedAttachments);
 
     let stdout = "";
     let stderr = "";
     let settled = false;
     const startedAt = Date.now();
     const requestTimeoutMs = chatTimeoutMsForPayload(payload);
-    const invocation = codexCommandInvocation(path, args);
+    const invocation = codexExecStdinInvocation(path, args, chatPrompt);
     const child = spawnObservedLlm(invocation.command, invocation.args, {
       cwd: WEB_ROOT,
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
         NO_COLOR: "1",
@@ -3682,6 +3696,9 @@ export function runCodexChat(payload = {}) {
       model,
       timeoutMs: requestTimeoutMs,
     });
+
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(invocation.stdin);
 
     const timer = setTimeout(() => {
       if (settled) return;

@@ -1,0 +1,20 @@
+{
+  "records": [
+    {
+      "record_id": "ticker-event-atm-straddle",
+      "ticker": "NVDA",
+      "event_date": "2026-08-19",
+      "as_of": "2026-08-17",
+      "spot": 200.0,
+      "expiration": "2026-08-21",
+      "atm_call_mid": 8.5,
+      "atm_put_mid": 8.0,
+      "currency": "USD",
+      "source_type": "approved_provider_export",
+      "source_reference": "Replace with provider export file, tab, timestamp, or permitted URL",
+      "provider": "Replace with licensed provider or broker",
+      "rights_confirmed": true,
+      "note": "Do not use delayed screenshots without an as-of timestamp. Record other catalysts inside the expiry separately."
+    }
+  ]
+}

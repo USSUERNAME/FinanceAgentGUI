@@ -12,6 +12,7 @@ import Newspaper from "lucide-react/dist/esm/icons/newspaper.js";
 import PieChart from "lucide-react/dist/esm/icons/chart-pie.js";
 import ReceiptText from "lucide-react/dist/esm/icons/receipt-text.js";
 import Settings from "lucide-react/dist/esm/icons/settings.js";
+import ShieldCheck from "lucide-react/dist/esm/icons/shield-check.js";
 import TrendingUp from "lucide-react/dist/esm/icons/trending-up.js";
 import { newsFeedSidebarHealthState } from "../news/newsFeedStatus.js";
 import { PortfolioCanvasNavList } from "../portfolio/PortfolioCanvasNavList.jsx";
@@ -28,6 +29,7 @@ const leftSidebarSections = [
       { label: "Economic Calendar", icon: Landmark, view: "economic-calendar" },
       { label: "채팅", icon: MessageSquare, view: "chat" },
       { label: "Daily Intelligence", icon: TrendingUp, view: "daily-intelligence" },
+      { label: "Research Operations", icon: ShieldCheck, view: "research-operations" },
       { label: "보고서", icon: FileText, view: "reports" },
       { label: "포트폴리오", icon: PieChart, view: "portfolio" },
     ],
@@ -125,6 +127,11 @@ export function AppNavigation({
                   const showReportsUrgentUpdateBadge =
                     item.view === "reports" && notificationStatus?.reportsUrgentUpdate?.showBadge;
                   const reportsUrgentUpdateSummary = notificationStatus?.reportsUrgentUpdate?.summary || "";
+                  const showDailyIntelligenceCriticalBadge =
+                    item.view === "daily-intelligence"
+                    && notificationStatus?.dailyIntelligenceCriticalUpdate?.showBadge;
+                  const dailyIntelligenceCriticalSummary =
+                    notificationStatus?.dailyIntelligenceCriticalUpdate?.summary || "";
                   const arcaNotificationCount =
                     item.statusKey === "arcaNotifications"
                       ? Math.max(0, Math.trunc(Number(itemStatusHealth?.count || 0)))
@@ -148,7 +155,9 @@ export function AppNavigation({
                         className={[
                           "nav-item",
                           isActiveItem ? "is-active" : "",
-                          showReportsUrgentUpdateBadge ? "is-critical-alert" : "",
+                          showReportsUrgentUpdateBadge || showDailyIntelligenceCriticalBadge
+                            ? "is-critical-alert"
+                            : "",
                           isPortfolioItem ? "has-children" : "",
                         ]
                           .filter(Boolean)
@@ -158,6 +167,8 @@ export function AppNavigation({
                         title={
                           showReportsUrgentUpdateBadge
                             ? `긴급 업데이트${reportsUrgentUpdateSummary ? `: ${reportsUrgentUpdateSummary}` : ""}`
+                            : showDailyIntelligenceCriticalBadge
+                              ? `보유종목 가설 반증${dailyIntelligenceCriticalSummary ? `: ${dailyIntelligenceCriticalSummary}` : ""}`
                             : itemStatusHealth
                               ? itemStatusHealth.title
                               : item.label
@@ -197,6 +208,14 @@ export function AppNavigation({
                               aria-label="보고서 긴급 업데이트"
                             >
                               긴급 업데이트
+                            </span>
+                          ) : null}
+                          {showDailyIntelligenceCriticalBadge ? (
+                            <span
+                              className="nav-unread-count nav-critical-update-badge"
+                              aria-label="보유종목 가설 반증 알림"
+                            >
+                              가설 반증
                             </span>
                           ) : null}
                         </span>

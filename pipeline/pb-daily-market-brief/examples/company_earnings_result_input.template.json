@@ -1,0 +1,78 @@
+{
+  "records": [
+    {
+      "result_id": "ticker-period-results",
+      "ticker": "NVDA",
+      "issuer": "NVIDIA Corporation",
+      "event_date": "2026-08-19",
+      "reported_period": "FY2027 Q2",
+      "source_type": "company_earnings_release",
+      "source_url": "https://investor.example.com/replace-with-earnings-release",
+      "source_date": "2026-08-19",
+      "body_location": "Financial results table and outlook section",
+      "primary_source_confirmed": true,
+      "body_verified": true,
+      "reported_metrics": [
+        {
+          "metric_id": "revenue",
+          "label": "Revenue",
+          "value": 0,
+          "unit": "USD",
+          "period_start": "2026-05-01",
+          "period_end": "2026-07-31",
+          "basis": "gaap",
+          "source_type": "company_earnings_release",
+          "source_url": "https://investor.example.com/replace-with-earnings-release",
+          "source_date": "2026-08-19",
+          "body_location": "Financial results table, Revenue row",
+          "primary_source_confirmed": true,
+          "body_verified": true
+        }
+      ],
+      "operating_kpis": [
+        {
+          "driver_id": "replace-with-tracked-driver-id",
+          "label": "Replace with company KPI",
+          "current_value": 0,
+          "prior_value": 0,
+          "unit": "replace-with-exact-unit",
+          "current_period_end": "2026-07-31",
+          "prior_period_end": "2026-04-30",
+          "definition": "Copy the company definition exactly enough to test comparability",
+          "comparison_status": "comparable",
+          "basis": "company_defined",
+          "source_type": "company_earnings_release",
+          "source_url": "https://investor.example.com/replace-with-earnings-release",
+          "source_date": "2026-08-19",
+          "body_location": "Operating metrics table, exact KPI row",
+          "primary_source_confirmed": true,
+          "body_verified": true
+        }
+      ],
+      "guidance_updates": [
+        {
+          "metric_id": "revenue",
+          "period_end": "2027-01-31",
+          "value_low": 0,
+          "value_high": 0,
+          "unit": "USD",
+          "basis": "gaap",
+          "assumptions": "Copy only assumptions stated in the source",
+          "source_type": "company_earnings_release",
+          "source_url": "https://investor.example.com/replace-with-earnings-release",
+          "source_date": "2026-08-19",
+          "body_location": "Outlook section, revenue guidance row",
+          "primary_source_confirmed": true,
+          "body_verified": true
+        }
+      ],
+      "eps_quality": {
+        "status": "source_not_provided",
+        "bridge_items": [],
+        "note": "Use expanded_bridge_required when EPS contains material non-recurring or below-the-line items."
+      },
+      "transcript_status": "not_provided",
+      "note": "Replace every placeholder. News articles and transcript summaries cannot serve as the primary numeric source."
+    }
+  ]
+}

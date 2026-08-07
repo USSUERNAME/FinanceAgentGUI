@@ -20,6 +20,7 @@ Thumbs.db
 !/data/magazine/.gitkeep
 /data/notifications/*
 !/data/notifications/.gitkeep
+/data/pb-daily-intelligence/*
 /data/invest-simulator/*
 !/data/invest-simulator/.gitkeep
 /data/reports/*

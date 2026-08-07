@@ -183,11 +183,12 @@ function ReportsRoute({ model }) {
   );
 }
 
-function DailyIntelligenceRoute() {
+function DailyIntelligenceRoute({ mode = "reader", model = {} }) {
+  const label = mode === "operations" ? "Research Operations" : "Daily Intelligence";
   return (
-    <section className="workspace-canvas daily-intelligence-canvas" aria-label="Daily Intelligence">
-      <React.Suspense fallback={<RouteLoading label="Daily Intelligence 불러오는 중" />}>
-        <DailyIntelligenceView />
+    <section className="workspace-canvas daily-intelligence-canvas" aria-label={label}>
+      <React.Suspense fallback={<RouteLoading label={`${label} 불러오는 중`} />}>
+        <DailyIntelligenceView mode={mode} {...model} />
       </React.Suspense>
     </section>
   );
@@ -296,7 +297,17 @@ function StockChannelRoute({ model }) {
 export function AppRoutes({ activeView, models }) {
   if (activeView === "settings") return <SettingsRoute model={models.settings()} />;
   if (activeView === "chat") return <ChatCanvas {...models.chat()} />;
-  if (activeView === "daily-intelligence") return <DailyIntelligenceRoute />;
+  if (activeView === "daily-intelligence") {
+    return <DailyIntelligenceRoute model={models.dailyIntelligence()} />;
+  }
+  if (activeView === "research-operations") {
+    return (
+      <DailyIntelligenceRoute
+        mode="operations"
+        model={models.researchOperations()}
+      />
+    );
+  }
   if (activeView === "reports") return <ReportsRoute model={models.reports()} />;
   if (activeView === "transaction-status") {
     return <TransactionStatusRoute model={models.transactionStatus()} />;

@@ -4,6 +4,18 @@ import {
   fetchDailyIntelligence,
   fetchDailyIntelligenceJobStatus,
   planDailyIntelligenceJob,
+  quickAddDailyIntelligencePortfolioHolding,
+  quickAddDailyIntelligenceWatchlistTicker,
+  recordDailyIntelligenceRiskPortfolioResponse,
+  reviewDailyIntelligencePortfolioResponseActiveRule,
+  reviewDailyIntelligencePortfolioResponseRuleSuggestion,
+  reviewDailyIntelligenceMonthlyDecisionGoalProposal,
+  removeDailyIntelligencePortfolioHolding,
+  reviewDailyIntelligencePortfolioRisk,
+  reviewDailyIntelligenceRiskThesisProposal,
+  syncDailyIntelligenceTheses,
+  trackDailyIntelligenceStockThesis,
+  updateDailyIntelligencePortfolioRiskFollowUp,
 } from "./dailyIntelligenceApi.js";
 
 export function useDailyIntelligenceController() {
@@ -16,6 +28,12 @@ export function useDailyIntelligenceController() {
   const [jobBusy, setJobBusy] = useState(false);
   const [jobError, setJobError] = useState("");
   const [pendingPlan, setPendingPlan] = useState(null);
+  const [thesisMemoryBusy, setThesisMemoryBusy] = useState(false);
+  const [thesisMemoryError, setThesisMemoryError] = useState("");
+  const [watchlistQuickAddBusy, setWatchlistQuickAddBusy] = useState("");
+  const [watchlistQuickAddError, setWatchlistQuickAddError] = useState("");
+  const [portfolioRiskReviewBusy, setPortfolioRiskReviewBusy] = useState("");
+  const [portfolioRiskReviewError, setPortfolioRiskReviewError] = useState("");
 
   const reload = useCallback(async () => {
     setBusy(true);
@@ -90,6 +108,288 @@ export function useDailyIntelligenceController() {
     setPendingPlan(null);
   }, []);
 
+  const syncThesisMemory = useCallback(async () => {
+    setThesisMemoryBusy(true);
+    setThesisMemoryError("");
+    try {
+      await syncDailyIntelligenceTheses();
+      setSnapshot(await fetchDailyIntelligence());
+    } catch (requestError) {
+      setThesisMemoryError(
+        requestError.message || "투자 가설을 World Memory에 반영하지 못했습니다.",
+      );
+    } finally {
+      setThesisMemoryBusy(false);
+    }
+  }, []);
+
+  const trackStockThesis = useCallback(async ({
+    ticker,
+    sectorId,
+    brokerResearchDate,
+  }) => {
+    setThesisMemoryBusy(true);
+    setThesisMemoryError("");
+    try {
+      const result = await trackDailyIntelligenceStockThesis({
+        ticker,
+        sectorId,
+        brokerResearchDate,
+      });
+      setSnapshot(await fetchDailyIntelligence(globalThis.fetch, {
+        brokerResearchDate,
+      }));
+      return result;
+    } catch (requestError) {
+      setThesisMemoryError(
+        requestError.message || "종목 투자 가설을 저장하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setThesisMemoryBusy(false);
+    }
+  }, []);
+
+  const quickAddWatchlistTicker = useCallback(async (ticker) => {
+    setWatchlistQuickAddBusy(`watchlist:${ticker}`);
+    setWatchlistQuickAddError("");
+    try {
+      const result = await quickAddDailyIntelligenceWatchlistTicker(ticker);
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setWatchlistQuickAddError(
+        requestError.message || "관심종목에 추가하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setWatchlistQuickAddBusy("");
+    }
+  }, []);
+
+  const quickAddPortfolioHolding = useCallback(async (ticker, weight) => {
+    setWatchlistQuickAddBusy(`portfolio:${ticker}`);
+    setWatchlistQuickAddError("");
+    try {
+      const result = await quickAddDailyIntelligencePortfolioHolding(ticker, weight);
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setWatchlistQuickAddError(
+        requestError.message || "보유종목에 등록하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setWatchlistQuickAddBusy("");
+    }
+  }, []);
+
+  const removePortfolioHolding = useCallback(async (ticker) => {
+    setWatchlistQuickAddBusy(`remove:${ticker}`);
+    setWatchlistQuickAddError("");
+    try {
+      const result = await removeDailyIntelligencePortfolioHolding(ticker);
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setWatchlistQuickAddError(
+        requestError.message || "보유종목을 삭제하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setWatchlistQuickAddBusy("");
+    }
+  }, []);
+
+  const reviewPortfolioRisk = useCallback(async ({
+    riskId,
+    status,
+    note,
+    reviewDate = "",
+    reviewReportDate = "",
+    deferReason = "",
+    thesisImpact = "",
+  }) => {
+    setPortfolioRiskReviewBusy(riskId);
+    setPortfolioRiskReviewError("");
+    try {
+      const result = await reviewDailyIntelligencePortfolioRisk({
+        riskId,
+        status,
+        note,
+        reviewDate,
+        reviewReportDate,
+        deferReason,
+        thesisImpact,
+      });
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setPortfolioRiskReviewError(
+        requestError.message || "위험 검토 상태를 저장하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setPortfolioRiskReviewBusy("");
+    }
+  }, []);
+
+  const reviewRiskThesisProposal = useCallback(async ({
+    riskId,
+    reviewReportDate,
+    decision,
+  }) => {
+    setThesisMemoryBusy(true);
+    setThesisMemoryError("");
+    try {
+      const result = await reviewDailyIntelligenceRiskThesisProposal({
+        riskId,
+        reviewReportDate,
+        decision,
+      });
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setThesisMemoryError(
+        requestError.message || "위험 검토 결과를 투자 가설에 반영하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setThesisMemoryBusy(false);
+    }
+  }, []);
+
+  const recordRiskPortfolioResponse = useCallback(async ({
+    riskId,
+    reviewReportDate,
+    portfolioResponseAction,
+    note,
+    reviewDate = "",
+    acknowledgedRuleIds = [],
+  }) => {
+    setThesisMemoryBusy(true);
+    setThesisMemoryError("");
+    try {
+      const result = await recordDailyIntelligenceRiskPortfolioResponse({
+        riskId,
+        reviewReportDate,
+        portfolioResponseAction,
+        note,
+        reviewDate,
+        acknowledgedRuleIds,
+      });
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setThesisMemoryError(
+        requestError.message || "포트폴리오 대응 판단을 기록하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setThesisMemoryBusy(false);
+    }
+  }, []);
+
+  const reviewPortfolioResponseRuleSuggestion = useCallback(async ({
+    suggestionId,
+    decision,
+  }) => {
+    setThesisMemoryBusy(true);
+    setThesisMemoryError("");
+    try {
+      const result = await reviewDailyIntelligencePortfolioResponseRuleSuggestion({
+        suggestionId,
+        decision,
+      });
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setThesisMemoryError(
+        requestError.message || "포트폴리오 검토 규칙 결정을 저장하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setThesisMemoryBusy(false);
+    }
+  }, []);
+
+  const reviewPortfolioResponseActiveRule = useCallback(async ({
+    suggestionId,
+    managementDecision,
+    modifiedProposal = "",
+  }) => {
+    setThesisMemoryBusy(true);
+    setThesisMemoryError("");
+    try {
+      const result = await reviewDailyIntelligencePortfolioResponseActiveRule({
+        suggestionId,
+        managementDecision,
+        modifiedProposal,
+      });
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setThesisMemoryError(
+        requestError.message || "활성 검토 규칙 재검토 결정을 저장하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setThesisMemoryBusy(false);
+    }
+  }, []);
+
+  const reviewMonthlyDecisionGoalProposal = useCallback(async ({
+    goalId,
+    decision,
+  }) => {
+    setThesisMemoryBusy(true);
+    setThesisMemoryError("");
+    try {
+      const result = await reviewDailyIntelligenceMonthlyDecisionGoalProposal({
+        goalId,
+        decision,
+      });
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setThesisMemoryError(
+        requestError.message || "월간 판단 개선 목표 결정을 저장하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setThesisMemoryBusy(false);
+    }
+  }, []);
+
+  const updatePortfolioRiskFollowUp = useCallback(async ({
+    riskId,
+    reviewReportDate,
+    followUpStatus,
+    evidenceUrl = "",
+    evidenceNote = "",
+  }) => {
+    setPortfolioRiskReviewBusy(riskId);
+    setPortfolioRiskReviewError("");
+    try {
+      const result = await updateDailyIntelligencePortfolioRiskFollowUp({
+        riskId,
+        reviewReportDate,
+        followUpStatus,
+        evidenceUrl,
+        evidenceNote,
+      });
+      setSnapshot(await fetchDailyIntelligence());
+      return result;
+    } catch (requestError) {
+      setPortfolioRiskReviewError(
+        requestError.message || "후속 작업 상태를 저장하지 못했습니다.",
+      );
+      return null;
+    } finally {
+      setPortfolioRiskReviewBusy("");
+    }
+  }, []);
+
   useEffect(() => {
     void reload();
     void reloadJobStatus();
@@ -121,5 +421,23 @@ export function useDailyIntelligenceController() {
     requestJobPlan,
     executePendingPlan,
     cancelPendingPlan,
+    thesisMemoryBusy,
+    thesisMemoryError,
+    syncThesisMemory,
+    trackStockThesis,
+    reviewRiskThesisProposal,
+    recordRiskPortfolioResponse,
+    reviewPortfolioResponseRuleSuggestion,
+    reviewPortfolioResponseActiveRule,
+    reviewMonthlyDecisionGoalProposal,
+    watchlistQuickAddBusy,
+    watchlistQuickAddError,
+    quickAddWatchlistTicker,
+    quickAddPortfolioHolding,
+    removePortfolioHolding,
+    portfolioRiskReviewBusy,
+    portfolioRiskReviewError,
+    reviewPortfolioRisk,
+    updatePortfolioRiskFollowUp,
   };
 }

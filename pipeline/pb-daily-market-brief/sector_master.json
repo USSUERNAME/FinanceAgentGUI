@@ -1,0 +1,677 @@
+{
+  "schema_version": "sector_master.v1",
+  "version_date": "2026-07-20",
+  "purpose": "미국·한국 상장시장에서 업황 개선과 미래 주도 가능성을 추적하기 위한 연구용 섹터 기준정보",
+  "classification_note": "표준 GICS 분류를 대체하지 않는다. 수혜 경로 중심의 연구 분류이며 대표 기업은 노출 검증 전 후보이다.",
+  "scoring_dimensions": [
+    {"dimension_id": "industry_leading_data", "label_ko": "업황 선행지표", "weight": 25},
+    {"dimension_id": "earnings_revisions", "label_ko": "실적·가이던스·추정치 변화", "weight": 25},
+    {"dimension_id": "orders_capex_backlog", "label_ko": "수주·CAPEX·백로그", "weight": 15},
+    {"dimension_id": "market_confirmation", "label_ko": "가격·상대강도·시장 폭", "weight": 15},
+    {"dimension_id": "structural_driver", "label_ko": "정책·구조적 성장 동력", "weight": 10},
+    {"dimension_id": "catalyst_durability", "label_ko": "촉매의 지속 가능성", "weight": 10}
+  ],
+  "default_evidence_policy": {
+    "minimum_independent_sources": 2,
+    "primary_source_required_for_advance": true,
+    "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"],
+    "candidate_label": "research_candidate_not_recommendation"
+  },
+  "sectors": [
+    {
+      "sector_id": "semiconductors_ai_compute",
+      "name_ko": "반도체·AI 컴퓨트",
+      "name_en": "Semiconductors and AI Compute",
+      "classification": "structural_growth",
+      "gics_anchors": ["Information Technology / Semiconductors"],
+      "beneficiary_pathways": [
+        {"pathway_id": "accelerators_memory", "label_ko": "가속기·HBM", "economic_link": "AI 학습·추론 투자 확대가 연산칩과 고대역폭 메모리 수요로 연결"},
+        {"pathway_id": "foundry_equipment", "label_ko": "파운드리·장비", "economic_link": "선단공정과 패키징 병목 해소 투자가 장비·소재 수요로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "SOXX", "name": "iShares Semiconductor ETF", "instrument_type": "ETF", "proxy_role": "sector_proxy"},
+        {"market": "US", "ticker": "SMH", "name": "VanEck Semiconductor ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "NVDA", "name": "NVIDIA", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "TSM", "name": "Taiwan Semiconductor Manufacturing ADR", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "005930", "name": "삼성전자", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "000660", "name": "SK하이닉스", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "memory_price_trend", "label_ko": "메모리 가격 방향", "improving_direction": "up", "frequency": "weekly_or_monthly", "preferred_source_types": ["industry_association", "company_filings_ir"]},
+        {"indicator_id": "ai_capex_guidance", "label_ko": "하이퍼스케일러 AI CAPEX 가이던스", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "semiconductor_book_to_bill", "label_ko": "반도체 장비 수주·매출 비율", "improving_direction": "up", "frequency": "monthly_or_quarterly", "preferred_source_types": ["industry_association", "company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "real_yields", "direction": "negative"},
+        {"factor_id": "global_manufacturing_cycle", "direction": "positive"}
+      ],
+      "keywords": {"ko": ["반도체", "HBM", "파운드리", "첨단 패키징", "AI 가속기"], "en": ["semiconductor", "HBM", "foundry", "advanced packaging", "AI accelerator"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "data_center_networking",
+      "name_ko": "데이터센터 네트워크",
+      "name_en": "Data Center Networking",
+      "classification": "structural_growth",
+      "gics_anchors": ["Information Technology / Communications Equipment"],
+      "beneficiary_pathways": [
+        {"pathway_id": "ethernet_switching", "label_ko": "이더넷 스위칭", "economic_link": "AI 클러스터 확장이 고속 스위치와 네트워크 운영체제 수요로 연결"},
+        {"pathway_id": "optical_interconnect", "label_ko": "광인터커넥트", "economic_link": "데이터 전송량 증가가 광모듈·DSP·광섬유 수요로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "IGN", "name": "iShares North American Tech-Multimedia Networking ETF", "instrument_type": "ETF", "proxy_role": "sector_proxy"},
+        {"market": "US", "ticker": "XLK", "name": "Technology Select Sector SPDR Fund", "instrument_type": "ETF", "proxy_role": "broad_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "ANET", "name": "Arista Networks", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "CSCO", "name": "Cisco Systems", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "298040", "name": "효성중공업", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "cloud_network_capex", "label_ko": "클라우드 네트워크 CAPEX", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "high_speed_port_shipments", "label_ko": "고속 포트 출하량", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["industry_association", "company_filings_ir"]},
+        {"indicator_id": "network_backlog", "label_ko": "네트워크 장비 백로그", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "cloud_capex_cycle", "direction": "positive"},
+        {"factor_id": "real_yields", "direction": "negative"}
+      ],
+      "keywords": {"ko": ["데이터센터 네트워크", "이더넷", "광모듈", "스위치", "인터커넥트"], "en": ["data center networking", "ethernet", "optical module", "switching", "interconnect"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "data_center_power_cooling",
+      "name_ko": "데이터센터 전력·냉각",
+      "name_en": "Data Center Power and Cooling",
+      "classification": "structural_growth",
+      "gics_anchors": ["Industrials / Electrical Equipment", "Industrials / Building Products"],
+      "beneficiary_pathways": [
+        {"pathway_id": "power_management", "label_ko": "전력 관리", "economic_link": "랙당 전력밀도 상승이 UPS·배전·전력관리 설비 수요로 연결"},
+        {"pathway_id": "thermal_management", "label_ko": "열 관리", "economic_link": "고성능 서버의 발열 증가가 액체냉각·열교환 설비 수요로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "PAVE", "name": "Global X U.S. Infrastructure Development ETF", "instrument_type": "ETF", "proxy_role": "broad_proxy"},
+        {"market": "US", "ticker": "GRID", "name": "First Trust NASDAQ Clean Edge Smart Grid Infrastructure Index Fund", "instrument_type": "ETF", "proxy_role": "theme_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "VRT", "name": "Vertiv", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "ETN", "name": "Eaton", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "267260", "name": "HD현대일렉트릭", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "data_center_power_pipeline", "label_ko": "데이터센터 전력 프로젝트 파이프라인", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir", "official_statistics"]},
+        {"indicator_id": "power_equipment_backlog", "label_ko": "전력·냉각 장비 백로그", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "rack_power_density", "label_ko": "랙당 전력밀도", "improving_direction": "up", "frequency": "annual_or_quarterly", "preferred_source_types": ["industry_association", "company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "data_center_construction", "direction": "positive"},
+        {"factor_id": "financing_costs", "direction": "negative"}
+      ],
+      "keywords": {"ko": ["데이터센터 전력", "액체냉각", "UPS", "배전", "열관리"], "en": ["data center power", "liquid cooling", "UPS", "power distribution", "thermal management"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "grid_electrification",
+      "name_ko": "전력망·전기화",
+      "name_en": "Grid and Electrification",
+      "classification": "structural_and_policy",
+      "gics_anchors": ["Industrials / Electrical Components and Equipment", "Utilities"],
+      "beneficiary_pathways": [
+        {"pathway_id": "transmission_distribution", "label_ko": "송배전망", "economic_link": "노후망 교체와 신규 전력원 연결이 송배전 투자로 연결"},
+        {"pathway_id": "transformers_switchgear", "label_ko": "변압기·스위치기어", "economic_link": "전력 수요 증가와 계통 병목이 고압기기 수주로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "GRID", "name": "First Trust NASDAQ Clean Edge Smart Grid Infrastructure Index Fund", "instrument_type": "ETF", "proxy_role": "theme_proxy"},
+        {"market": "US", "ticker": "IFRA", "name": "iShares U.S. Infrastructure ETF", "instrument_type": "ETF", "proxy_role": "broad_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "GEV", "name": "GE Vernova", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "ETN", "name": "Eaton", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "010120", "name": "LS ELECTRIC", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "267260", "name": "HD현대일렉트릭", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "utility_capex_guidance", "label_ko": "유틸리티 송배전 CAPEX 가이던스", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir", "official_statistics"]},
+        {"indicator_id": "transformer_lead_times", "label_ko": "변압기 납기", "improving_direction": "up", "frequency": "monthly_or_quarterly", "preferred_source_types": ["industry_association", "company_filings_ir"]},
+        {"indicator_id": "grid_equipment_orders", "label_ko": "전력기기 신규 수주", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "electricity_demand", "direction": "positive"},
+        {"factor_id": "public_infrastructure_spending", "direction": "positive"}
+      ],
+      "keywords": {"ko": ["전력망", "송배전", "변압기", "스위치기어", "전기화"], "en": ["power grid", "transmission", "transformer", "switchgear", "electrification"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "nuclear_generation",
+      "name_ko": "원전·원자력 공급망",
+      "name_en": "Nuclear Generation and Supply Chain",
+      "classification": "structural_and_policy",
+      "gics_anchors": ["Utilities / Electric Utilities", "Energy / Uranium"],
+      "beneficiary_pathways": [
+        {"pathway_id": "reactor_build_services", "label_ko": "원전 건설·서비스", "economic_link": "신규 원전과 수명연장이 기자재·정비·엔지니어링 수요로 연결"},
+        {"pathway_id": "uranium_fuel_cycle", "label_ko": "우라늄·연료주기", "economic_link": "원전 가동 확대가 우라늄과 연료 서비스 수요로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "NLR", "name": "VanEck Uranium and Nuclear ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"},
+        {"market": "US", "ticker": "URA", "name": "Global X Uranium ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "CCJ", "name": "Cameco", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "CEG", "name": "Constellation Energy", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "034020", "name": "두산에너빌리티", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "reactor_project_pipeline", "label_ko": "원전 프로젝트 파이프라인", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["official_statistics", "company_filings_ir"]},
+        {"indicator_id": "uranium_contracting", "label_ko": "장기 우라늄 계약 활동", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["industry_association", "company_filings_ir"]},
+        {"indicator_id": "nuclear_capacity_factor", "label_ko": "원전 이용률", "improving_direction": "up", "frequency": "monthly", "preferred_source_types": ["official_statistics"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "electricity_prices", "direction": "positive"},
+        {"factor_id": "energy_policy_support", "direction": "positive"}
+      ],
+      "keywords": {"ko": ["원전", "원자력", "SMR", "우라늄", "원전 수명연장"], "en": ["nuclear", "SMR", "uranium", "reactor", "life extension"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "batteries_energy_storage",
+      "name_ko": "배터리·에너지저장",
+      "name_en": "Batteries and Energy Storage",
+      "classification": "cyclical_structural_growth",
+      "gics_anchors": ["Industrials / Electrical Equipment", "Materials / Specialty Chemicals"],
+      "beneficiary_pathways": [
+        {"pathway_id": "battery_cells_materials", "label_ko": "셀·소재", "economic_link": "전기차와 저장장치 수요가 배터리 셀·양극재·전해질 수요로 연결"},
+        {"pathway_id": "stationary_storage", "label_ko": "ESS", "economic_link": "재생에너지 변동성과 전력 피크 관리가 고정형 저장장치 수요로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "LIT", "name": "Global X Lithium and Battery Tech ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"},
+        {"market": "US", "ticker": "BATT", "name": "Amplify Lithium and Battery Technology ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "ALB", "name": "Albemarle", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "373220", "name": "LG에너지솔루션", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "006400", "name": "삼성SDI", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "battery_utilization", "label_ko": "배터리 공장 가동률", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "lithium_price_inventory", "label_ko": "리튬 가격·재고 조합", "improving_direction": "context_dependent", "frequency": "weekly_or_monthly", "preferred_source_types": ["official_statistics", "industry_association"]},
+        {"indicator_id": "ess_order_growth", "label_ko": "ESS 신규 수주 증가율", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "electric_vehicle_demand", "direction": "positive"},
+        {"factor_id": "lithium_prices", "direction": "mixed"}
+      ],
+      "keywords": {"ko": ["배터리", "ESS", "리튬", "양극재", "에너지저장"], "en": ["battery", "energy storage", "lithium", "cathode", "ESS"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "electric_vehicles_autonomy",
+      "name_ko": "전기차·자율주행",
+      "name_en": "Electric Vehicles and Autonomy",
+      "classification": "cyclical_structural_growth",
+      "gics_anchors": ["Consumer Discretionary / Automobile Manufacturers"],
+      "beneficiary_pathways": [
+        {"pathway_id": "electric_vehicle_platforms", "label_ko": "전기차 플랫폼", "economic_link": "전동화 전환이 차량·파워트레인·충전 생태계 수요로 연결"},
+        {"pathway_id": "adas_autonomy", "label_ko": "ADAS·자율주행", "economic_link": "차량당 연산·센서 탑재 증가가 반도체와 소프트웨어 매출로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "DRIV", "name": "Global X Autonomous and Electric Vehicles ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"},
+        {"market": "US", "ticker": "CARZ", "name": "First Trust S-Network Future Vehicles and Technology ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "TSLA", "name": "Tesla", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "005380", "name": "현대차", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "000270", "name": "기아", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "ev_unit_sales", "label_ko": "전기차 판매량", "improving_direction": "up", "frequency": "monthly", "preferred_source_types": ["official_statistics", "industry_association"]},
+        {"indicator_id": "ev_inventory_days", "label_ko": "전기차 재고일수", "improving_direction": "down", "frequency": "monthly", "preferred_source_types": ["industry_association", "company_filings_ir"]},
+        {"indicator_id": "adas_content_per_vehicle", "label_ko": "차량당 ADAS 탑재 가치", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "consumer_financing_rates", "direction": "negative"},
+        {"factor_id": "auto_demand", "direction": "positive"}
+      ],
+      "keywords": {"ko": ["전기차", "자율주행", "ADAS", "차량용 반도체", "충전"], "en": ["electric vehicle", "autonomous driving", "ADAS", "automotive semiconductor", "charging"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "industrial_automation_robotics",
+      "name_ko": "산업자동화·로봇",
+      "name_en": "Industrial Automation and Robotics",
+      "classification": "cyclical_structural_growth",
+      "gics_anchors": ["Industrials / Industrial Machinery"],
+      "beneficiary_pathways": [
+        {"pathway_id": "factory_automation", "label_ko": "공장 자동화", "economic_link": "인건비와 리쇼어링 투자가 제어기·센서·자동화 설비 수요로 연결"},
+        {"pathway_id": "robotics_motion", "label_ko": "로봇·모션제어", "economic_link": "생산 유연성과 서비스 자동화가 로봇·감속기·모션제어 수요로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "BOTZ", "name": "Global X Robotics and Artificial Intelligence ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"},
+        {"market": "US", "ticker": "ROBO", "name": "ROBO Global Robotics and Automation Index ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "ROK", "name": "Rockwell Automation", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "454910", "name": "두산로보틱스", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "277810", "name": "레인보우로보틱스", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "automation_orders", "label_ko": "자동화 설비 신규 수주", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "manufacturing_pmi", "label_ko": "제조업 PMI", "improving_direction": "up", "frequency": "monthly", "preferred_source_types": ["official_statistics"]},
+        {"indicator_id": "robot_installations", "label_ko": "산업용 로봇 설치 대수", "improving_direction": "up", "frequency": "quarterly_or_annual", "preferred_source_types": ["industry_association"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "manufacturing_capex", "direction": "positive"},
+        {"factor_id": "labor_costs", "direction": "positive"}
+      ],
+      "keywords": {"ko": ["산업자동화", "로봇", "스마트팩토리", "모션제어", "협동로봇"], "en": ["industrial automation", "robotics", "smart factory", "motion control", "cobot"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "aerospace_defense",
+      "name_ko": "항공우주·방산",
+      "name_en": "Aerospace and Defense",
+      "classification": "policy_and_backlog",
+      "gics_anchors": ["Industrials / Aerospace and Defense"],
+      "beneficiary_pathways": [
+        {"pathway_id": "defense_platforms", "label_ko": "방산 플랫폼", "economic_link": "국방예산과 재고 보충이 항공·지상·해상 플랫폼 수주로 연결"},
+        {"pathway_id": "munitions_electronics", "label_ko": "탄약·전자체계", "economic_link": "소모품 보충과 정밀화가 탄약·레이더·전자전 수요로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "ITA", "name": "iShares U.S. Aerospace and Defense ETF", "instrument_type": "ETF", "proxy_role": "sector_proxy"},
+        {"market": "US", "ticker": "XAR", "name": "SPDR S&P Aerospace and Defense ETF", "instrument_type": "ETF", "proxy_role": "sector_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "LMT", "name": "Lockheed Martin", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "RTX", "name": "RTX", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "012450", "name": "한화에어로스페이스", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "064350", "name": "현대로템", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "defense_budget_authorizations", "label_ko": "국방예산·승인액", "improving_direction": "up", "frequency": "annual_and_event_driven", "preferred_source_types": ["official_statistics"]},
+        {"indicator_id": "defense_book_to_bill", "label_ko": "방산 수주·매출 비율", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "defense_backlog", "label_ko": "방산 백로그", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "defense_spending", "direction": "positive"},
+        {"factor_id": "geopolitical_risk", "direction": "positive"}
+      ],
+      "keywords": {"ko": ["방산", "국방예산", "항공우주", "탄약", "레이더"], "en": ["defense", "defense budget", "aerospace", "munitions", "radar"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "shipbuilding_marine",
+      "name_ko": "조선·해양",
+      "name_en": "Shipbuilding and Marine",
+      "classification": "cyclical_backlog",
+      "gics_anchors": ["Industrials / Construction Machinery and Heavy Transportation Equipment"],
+      "beneficiary_pathways": [
+        {"pathway_id": "commercial_shipbuilding", "label_ko": "상선 건조", "economic_link": "선대 교체와 환경규제가 신규 선박 발주로 연결"},
+        {"pathway_id": "lng_offshore", "label_ko": "LNG·해양", "economic_link": "가스 공급망과 해양개발 투자가 고부가 선박·해양설비 수주로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "SEA", "name": "U.S. Global Sea to Sky Cargo ETF", "instrument_type": "ETF", "proxy_role": "broad_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "KR", "ticker": "009540", "name": "HD한국조선해양", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "010140", "name": "삼성중공업", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "042660", "name": "한화오션", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "newbuild_price_index", "label_ko": "신조선가 지수", "improving_direction": "up", "frequency": "weekly", "preferred_source_types": ["industry_association"]},
+        {"indicator_id": "global_new_orders", "label_ko": "글로벌 신규 선박 발주", "improving_direction": "up", "frequency": "monthly", "preferred_source_types": ["industry_association"]},
+        {"indicator_id": "shipyard_backlog_margin", "label_ko": "조선소 백로그·예상 마진", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "global_trade_volume", "direction": "positive"},
+        {"factor_id": "steel_prices", "direction": "negative"}
+      ],
+      "keywords": {"ko": ["조선", "신조선가", "LNG선", "해양플랜트", "선박 발주"], "en": ["shipbuilding", "newbuild price", "LNG carrier", "offshore", "vessel orders"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "biotech_healthcare_innovation",
+      "name_ko": "바이오·헬스케어 혁신",
+      "name_en": "Biotech and Healthcare Innovation",
+      "classification": "innovation_and_event_driven",
+      "gics_anchors": ["Health Care / Biotechnology", "Health Care / Pharmaceuticals"],
+      "beneficiary_pathways": [
+        {"pathway_id": "therapeutic_platforms", "label_ko": "신약 플랫폼", "economic_link": "임상 성공과 적응증 확대가 파이프라인 가치와 라이선스 수익으로 연결"},
+        {"pathway_id": "biologics_manufacturing", "label_ko": "바이오의약품 생산", "economic_link": "바이오의약품 수요와 외주화가 CDMO 수주·가동률로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "XBI", "name": "SPDR S&P Biotech ETF", "instrument_type": "ETF", "proxy_role": "sector_proxy"},
+        {"market": "US", "ticker": "IBB", "name": "iShares Biotechnology ETF", "instrument_type": "ETF", "proxy_role": "sector_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "AMGN", "name": "Amgen", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "207940", "name": "삼성바이오로직스", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "068270", "name": "셀트리온", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "clinical_catalyst_quality", "label_ko": "임상 촉매의 질과 성공 여부", "improving_direction": "context_dependent", "frequency": "event_driven", "preferred_source_types": ["official_statistics", "company_filings_ir"]},
+        {"indicator_id": "biotech_financing_window", "label_ko": "바이오 자금조달 환경", "improving_direction": "up", "frequency": "monthly", "preferred_source_types": ["market_data_estimates"]},
+        {"indicator_id": "cdmo_backlog_utilization", "label_ko": "CDMO 백로그·가동률", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "real_yields", "direction": "negative"},
+        {"factor_id": "regulatory_policy", "direction": "mixed"}
+      ],
+      "keywords": {"ko": ["바이오", "임상", "신약", "CDMO", "바이오시밀러"], "en": ["biotech", "clinical trial", "drug pipeline", "CDMO", "biosimilar"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["clinical_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "financials_capital_markets",
+      "name_ko": "금융·자본시장",
+      "name_en": "Financials and Capital Markets",
+      "classification": "cyclical_rate_sensitive",
+      "gics_anchors": ["Financials / Banks", "Financials / Capital Markets"],
+      "beneficiary_pathways": [
+        {"pathway_id": "banking_credit", "label_ko": "은행·신용", "economic_link": "대출 성장과 신용비용이 순이자이익·대손비용으로 연결"},
+        {"pathway_id": "trading_asset_management", "label_ko": "거래·자산관리", "economic_link": "시장 거래와 자산가격이 수수료·운용자산으로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "XLF", "name": "Financial Select Sector SPDR Fund", "instrument_type": "ETF", "proxy_role": "sector_proxy"},
+        {"market": "US", "ticker": "KRE", "name": "SPDR S&P Regional Banking ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "JPM", "name": "JPMorgan Chase", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "GS", "name": "Goldman Sachs", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "105560", "name": "KB금융", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "055550", "name": "신한지주", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "yield_curve_net_interest", "label_ko": "금리곡선·순이자마진", "improving_direction": "context_dependent", "frequency": "daily_and_quarterly", "preferred_source_types": ["official_statistics", "company_filings_ir"]},
+        {"indicator_id": "credit_cost_delinquency", "label_ko": "연체율·신용비용", "improving_direction": "down", "frequency": "monthly_or_quarterly", "preferred_source_types": ["official_statistics", "company_filings_ir"]},
+        {"indicator_id": "capital_market_activity", "label_ko": "ECM·DCM·M&A 활동", "improving_direction": "up", "frequency": "monthly_or_quarterly", "preferred_source_types": ["market_data_estimates", "company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "yield_curve", "direction": "mixed"},
+        {"factor_id": "credit_cycle", "direction": "positive"}
+      ],
+      "keywords": {"ko": ["은행", "순이자마진", "대손비용", "자본시장", "운용자산"], "en": ["bank", "net interest margin", "credit cost", "capital markets", "assets under management"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["credit_or_activity", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "consumer_internet_platforms",
+      "name_ko": "소비자 인터넷·플랫폼",
+      "name_en": "Consumer Internet and Platforms",
+      "classification": "growth_consumer_cyclical",
+      "gics_anchors": ["Communication Services / Interactive Media and Services", "Consumer Discretionary / Broadline Retail"],
+      "beneficiary_pathways": [
+        {"pathway_id": "digital_advertising", "label_ko": "디지털 광고", "economic_link": "광고주의 수요와 이용자 참여가 광고 단가·노출량으로 연결"},
+        {"pathway_id": "commerce_content", "label_ko": "커머스·콘텐츠", "economic_link": "거래액과 구독·콘텐츠 소비가 수수료와 매출로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "FDN", "name": "First Trust Dow Jones Internet Index Fund", "instrument_type": "ETF", "proxy_role": "theme_proxy"},
+        {"market": "US", "ticker": "XLC", "name": "Communication Services Select Sector SPDR Fund", "instrument_type": "ETF", "proxy_role": "broad_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "META", "name": "Meta Platforms", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "AMZN", "name": "Amazon", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "035420", "name": "NAVER", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "035720", "name": "카카오", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "digital_ad_spend", "label_ko": "디지털 광고 지출", "improving_direction": "up", "frequency": "monthly_or_quarterly", "preferred_source_types": ["industry_association", "company_filings_ir"]},
+        {"indicator_id": "gross_merchandise_value", "label_ko": "플랫폼 거래액", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "engagement_monetization", "label_ko": "이용자 참여·수익화", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "consumer_spending", "direction": "positive"},
+        {"factor_id": "real_yields", "direction": "negative"}
+      ],
+      "keywords": {"ko": ["플랫폼", "디지털 광고", "커머스", "콘텐츠", "거래액"], "en": ["platform", "digital advertising", "commerce", "content", "GMV"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "cloud_saas_cybersecurity",
+      "name_ko": "클라우드·SaaS·사이버보안",
+      "name_en": "Cloud, SaaS and Cybersecurity",
+      "classification": "structural_growth",
+      "gics_anchors": ["Information Technology / Software"],
+      "beneficiary_pathways": [
+        {"pathway_id": "cloud_software", "label_ko": "클라우드 소프트웨어", "economic_link": "IT 워크로드 전환이 구독 매출과 클라우드 사용량으로 연결"},
+        {"pathway_id": "cybersecurity", "label_ko": "사이버보안", "economic_link": "위협 증가와 규제가 보안 플랫폼·서비스 지출로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "CLOU", "name": "Global X Cloud Computing ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"},
+        {"market": "US", "ticker": "CIBR", "name": "First Trust NASDAQ Cybersecurity ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "MSFT", "name": "Microsoft", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "CRWD", "name": "CrowdStrike", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "035420", "name": "NAVER", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "annual_recurring_revenue", "label_ko": "ARR·구독 매출 성장", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "net_retention_rate", "label_ko": "순매출 유지율", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "remaining_performance_obligations", "label_ko": "잔여계약가치·수주잔고", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "enterprise_it_spending", "direction": "positive"},
+        {"factor_id": "real_yields", "direction": "negative"}
+      ],
+      "keywords": {"ko": ["클라우드", "SaaS", "사이버보안", "ARR", "구독"], "en": ["cloud", "SaaS", "cybersecurity", "ARR", "subscription"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "energy_oil_gas",
+      "name_ko": "에너지·석유가스",
+      "name_en": "Energy and Oil and Gas",
+      "classification": "commodity_cyclical",
+      "gics_anchors": ["Energy / Oil Gas and Consumable Fuels"],
+      "beneficiary_pathways": [
+        {"pathway_id": "upstream_production", "label_ko": "탐사·생산", "economic_link": "원유·가스 가격과 생산량이 현금흐름으로 연결"},
+        {"pathway_id": "lng_services", "label_ko": "LNG·서비스", "economic_link": "가스 인프라와 시추 활동이 액화·운송·유전서비스 수요로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "XLE", "name": "Energy Select Sector SPDR Fund", "instrument_type": "ETF", "proxy_role": "sector_proxy"},
+        {"market": "US", "ticker": "XOP", "name": "SPDR S&P Oil and Gas Exploration and Production ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "XOM", "name": "Exxon Mobil", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "CVX", "name": "Chevron", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "096770", "name": "SK이노베이션", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "oil_gas_inventory", "label_ko": "원유·가스 재고", "improving_direction": "down", "frequency": "weekly", "preferred_source_types": ["official_statistics"]},
+        {"indicator_id": "rig_count", "label_ko": "가동 리그 수", "improving_direction": "context_dependent", "frequency": "weekly", "preferred_source_types": ["industry_association"]},
+        {"indicator_id": "upstream_free_cash_flow", "label_ko": "상류부문 잉여현금흐름", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "oil_gas_prices", "direction": "positive"},
+        {"factor_id": "global_growth", "direction": "positive"}
+      ],
+      "keywords": {"ko": ["원유", "천연가스", "LNG", "탐사생산", "유전서비스"], "en": ["oil", "natural gas", "LNG", "exploration production", "oilfield services"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["commodity_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "metals_critical_materials",
+      "name_ko": "금속·핵심소재",
+      "name_en": "Metals and Critical Materials",
+      "classification": "commodity_cyclical",
+      "gics_anchors": ["Materials / Metals and Mining"],
+      "beneficiary_pathways": [
+        {"pathway_id": "copper_electrification", "label_ko": "구리·전기화", "economic_link": "전력망·데이터센터·전기차 투자가 구리 수요로 연결"},
+        {"pathway_id": "steel_specialty_materials", "label_ko": "철강·특수소재", "economic_link": "인프라와 제조업 투자가 철강·합금·특수소재 수요로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "XME", "name": "SPDR S&P Metals and Mining ETF", "instrument_type": "ETF", "proxy_role": "sector_proxy"},
+        {"market": "US", "ticker": "COPX", "name": "Global X Copper Miners ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "FCX", "name": "Freeport-McMoRan", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "NUE", "name": "Nucor", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "005490", "name": "POSCO홀딩스", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "metal_inventory", "label_ko": "거래소 금속 재고", "improving_direction": "down", "frequency": "daily_or_weekly", "preferred_source_types": ["official_statistics", "industry_association"]},
+        {"indicator_id": "treatment_charge_spread", "label_ko": "제련 수수료·제품 스프레드", "improving_direction": "context_dependent", "frequency": "weekly_or_monthly", "preferred_source_types": ["industry_association", "company_filings_ir"]},
+        {"indicator_id": "mining_capex_supply", "label_ko": "광산 CAPEX·공급 증가율", "improving_direction": "context_dependent", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir", "official_statistics"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "global_manufacturing_cycle", "direction": "positive"},
+        {"factor_id": "us_dollar", "direction": "negative"}
+      ],
+      "keywords": {"ko": ["구리", "철강", "핵심광물", "금속 재고", "제련"], "en": ["copper", "steel", "critical minerals", "metal inventory", "smelting"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["commodity_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "construction_infrastructure",
+      "name_ko": "건설·인프라",
+      "name_en": "Construction and Infrastructure",
+      "classification": "cyclical_and_policy",
+      "gics_anchors": ["Industrials / Construction and Engineering", "Materials / Construction Materials"],
+      "beneficiary_pathways": [
+        {"pathway_id": "public_infrastructure", "label_ko": "공공 인프라", "economic_link": "정부 투자와 노후시설 교체가 설계·건설·자재 수요로 연결"},
+        {"pathway_id": "industrial_reshoring", "label_ko": "산업시설·리쇼어링", "economic_link": "공장과 데이터센터 건설이 엔지니어링·장비·자재 수요로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "PAVE", "name": "Global X U.S. Infrastructure Development ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"},
+        {"market": "US", "ticker": "IFRA", "name": "iShares U.S. Infrastructure ETF", "instrument_type": "ETF", "proxy_role": "sector_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "CAT", "name": "Caterpillar", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "VMC", "name": "Vulcan Materials", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "000720", "name": "현대건설", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "construction_spending", "label_ko": "건설지출", "improving_direction": "up", "frequency": "monthly", "preferred_source_types": ["official_statistics"]},
+        {"indicator_id": "engineering_backlog", "label_ko": "엔지니어링·건설 백로그", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "equipment_orders", "label_ko": "건설장비 신규 주문", "improving_direction": "up", "frequency": "monthly_or_quarterly", "preferred_source_types": ["official_statistics", "company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "public_infrastructure_spending", "direction": "positive"},
+        {"factor_id": "financing_costs", "direction": "negative"}
+      ],
+      "keywords": {"ko": ["인프라", "건설지출", "리쇼어링", "산업시설", "건설장비"], "en": ["infrastructure", "construction spending", "reshoring", "industrial construction", "construction equipment"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "reits_data_centers",
+      "name_ko": "리츠·데이터센터",
+      "name_en": "REITs and Data Centers",
+      "classification": "rate_sensitive_structural_growth",
+      "gics_anchors": ["Real Estate / Specialized REITs"],
+      "beneficiary_pathways": [
+        {"pathway_id": "data_center_colocation", "label_ko": "데이터센터·코로케이션", "economic_link": "클라우드와 AI 수요가 임대면적·전력용량 계약으로 연결"},
+        {"pathway_id": "digital_infrastructure", "label_ko": "디지털 인프라", "economic_link": "데이터 트래픽 증가가 타워·광통신·연결 인프라 임대로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "VPN", "name": "Global X Data Center and Digital Infrastructure ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"},
+        {"market": "US", "ticker": "VNQ", "name": "Vanguard Real Estate ETF", "instrument_type": "ETF", "proxy_role": "broad_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "EQIX", "name": "Equinix", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "DLR", "name": "Digital Realty Trust", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "365550", "name": "ESR켄달스퀘어리츠", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "leasing_megawatts", "label_ko": "신규 임대 전력용량", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "occupancy_rent_spread", "label_ko": "점유율·임대료 스프레드", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "development_pipeline_yield", "label_ko": "개발 파이프라인·개발수익률", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "real_yields", "direction": "negative"},
+        {"factor_id": "cloud_capex_cycle", "direction": "positive"}
+      ],
+      "keywords": {"ko": ["데이터센터 리츠", "코로케이션", "점유율", "임대 전력", "디지털 인프라"], "en": ["data center REIT", "colocation", "occupancy", "leased megawatts", "digital infrastructure"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "renewable_energy_equipment",
+      "name_ko": "재생에너지 장비",
+      "name_en": "Renewable Energy Equipment",
+      "classification": "policy_and_rate_sensitive",
+      "gics_anchors": ["Industrials / Electrical Equipment", "Information Technology / Semiconductor Materials"],
+      "beneficiary_pathways": [
+        {"pathway_id": "solar_supply_chain", "label_ko": "태양광 공급망", "economic_link": "발전소 설치와 교체가 모듈·인버터·추적장치 수요로 연결"},
+        {"pathway_id": "wind_equipment", "label_ko": "풍력 장비", "economic_link": "육상·해상풍력 프로젝트가 터빈·하부구조·서비스 수요로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "ICLN", "name": "iShares Global Clean Energy ETF", "instrument_type": "ETF", "proxy_role": "broad_proxy"},
+        {"market": "US", "ticker": "TAN", "name": "Invesco Solar ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "FSLR", "name": "First Solar", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "US", "ticker": "ENPH", "name": "Enphase Energy", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "009830", "name": "한화솔루션", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "renewable_installations", "label_ko": "재생에너지 신규 설치량", "improving_direction": "up", "frequency": "monthly_or_quarterly", "preferred_source_types": ["official_statistics", "industry_association"]},
+        {"indicator_id": "equipment_price_inventory", "label_ko": "장비 가격·유통재고", "improving_direction": "context_dependent", "frequency": "monthly", "preferred_source_types": ["industry_association", "company_filings_ir"]},
+        {"indicator_id": "project_backlog", "label_ko": "프로젝트·장비 백로그", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "financing_costs", "direction": "negative"},
+        {"factor_id": "energy_policy_support", "direction": "positive"}
+      ],
+      "keywords": {"ko": ["태양광", "풍력", "인버터", "재생에너지", "클린에너지"], "en": ["solar", "wind", "inverter", "renewable energy", "clean energy"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "media_gaming_entertainment",
+      "name_ko": "미디어·게임·엔터테인먼트",
+      "name_en": "Media, Gaming and Entertainment",
+      "classification": "consumer_and_content_cycle",
+      "gics_anchors": ["Communication Services / Entertainment", "Communication Services / Interactive Home Entertainment"],
+      "beneficiary_pathways": [
+        {"pathway_id": "gaming_live_services", "label_ko": "게임·라이브서비스", "economic_link": "신작 성과와 이용자 유지가 인앱결제·라이브서비스 매출로 연결"},
+        {"pathway_id": "content_ip", "label_ko": "콘텐츠·IP", "economic_link": "콘텐츠 흥행과 팬덤 확장이 라이선스·공연·광고 매출로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "HERO", "name": "Global X Video Games and Esports ETF", "instrument_type": "ETF", "proxy_role": "theme_proxy"},
+        {"market": "US", "ticker": "XLC", "name": "Communication Services Select Sector SPDR Fund", "instrument_type": "ETF", "proxy_role": "broad_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "NFLX", "name": "Netflix", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "259960", "name": "크래프톤", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "352820", "name": "하이브", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "active_users_engagement", "label_ko": "활성이용자·참여도", "improving_direction": "up", "frequency": "monthly_or_quarterly", "preferred_source_types": ["company_filings_ir", "market_data_estimates"]},
+        {"indicator_id": "content_release_pipeline", "label_ko": "신작·콘텐츠 출시 파이프라인", "improving_direction": "context_dependent", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]},
+        {"indicator_id": "bookings_subscriber_growth", "label_ko": "예약매출·구독자 성장", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "consumer_discretionary_spending", "direction": "positive"},
+        {"factor_id": "foreign_exchange", "direction": "mixed"}
+      ],
+      "keywords": {"ko": ["게임", "콘텐츠", "엔터테인먼트", "구독자", "IP"], "en": ["gaming", "content", "entertainment", "subscribers", "intellectual property"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["audience_or_demand", "earnings_or_orders", "market_confirmation"]}
+    },
+    {
+      "sector_id": "consumer_brands_beauty",
+      "name_ko": "소비재 브랜드·뷰티",
+      "name_en": "Consumer Brands and Beauty",
+      "classification": "consumer_growth",
+      "gics_anchors": ["Consumer Staples / Personal Care Products", "Consumer Discretionary / Apparel and Luxury Goods"],
+      "beneficiary_pathways": [
+        {"pathway_id": "beauty_export", "label_ko": "뷰티 수출", "economic_link": "브랜드 인지도와 유통 확장이 수출·현지 매출로 연결"},
+        {"pathway_id": "premium_brands", "label_ko": "프리미엄 브랜드", "economic_link": "가격 결정력과 제품 믹스 개선이 매출총이익률로 연결"}
+      ],
+      "market_proxies": [
+        {"market": "US", "ticker": "XLP", "name": "Consumer Staples Select Sector SPDR Fund", "instrument_type": "ETF", "proxy_role": "broad_proxy"},
+        {"market": "US", "ticker": "XLY", "name": "Consumer Discretionary Select Sector SPDR Fund", "instrument_type": "ETF", "proxy_role": "broad_proxy"}
+      ],
+      "representative_companies": [
+        {"market": "US", "ticker": "EL", "name": "Estee Lauder", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "090430", "name": "아모레퍼시픽", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"},
+        {"market": "KR", "ticker": "192820", "name": "코스맥스", "instrument_type": "EQUITY", "exposure_status": "candidate_unverified"}
+      ],
+      "leading_indicators": [
+        {"indicator_id": "export_growth", "label_ko": "주요 국가향 수출 증가율", "improving_direction": "up", "frequency": "monthly", "preferred_source_types": ["official_statistics"]},
+        {"indicator_id": "channel_inventory", "label_ko": "유통채널 재고", "improving_direction": "down", "frequency": "monthly_or_quarterly", "preferred_source_types": ["company_filings_ir", "industry_association"]},
+        {"indicator_id": "gross_margin_mix", "label_ko": "매출총이익률·제품 믹스", "improving_direction": "up", "frequency": "quarterly", "preferred_source_types": ["company_filings_ir"]}
+      ],
+      "macro_sensitivities": [
+        {"factor_id": "consumer_spending", "direction": "positive"},
+        {"factor_id": "foreign_exchange", "direction": "mixed"}
+      ],
+      "keywords": {"ko": ["뷰티", "화장품 수출", "브랜드", "ODM", "유통재고"], "en": ["beauty", "cosmetics export", "brand", "ODM", "channel inventory"]},
+      "evidence_requirements": {"minimum_independent_sources": 2, "required_evidence_classes": ["industry_or_demand", "earnings_or_orders", "market_confirmation"]}
+    }
+  ]
+}

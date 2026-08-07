@@ -81,6 +81,10 @@ function readPortfolioCanvasStoreFile() {
   };
 }
 
+export function readPortfolioCanvasStoreSnapshot() {
+  return readPortfolioCanvasStoreFile();
+}
+
 function writePortfolioCanvasStoreFile(store = {}) {
   ensurePortfolioDataDir();
   const normalizedStore = normalizePortfolioCanvasStoreForFile(store);

@@ -11,6 +11,10 @@ import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
 import { handlePbBrokerResearchApprovalsEndpoint } from "./pbBrokerResearchApprovals.mjs";
 import { handlePbDailyIntelligenceEndpoint } from "./pbDailyIntelligenceApi.mjs";
 import { handlePbDailyIntelligenceJobsEndpoint } from "./pbDailyIntelligenceJobs.mjs";
+import { handlePbGmailResearchApprovalsEndpoint } from "./pbGmailResearchApprovals.mjs";
+import { handlePbGmailSenderReviewsEndpoint } from "./pbGmailSenderReviews.mjs";
+import { handlePbTelegramResearchApprovalsEndpoint } from "./pbTelegramResearchApprovals.mjs";
+import { handleResearchSectorTaxonomyEndpoint } from "./researchSectorTaxonomy.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
 import { handleTossInvestEndpoint } from "./tossInvestApi.mjs";
@@ -334,6 +338,22 @@ export function codexApiPlugin() {
 
       server.middlewares.use("/api/pb-daily-intelligence/broker-approvals", async (req, res) => {
         await handlePbBrokerResearchApprovalsEndpoint(req, res);
+      });
+
+      server.middlewares.use("/api/pb-daily-intelligence/gmail-attachment-approvals", async (req, res) => {
+        await handlePbGmailResearchApprovalsEndpoint(req, res);
+      });
+
+      server.middlewares.use("/api/pb-daily-intelligence/gmail-sender-reviews", async (req, res) => {
+        await handlePbGmailSenderReviewsEndpoint(req, res);
+      });
+
+      server.middlewares.use("/api/pb-daily-intelligence/telegram-attachment-approvals", async (req, res) => {
+        await handlePbTelegramResearchApprovalsEndpoint(req, res);
+      });
+
+      server.middlewares.use("/api/pb-daily-intelligence/sector-taxonomy", async (req, res) => {
+        await handleResearchSectorTaxonomyEndpoint(req, res);
       });
 
       server.middlewares.use("/api/pb-daily-intelligence", async (req, res) => {

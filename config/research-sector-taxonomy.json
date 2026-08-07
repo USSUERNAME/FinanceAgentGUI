@@ -1,0 +1,431 @@
+{
+  "schemaVersion": "research-sector-taxonomy.v3",
+  "sectors": [
+    {
+      "id": "semiconductors_ai_compute",
+      "nameKo": "반도체·AI 컴퓨트",
+      "nameEn": "Semiconductors and AI Compute",
+      "aliases": [
+        "반도체",
+        "semiconductor",
+        "semiconductors",
+        "chips",
+        "memory",
+        "메모리",
+        "hbm",
+        "ai semiconductor",
+        "ai chips"
+      ]
+    },
+    {
+      "id": "data_center_networking",
+      "nameKo": "데이터센터 네트워크",
+      "nameEn": "Data Center Networking",
+      "aliases": [
+        "데이터센터 네트워크",
+        "data center networking",
+        "optical networking",
+        "광통신"
+      ]
+    },
+    {
+      "id": "data_center_power_cooling",
+      "nameKo": "데이터센터 전력·냉각",
+      "nameEn": "Data Center Power and Cooling",
+      "aliases": [
+        "데이터센터 전력",
+        "데이터센터 냉각",
+        "data center power",
+        "data center cooling",
+        "power cooling"
+      ]
+    },
+    {
+      "id": "grid_electrification",
+      "nameKo": "전력망·전기화",
+      "nameEn": "Grid and Electrification",
+      "aliases": [
+        "전력망",
+        "전력기기",
+        "전력 솔루션",
+        "grid",
+        "electrification",
+        "electrical equipment"
+      ]
+    },
+    {
+      "id": "nuclear_generation",
+      "nameKo": "원전·원자력 공급망",
+      "nameEn": "Nuclear Generation and Supply Chain",
+      "aliases": [
+        "원전",
+        "원자력",
+        "nuclear",
+        "nuclear power"
+      ]
+    },
+    {
+      "id": "batteries_energy_storage",
+      "nameKo": "배터리·에너지저장",
+      "nameEn": "Batteries and Energy Storage",
+      "aliases": [
+        "배터리",
+        "이차전지",
+        "2차전지",
+        "에너지저장",
+        "battery",
+        "batteries",
+        "energy storage",
+        "ess"
+      ]
+    },
+    {
+      "id": "electric_vehicles_autonomy",
+      "nameKo": "전기차·자율주행",
+      "nameEn": "Electric Vehicles and Autonomy",
+      "aliases": [
+        "전기차",
+        "자율주행",
+        "ev",
+        "electric vehicle",
+        "electric vehicles",
+        "autonomous driving",
+        "autonomy"
+      ]
+    },
+    {
+      "id": "industrial_automation_robotics",
+      "nameKo": "산업자동화·로봇",
+      "nameEn": "Industrial Automation and Robotics",
+      "aliases": [
+        "로봇",
+        "로보틱스",
+        "산업자동화",
+        "robot",
+        "robotics",
+        "industrial automation",
+        "AI/로보틱스",
+        "휴머노이드"
+      ]
+    },
+    {
+      "id": "aerospace_defense",
+      "nameKo": "항공우주·방산",
+      "nameEn": "Aerospace and Defense",
+      "aliases": [
+        "방산",
+        "항공우주",
+        "defense",
+        "aerospace",
+        "aerospace defense"
+      ]
+    },
+    {
+      "id": "shipbuilding_marine",
+      "nameKo": "조선·해양",
+      "nameEn": "Shipbuilding and Marine",
+      "aliases": [
+        "조선",
+        "해양",
+        "shipbuilding",
+        "marine",
+        "조선기자재"
+      ]
+    },
+    {
+      "id": "transportation_logistics",
+      "nameKo": "운송·물류",
+      "nameEn": "Transportation and Logistics",
+      "aliases": [
+        "운송",
+        "물류",
+        "육운",
+        "택배",
+        "해운",
+        "해상운송",
+        "항공운송",
+        "항공사",
+        "transportation",
+        "logistics",
+        "transport logistics",
+        "shipping services",
+        "airlines"
+      ]
+    },
+    {
+      "id": "biotech_healthcare_innovation",
+      "nameKo": "바이오·헬스케어 혁신",
+      "nameEn": "Biotech and Healthcare Innovation",
+      "aliases": [
+        "바이오",
+        "헬스케어",
+        "제약",
+        "biotech",
+        "healthcare",
+        "pharmaceuticals",
+        "pharma"
+      ]
+    },
+    {
+      "id": "financials_capital_markets",
+      "nameKo": "금융·자본시장",
+      "nameEn": "Financials and Capital Markets",
+      "aliases": [
+        "금융",
+        "은행",
+        "증권",
+        "보험",
+        "financials",
+        "banks",
+        "capital markets",
+        "insurance"
+      ]
+    },
+    {
+      "id": "consumer_internet_platforms",
+      "nameKo": "소비자 인터넷·플랫폼",
+      "nameEn": "Consumer Internet and Platforms",
+      "aliases": [
+        "인터넷",
+        "플랫폼",
+        "consumer internet",
+        "internet platforms",
+        "platforms"
+      ]
+    },
+    {
+      "id": "cloud_saas_cybersecurity",
+      "nameKo": "클라우드·SaaS·사이버보안",
+      "nameEn": "Cloud, SaaS and Cybersecurity",
+      "aliases": [
+        "클라우드",
+        "소프트웨어",
+        "사이버보안",
+        "cloud",
+        "software",
+        "saas",
+        "cybersecurity"
+      ]
+    },
+    {
+      "id": "energy_oil_gas",
+      "nameKo": "에너지·석유가스",
+      "nameEn": "Energy and Oil and Gas",
+      "aliases": [
+        "에너지",
+        "정유",
+        "석유가스",
+        "oil gas",
+        "oil and gas",
+        "energy"
+      ]
+    },
+    {
+      "id": "metals_critical_materials",
+      "nameKo": "금속·핵심소재",
+      "nameEn": "Metals and Critical Materials",
+      "aliases": [
+        "금속",
+        "소재",
+        "철강",
+        "critical materials",
+        "metals",
+        "materials",
+        "steel",
+        "철강비철금속"
+      ]
+    },
+    {
+      "id": "construction_infrastructure",
+      "nameKo": "건설·인프라",
+      "nameEn": "Construction and Infrastructure",
+      "aliases": [
+        "건설",
+        "인프라",
+        "construction",
+        "infrastructure"
+      ]
+    },
+    {
+      "id": "reits_data_centers",
+      "nameKo": "리츠·데이터센터",
+      "nameEn": "REITs and Data Centers",
+      "aliases": [
+        "리츠",
+        "데이터센터 리츠",
+        "reit",
+        "reits",
+        "data center reits"
+      ]
+    },
+    {
+      "id": "renewable_energy_equipment",
+      "nameKo": "재생에너지 장비",
+      "nameEn": "Renewable Energy Equipment",
+      "aliases": [
+        "재생에너지",
+        "태양광",
+        "풍력",
+        "renewable energy",
+        "solar",
+        "wind"
+      ]
+    },
+    {
+      "id": "media_gaming_entertainment",
+      "nameKo": "미디어·게임·엔터테인먼트",
+      "nameEn": "Media, Gaming and Entertainment",
+      "aliases": [
+        "미디어",
+        "게임",
+        "엔터테인먼트",
+        "media",
+        "gaming",
+        "entertainment",
+        "미디어업종"
+      ]
+    },
+    {
+      "id": "consumer_brands_beauty",
+      "nameKo": "소비재 브랜드·뷰티",
+      "nameEn": "Consumer Brands and Beauty",
+      "aliases": [
+        "소비재",
+        "브랜드",
+        "뷰티",
+        "화장품",
+        "consumer brands",
+        "beauty",
+        "cosmetics"
+      ]
+    },
+    {
+      "id": "technology_hardware_services",
+      "nameKo": "정보기술·하드웨어",
+      "nameEn": "Information Technology and Hardware",
+      "kind": "sector",
+      "aliases": ["IT", "정보기술", "IT하드웨어", "technology hardware", "information technology"]
+    },
+    {
+      "id": "communications_network_equipment",
+      "nameKo": "통신서비스·네트워크 장비",
+      "nameEn": "Communications Services and Network Equipment",
+      "kind": "sector",
+      "aliases": ["통신", "통신서비스", "통신장비", "telecom", "telecommunications", "network equipment"]
+    },
+    {
+      "id": "industrials_machinery",
+      "nameKo": "산업재·기계",
+      "nameEn": "Industrials and Machinery",
+      "kind": "sector",
+      "aliases": ["산업재", "기계", "기계장비", "industrials", "machinery"]
+    },
+    {
+      "id": "chemicals_specialty_materials",
+      "nameKo": "화학·특수소재",
+      "nameEn": "Chemicals and Specialty Materials",
+      "kind": "sector",
+      "aliases": ["화학", "석유화학", "특수소재", "chemicals", "specialty materials"]
+    },
+    {
+      "id": "consumer_staples_food_beverage",
+      "nameKo": "필수소비재·음식료",
+      "nameEn": "Consumer Staples, Food and Beverage",
+      "kind": "sector",
+      "aliases": ["필수소비재", "음식료", "식품", "consumer staples", "food beverage", "food and beverage"]
+    },
+    {
+      "id": "consumer_discretionary_retail",
+      "nameKo": "경기소비재·유통",
+      "nameEn": "Consumer Discretionary and Retail",
+      "kind": "sector",
+      "aliases": ["경기소비재", "유통", "소매", "consumer discretionary", "retail"]
+    },
+    {
+      "id": "travel_leisure",
+      "nameKo": "여행·레저",
+      "nameEn": "Travel and Leisure",
+      "kind": "sector",
+      "aliases": ["여행", "레저", "호텔", "카지노", "travel", "leisure", "hotels", "casinos"]
+    },
+    {
+      "id": "healthcare_services_medtech",
+      "nameKo": "의료서비스·의료기기",
+      "nameEn": "Healthcare Services and Medical Technology",
+      "kind": "sector",
+      "aliases": ["의료서비스", "의료기기", "메드테크", "healthcare services", "medical devices", "medtech"]
+    },
+    {
+      "id": "payments_fintech",
+      "nameKo": "결제·핀테크",
+      "nameEn": "Payments and Fintech",
+      "kind": "sector",
+      "aliases": ["결제", "핀테크", "payments", "fintech"]
+    },
+    {
+      "id": "utilities_power",
+      "nameKo": "유틸리티·발전",
+      "nameEn": "Utilities and Power Generation",
+      "kind": "sector",
+      "aliases": ["유틸리티", "발전", "전력공급", "utilities", "power generation"]
+    },
+    {
+      "id": "real_estate_general",
+      "nameKo": "부동산·일반 리츠",
+      "nameEn": "Real Estate and Diversified REITs",
+      "kind": "sector",
+      "aliases": ["부동산", "일반리츠", "real estate", "diversified reits"]
+    },
+    {
+      "id": "carbon_decarbonization",
+      "nameKo": "탄소시장·탈탄소",
+      "nameEn": "Carbon Markets and Decarbonization",
+      "kind": "theme",
+      "aliases": ["탄소", "탄소배출권", "탈탄소", "carbon market", "carbon markets", "decarbonization"]
+    },
+    {
+      "id": "market_strategy_asset_allocation",
+      "nameKo": "시장전략·자산배분",
+      "nameEn": "Market Strategy and Asset Allocation",
+      "kind": "cross_market",
+      "aliases": ["아침시장", "시장전략", "포트폴리오", "종목추천", "market strategy", "asset allocation", "portfolio strategy"]
+    },
+    {
+      "id": "etf_index_strategy",
+      "nameKo": "ETF·인덱스 전략",
+      "nameEn": "ETF and Index Strategy",
+      "kind": "cross_market",
+      "aliases": ["ETF", "지수", "인덱스", "index", "index strategy"]
+    },
+    {
+      "id": "macro_rates_fx",
+      "nameKo": "매크로·금리·FX",
+      "nameEn": "Macro, Rates and FX",
+      "kind": "cross_market",
+      "aliases": ["거시", "매크로", "금리", "환율", "FX", "macro", "rates"]
+    },
+    {
+      "id": "fixed_income_credit",
+      "nameKo": "채권·크레딧",
+      "nameEn": "Fixed Income and Credit",
+      "kind": "cross_market",
+      "aliases": ["채권", "크레딧", "CDS", "유가,CDS", "fixed income", "credit"]
+    },
+    {
+      "id": "alternatives_private_markets",
+      "nameKo": "대체투자·사모시장",
+      "nameEn": "Alternatives and Private Markets",
+      "kind": "cross_market",
+      "aliases": ["대체투자", "사모시장", "사모펀드", "alternative investments", "private markets"]
+    }
+  ],
+  "aliasMappings": [
+    {
+      "alias": "AI인터넷게임",
+      "primarySectorId": "consumer_internet_platforms",
+      "secondarySectorIds": [
+        "media_gaming_entertainment"
+      ]
+    }
+  ]
+}

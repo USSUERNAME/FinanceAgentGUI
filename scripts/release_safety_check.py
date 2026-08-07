@@ -191,7 +191,11 @@ def pattern_is_allowed(pattern: FindingPattern, match: re.Match[str]) -> bool:
     value = match.group(pattern.value_group)
     if pattern.code == "email-address":
         domain = value.lower()
-        return domain in {"example.com", "example.org", "example.net", "localhost.local"}
+        reserved_domains = ("example.com", "example.org", "example.net")
+        return domain == "localhost.local" or any(
+            domain == reserved or domain.endswith(f".{reserved}")
+            for reserved in reserved_domains
+        )
     if pattern.code in {"personal-macos-home-path", "personal-windows-home-path"}:
         return value.lower() in {"you", "user", "username", "example", "test", "runner"}
     return is_placeholder(value)
@@ -277,62 +281,106 @@ def history_blob_entries(root: Path) -> list[tuple[str, str]]:
     return entries
 
 
-def read_git_object(root: Path, object_id: str) -> bytes | None:
-    kind = run_git(root, ["cat-file", "-t", object_id], text=True)
-    if kind.returncode != 0 or kind.stdout.strip() != "blob":
-        return None
-    size = run_git(root, ["cat-file", "-s", object_id], text=True)
-    if size.returncode != 0 or int(size.stdout.strip() or 0) > MAX_TEXT_BYTES:
-        return None
-    content = run_git(root, ["cat-file", "blob", object_id])
-    return content.stdout if content.returncode == 0 else None
+def read_git_objects(root: Path, object_ids: list[str]) -> dict[str, bytes]:
+    if not object_ids:
+        return {}
+    request = "".join(f"{object_id}\n" for object_id in object_ids).encode("ascii")
+    result = subprocess.run(
+        ["git", "-C", str(root), "cat-file", "--batch"],
+        input=request,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Git history batch object read failed")
+    objects: dict[str, bytes] = {}
+    output = result.stdout
+    cursor = 0
+    while cursor < len(output):
+        header_end = output.find(b"\n", cursor)
+        if header_end < 0:
+            raise RuntimeError("Malformed Git batch object header")
+        header = output[cursor:header_end].decode("ascii", errors="replace").split()
+        cursor = header_end + 1
+        if len(header) != 3 or header[1] != "blob":
+            raise RuntimeError("Unexpected Git batch object response")
+        object_id, _, raw_size = header
+        size = int(raw_size)
+        objects[object_id] = output[cursor : cursor + size]
+        cursor += size + 1
+    return objects
 
 
 def scan_history(root: Path) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
     entries = history_blob_entries(root)
-    scanned_objects: set[str] = set()
+    object_paths: dict[str, list[str]] = {}
     for object_id, path in entries:
-        normalized = normalize_git_path(path)
-        kind = run_git(root, ["cat-file", "-t", object_id], text=True)
-        if kind.returncode != 0 or kind.stdout.strip() != "blob":
+        object_paths.setdefault(object_id, []).append(path)
+    metadata_request = "".join(f"{object_id}\n" for object_id in object_paths).encode("ascii")
+    metadata = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "cat-file",
+            "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        ],
+        input=metadata_request,
+        capture_output=True,
+        check=False,
+    )
+    if metadata.returncode != 0:
+        raise RuntimeError("Git history batch metadata read failed")
+    blob_sizes: dict[str, int] = {}
+    for line in metadata.stdout.decode("ascii", errors="replace").splitlines():
+        fields = line.split()
+        if len(fields) == 3 and fields[1] == "blob":
+            blob_sizes[fields[0]] = int(fields[2])
+    eligible_ids = [
+        object_id
+        for object_id, size in blob_sizes.items()
+        if size <= MAX_TEXT_BYTES
+    ]
+    object_contents = read_git_objects(root, eligible_ids)
+    for object_id, paths in object_paths.items():
+        if object_id not in blob_sizes:
             continue
-        forbidden_code = is_forbidden_tracked_path(normalized)
-        if forbidden_code and normalized not in ALLOWED_HISTORICAL_RUNTIME_PATHS:
-            sensitive_history_path = (
-                normalized.startswith(("data/secrets/", "data/arca-browser-profile/", "data/backups/"))
-                or normalized.lower().endswith(PRIVATE_SUFFIXES)
-                or forbidden_code in {
-                    "environment-file-tracked",
-                    "user-config-tracked",
-                    "private-artifact-tracked",
-                }
-            )
-            issues.append(
-                {
-                    "level": "error" if sensitive_history_path else "warning",
-                    "code": f"historical-{forbidden_code}",
-                    "path": normalized,
-                    "source": "history-path",
-                    "object": object_id[:12],
-                    "message": "Sensitive/runtime path exists in reachable Git history.",
-                }
-            )
-        if object_id in scanned_objects:
-            continue
-        scanned_objects.add(object_id)
-        data = read_git_object(root, object_id)
+        for path in paths:
+            normalized = normalize_git_path(path)
+            forbidden_code = is_forbidden_tracked_path(normalized)
+            if forbidden_code and normalized not in ALLOWED_HISTORICAL_RUNTIME_PATHS:
+                sensitive_history_path = (
+                    normalized.startswith(("data/secrets/", "data/arca-browser-profile/", "data/backups/"))
+                    or normalized.lower().endswith(PRIVATE_SUFFIXES)
+                    or forbidden_code in {
+                        "environment-file-tracked",
+                        "user-config-tracked",
+                        "private-artifact-tracked",
+                    }
+                )
+                issues.append(
+                    {
+                        "level": "error" if sensitive_history_path else "warning",
+                        "code": f"historical-{forbidden_code}",
+                        "path": normalized,
+                        "source": "history-path",
+                        "object": object_id[:12],
+                        "message": "Sensitive/runtime path exists in reachable Git history.",
+                    }
+                )
+        data = object_contents.get(object_id)
         if not data or b"\0" in data:
             continue
         text = data.decode("utf-8", errors="replace")
         issues.extend(
-            scan_text(text, path=normalized, source="history-content", object_id=object_id)
+            scan_text(text, path=paths[0], source="history-content", object_id=object_id)
         )
         if len(issues) >= MAX_ISSUES:
             break
     return {
         "objectPathCount": len(entries),
-        "uniqueBlobCount": len(scanned_objects),
+        "uniqueBlobCount": len(blob_sizes),
         "issues": issues[:MAX_ISSUES],
     }
 

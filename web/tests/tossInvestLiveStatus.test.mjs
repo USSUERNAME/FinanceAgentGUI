@@ -1507,7 +1507,7 @@ test("transaction status view reads the live Toss API endpoint and does not expo
   assert.match(transactionSettingsSource, /MAIN_TABLE_COLUMN_IDS/);
   assert.match(transactionSettingsSource, /normalizeTransactionMainTableColumns/);
   assert.doesNotMatch(transactionSettingsSource, /"ticker",/);
-  assert.match(transactionSettingsSource, /sidebarValueMode, investmentChartMode, investmentChartIntervalMode, investmentChartVolumeVisible, mainTableColumns, sidebarManualOrder, or watchlistGroups is required/);
+  assert.match(transactionSettingsSource, /sidebarValueMode, investmentChartMode, investmentChartIntervalMode, investmentChartVolumeVisible, mainTableColumns, sidebarManualOrder, watchlistGroups, or portfolioHoldings is required/);
   assert.match(transactionDefaultsSource, /"mainTableColumns": \[\s*\]/);
   assert.match(transactionDefaultsSource, /"sidebarValueMode": "value"/);
   assert.match(transactionDefaultsSource, /"investmentChartMode": "area"/);

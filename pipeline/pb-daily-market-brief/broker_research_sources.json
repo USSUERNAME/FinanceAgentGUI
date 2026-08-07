@@ -1,0 +1,56 @@
+{
+  "schema_version": "broker_research_sources.v1",
+  "default_publication_policy": "summary_and_link_only",
+  "sources": [
+    {
+      "id": "authorized_report_drop",
+      "name": "Operator-authorized local or synced folder",
+      "acquisition_mode": "operator_authorized_local",
+      "automated_collection_allowed": true,
+      "analysis_allowed": true,
+      "redistribution_allowed": false,
+      "publication_policy": "summary_and_link_only",
+      "notes": "Only files with an explicit rights sidecar are accepted."
+    },
+    {
+      "id": "google_drive_research_inbox",
+      "name": "Private Google Drive research inbox",
+      "acquisition_mode": "operator_authorized_drive",
+      "automated_collection_allowed": true,
+      "analysis_allowed": true,
+      "redistribution_allowed": false,
+      "publication_policy": "summary_and_link_only",
+      "notes": "OAuth folder access is optional and limited to the configured folder."
+    },
+    {
+      "id": "jpmorgan_weekly_market_recap",
+      "name": "J.P. Morgan Asset Management Weekly Market Recap",
+      "acquisition_mode": "official_public_document",
+      "automated_collection_allowed": true,
+      "analysis_allowed": true,
+      "redistribution_allowed": false,
+      "publication_policy": "summary_and_link_only",
+      "notes": "Reviewed official public PDF URL. Store structured analysis and source link only; never republish the document body."
+    },
+    {
+      "id": "naver_finance_research",
+      "name": "Naver Finance research pages",
+      "acquisition_mode": "prohibited_automated_scrape",
+      "automated_collection_allowed": false,
+      "analysis_allowed": false,
+      "redistribution_allowed": false,
+      "publication_policy": "link_only",
+      "notes": "Manual discovery only unless Naver grants separate permission."
+    },
+    {
+      "id": "broker_official_website",
+      "name": "Broker official research website",
+      "acquisition_mode": "manual_discovery_only",
+      "automated_collection_allowed": false,
+      "analysis_allowed": false,
+      "redistribution_allowed": false,
+      "publication_policy": "link_only",
+      "notes": "Enable a specific feed only after its automation and redistribution terms are reviewed."
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "followup_id": "followup:company-review-alert:example",
+  "alert_key": "0000000000000000000000000000000000000000000000000000000000000000",
+  "review_id": "company-review:EXAMPLE:2026-10-30",
+  "ticker": "EXAMPLE",
+  "status": "open",
+  "assigned_by": "pm_owner",
+  "owner": "research_analyst",
+  "assigned_at": "2026-10-31T09:00:00+09:00",
+  "due_at": "2026-11-01T09:00:00+09:00",
+  "completion_criteria": "Review the named primary evidence and log the formal thesis-update decision.",
+  "acknowledgement_review_hash": "Copy from the acknowledgement record.",
+  "followup_scope": "operational_review_only",
+  "automatic_position_action_allowed": false
+}

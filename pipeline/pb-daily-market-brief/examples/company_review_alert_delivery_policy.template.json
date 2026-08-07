@@ -1,0 +1,22 @@
+{
+  "policy_id": "company-review-critical-telegram",
+  "version": 1,
+  "effective_from": "2026-07-21",
+  "approval": {
+    "status": "draft_pending_user_or_pm_approval",
+    "approved_by": null,
+    "approved_at": null,
+    "approval_note": null
+  },
+  "channel": "telegram",
+  "minimum_alert_level": "critical_review_required",
+  "allowed_escalation_reasons": [
+    "post_event_update_sla_missed_or_late",
+    "approved_kill_criterion_matched"
+  ],
+  "repeat_exact_alert": false,
+  "recipient_scope": "configured_private_chat",
+  "environment_enable_variable": "COMPANY_REVIEW_ALERTS_ENABLED",
+  "message_scope": "operational_review_only",
+  "automatic_position_action_allowed": false
+}

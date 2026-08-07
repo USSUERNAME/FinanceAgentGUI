@@ -50,6 +50,36 @@ The plan displays the executable preview, local/external effect, and target.
 Only the plan token can start the allowlisted action. One job may run at a
 time, logs are bounded and redacted, and there is no process-kill action.
 
+## GitHub Actions runner and local artifact sync
+
+Report generation can use the Secrets already stored in a private
+`pb-daily-market-brief` repository instead of copying them into a local `.env`.
+The local server dispatches the allowlisted `daily-brief.yml` workflow through
+an authenticated GitHub CLI, waits for the uniquely correlated run, downloads
+`daily-market-evidence-<run-id>`, and copies only known report workspace
+directories into `PB_DAILY_INTELLIGENCE_DIR`.
+
+Configure the durable service with:
+
+```powershell
+$env:PB_DAILY_INTELLIGENCE_REMOTE_ENABLED = "true"
+$env:PB_DAILY_INTELLIGENCE_REMOTE_REPO = "owner/pb-daily-market-brief"
+$env:PB_DAILY_INTELLIGENCE_REMOTE_WORKFLOW = "daily-brief.yml"
+$env:PB_DAILY_INTELLIGENCE_REMOTE_REF = "main"
+$env:PB_DAILY_INTELLIGENCE_GH = "C:\Program Files\GitHub CLI\gh.exe"
+```
+
+The workflow must accept a `client_request_id` input and include it in
+`run-name`; this prevents the GUI from attaching to another manual run. Local
+collection-only actions remain local. Report generation, official-evidence
+verification, Telegram/Gmail analysis, and publication use GitHub Actions when
+remote mode is enabled. Publication still requires an explicit GUI confirmation.
+
+For a non-service local setup, the same values may be stored in ignored
+`config/pb-daily-intelligence.remote.user.json` using `enabled`, `repository`,
+`workflow`, `ref`, `workspace`, and `ghPath` fields. Secret values never enter
+this file or the FinanceAgentGUI process.
+
 ## Expected artifacts
 
 ```text

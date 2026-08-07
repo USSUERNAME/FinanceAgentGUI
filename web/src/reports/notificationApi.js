@@ -25,3 +25,15 @@ export function markReportsNotificationsOpened(fetchImpl) {
     fetchImpl
   );
 }
+
+export function markDailyIntelligenceNotificationsOpened(fetchImpl) {
+  return requestNotification(
+    "/api/notifications/read-state",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "mark-daily-intelligence-opened" }),
+    },
+    fetchImpl
+  );
+}

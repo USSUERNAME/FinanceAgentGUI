@@ -1,0 +1,29 @@
+[
+  {
+    "id": "sample-fred-dgs10-20260720",
+    "source_id": "fred",
+    "source_type": "macro_series",
+    "published_at": "2026-07-21T00:00:00+00:00",
+    "title": "Sample U.S. 10-year Treasury yield observation",
+    "url": "https://fred.stlouisfed.org/series/DGS10",
+    "canonical_url": "https://fred.stlouisfed.org/series/DGS10",
+    "publisher": "FRED",
+    "source_url_kind": "primary_source",
+    "link_required": true,
+    "source_reference": "DGS10",
+    "tickers": [],
+    "tags": ["rates", "macro"],
+    "raw_text": "Sample observation only. Replace with collector output.",
+    "rights_label": "Official data source; retain original URL.",
+    "observation_date": "2026-07-20",
+    "release_date": null,
+    "collected_at": "2026-07-21T00:05:00+00:00",
+    "market_cutoff": "2026-07-20",
+    "source_grade": "A",
+    "primary_source_confirmed": true,
+    "evidence_scope": "observation",
+    "evidence_label": "primary_source",
+    "freshness_state": "current",
+    "derivation_note": null
+  }
+]

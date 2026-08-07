@@ -1,0 +1,42 @@
+{
+  "schema_version": "us_index_membership_input.v1",
+  "report_date": "2026-07-23",
+  "sources": [
+    {
+      "source_id": "replace-with-authorized-sp500-source",
+      "universe_id": "sp500",
+      "membership_scope": "fund_holdings_proxy",
+      "provider": "State Street SPDR",
+      "source_url": "https://www.ssga.com/us/en/individual/etfs/state-street-spdr-sp-500-etf-trust-spy",
+      "source_grade": "A",
+      "primary_source_confirmed": true,
+      "as_of": "2026-07-22",
+      "expected_refresh_days": 7,
+      "rights_label": "user_supplied_authorized"
+    },
+    {
+      "source_id": "replace-with-authorized-nasdaq100-source",
+      "universe_id": "nasdaq100",
+      "membership_scope": "fund_holdings_proxy",
+      "provider": "Invesco QQQ",
+      "source_url": "https://www.invesco.com/us/en/financial-products/etfs/invesco-qqq.html",
+      "source_grade": "A",
+      "primary_source_confirmed": true,
+      "as_of": "2026-07-22",
+      "expected_refresh_days": 7,
+      "rights_label": "user_supplied_authorized"
+    }
+  ],
+  "members": [
+    {
+      "ticker": "AAPL",
+      "company_name": "Apple Inc.",
+      "exchange": "NASDAQ",
+      "cik": "0000320193",
+      "source_ids": [
+        "replace-with-authorized-sp500-source",
+        "replace-with-authorized-nasdaq100-source"
+      ]
+    }
+  ]
+}

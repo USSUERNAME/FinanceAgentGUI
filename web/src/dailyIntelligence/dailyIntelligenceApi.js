@@ -18,6 +18,340 @@ export async function fetchDailyIntelligence(
   return payload;
 }
 
+export async function syncDailyIntelligenceTheses(fetchImpl = globalThis.fetch) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("투자 가설 동기화 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "syncInvestmentTheses" }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function trackDailyIntelligenceStockThesis(
+  {
+    ticker,
+    sectorId = "",
+    brokerResearchDate = "",
+  },
+  fetchImpl = globalThis.fetch,
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("종목 투자 가설 저장 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "trackStockThesis",
+      ticker,
+      sectorId,
+      brokerResearchDate,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function quickAddDailyIntelligenceWatchlistTicker(
+  ticker,
+  fetchImpl = globalThis.fetch,
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("관심종목 등록 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "quickAddWatchlistTicker",
+      ticker,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function quickAddDailyIntelligencePortfolioHolding(
+  ticker,
+  weight,
+  fetchImpl = globalThis.fetch,
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("보유종목 등록 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "quickAddPortfolioHolding",
+      ticker,
+      weight,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function removeDailyIntelligencePortfolioHolding(
+  ticker,
+  fetchImpl = globalThis.fetch,
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("보유종목 삭제 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "removePortfolioHolding",
+      ticker,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function reviewDailyIntelligencePortfolioRisk(
+  {
+    riskId,
+    status,
+    note = "",
+    reviewDate = "",
+    reviewReportDate = "",
+    deferReason = "",
+    thesisImpact = "",
+  },
+  fetchImpl = globalThis.fetch,
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("포트폴리오 위험 검토 저장 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "reviewPortfolioRisk",
+      riskId,
+      status,
+      note,
+      reviewDate,
+      reviewReportDate,
+      deferReason,
+      thesisImpact,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function reviewDailyIntelligenceRiskThesisProposal(
+  {
+    riskId,
+    reviewReportDate,
+    decision,
+  },
+  fetchImpl = globalThis.fetch,
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("투자 가설 반영 승인 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "reviewRiskThesisProposal",
+      riskId,
+      reviewReportDate,
+      decision,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function recordDailyIntelligenceRiskPortfolioResponse(
+  {
+    riskId,
+    reviewReportDate,
+    portfolioResponseAction,
+    note,
+    reviewDate = "",
+    acknowledgedRuleIds = [],
+  },
+  fetchImpl = globalThis.fetch,
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("포트폴리오 대응 기록 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "recordRiskPortfolioResponse",
+      riskId,
+      reviewReportDate,
+      portfolioResponseAction,
+      note,
+      reviewDate,
+      acknowledgedRuleIds,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function reviewDailyIntelligencePortfolioResponseRuleSuggestion(
+  {
+    suggestionId,
+    decision,
+  },
+  fetchImpl = globalThis.fetch,
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("포트폴리오 검토 규칙 승인 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "reviewPortfolioResponseRuleSuggestion",
+      suggestionId,
+      decision,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function reviewDailyIntelligencePortfolioResponseActiveRule(
+  {
+    suggestionId,
+    managementDecision,
+    modifiedProposal = "",
+  },
+  fetchImpl = globalThis.fetch,
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("활성 포트폴리오 검토 규칙 재검토 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "reviewPortfolioResponseActiveRule",
+      suggestionId,
+      managementDecision,
+      modifiedProposal,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function reviewDailyIntelligenceMonthlyDecisionGoalProposal(
+  {
+    goalId,
+    decision,
+  },
+  fetchImpl = globalThis.fetch,
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("월간 판단 개선 목표 승인 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "reviewMonthlyDecisionGoalProposal",
+      goalId,
+      decision,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function updateDailyIntelligencePortfolioRiskFollowUp(
+  {
+    riskId,
+    reviewReportDate,
+    followUpStatus,
+    evidenceUrl = "",
+    evidenceNote = "",
+  },
+  fetchImpl = globalThis.fetch,
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("포트폴리오 위험 후속 작업 저장 요청에 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/pb-daily-intelligence", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "updatePortfolioRiskFollowUp",
+      riskId,
+      reviewReportDate,
+      followUpStatus,
+      evidenceUrl,
+      evidenceNote,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
 async function requestDailyIntelligenceJob(payload = null, fetchImpl = globalThis.fetch) {
   if (typeof fetchImpl !== "function") {
     throw new Error("Daily Intelligence 작업 요청에 fetch가 필요합니다.");

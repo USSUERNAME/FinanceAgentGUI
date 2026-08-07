@@ -27,6 +27,11 @@ const PB_SERVICE_ENVIRONMENT = Object.freeze([
   ["PB_DAILY_INTELLIGENCE_DIR", "PbDailyIntelligenceDir"],
   ["PB_DAILY_INTELLIGENCE_ENGINE_DIR", "PbDailyIntelligenceEngineDir"],
   ["PB_DAILY_INTELLIGENCE_PYTHON", "PbDailyIntelligencePython"],
+  ["PB_DAILY_INTELLIGENCE_REMOTE_ENABLED", "PbDailyIntelligenceRemoteEnabled"],
+  ["PB_DAILY_INTELLIGENCE_REMOTE_REPO", "PbDailyIntelligenceRemoteRepo"],
+  ["PB_DAILY_INTELLIGENCE_REMOTE_WORKFLOW", "PbDailyIntelligenceRemoteWorkflow"],
+  ["PB_DAILY_INTELLIGENCE_REMOTE_REF", "PbDailyIntelligenceRemoteRef"],
+  ["PB_DAILY_INTELLIGENCE_GH", "PbDailyIntelligenceGh"],
 ]);
 
 const outLog = join(logsDir, "service-5173.out.log");
@@ -56,6 +61,11 @@ Environment:
   PB_DAILY_INTELLIGENCE_DIR=<external workspace path>
   PB_DAILY_INTELLIGENCE_ENGINE_DIR=<external engine path>
   PB_DAILY_INTELLIGENCE_PYTHON=<python executable>
+  PB_DAILY_INTELLIGENCE_REMOTE_ENABLED=true
+  PB_DAILY_INTELLIGENCE_REMOTE_REPO=<owner/repository>
+  PB_DAILY_INTELLIGENCE_REMOTE_WORKFLOW=daily-brief.yml
+  PB_DAILY_INTELLIGENCE_REMOTE_REF=main
+  PB_DAILY_INTELLIGENCE_GH=<GitHub CLI executable>
   NODE_BIN=${nodeBin}`);
 }
 

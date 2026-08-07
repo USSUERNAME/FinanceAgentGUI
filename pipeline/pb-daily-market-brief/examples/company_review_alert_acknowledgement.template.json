@@ -1,0 +1,13 @@
+{
+  "acknowledgement_id": "ack:company-review-alert:example",
+  "alert_key": "0000000000000000000000000000000000000000000000000000000000000000",
+  "review_id": "company-review:EXAMPLE:2026-10-30",
+  "ticker": "EXAMPLE",
+  "status": "acknowledged_by_user_or_pm",
+  "acknowledged_by": "user_or_pm_name",
+  "acknowledged_at": "2026-10-31T09:00:00+09:00",
+  "note": "Reviewed the operational exception; follow-up is assigned.",
+  "reviewed_alert_hash": "Copy this from acknowledge_company_review_alert.py --list-eligible output.",
+  "acknowledgement_scope": "operational_review_only",
+  "automatic_position_action_allowed": false
+}

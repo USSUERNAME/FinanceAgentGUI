@@ -3,14 +3,78 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  addTickerToTransactionWatchlistSettings,
   normalizeTransactionSettings,
   preserveTransactionWatchlistInstrumentsForLegacyPatch,
+  removePortfolioHoldingSettings,
+  upsertPortfolioHoldingSettings,
 } from "../server/transactionSettings.mjs";
 
 test("transaction status menu visibility defaults to shown and normalizes saved values", () => {
   assert.equal(normalizeTransactionSettings({}).menuHidden, false);
   assert.equal(normalizeTransactionSettings({ menuHidden: true }).menuHidden, true);
   assert.equal(normalizeTransactionSettings({ menuHidden: "off" }).menuHidden, false);
+});
+
+test("Daily Intelligence quick-add reuses one watchlist group and dedupes tickers", () => {
+  const first = addTickerToTransactionWatchlistSettings(
+    normalizeTransactionSettings({}),
+    { ticker: "nvda" },
+  );
+  assert.equal(first.added, true);
+  assert.equal(first.ticker, "NVDA");
+  assert.deepEqual(first.settings.watchlistGroups[0].symbols, ["NVDA"]);
+  assert.equal(first.settings.watchlistGroups[0].id, "daily-intelligence");
+
+  const second = addTickerToTransactionWatchlistSettings(
+    first.settings,
+    { ticker: "MSFT" },
+  );
+  assert.equal(second.added, true);
+  assert.deepEqual(second.settings.watchlistGroups[0].symbols, ["NVDA", "MSFT"]);
+
+  const repeated = addTickerToTransactionWatchlistSettings(
+    second.settings,
+    { ticker: "NVDA" },
+  );
+  assert.equal(repeated.added, false);
+  assert.equal(repeated.groupId, "daily-intelligence");
+  assert.equal(repeated.settings.watchlistGroups.length, 1);
+});
+
+test("Daily Intelligence quick portfolio holdings keep role and update weight", () => {
+  const first = upsertPortfolioHoldingSettings(
+    normalizeTransactionSettings({}),
+    { ticker: "nvda", weight: 5 },
+  );
+  assert.equal(first.added, true);
+  assert.equal(first.updated, false);
+  assert.deepEqual(first.settings.portfolioHoldings.map((item) => ({
+    ticker: item.ticker,
+    weight: item.weight,
+  })), [{ ticker: "NVDA", weight: 5 }]);
+
+  const updated = upsertPortfolioHoldingSettings(
+    first.settings,
+    { ticker: "NVDA", weight: 7.25 },
+  );
+  assert.equal(updated.added, false);
+  assert.equal(updated.updated, true);
+  assert.equal(updated.settings.portfolioHoldings.length, 1);
+  assert.equal(updated.settings.portfolioHoldings[0].weight, 7.25);
+
+  assert.throws(
+    () => upsertPortfolioHoldingSettings(updated.settings, { ticker: "MSFT", weight: 0 }),
+    /0보다 크고 100 이하/,
+  );
+  assert.throws(
+    () => upsertPortfolioHoldingSettings(updated.settings, { ticker: "MSFT", weight: 95 }),
+    /100%를 초과/,
+  );
+
+  const removed = removePortfolioHoldingSettings(updated.settings, { ticker: "NVDA" });
+  assert.equal(removed.removed, true);
+  assert.deepEqual(removed.settings.portfolioHoldings, []);
 });
 
 test("transaction status navigation is labeled and placed directly after stock channel", () => {
