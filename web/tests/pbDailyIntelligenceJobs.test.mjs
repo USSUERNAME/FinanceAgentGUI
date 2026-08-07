@@ -325,3 +325,84 @@ test("PB job service never syncs investment theses after a failed report job", a
   assert.equal(status.run.status, "failed");
   assert.equal(status.run.thesisSync.status, "idle");
 });
+
+test("PB job service dispatches configured report jobs through GitHub Actions", async () => {
+  await createEngine();
+  const remoteRunnerPath = join(tempRoot, "pb-remote-runner.mjs");
+  const workspace = join(tempRoot, "workspace");
+  await writeFile(remoteRunnerPath, "console.log('remote runner')\n", "utf8");
+  const calls = [];
+  let sequence = 0;
+  const service = createPbDailyIntelligenceJobService({
+    env: {
+      PB_DAILY_INTELLIGENCE_DIR: workspace,
+    },
+    remoteUserConfig: {
+      enabled: true,
+      repository: "USSUERNAME/pb-daily-market-brief",
+      workflow: "daily-brief.yml",
+      ref: "codex/remote-artifact-sync",
+      workspace,
+      ghPath: "gh-test",
+    },
+    remoteRunnerPath,
+    uuid: () => `remote-request-${++sequence}-12345678`,
+    spawnImpl(command, args, options) {
+      calls.push({ command, args, options });
+      return fakeChild({ output: "GitHub Actions run 123: completed\nSynced report artifact\n" });
+    },
+    async syncThesesImpl() {
+      return { status: "skipped", message: "test sync skipped" };
+    },
+  });
+
+  const status = service.status();
+  assert.equal(status.connection.available, true);
+  assert.equal(status.connection.executionMode, "github_actions");
+  const plan = service.plan("dry_run");
+  assert.equal(plan.job.executionMode, "github_actions");
+  assert.equal(
+    plan.commandPreview,
+    "gh workflow run daily-brief.yml -R USSUERNAME/pb-daily-market-brief -f run_mode=dry_run"
+  );
+  service.execute(plan.token);
+  assert.equal(calls[0].command, process.execPath);
+  assert.equal(calls[0].args[0], remoteRunnerPath);
+  assert.deepEqual(calls[0].args.slice(1, 5), [
+    "--repo",
+    "USSUERNAME/pb-daily-market-brief",
+    "--workflow",
+    "daily-brief.yml",
+  ]);
+  assert.ok(calls[0].args.includes("client_request_id") === false);
+  assert.ok(calls[0].args.some((item) => String(item).startsWith("finance-agent-remote-request-")));
+  assert.equal(calls[0].options.shell, false);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(service.status().run.status, "succeeded");
+});
+
+test("PB job service keeps collection-only jobs local when remote reports are enabled", async () => {
+  await createEngine();
+  const remoteRunnerPath = join(tempRoot, "pb-remote-runner.mjs");
+  const workspace = join(tempRoot, "workspace");
+  await writeFile(remoteRunnerPath, "console.log('remote runner')\n", "utf8");
+  const service = createPbDailyIntelligenceJobService({
+    env: {
+      PB_DAILY_INTELLIGENCE_ENGINE_DIR: tempRoot,
+      PB_DAILY_INTELLIGENCE_DIR: workspace,
+      PB_DAILY_INTELLIGENCE_PYTHON: "python-test",
+    },
+    remoteUserConfig: {
+      enabled: true,
+      repository: "USSUERNAME/pb-daily-market-brief",
+      workspace,
+      ghPath: "gh-test",
+    },
+    remoteRunnerPath,
+  });
+
+  const plan = service.plan("collect");
+  assert.equal(plan.job.executionMode, "local");
+  assert.equal(plan.commandPreview, "python-test collect_all.py");
+});

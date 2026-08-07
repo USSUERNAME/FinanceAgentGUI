@@ -1,8 +1,14 @@
 name: Daily market brief
+run-name: Daily market brief · ${{ github.event_name == 'workflow_dispatch' && inputs.run_mode || 'publish' }} · ${{ github.event_name == 'workflow_dispatch' && inputs.client_request_id || github.run_id }}
 
 on:
   workflow_dispatch:
     inputs:
+      client_request_id:
+        description: "Optional caller correlation ID used by FinanceAgentGUI"
+        required: false
+        default: ""
+        type: string
       run_mode:
         description: "publish publishes; dry_run is offline evidence validation; verification_dry_run verifies official evidence without publishing; publish_cached reuses a prior artifact"
         required: true

@@ -5,7 +5,12 @@ param(
   [string]$CodexCliPath = "",
   [string]$PbDailyIntelligenceDir = "",
   [string]$PbDailyIntelligenceEngineDir = "",
-  [string]$PbDailyIntelligencePython = ""
+  [string]$PbDailyIntelligencePython = "",
+  [string]$PbDailyIntelligenceRemoteEnabled = "",
+  [string]$PbDailyIntelligenceRemoteRepo = "",
+  [string]$PbDailyIntelligenceRemoteWorkflow = "",
+  [string]$PbDailyIntelligenceRemoteRef = "",
+  [string]$PbDailyIntelligenceGh = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +58,21 @@ if ($PbDailyIntelligenceEngineDir) {
 }
 if ($PbDailyIntelligencePython) {
   $env:PB_DAILY_INTELLIGENCE_PYTHON = $PbDailyIntelligencePython
+}
+if ($PbDailyIntelligenceRemoteEnabled) {
+  $env:PB_DAILY_INTELLIGENCE_REMOTE_ENABLED = $PbDailyIntelligenceRemoteEnabled
+}
+if ($PbDailyIntelligenceRemoteRepo) {
+  $env:PB_DAILY_INTELLIGENCE_REMOTE_REPO = $PbDailyIntelligenceRemoteRepo
+}
+if ($PbDailyIntelligenceRemoteWorkflow) {
+  $env:PB_DAILY_INTELLIGENCE_REMOTE_WORKFLOW = $PbDailyIntelligenceRemoteWorkflow
+}
+if ($PbDailyIntelligenceRemoteRef) {
+  $env:PB_DAILY_INTELLIGENCE_REMOTE_REF = $PbDailyIntelligenceRemoteRef
+}
+if ($PbDailyIntelligenceGh) {
+  $env:PB_DAILY_INTELLIGENCE_GH = $PbDailyIntelligenceGh
 }
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null

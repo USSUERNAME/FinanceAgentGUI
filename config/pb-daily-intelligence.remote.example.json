@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "repository": "owner/pb-daily-market-brief",
+  "workflow": "daily-brief.yml",
+  "ref": "main",
+  "workspace": "C:\\path\\to\\pb-daily-market-brief\\workspace",
+  "ghPath": "C:\\Program Files\\GitHub CLI\\gh.exe"
+}
