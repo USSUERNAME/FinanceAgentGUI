@@ -648,6 +648,9 @@ async function loadGmailResearchOverview({ root, reportDate, engineRoot, env }) 
     collection: {
       reportDate: sourceStatusArtifact?.date || reportDate,
       status: cleanText(gmailSource?.status, 80) || "not_run",
+      ...(cleanText(gmailSource?.notice_category, 120)
+        ? { noticeCategory: cleanText(gmailSource.notice_category, 120) }
+        : {}),
       itemCount: Number(gmailSource?.item_count || 0),
       lastCollectedAt:
         cleanText(gmailSource?.checked_at, 80)

@@ -123,6 +123,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-broker-research-v1-
 
+      - name: Restore Drive ingestion fingerprint state
+        if: env.BRIEF_RUN_MODE != 'publish_cached'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/broker_research_cache/drive_ingestion_state.json
+          key: ${{ runner.os }}-drive-ingestion-v1-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-drive-ingestion-v1-
+
       - name: Validate cached publication input
         if: env.BRIEF_RUN_MODE == 'publish_cached'
         env:
@@ -178,6 +188,14 @@ jobs:
         with:
           path: workspace/broker_research_cache/structured_analysis
           key: ${{ runner.os }}-broker-research-v1-${{ github.run_id }}
+
+      - name: Save Drive ingestion fingerprint state
+        if: env.BRIEF_RUN_MODE != 'publish_cached' && steps.brief.outcome == 'success'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/broker_research_cache/drive_ingestion_state.json
+          key: ${{ runner.os }}-drive-ingestion-v1-${{ github.run_id }}
 
       - name: Preserve structured evidence and analysis
         if: always()

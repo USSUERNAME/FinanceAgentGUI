@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -43,6 +45,13 @@ APPROVAL_REGISTRY_PATH = (
     / "workspace"
     / "broker_research_approvals"
     / "google_drive.json"
+)
+INGESTION_STATE_SCHEMA = "google_drive_research_ingestion_state.v1"
+INGESTION_STATE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "workspace"
+    / "broker_research_cache"
+    / "drive_ingestion_state.json"
 )
 
 
@@ -265,6 +274,72 @@ def load_local_approvals(path: Path | None = None) -> dict[str, dict[str, Any]]:
     return indexed
 
 
+def load_ingestion_state(path: Path | None = None) -> dict[str, dict[str, Any]]:
+    state_path = path or INGESTION_STATE_PATH
+    if not state_path.exists():
+        return {}
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    if payload.get("schema_version") != INGESTION_STATE_SCHEMA:
+        return {}
+    entries = payload.get("entries")
+    if not isinstance(entries, dict):
+        return {}
+    return {
+        str(file_id): entry
+        for file_id, entry in entries.items()
+        if str(file_id).strip() and isinstance(entry, dict)
+    }
+
+
+def save_ingestion_state(
+    entries: dict[str, dict[str, Any]],
+    path: Path | None = None,
+) -> None:
+    state_path = path or INGESTION_STATE_PATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    bounded_entries = dict(list(entries.items())[-1000:])
+    temporary_path = state_path.with_suffix(f"{state_path.suffix}.tmp-{os.getpid()}")
+    temporary_path.write_text(
+        json.dumps({
+            "schema_version": INGESTION_STATE_SCHEMA,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "entries": bounded_entries,
+        }, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporary_path.replace(state_path)
+
+
+def ingestion_signature(
+    document: dict[str, Any],
+    sidecar: dict[str, Any] | None,
+    local_decision: dict[str, Any] | None,
+) -> str:
+    """Fingerprint Drive metadata without storing document contents."""
+    payload = {
+        "file_id": str(document.get("id") or ""),
+        "file_name": str(document.get("name") or ""),
+        "modified_time": str(document.get("modifiedTime") or ""),
+        "md5_checksum": str(document.get("md5Checksum") or ""),
+        "size": str(document.get("size") or ""),
+        "drive_path": document.get("drive_path") or [],
+        "sidecar_id": str((sidecar or {}).get("id") or ""),
+        "sidecar_modified_time": str((sidecar or {}).get("modifiedTime") or ""),
+        "sidecar_md5_checksum": str((sidecar or {}).get("md5Checksum") or ""),
+        "approval": local_decision or {},
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def collect(_: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
     credentials, missing = _credentials()
     if missing:
@@ -290,12 +365,15 @@ def collect(_: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
         for item in files if str(item.get("name") or "")
     }
     approvals = load_local_approvals()
+    ingestion_state = load_ingestion_state()
     documents = [
         item for item in files
         if Path(str(item.get("name") or "")).suffix.lower() in SUPPORTED_DOCUMENT_SUFFIXES
     ]
     records: list[dict[str, Any]] = []
     rejected = 0
+    unchanged = 0
+    state_changed = False
     for document in documents:
         name = str(document["name"])
         sidecar_name = f"{Path(name).stem}.meta.json"
@@ -316,6 +394,10 @@ def collect(_: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
             and isinstance(local_decision.get("metadata"), dict)
         ):
             rejected += 1
+            continue
+        signature = ingestion_signature(document, sidecar, local_decision)
+        if ingestion_state.get(file_id, {}).get("signature") == signature:
+            unchanged += 1
             continue
         try:
             metadata_payload = (
@@ -338,10 +420,23 @@ def collect(_: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
                 metadata=metadata_payload,
                 document_text_cache_dir=DOCUMENT_TEXT_CACHE_DIR,
             ))
+            ingestion_state[file_id] = {
+                "signature": signature,
+                "file_name": name,
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+            }
+            state_changed = True
         except (RuntimeError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
             rejected += 1
-    notice = (
-        f"{rejected} Drive report(s) rejected by the rights or document gate"
-        if rejected else None
-    )
-    return records, notice
+    if state_changed:
+        save_ingestion_state(ingestion_state)
+    notices = []
+    if rejected:
+        notices.append(
+            f"{rejected} Drive report(s) rejected by the rights or document gate"
+        )
+    if unchanged:
+        notices.append(
+            f"{unchanged} unchanged Drive report(s) skipped by incremental cache"
+        )
+    return records, "; ".join(notices) or None

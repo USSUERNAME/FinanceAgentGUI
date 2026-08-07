@@ -86,6 +86,7 @@ test("Research Operations owns collection, approval, and verification controls",
     viewSource,
     /\/api\/pb-daily-intelligence\/telegram-attachment-approvals/,
   );
+  assert.match(viewSource, /\/api\/pb-daily-intelligence\/gmail-sender-reviews/);
   assert.match(viewSource, /승인 전에는 PDF 원문을 다운로드하지 않음/);
   assert.match(viewSource, /승인 PDF 수집·분석/);
   assert.match(viewSource, /구조화 분석 결과가 애널리스트 리포트에 반영됨/);

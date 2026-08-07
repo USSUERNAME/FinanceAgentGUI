@@ -25,7 +25,16 @@ GMAIL_ATTACHMENT_APPROVALS_SCHEMA = "gmail_research_attachment_approvals.v1"
 GMAIL_ATTACHMENT_APPROVALS_PATH = (
     ROOT / "workspace" / "gmail_research_approvals" / "attachments.json"
 )
+GMAIL_SENDER_APPROVALS_SCHEMA = "gmail_research_sender_approvals.v1"
+GMAIL_SENDER_APPROVALS_PATH = (
+    ROOT / "workspace" / "gmail_research_approvals" / "senders.json"
+)
+GMAIL_SENDER_REVIEWS_SCHEMA = "gmail_research_sender_reviews.v1"
+GMAIL_SENDER_REVIEWS_PATH = (
+    ROOT / "workspace" / "gmail_research_reviews" / "blocked_senders.json"
+)
 DEFAULT_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+DEFAULT_MAX_INLINE_BODY_BYTES = 2 * 1024 * 1024
 
 
 def _credentials() -> tuple[dict[str, str], list[str]]:
@@ -196,7 +205,55 @@ def message_text(payload: dict[str, Any], *, max_chars: int = 30_000) -> str:
             continue
         if mime_type == "text/plain":
             plain.append(decoded)
-        elif mime_type == "text/html":
+        elif mime_type in {"text/html", "text/x-amp-html"}:
+            html.append(_html_to_text(decoded))
+    selected = plain or html
+    normalized = "\n".join(
+        line.strip()
+        for line in "\n".join(selected).splitlines()
+        if line.strip()
+    )
+    return normalized[:max_chars]
+
+
+def message_snippet(message: dict[str, Any], *, max_chars: int = 1000) -> str:
+    snippet = unescape(str(message.get("snippet") or ""))
+    normalized = " ".join(snippet.split())
+    return normalized[:max_chars]
+
+
+def remote_message_text(
+    token: str,
+    message_id: str,
+    payload: dict[str, Any],
+    *,
+    max_chars: int = 30_000,
+    max_bytes: int = DEFAULT_MAX_INLINE_BODY_BYTES,
+) -> str:
+    """Read Gmail-managed inline body parts without touching file attachments."""
+    plain: list[str] = []
+    html: list[str] = []
+    for part in _walk_parts(payload):
+        mime_type = str(part.get("mimeType") or "").strip().lower()
+        if mime_type not in {"text/plain", "text/html", "text/x-amp-html"}:
+            continue
+        if str(part.get("filename") or "").strip():
+            continue
+        body = part.get("body") or {}
+        if str(body.get("data") or "").strip():
+            continue
+        attachment_id = str(body.get("attachmentId") or "").strip()
+        if not attachment_id:
+            continue
+        decoded = get_attachment(
+            token,
+            message_id,
+            attachment_id,
+            max_bytes=max_bytes,
+        ).decode("utf-8", errors="replace")
+        if mime_type == "text/plain":
+            plain.append(decoded)
+        else:
             html.append(_html_to_text(decoded))
     selected = plain or html
     normalized = "\n".join(
@@ -254,6 +311,13 @@ def _sender_source(
     return None
 
 
+def _sender_identity(sender: str) -> tuple[str, str, str]:
+    display_name, address = parseaddr(sender)
+    normalized_address = address.strip().lower()
+    domain = normalized_address.rsplit("@", 1)[-1] if "@" in normalized_address else ""
+    return display_name.strip(), normalized_address, domain
+
+
 def _authentication_passes(
     headers: dict[str, str],
     source: dict[str, Any],
@@ -288,6 +352,130 @@ def _authentication_passes(
         )
         for domain in domains
     )
+
+
+def _sender_approvals(
+    path: Path = GMAIL_SENDER_APPROVALS_PATH,
+) -> tuple[dict[str, str], str | None]:
+    if not path.exists():
+        return {}, None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            payload.get("schema_version") != GMAIL_SENDER_APPROVALS_SCHEMA
+            or not isinstance(payload.get("decisions"), list)
+        ):
+            raise ValueError("unexpected sender approval registry schema")
+        decisions: dict[str, str] = {}
+        for row in payload["decisions"]:
+            if not isinstance(row, dict):
+                continue
+            sender_email = str(row.get("sender_email") or "").strip().lower()
+            decision = str(row.get("decision") or "").strip()
+            if sender_email and decision in {"approved", "excluded"}:
+                decisions[sender_email] = decision
+        return decisions, None
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return {}, "Gmail sender approval registry is invalid; reviewed senders were blocked"
+
+
+def _review_key(sender_email: str) -> str:
+    return hashlib.sha256(sender_email.encode("utf-8")).hexdigest()
+
+
+def _persist_sender_reviews(
+    candidates: list[dict[str, Any]],
+    resolved_sender_emails: set[str] | None = None,
+    path: Path = GMAIL_SENDER_REVIEWS_PATH,
+) -> None:
+    existing: dict[str, dict[str, Any]] = {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if (
+            payload.get("schema_version") == GMAIL_SENDER_REVIEWS_SCHEMA
+            and isinstance(payload.get("items"), list)
+        ):
+            existing = {
+                str(row.get("sender_key") or ""): row
+                for row in payload["items"]
+                if isinstance(row, dict) and str(row.get("sender_key") or "")
+            }
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        existing = {}
+    resolved = {
+        str(value).strip().lower()
+        for value in resolved_sender_emails or set()
+        if str(value).strip()
+    }
+    before_count = len(existing)
+    existing = {
+        key: row
+        for key, row in existing.items()
+        if str(row.get("sender_email") or "").strip().lower() not in resolved
+    }
+    if not candidates and len(existing) == before_count:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    for candidate in candidates:
+        sender_key = str(candidate["sender_key"])
+        previous = existing.pop(sender_key, {})
+        existing[sender_key] = {
+            **candidate,
+            "message_count": int(previous.get("message_count") or 0) + 1,
+            "first_seen_at": str(previous.get("first_seen_at") or now),
+            "last_seen_at": now,
+        }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(f"{path.suffix}.tmp-{os.getpid()}")
+    temporary_path.write_text(
+        json.dumps({
+            "schema_version": GMAIL_SENDER_REVIEWS_SCHEMA,
+            "updated_at": now,
+            "items": list(existing.values())[-500:],
+        }, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporary_path.replace(path)
+
+
+def _review_candidate(
+    *,
+    sender_header: str,
+    headers: dict[str, str],
+    message: dict[str, Any],
+    reason: str,
+) -> dict[str, Any] | None:
+    sender_name, sender_email, sender_domain = _sender_identity(sender_header)
+    if not sender_email:
+        return None
+    return {
+        "sender_key": _review_key(sender_email),
+        "sender_name": sender_name[:200],
+        "sender_email": sender_email[:320],
+        "sender_domain": sender_domain[:255],
+        "latest_subject": str(headers.get("subject") or "")[:500],
+        "latest_published_at": _published_at(message, headers),
+        "reason": reason,
+        "reviewable": reason == "sender_not_allowlisted",
+    }
+
+
+def _reviewed_sender_source(
+    sender_header: str,
+    decisions: dict[str, str],
+) -> dict[str, Any] | None:
+    sender_name, sender_email, sender_domain = _sender_identity(sender_header)
+    if decisions.get(sender_email) != "approved" or not sender_domain:
+        return None
+    return {
+        "id": "gmail_reviewed_sender",
+        "publisher": sender_name or sender_domain,
+        "sender_domains": [sender_domain],
+        "market_scope": "GLOBAL",
+        "original_language": "en",
+        "research_path": ["GLOBAL", "Reviewed Gmail sender"],
+        "tags": ["operator_reviewed_sender"],
+    }
 
 
 def _attachment_key(
@@ -394,10 +582,15 @@ def collect(config: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
     )
     records: list[dict[str, Any]] = []
     rejected = 0
+    sender_review_candidates: list[dict[str, Any]] = []
+    accepted_sender_emails: set[str] = set()
     attachment_reviews = 0
     attachment_failures = 0
     approval_decisions, approval_notice = _attachment_approvals(
         GMAIL_ATTACHMENT_APPROVALS_PATH
+    )
+    sender_decisions, sender_approval_notice = _sender_approvals(
+        GMAIL_SENDER_APPROVALS_PATH
     )
     max_attachment_bytes = max(
         1,
@@ -413,14 +606,57 @@ def collect(config: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
             if not isinstance(payload, dict):
                 raise ValueError("Gmail message payload is invalid")
             headers = _headers(payload)
-            source = _sender_source(headers.get("from", ""), sources)
-            if source is None or not _authentication_passes(headers, source):
+            sender_header = headers.get("from", "")
+            sender_name, sender_email, _ = _sender_identity(sender_header)
+            source = _sender_source(sender_header, sources)
+            if source is None:
+                source = _reviewed_sender_source(sender_header, sender_decisions)
+            if source is None:
                 rejected += 1
+                candidate = _review_candidate(
+                    sender_header=sender_header,
+                    headers=headers,
+                    message=message,
+                    reason=(
+                        "sender_excluded"
+                        if sender_decisions.get(sender_email) == "excluded"
+                        else "sender_not_allowlisted"
+                    ),
+                )
+                if candidate:
+                    sender_review_candidates.append(candidate)
                 continue
+            if not _authentication_passes(headers, source):
+                rejected += 1
+                candidate = _review_candidate(
+                    sender_header=sender_header,
+                    headers=headers,
+                    message=message,
+                    reason="authentication_failed",
+                )
+                if candidate:
+                    sender_review_candidates.append(candidate)
+                continue
+            body_mode = "full_body"
             text = message_text(payload)
             if not text:
+                text = remote_message_text(token, message_id, payload)
+                body_mode = "inline_body_attachment"
+            if not text:
+                text = message_snippet(message)
+                body_mode = "snippet_fallback"
+            if not text:
                 rejected += 1
+                candidate = _review_candidate(
+                    sender_header=sender_header,
+                    headers=headers,
+                    message=message,
+                    reason="empty_body",
+                )
+                if candidate:
+                    sender_review_candidates.append(candidate)
                 continue
+            accepted_sender_emails.add(sender_email)
             attachments = _attachments(payload, message_id)
             attachment_count = len(attachments)
             pdf_attachment_count = sum(
@@ -491,6 +727,7 @@ def collect(config: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
             )
             record["gmail_message"] = {
                 "label_name": label_name,
+                "body_mode": body_mode,
                 "attachment_count": attachment_count,
                 "pdf_attachment_count": pdf_attachment_count,
                 "attachment_review_required": pdf_attachment_count > 0,
@@ -554,9 +791,16 @@ def collect(config: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
                     attachment_failures += 1
         except (OSError, RuntimeError, TypeError, ValueError):
             rejected += 1
+    _persist_sender_reviews(
+        sender_review_candidates,
+        accepted_sender_emails,
+        GMAIL_SENDER_REVIEWS_PATH,
+    )
     notices = []
     if approval_notice:
         notices.append(approval_notice)
+    if sender_approval_notice:
+        notices.append(sender_approval_notice)
     if rejected:
         notices.append(f"{rejected} Gmail message(s) rejected by label or sender gate")
     if attachment_reviews:

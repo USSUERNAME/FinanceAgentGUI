@@ -16,6 +16,9 @@ import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
 import { handleNotificationsEndpoint } from "./notificationsApi.mjs";
 import { handlePbDailyIntelligenceEndpoint } from "./pbDailyIntelligenceApi.mjs";
 import { handlePbDailyIntelligenceJobsEndpoint } from "./pbDailyIntelligenceJobs.mjs";
+import { handlePbBrokerResearchApprovalsEndpoint } from "./pbBrokerResearchApprovals.mjs";
+import { handlePbGmailResearchApprovalsEndpoint } from "./pbGmailResearchApprovals.mjs";
+import { handlePbGmailSenderReviewsEndpoint } from "./pbGmailSenderReviews.mjs";
 import { handlePbTelegramResearchApprovalsEndpoint } from "./pbTelegramResearchApprovals.mjs";
 import { handleResearchSectorTaxonomyEndpoint } from "./researchSectorTaxonomy.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
@@ -413,6 +416,21 @@ const server = createServer(async (req, res) => {
 
   if (req.url?.startsWith("/api/pb-daily-intelligence/jobs")) {
     await handlePbDailyIntelligenceJobsEndpoint(req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/pb-daily-intelligence/broker-approvals")) {
+    await handlePbBrokerResearchApprovalsEndpoint(req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/pb-daily-intelligence/gmail-attachment-approvals")) {
+    await handlePbGmailResearchApprovalsEndpoint(req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/pb-daily-intelligence/gmail-sender-reviews")) {
+    await handlePbGmailSenderReviewsEndpoint(req, res);
     return;
   }
 

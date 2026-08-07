@@ -3166,6 +3166,7 @@ function TelegramSourceMonitor({
   const approvedAttachmentCount = Number(attachmentQueue?.counts?.approved || 0);
   const collectionLabels = {
     ok: "수집 완료",
+    ok_with_filtered: "수집 완료 · 정책 필터 적용",
     skipped_or_notice: "설정 확인",
     not_run: "미실행",
   };
@@ -5492,6 +5493,9 @@ function BrokerResearchMonitor({
 
 function GmailResearchStatus({
   gmailResearch,
+  senderReviewQueue,
+  senderReviewBusy,
+  senderReviewError,
   attachmentApprovalQueue,
   attachmentApprovalBusy,
   attachmentApprovalError,
@@ -5504,11 +5508,12 @@ function GmailResearchStatus({
   onCancel,
   onReloadAttachmentApprovals,
   onDecideAttachment,
+  onReloadSenderReviews,
+  onDecideSender,
 }) {
   if (!gmailResearch) return null;
   const collection = gmailResearch.collection || {};
   const connected = Boolean(gmailResearch.configured);
-  const collectionOk = collection.status === "ok";
   const senderDomains = gmailResearch.allowlistedSenderDomains || [];
   const candidates = gmailResearch.candidates || [];
   const gmailRun = jobStatus?.run?.jobId === "gmail_refresh"
@@ -5522,6 +5527,22 @@ function GmailResearchStatus({
   const gmailPlanPending = pendingPlan?.job?.id === "gmail_refresh";
   const gmailAnalysisPlanPending = pendingPlan?.job?.id === "gmail_analyze";
   const attachmentItems = attachmentApprovalQueue?.items || [];
+  const senderReviewItems = senderReviewQueue?.items || [];
+  const senderReasonLabels = {
+    sender_not_allowlisted: "허용 목록 밖 발신자",
+    sender_excluded: "검토에서 제외한 발신자",
+    authentication_failed: "DKIM/DMARC 인증 실패",
+    empty_body: "분석 가능한 본문 없음",
+  };
+  const collectionStatusLabels = {
+    ok: "정상 수집",
+    ok_with_filtered: "정상 수집 · 정책 필터 적용",
+    partial: "일부 수집 · 확인 필요",
+    skipped_or_notice: "설정 확인 필요",
+    timeout: "시간 초과",
+    error: "수집 실패",
+    not_run: "미실행",
+  };
   return (
     <section
       id="gmail-research-analysis"
@@ -5573,9 +5594,10 @@ function GmailResearchStatus({
           <span>최근 수집</span>
           <strong>{collection.itemCount || 0}건</strong>
           <small>
+            {collectionStatusLabels[collection.status] || collection.status}
             {collection.lastCollectedAt
-              ? formatGeneratedAt(collection.lastCollectedAt)
-              : "아직 실행되지 않음"}
+              ? ` · ${formatGeneratedAt(collection.lastCollectedAt)}`
+              : " · 아직 실행되지 않음"}
           </small>
         </article>
         <article>
@@ -5800,6 +5822,86 @@ function GmailResearchStatus({
           <p className="daily-intelligence-panel-note">
             승인만으로는 다운로드하지 않습니다. 결정 후 <strong>Gmail 수집·분석</strong>을
             실행하면 승인된 PDF만 내려받아 구조화 분석합니다.
+          </p>
+        </div>
+      ) : null}
+      {senderReviewItems.length ? (
+        <div className="daily-intelligence-gmail-attachment-approvals daily-intelligence-gmail-sender-reviews">
+          <div className="daily-intelligence-subsection-heading">
+            <div>
+              <span>SENDER REVIEW</span>
+              <h3>차단 발신자 검토함</h3>
+            </div>
+            <div className="daily-intelligence-approval-title-actions">
+              <small>
+                대기 {senderReviewQueue?.counts?.pending || 0} ·
+                허용 {senderReviewQueue?.counts?.approved || 0} ·
+                제외 {senderReviewQueue?.counts?.excluded || 0}
+              </small>
+              <button
+                type="button"
+                className="daily-intelligence-approval-text-button"
+                onClick={onReloadSenderReviews}
+                disabled={senderReviewBusy}
+              >
+                <RefreshCw size={14} className={senderReviewBusy ? "is-spinning" : ""} />
+                새로고침
+              </button>
+            </div>
+          </div>
+          {senderReviewError ? (
+            <p className="daily-intelligence-approval-error">
+              <AlertTriangle size={15} /> {senderReviewError}
+            </p>
+          ) : null}
+          <div className="daily-intelligence-approval-list">
+            {senderReviewItems.map((item) => (
+              <article key={item.senderKey}>
+                <div>
+                  <span>
+                    {senderReasonLabels[item.reason] || item.reason || "차단 사유 확인 필요"}
+                    {item.messageCount > 1 ? ` · ${item.messageCount}건` : ""}
+                  </span>
+                  <h3>{item.senderName || item.senderEmail}</h3>
+                  <small>{item.senderEmail} · {item.latestSubject || "제목 없음"}</small>
+                </div>
+                <div className="daily-intelligence-approval-actions">
+                  <span className="daily-intelligence-approval-status">
+                    <span>
+                      {item.state === "approved"
+                        ? "수집 허용"
+                        : item.state === "excluded"
+                          ? "계속 제외"
+                          : "검토 대기"}
+                    </span>
+                    <small>
+                      {item.reviewable
+                        ? "정확한 메일주소 단위로만 허용"
+                        : "보안 또는 본문 문제로 허용 불가"}
+                    </small>
+                  </span>
+                  <button
+                    type="button"
+                    className="is-approve"
+                    onClick={() => onDecideSender(item.senderKey, "approved")}
+                    disabled={senderReviewBusy || !item.reviewable || item.state === "approved"}
+                  >
+                    <ShieldCheck size={14} /> 발신자 허용
+                  </button>
+                  <button
+                    type="button"
+                    className="is-exclude"
+                    onClick={() => onDecideSender(item.senderKey, "excluded")}
+                    disabled={senderReviewBusy || item.state === "excluded"}
+                  >
+                    <X size={14} /> 계속 제외
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+          <p className="daily-intelligence-panel-note">
+            허용해도 DKIM/DMARC 인증을 다시 통과해야 수집됩니다. 인증 실패와 빈 본문은 허용할 수 없습니다.
           </p>
         </div>
       ) : null}
@@ -6069,6 +6171,9 @@ export default function DailyIntelligenceView({
   const [gmailAttachmentApprovalQueue, setGmailAttachmentApprovalQueue] = React.useState(null);
   const [gmailAttachmentApprovalBusy, setGmailAttachmentApprovalBusy] = React.useState(false);
   const [gmailAttachmentApprovalError, setGmailAttachmentApprovalError] = React.useState("");
+  const [gmailSenderReviewQueue, setGmailSenderReviewQueue] = React.useState(null);
+  const [gmailSenderReviewBusy, setGmailSenderReviewBusy] = React.useState(false);
+  const [gmailSenderReviewError, setGmailSenderReviewError] = React.useState("");
 
   const loadBrokerApprovalQueue = React.useCallback(async () => {
     setBrokerApprovalBusy(true);
@@ -6158,6 +6263,56 @@ export default function DailyIntelligenceView({
     }
   }, []);
 
+  const loadGmailSenderReviewQueue = React.useCallback(async () => {
+    setGmailSenderReviewBusy(true);
+    setGmailSenderReviewError("");
+    try {
+      const response = await fetch(
+        "/api/pb-daily-intelligence/gmail-sender-reviews",
+        { cache: "no-store" },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setGmailSenderReviewQueue(payload);
+    } catch (reviewError) {
+      setGmailSenderReviewError(
+        reviewError.message || "Gmail 차단 발신자 검토함을 불러오지 못했습니다.",
+      );
+    } finally {
+      setGmailSenderReviewBusy(false);
+    }
+  }, []);
+
+  const decideGmailSender = React.useCallback(async (senderKey, decision) => {
+    const actionLabel = decision === "approved" ? "이 발신자를 수집 허용" : "이 발신자를 계속 제외";
+    if (!window.confirm(`${actionLabel}할까요?`)) return;
+    setGmailSenderReviewBusy(true);
+    setGmailSenderReviewError("");
+    try {
+      const response = await fetch(
+        "/api/pb-daily-intelligence/gmail-sender-reviews",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ senderKey, decision }),
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setGmailSenderReviewQueue(payload);
+    } catch (reviewError) {
+      setGmailSenderReviewError(
+        reviewError.message || "Gmail 발신자 검토 결정을 저장하지 못했습니다.",
+      );
+    } finally {
+      setGmailSenderReviewBusy(false);
+    }
+  }, []);
+
   React.useEffect(() => {
     if (!operationsMode) return;
     void loadBrokerApprovalQueue();
@@ -6168,6 +6323,15 @@ export default function DailyIntelligenceView({
     void loadGmailAttachmentApprovalQueue();
   }, [
     loadGmailAttachmentApprovalQueue,
+    gmailResearch?.collection?.lastCollectedAt,
+    operationsMode,
+  ]);
+
+  React.useEffect(() => {
+    if (!operationsMode) return;
+    void loadGmailSenderReviewQueue();
+  }, [
+    loadGmailSenderReviewQueue,
     gmailResearch?.collection?.lastCollectedAt,
     operationsMode,
   ]);
@@ -6197,7 +6361,10 @@ export default function DailyIntelligenceView({
   const reviewCount = pipeline?.reviewQueue?.length || 0;
   const koreaStatus = report.koreaConnection?.status || "unknown";
   const driveApprovalCount = brokerApprovalQueue?.counts?.pending || 0;
-  const gmailApprovalCount = gmailAttachmentApprovalQueue?.counts?.pending || 0;
+  const gmailApprovalCount = (
+    (gmailAttachmentApprovalQueue?.counts?.pending || 0)
+    + (gmailSenderReviewQueue?.counts?.pending || 0)
+  );
 
   if (operationsMode) {
     return (
@@ -6266,6 +6433,9 @@ export default function DailyIntelligenceView({
 
           <GmailResearchStatus
             gmailResearch={gmailResearch}
+            senderReviewQueue={gmailSenderReviewQueue}
+            senderReviewBusy={gmailSenderReviewBusy}
+            senderReviewError={gmailSenderReviewError}
             attachmentApprovalQueue={gmailAttachmentApprovalQueue}
             attachmentApprovalBusy={gmailAttachmentApprovalBusy}
             attachmentApprovalError={gmailAttachmentApprovalError}
@@ -6278,6 +6448,8 @@ export default function DailyIntelligenceView({
             onCancel={cancelPendingPlan}
             onReloadAttachmentApprovals={loadGmailAttachmentApprovalQueue}
             onDecideAttachment={decideGmailAttachment}
+            onReloadSenderReviews={loadGmailSenderReviewQueue}
+            onDecideSender={decideGmailSender}
           />
 
           <BrokerResearchApprovalQueue

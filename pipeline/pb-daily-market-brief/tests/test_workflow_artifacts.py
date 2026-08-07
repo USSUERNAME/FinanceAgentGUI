@@ -62,6 +62,12 @@ class WorkflowArtifactTests(unittest.TestCase):
             "path: workspace/broker_research_cache/document_text",
             workflow,
         )
+        self.assertIn("Restore Drive ingestion fingerprint state", workflow)
+        self.assertIn("Save Drive ingestion fingerprint state", workflow)
+        self.assertGreaterEqual(
+            workflow.count("workspace/broker_research_cache/drive_ingestion_state.json"),
+            2,
+        )
 
     def test_broker_research_cold_ocr_has_bounded_actions_timeout(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

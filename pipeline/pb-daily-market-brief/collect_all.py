@@ -54,6 +54,35 @@ ADAPTERS: dict[str, Adapter] = {
     "telegram_channels": telegram_channels.collect,
 }
 
+EXPECTED_FILTER_NOTICES = (
+    "Gmail message(s) rejected by label or sender gate",
+    "Drive report(s) rejected by the rights or document gate",
+)
+INCREMENTAL_SKIP_NOTICES = (
+    "unchanged Drive report(s) skipped by incremental cache",
+)
+
+
+def completed_source_status(
+    rows: list[dict[str, Any]],
+    notice: str | None,
+) -> tuple[str, str | None]:
+    if not notice:
+        return "ok", None
+    parts = [part.strip() for part in notice.split(";") if part.strip()]
+    expected = all(
+        any(marker in part for marker in (*EXPECTED_FILTER_NOTICES, *INCREMENTAL_SKIP_NOTICES))
+        for part in parts
+    )
+    if expected:
+        category = (
+            "incremental_unchanged"
+            if all(any(marker in part for marker in INCREMENTAL_SKIP_NOTICES) for part in parts)
+            else "policy_filtered"
+        )
+        return "ok_with_filtered", category
+    return ("partial" if rows else "skipped_or_notice"), "configuration_or_provider_notice"
+
 
 def _collector_worker(
     adapter: Adapter,
@@ -214,6 +243,7 @@ def main() -> None:
         rows = result["rows"]
         notice = result.get("notice")
         execution_status = result["execution_status"]
+        notice_category = None
         if execution_status == "timeout":
             status = "timeout"
             print(
@@ -225,14 +255,13 @@ def main() -> None:
             status = "error"
             print(f"{name}: ERROR - {notice}", flush=True)
         elif notice:
-            print(f"{name}: SKIPPED/NOTICE - {notice}")
-            status = (
-                "partial" if rows else
-                "skipped_or_notice"
-            )
+            status, notice_category = completed_source_status(rows, notice)
+            label = "FILTERED/NOTICE" if status == "ok_with_filtered" else "SKIPPED/NOTICE"
+            print(f"{name}: {label} - {notice}")
         else:
             print(f"{name}: collected {len(rows)} item(s)", flush=True)
             status = "ok"
+            notice_category = None
         source_status.append({
             "source_id": name,
             "status": status,
@@ -244,7 +273,7 @@ def main() -> None:
             "notice_category": (
                 "timeout" if status == "timeout" else
                 "runtime_error" if status == "error" else
-                "configuration_or_provider_notice" if notice else None
+                notice_category
             ),
         })
         collected.extend(rows)

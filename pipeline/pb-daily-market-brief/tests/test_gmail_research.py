@@ -71,6 +71,46 @@ class GmailResearchTests(unittest.TestCase):
         text = gmail_research.message_text(self.message()["payload"])
         self.assertEqual(text, "Rates rose while value stocks led.")
 
+    def test_message_snippet_normalizes_gmail_preview(self) -> None:
+        text = gmail_research.message_snippet({
+            "snippet": "Buying the AI dip &amp; watching rates\n this week",
+        })
+        self.assertEqual(text, "Buying the AI dip & watching rates this week")
+
+    def test_remote_message_text_reads_only_inline_body_attachment(self) -> None:
+        payload = {
+            "mimeType": "multipart/alternative",
+            "parts": [
+                {
+                    "mimeType": "text/html",
+                    "filename": "",
+                    "body": {"attachmentId": "inline-body"},
+                },
+                {
+                    "mimeType": "text/plain",
+                    "filename": "notes.txt",
+                    "body": {"attachmentId": "file-attachment"},
+                },
+            ],
+        }
+        with patch.object(
+            gmail_research,
+            "get_attachment",
+            return_value=b"<p>Large newsletter body.</p>",
+        ) as download:
+            text = gmail_research.remote_message_text(
+                "token",
+                "message-1",
+                payload,
+            )
+        self.assertEqual(text, "Large newsletter body.")
+        download.assert_called_once_with(
+            "token",
+            "message-1",
+            "inline-body",
+            max_bytes=gmail_research.DEFAULT_MAX_INLINE_BODY_BYTES,
+        )
+
     def test_collect_reads_only_allowlisted_sender_and_marks_pdf_review(self) -> None:
         env = {
             "GOOGLE_GMAIL_CLIENT_ID": "client",
@@ -110,6 +150,7 @@ class GmailResearchTests(unittest.TestCase):
         self.assertEqual(record["market_scope"], "US")
         self.assertEqual(record["research_rights"]["acquisition_mode"], "official_email")
         self.assertTrue(record["gmail_message"]["attachment_review_required"])
+        self.assertEqual(record["gmail_message"]["body_mode"], "full_body")
         self.assertFalse(record["gmail_message"]["attachment_downloaded"])
         self.assertEqual(
             record["gmail_message"]["attachments"][0]["approval_state"],
@@ -120,6 +161,49 @@ class GmailResearchTests(unittest.TestCase):
             record["gmail_message"]["attachments"][0],
         )
         self.assertNotIn("weekly@research.example.com", json.dumps(record))
+
+    def test_collect_uses_bounded_snippet_when_message_has_no_body_part(self) -> None:
+        env = {
+            "GOOGLE_GMAIL_CLIENT_ID": "client",
+            "GOOGLE_GMAIL_CLIENT_SECRET": "secret",
+            "GOOGLE_GMAIL_REFRESH_TOKEN": "refresh",
+        }
+        message = self.message()
+        message["snippet"] = "AI infrastructure spending remains resilient."
+        message["payload"]["parts"] = []
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ",
+            env,
+            clear=False,
+        ), patch.object(
+            gmail_research,
+            "DOCUMENT_TEXT_CACHE_DIR",
+            Path(directory),
+        ), patch.object(
+            gmail_research,
+            "GMAIL_SENDER_REVIEWS_PATH",
+            Path(directory) / "blocked_senders.json",
+        ), patch.object(
+            gmail_research,
+            "refresh_access_token",
+            return_value="token",
+        ), patch.object(
+            gmail_research,
+            "resolve_label_id",
+            return_value="Label_Stocks",
+        ), patch.object(
+            gmail_research,
+            "list_message_ids",
+            return_value=["message-1"],
+        ), patch.object(
+            gmail_research,
+            "get_message",
+            return_value=message,
+        ):
+            records, notice = gmail_research.collect(self.config())
+        self.assertEqual(len(records), 1)
+        self.assertIsNone(notice)
+        self.assertEqual(records[0]["gmail_message"]["body_mode"], "snippet_fallback")
 
     def test_collect_downloads_only_explicitly_approved_pdf(self) -> None:
         env = {
@@ -240,26 +324,96 @@ class GmailResearchTests(unittest.TestCase):
             "GOOGLE_GMAIL_CLIENT_SECRET": "secret",
             "GOOGLE_GMAIL_REFRESH_TOKEN": "refresh",
         }
-        with patch.dict("os.environ", env, clear=False), patch.object(
-            gmail_research,
-            "refresh_access_token",
-            return_value="token",
-        ), patch.object(
-            gmail_research,
-            "resolve_label_id",
-            return_value="Label_Stocks",
-        ), patch.object(
-            gmail_research,
-            "list_message_ids",
-            return_value=["message-1"],
-        ), patch.object(
-            gmail_research,
-            "get_message",
-            return_value=self.message(sender="Unknown <mail@untrusted.example.net>"),
-        ):
-            records, notice = gmail_research.collect(self.config())
+        with tempfile.TemporaryDirectory() as directory:
+            review_path = Path(directory) / "blocked_senders.json"
+            with patch.dict("os.environ", env, clear=False), patch.object(
+                gmail_research,
+                "GMAIL_SENDER_REVIEWS_PATH",
+                review_path,
+            ), patch.object(
+                gmail_research,
+                "GMAIL_SENDER_APPROVALS_PATH",
+                Path(directory) / "senders.json",
+            ), patch.object(
+                gmail_research,
+                "refresh_access_token",
+                return_value="token",
+            ), patch.object(
+                gmail_research,
+                "resolve_label_id",
+                return_value="Label_Stocks",
+            ), patch.object(
+                gmail_research,
+                "list_message_ids",
+                return_value=["message-1"],
+            ), patch.object(
+                gmail_research,
+                "get_message",
+                return_value=self.message(sender="Unknown <mail@untrusted.example.net>"),
+            ):
+                records, notice = gmail_research.collect(self.config())
+            review = json.loads(review_path.read_text(encoding="utf-8"))
         self.assertEqual(records, [])
         self.assertIn("1 Gmail message", notice)
+        self.assertEqual(review["schema_version"], gmail_research.GMAIL_SENDER_REVIEWS_SCHEMA)
+        self.assertEqual(review["items"][0]["sender_email"], "mail@untrusted.example.net")
+        self.assertEqual(review["items"][0]["reason"], "sender_not_allowlisted")
+
+    def test_collect_accepts_exact_sender_after_review_with_valid_authentication(self) -> None:
+        env = {
+            "GOOGLE_GMAIL_CLIENT_ID": "client",
+            "GOOGLE_GMAIL_CLIENT_SECRET": "secret",
+            "GOOGLE_GMAIL_REFRESH_TOKEN": "refresh",
+        }
+        message = self.message(sender="Unknown <mail@untrusted.example.net>")
+        message["payload"]["headers"][3]["value"] = (
+            "mx.google.com; dkim=pass header.i=@untrusted.example.net "
+            "header.d=untrusted.example.net; dmarc=pass "
+            "header.from=untrusted.example.net"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            approval_path = root / "senders.json"
+            approval_path.write_text(json.dumps({
+                "schema_version": gmail_research.GMAIL_SENDER_APPROVALS_SCHEMA,
+                "decisions": [{
+                    "sender_email": "mail@untrusted.example.net",
+                    "decision": "approved",
+                }],
+            }), encoding="utf-8")
+            with patch.dict("os.environ", env, clear=False), patch.object(
+                gmail_research,
+                "GMAIL_SENDER_APPROVALS_PATH",
+                approval_path,
+            ), patch.object(
+                gmail_research,
+                "GMAIL_SENDER_REVIEWS_PATH",
+                root / "blocked_senders.json",
+            ), patch.object(
+                gmail_research,
+                "DOCUMENT_TEXT_CACHE_DIR",
+                root / "text-cache",
+            ), patch.object(
+                gmail_research,
+                "refresh_access_token",
+                return_value="token",
+            ), patch.object(
+                gmail_research,
+                "resolve_label_id",
+                return_value="Label_Stocks",
+            ), patch.object(
+                gmail_research,
+                "list_message_ids",
+                return_value=["message-1"],
+            ), patch.object(
+                gmail_research,
+                "get_message",
+                return_value=message,
+            ):
+                records, notice = gmail_research.collect(self.config())
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["publisher"], "Unknown")
+        self.assertIn("PDF attachment", notice)
 
     def test_collect_is_optional_without_credentials(self) -> None:
         env = {

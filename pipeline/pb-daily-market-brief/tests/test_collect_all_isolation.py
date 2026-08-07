@@ -3,7 +3,11 @@ from __future__ import annotations
 import time
 import unittest
 
-from collect_all import configured_timeout_seconds, run_adapter_isolated
+from collect_all import (
+    completed_source_status,
+    configured_timeout_seconds,
+    run_adapter_isolated,
+)
 
 
 def successful_adapter(_config: dict) -> tuple[list[dict], str | None]:
@@ -20,6 +24,30 @@ def failing_adapter(_config: dict) -> tuple[list[dict], str | None]:
 
 
 class CollectorTimeoutConfigurationTests(unittest.TestCase):
+    def test_expected_policy_filter_is_not_a_partial_failure(self) -> None:
+        status, category = completed_source_status(
+            [{"id": "accepted"}],
+            "2 Gmail message(s) rejected by label or sender gate",
+        )
+        self.assertEqual(status, "ok_with_filtered")
+        self.assertEqual(category, "policy_filtered")
+
+    def test_incremental_drive_skip_is_a_healthy_source_state(self) -> None:
+        status, category = completed_source_status(
+            [],
+            "18 unchanged Drive report(s) skipped by incremental cache",
+        )
+        self.assertEqual(status, "ok_with_filtered")
+        self.assertEqual(category, "incremental_unchanged")
+
+    def test_action_required_notice_remains_partial(self) -> None:
+        status, category = completed_source_status(
+            [{"id": "accepted"}],
+            "1 PDF attachment(s) require explicit analysis approval",
+        )
+        self.assertEqual(status, "partial")
+        self.assertEqual(category, "configuration_or_provider_notice")
+
     def test_cli_override_has_priority(self) -> None:
         self.assertEqual(
             configured_timeout_seconds(

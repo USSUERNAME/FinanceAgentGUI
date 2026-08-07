@@ -202,6 +202,11 @@ class BrokerResearchIngestionTests(unittest.TestCase):
                 ),
                 patch.object(
                     google_drive_reports,
+                    "INGESTION_STATE_PATH",
+                    Path(directory) / "drive_ingestion_state.json",
+                ),
+                patch.object(
+                    google_drive_reports,
                     "_credentials",
                     return_value=({"folder_id": "folder"}, []),
                 ),
@@ -217,6 +222,54 @@ class BrokerResearchIngestionTests(unittest.TestCase):
         self.assertIsNone(notice)
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["source_reference"], "drive:report-1")
+
+    def test_drive_adapter_skips_unchanged_processed_report(self) -> None:
+        approved = metadata()
+        approved["acquisition_mode"] = "operator_authorized_drive"
+        approved["source_reference"] = "drive:report-1"
+        files = [{
+            "id": "report-1",
+            "name": "report.txt",
+            "mimeType": "text/plain",
+            "modifiedTime": "2026-08-07T01:00:00Z",
+            "md5Checksum": "document-checksum",
+        }]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            approval_path = root / "google_drive.json"
+            approval_path.write_text(json.dumps({
+                "schema_version": google_drive_reports.APPROVAL_REGISTRY_SCHEMA,
+                "decisions": [{
+                    "file_id": "report-1",
+                    "file_name": "report.txt",
+                    "decision": "approved",
+                    "metadata": approved,
+                }],
+            }), encoding="utf-8")
+            with (
+                patch.object(google_drive_reports, "APPROVAL_REGISTRY_PATH", approval_path),
+                patch.object(google_drive_reports, "DOCUMENT_TEXT_CACHE_DIR", root / "text-cache"),
+                patch.object(google_drive_reports, "INGESTION_STATE_PATH", root / "state.json"),
+                patch.object(
+                    google_drive_reports,
+                    "_credentials",
+                    return_value=({"folder_id": "folder"}, []),
+                ),
+                patch.object(google_drive_reports, "refresh_access_token", return_value="token"),
+                patch.object(google_drive_reports, "list_folder_files", return_value=files),
+                patch.object(
+                    google_drive_reports,
+                    "download_file",
+                    return_value=b"Authorized analyst research",
+                ) as download,
+            ):
+                first_records, first_notice = google_drive_reports.collect({})
+                second_records, second_notice = google_drive_reports.collect({})
+        self.assertEqual(len(first_records), 1)
+        self.assertIsNone(first_notice)
+        self.assertEqual(second_records, [])
+        self.assertIn("unchanged Drive report", second_notice)
+        download.assert_called_once()
 
     def test_drive_adapter_skips_locally_excluded_report(self) -> None:
         files = [{"id": "report-1", "name": "excluded.txt", "mimeType": "text/plain"}]
@@ -362,6 +415,11 @@ class BrokerResearchIngestionTests(unittest.TestCase):
                     google_drive_reports,
                     "DOCUMENT_TEXT_CACHE_DIR",
                     Path(directory) / "cache",
+                ),
+                patch.object(
+                    google_drive_reports,
+                    "INGESTION_STATE_PATH",
+                    Path(directory) / "drive_ingestion_state.json",
                 ),
                 patch.object(
                     google_drive_reports,
