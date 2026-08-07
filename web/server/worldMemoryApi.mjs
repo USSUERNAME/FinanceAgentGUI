@@ -668,7 +668,7 @@ export function completeWorldMemoryCollectionCollectorState(
     ...collector,
     running: false,
     status: "ok",
-    lastAction: `월드 메모리 수집 완료 · 신규 후보 ${Number(importedCandidates || 0)}건`,
+    lastAction: `월드 메모리 수집·분석 완료 · 신규 브리프 ${Number(importedCandidates || 0)}건`,
     lastError: "",
     lastFinishedAt: reportFinishedAt,
     lastSuccessfulAt: collectionSuccessfulAt || collector.lastSuccessfulAt || "",
@@ -1393,6 +1393,20 @@ function normalizeBriefSubject(subject) {
     ...subject,
     name,
     type: WORLD_MEMORY_SUBJECT_TYPES.has(aliasedType) ? aliasedType : "other",
+  };
+}
+
+export function worldMemoryBriefImportCounts(result = {}) {
+  const text = [result?.stdout, result?.outputText]
+    .map((value) => String(value || ""))
+    .filter(Boolean)
+    .join("\n");
+  const match = text.match(/inserted=(\d+)\s+skipped_duplicates=(\d+)\s+total_input=(\d+)/u);
+  if (!match) return null;
+  return {
+    inserted: Number(match[1]),
+    skippedDuplicates: Number(match[2]),
+    totalInput: Number(match[3]),
   };
 }
 
@@ -2985,6 +2999,8 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
             "--from-file",
             briefPath,
             "--skip-if-duplicate",
+            "--embedding-mode",
+            "auto",
           ],
           timeoutMs: COMMAND_TIMEOUT_MS,
         });
@@ -2992,6 +3008,8 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
       }
       steps.push({ id: "brief-import", ok: briefImport.ok, text: safeStepText(briefImport) });
       if (!briefImport.ok) throw new Error(briefImport.error || "brief-import 실패");
+      const briefImportCounts = worldMemoryBriefImportCounts(briefImport);
+      const importedCandidates = briefImportCounts?.inserted ?? generated.rows.length;
 
       const [auditAfter, harnessAfter, embedAfter, listAfter, statesAfter] = await Promise.all([
         runCommandFromBody({ action: "audit", days: 30 }),
@@ -3075,7 +3093,7 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
             collector: completeWorldMemoryCollectionCollectorState(state.collector, {
               collectionSuccessfulAt,
               reportFinishedAt: finishedAt,
-              importedCandidates: generated.rows.length,
+              importedCandidates,
               attempt,
             }),
             schedule: {
@@ -3094,7 +3112,7 @@ async function executeWorldMemoryCycle({ trigger = "manual", scheduledAt = nowIs
             startedAt,
             finishedAt,
             attempts: attempt,
-            importedCandidates: generated.rows.length,
+            importedCandidates,
             reportPath: safeRelative(reportHtmlPath),
             reportJsonPath: safeRelative(reportJsonPath),
             feedScanPath: feedScan.artifact?.path || "",
