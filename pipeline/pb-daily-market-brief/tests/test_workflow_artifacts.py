@@ -6,9 +6,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "daily-brief.yml"
+APP_WORKFLOW = ROOT.parents[1] / ".github" / "workflows" / "daily-brief.yml"
 
 
 class WorkflowArtifactTests(unittest.TestCase):
+    def test_app_workflow_accepts_remote_runner_correlation_id(self) -> None:
+        workflow = APP_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("client_request_id:", workflow)
+        self.assertIn("inputs.client_request_id", workflow)
+
     def test_daily_artifact_preserves_market_input_and_provider_budget(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("workspace/provider_budget/", workflow)
