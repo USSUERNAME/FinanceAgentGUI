@@ -1542,7 +1542,11 @@ function runPythonScript({ scriptPath, args = [], timeoutMs = COMMAND_TIMEOUT_MS
     const commandArgs = [...python.argsPrefix, scriptPath, ...args];
     const child = spawn(python.command, commandArgs, {
       cwd: GUIBUILD_ROOT,
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUNBUFFERED: "1",
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
 
