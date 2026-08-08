@@ -1,0 +1,47 @@
+{
+  "schema_version": "company_korea_transmission_policy.v1",
+  "classification_order": [
+    "direct",
+    "industry",
+    "watch_candidate",
+    "rejected"
+  ],
+  "classifications": {
+    "direct": {
+      "label_ko": "직접 연결",
+      "requires": [
+        "verified_primary_relationship",
+        "verified_target_revenue_or_order_exposure"
+      ]
+    },
+    "industry": {
+      "label_ko": "산업 연결",
+      "requires": [
+        "same_verified_sector_pathway",
+        "verified_target_revenue_or_order_exposure"
+      ]
+    },
+    "watch_candidate": {
+      "label_ko": "관찰 후보",
+      "requires": [
+        "same_sector_candidate"
+      ]
+    },
+    "rejected": {
+      "label_ko": "연결 제외",
+      "requires": [
+        "failed_identity_or_exposure_gate"
+      ]
+    }
+  },
+  "market_confirmation": {
+    "required": true,
+    "acceptable_gate_statuses": [
+      "ready_for_korea_transmission",
+      "ready_for_korea_transmission_with_source_lag"
+    ],
+    "automatic_directional_call_allowed": false
+  },
+  "automatic_beneficiary_label_allowed": false,
+  "automatic_position_actions_allowed": false
+}

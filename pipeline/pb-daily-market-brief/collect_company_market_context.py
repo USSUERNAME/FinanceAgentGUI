@@ -393,7 +393,7 @@ def main() -> None:
         json.loads(queue_path.read_text(encoding="utf-8")),
         os.getenv("ALPHAVANTAGE_API_KEY", "").strip(),
         fallback_market=fallback_market,
-        delay_seconds=float(os.getenv("ALPHAVANTAGE_REQUEST_DELAY_SECONDS", "0")),
+        delay_seconds=float(os.getenv("ALPHAVANTAGE_REQUEST_DELAY_SECONDS", "13")),
         max_candidates=max_candidates,
     )
     output = root_path(

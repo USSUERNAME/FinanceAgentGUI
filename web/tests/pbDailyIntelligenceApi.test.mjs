@@ -1265,10 +1265,85 @@ test("PB Daily Intelligence separates verified reader content from review queue"
             post_result_estimate_revision: {
               status: "not_established",
             },
+            long_term_analysis: {
+              company_quality: {
+                status: "financial_compounding_supported",
+                label: "재무 복리 확인·질 평가 보류",
+                reason: "정성 근거 대기",
+              },
+              stock_attractiveness: {
+                status: "screening_only",
+                label: "피어 대비 할인",
+                reason: "시나리오 대기",
+              },
+              portfolio_fit: {
+                status: "evaluation_withheld",
+                label: "평가 보류",
+                score: null,
+                reason: "비중 정보 대기",
+              },
+              judgment_framework: {
+                policy_name: "장기투자 판단 원칙",
+                policy_schema_version: "company_judgment_policy.v1",
+                decision_sequence: [
+                  "company_quality",
+                  "stock_attractiveness",
+                  "portfolio_fit",
+                  "conditional_action",
+                ],
+                company_quality: {
+                  status: "partial",
+                  met_count: 2,
+                  required_count: 5,
+                  gates: [{
+                    gate_id: "five_year_financials",
+                    label: "5개년 영업이익·FCF",
+                    status: "met",
+                    evidence: "정규화된 핵심 재무 5개년",
+                  }],
+                },
+                stock_attractiveness: {
+                  status: "partial",
+                  met_count: 2,
+                  required_count: 5,
+                  gates: [],
+                },
+                portfolio_fit: {
+                  status: "withheld",
+                  met_count: 0,
+                  required_count: 4,
+                  gates: [],
+                },
+              },
+              action: {
+                grade: "관망",
+                reason: "필수 근거 대기",
+                next_required_evidence: ["해자 검증"],
+                automatic_position_action: false,
+              },
+            },
           },
         ],
       },
-      korea_connection: { status: "insufficient", summary: "수급 데이터가 부족하다." },
+      korea_connection: {
+        status: "insufficient",
+        summary: "수급 데이터가 부족하다.",
+        company_transmissions: [{
+          source_ticker: "NVDA",
+          source_company_name: "NVIDIA",
+          sector_name_ko: "반도체·AI 컴퓨트",
+          source_signal_label: "재무 복리 확인·질 평가 보류",
+          market_confirmation_status: "blocked",
+          targets: [{
+            ticker: "000660",
+            company_name: "SK하이닉스",
+            classification: "watch_candidate",
+            classification_label: "관찰 후보",
+            reason: "국내 기업 민감도 검증 대기",
+            next_required_evidence: ["관련 매출·수주 민감도"],
+          }],
+        }],
+      },
       next_checks: ["외국인 선물 수급"],
       data_status: {
         latest_price_as_of: "2026-07-22",
@@ -1508,6 +1583,21 @@ test("PB Daily Intelligence separates verified reader content from review queue"
   assert.equal(
     snapshot.report.earningsWatch.companies[0].guidance[0].evidenceLabel,
     "issuer_management_claim"
+  );
+  assert.equal(
+    snapshot.report.earningsWatch.companies[0].longTermAnalysis
+      .judgmentFramework.decisions.companyQuality.metCount,
+    2,
+  );
+  assert.deepEqual(
+    snapshot.report.earningsWatch.companies[0].longTermAnalysis
+      .action.nextRequiredEvidence,
+    ["해자 검증"],
+  );
+  assert.equal(
+    snapshot.report.koreaConnection.companyTransmissions[0]
+      .targets[0].classification,
+    "watch_candidate",
   );
 });
 

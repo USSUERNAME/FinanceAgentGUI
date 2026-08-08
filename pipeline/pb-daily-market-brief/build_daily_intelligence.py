@@ -215,6 +215,7 @@ def build_daily_intelligence(
     analysis_payload: dict[str, Any],
     continuity_review: dict[str, Any],
     earnings_intelligence: dict[str, Any] | None = None,
+    company_korea_transmission: dict[str, Any] | None = None,
     cross_source_events: dict[str, Any] | None = None,
     generated_at: str | None = None,
     max_events: int = MAX_EVENTS,
@@ -307,6 +308,9 @@ def build_daily_intelligence(
             ),
             "korea_transmission_inputs": deepcopy(
                 snapshot.get("korea_market") or {}
+            ),
+            "company_korea_transmission": deepcopy(
+                company_korea_transmission or {}
             ),
         },
         "events": {
@@ -442,12 +446,20 @@ def main() -> None:
         / args.date
         / "cross_source_events.json"
     )
+    company_korea_path = (
+        ROOT
+        / "workspace"
+        / "company_korea_transmission"
+        / args.date
+        / "company_korea_transmission.json"
+    )
     packet = build_daily_intelligence(
         args.date,
         snapshot=load_json(snapshot_path),
         analysis_payload=load_json(analysis_path),
         continuity_review=load_json(continuity_path, required=False),
         earnings_intelligence=load_json(earnings_path, required=False),
+        company_korea_transmission=load_json(company_korea_path, required=False),
         cross_source_events=load_json(cross_source_path, required=False),
         max_events=args.max_events,
     )

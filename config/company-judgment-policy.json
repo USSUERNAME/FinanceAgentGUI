@@ -1,0 +1,59 @@
+{
+  "schema_version": "company_judgment_policy.v1",
+  "policy_name": "장기투자 판단 원칙",
+  "decision_sequence": [
+    "company_quality",
+    "stock_attractiveness",
+    "portfolio_fit",
+    "conditional_action"
+  ],
+  "evidence_classes": [
+    "fact",
+    "calculation",
+    "judgment",
+    "inference"
+  ],
+  "company_quality": {
+    "required_core_years": 5,
+    "minimum_positive_fcf_years": 4,
+    "financial_compounding_operating_cagr_pct": 10,
+    "required_gates": [
+      "five_year_financials",
+      "business_model_primary_evidence",
+      "capital_allocation_and_dilution",
+      "moat_evidence",
+      "management_execution_evidence"
+    ]
+  },
+  "stock_attractiveness": {
+    "required_gates": [
+      "dated_current_price",
+      "comparable_peer_screen",
+      "historical_valuation_band",
+      "three_scenario_valuation",
+      "priced_in_expectations"
+    ],
+    "relative_screen_is_decision_sufficient": false
+  },
+  "portfolio_fit": {
+    "required_gates": [
+      "current_position_weight",
+      "overlap_and_concentration",
+      "cash_and_staging_capacity",
+      "investment_horizon_and_loss_tolerance"
+    ],
+    "score_without_explicit_context": false
+  },
+  "conditional_action": {
+    "default_when_any_decision_is_incomplete": "관망",
+    "automatic_position_actions_allowed": false,
+    "allowed_grades": [
+      "매수 검토",
+      "분할매수",
+      "보유",
+      "관망",
+      "축소 검토",
+      "논리 훼손"
+    ]
+  }
+}

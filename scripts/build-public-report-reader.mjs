@@ -122,6 +122,65 @@ function safeScalarMap(source, allowedKeys) {
   );
 }
 
+function koreaMetricDirection(metricId, metric = {}) {
+  const isFlow = /^foreign_/i.test(metricId);
+  const signal = Number(isFlow ? metric.value : metric.change_1d_pct);
+  if (!Number.isFinite(signal)) return "";
+  if (signal === 0) return isFlow ? "neutral" : "flat";
+  if (isFlow) return signal > 0 ? "net_buy" : "net_sell";
+  return signal > 0 ? "up" : "down";
+}
+
+function summarizeKoreaMetric(metricId, value) {
+  const metric = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    metricId: text(metric.metric_id || metricId, 120),
+    label: text(metric.label, 200),
+    status: text(metric.status, 80),
+    asOf: text(metric.as_of, 40),
+    direction: koreaMetricDirection(metricId, metric),
+    sourceGrade: text(metric.source_grade, 40),
+    primarySourceConfirmed: Boolean(metric.primary_source_confirmed),
+  };
+}
+
+function summarizeKoreaMetrics(value) {
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).map((item, index) => {
+      const metricId = text(item?.metric_id || item?.id || `metric_${index + 1}`, 120);
+      return summarizeKoreaMetric(metricId, item);
+    });
+  }
+  const source = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(
+    Object.entries(source)
+      .slice(0, 20)
+      .map(([metricId, metric]) => [text(metricId, 120), summarizeKoreaMetric(metricId, metric)]),
+  );
+}
+
+function sanitizeKoreaTransmission(source = {}) {
+  const value = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+  const gate = value.transmission_gate && typeof value.transmission_gate === "object" ? value.transmission_gate : {};
+  return {
+    reportDate: text(value.report_date, 20),
+    collectionStatus: text(value.collection_status || value.status, 100),
+    metrics: summarizeKoreaMetrics(value.metrics),
+    transmissionGate: {
+      status: text(gate.status, 120),
+      dateAlignment: safeScalarMap(gate.date_alignment, [
+        "status",
+        "earliest_as_of",
+        "latest_as_of",
+        "calendar_day_gap",
+        "business_day_gap",
+        "max_allowed_business_day_gap",
+      ]),
+      decisionLimit: prose(gate.decision_limit, 1200),
+    },
+  };
+}
+
 function sourceList(value) {
   return (Array.isArray(value) ? value : [])
     .map((source) => ({
@@ -148,7 +207,10 @@ export function sanitizeReaderReport(source = {}) {
     verifiedEvents: findingList(source.verified_events, 16),
     analystResearch: analystResearch(source.analyst_research),
     earningsWatch: safeScalarMap(source.earnings_watch, ["status", "summary", "labels"]),
-    koreaConnection: safeScalarMap(source.korea_connection, ["status", "summary", "metrics"]),
+    koreaConnection: {
+      ...safeScalarMap(source.korea_connection, ["status", "summary"]),
+      metrics: summarizeKoreaMetrics(source.korea_connection?.metrics),
+    },
     nextChecks: textList(source.next_checks, { limit: 20, maxLength: 1200 }),
     dataStatus: safeScalarMap(source.data_status, ["latest_price_as_of", "verified_event_count", "korea_data_status", "warnings"]),
     sources: sourceList(source.sources),
@@ -187,7 +249,7 @@ export function sanitizeDailyIntelligence(source = {}) {
       topRisks: textList(market.top_risks, { limit: 16, maxLength: 1800 }),
       scoreboard: safeObject(market.scoreboard, { maxDepth: 5, arrayLimit: 24, keyLimit: 80 }),
       dayOverDayChanges: safeObject(market.day_over_day_changes, { maxDepth: 4, arrayLimit: 24, keyLimit: 60 }),
-      koreaTransmission: safeObject(market.korea_transmission_inputs, { maxDepth: 5, arrayLimit: 24, keyLimit: 70 }),
+      koreaTransmission: sanitizeKoreaTransmission(market.korea_transmission_inputs),
     },
     events: {
       clusterCount: Number(events.cluster_count) || 0,

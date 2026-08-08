@@ -122,6 +122,22 @@ class CompanyResearchQueueTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "primary exposure proof"):
             validate_company_research_queue(tampered)
 
+    def test_direct_watchlist_company_advances_without_sector_radar(self) -> None:
+        payload = build_company_research_queue(
+            "2026-07-20",
+            {"schema_version": "sector_leadership_radar.v1", "funnel": {}},
+            self.master,
+            self.registry,
+            {"estimate_observations": [], "operating_observations": []},
+            direct_inputs=[{"ticker": "NVDA", "market": "US", "sources": ["watchlist"]}],
+        )
+        self.assertEqual(payload["candidate_count"], 1)
+        row = payload["candidates"][0]
+        self.assertEqual(row["ticker"], "NVDA")
+        self.assertEqual(row["candidate_origin"], "direct_user_watchlist")
+        self.assertEqual(row["queue_stage"], "valuation_expectations_gated")
+        self.assertEqual(payload["advance_count"], 1)
+
     def test_company_evidence_url_is_added_to_deterministic_sources(self) -> None:
         rendered = source_section([], {
             "company_research_queue": {"candidates": [{

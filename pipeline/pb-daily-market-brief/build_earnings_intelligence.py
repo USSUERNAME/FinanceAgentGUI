@@ -183,6 +183,7 @@ def _company_row(
     review: dict[str, Any],
     result: dict[str, Any],
     deep_dive: dict[str, Any],
+    long_term: dict[str, Any],
 ) -> dict[str, Any]:
     estimates = _estimate_summary(review)
     guidance = _guidance_rows(review, result)
@@ -224,6 +225,7 @@ def _company_row(
             ),
             "model_update_applied": bool(model_update.get("model_update_applied")),
         },
+        "long_term_analysis": dict(long_term),
         "source_index": _source_rows(event, reaction, review, result, deep_dive),
         "decision_limits": [
             "과거 EPS 서프라이즈와 가격 반응은 반복 가능한 인과관계를 의미하지 않는다.",
@@ -241,6 +243,7 @@ def build_earnings_intelligence(
     reviews: dict[str, Any],
     results: dict[str, Any],
     deep_dives: dict[str, Any],
+    long_term_profiles: dict[str, Any] | None = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     event_map = _ticker_map(events, "companies")
@@ -248,9 +251,10 @@ def build_earnings_intelligence(
     review_map = _ticker_map(reviews, "reviews")
     result_map = _ticker_map(results, "companies")
     deep_map = _ticker_map(deep_dives, "reviews")
+    long_term_map = _ticker_map(long_term_profiles or {}, "profiles")
     tickers = sorted(
         set(event_map) | set(reaction_map) | set(review_map) | set(result_map)
-        | set(deep_map)
+        | set(deep_map) | set(long_term_map)
     )[:MAX_COMPANIES]
     companies = [
         _company_row(
@@ -260,6 +264,7 @@ def build_earnings_intelligence(
             review_map.get(ticker, {}),
             result_map.get(ticker, {}),
             deep_map.get(ticker, {}),
+            long_term_map.get(ticker, {}),
         )
         for ticker in tickers
     ]
@@ -343,6 +348,8 @@ def main() -> None:
         / "company_earnings_results.json",
         "deep_dives": ROOT / "workspace" / "company_earnings_deep_dive"
         / args.date / "company_earnings_deep_dive.json",
+        "long_term_profiles": ROOT / "workspace" / "company_long_term_profiles"
+        / args.date / "company_long_term_profiles.json",
     }
     payload = build_earnings_intelligence(
         args.date,

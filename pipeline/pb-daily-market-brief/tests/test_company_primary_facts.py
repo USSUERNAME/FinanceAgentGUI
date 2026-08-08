@@ -5,6 +5,7 @@ import unittest
 from datetime import date
 
 from collect_company_primary_facts import (
+    annual_reported_metrics,
     collect_company_primary_facts,
     company_cik_map,
     compare_guidance_to_estimates,
@@ -63,6 +64,39 @@ def companyfacts_payload() -> dict:
     }
 
 
+def annual_fact(label: str, values: list[float], unit: str = "USD") -> dict:
+    rows = []
+    for year, value in zip(range(2021, 2026), values):
+        rows.append({
+            "start": f"{year}-01-01",
+            "end": f"{year}-12-31",
+            "val": value,
+            "accn": f"0001045810-{str(year + 1)[-2:]}-000001",
+            "fy": year,
+            "fp": "FY",
+            "form": "10-K",
+            "filed": f"{year + 1}-02-20",
+            "frame": f"CY{year}",
+        })
+    return {"label": label, "description": label, "units": {unit: rows}}
+
+
+def annual_companyfacts_payload() -> dict:
+    payload = companyfacts_payload()
+    facts = payload["facts"]["us-gaap"]
+    facts.update({
+        "RevenueFromContractWithCustomerExcludingAssessedTax": annual_fact("Revenue", [100, 120, 145, 170, 210]),
+        "OperatingIncomeLoss": annual_fact("Operating income", [20, 25, 32, 40, 52]),
+        "NetCashProvidedByUsedInOperatingActivities": annual_fact("Operating cash flow", [18, 23, 30, 38, 50]),
+        "PaymentsToAcquirePropertyPlantAndEquipment": annual_fact("Capital expenditures", [2, 2, 3, 4, 5]),
+        "PaymentsOfDividendsCommonStock": annual_fact("Dividends", [1, 1, 1.5, 2, 2.5]),
+        "PaymentsForRepurchaseOfCommonStock": annual_fact("Repurchases", [2, 3, 4, 5, 7]),
+        "ProceedsFromStockOptionsExercised": annual_fact("Share issuance", [0.5, 0.5, 0.7, 1, 1]),
+        "WeightedAverageNumberOfDilutedSharesOutstanding": annual_fact("Diluted shares", [100, 99, 98, 97, 96], "shares"),
+    })
+    return payload
+
+
 def valuation_expectations() -> dict:
     return {"companies": [{
         "candidate_id": "semiconductors_ai_compute:US:NVDA",
@@ -115,6 +149,22 @@ class CompanyPrimaryFactsTests(unittest.TestCase):
         self.assertIn(ACCESSION, metric["source_url"])
         self.assertEqual(metric["evidence_label"], "fact_source_reported")
 
+    def test_annual_metrics_and_long_term_financials_are_calculated(self) -> None:
+        facts = annual_companyfacts_payload()
+        rows = annual_reported_metrics(
+            facts, "revenue", date.fromisoformat("2026-07-20"), "0001045810",
+        )
+        self.assertEqual(len(rows), 5)
+        payload = collect_company_primary_facts(
+            "2026-07-20", valuation_expectations(), self.registry, "operator test@example.com",
+            fetcher=lambda cik, agent: facts,
+        )
+        long_term = payload["companies"][0]["long_term_financials"]
+        self.assertEqual(long_term["quality_gate"]["status"], "ready")
+        self.assertEqual(long_term["summary"]["revenue_cagr_pct"], 20.38)
+        self.assertEqual(long_term["summary"]["diluted_share_count_change_pct"], -4.0)
+        self.assertIsNotNone(long_term["summary"]["cumulative_net_cash_returns_after_issuance"])
+
     def test_primary_fact_pack_retains_period_unit_tag_and_source(self) -> None:
         payload = collect_company_primary_facts(
             "2026-07-20", valuation_expectations(), self.registry, "operator test@example.com",
@@ -135,6 +185,24 @@ class CompanyPrimaryFactsTests(unittest.TestCase):
         )
         self.assertEqual(payload["collection_status"], "missing_sec_user_agent")
         self.assertEqual(payload["request_count"], 0)
+
+    def test_direct_queue_collects_sec_facts_without_valuation_provider(self) -> None:
+        payload = collect_company_primary_facts(
+            "2026-07-20",
+            {"companies": []},
+            self.registry,
+            "operator test@example.com",
+            fetcher=lambda cik, agent: companyfacts_payload(),
+            research_queue={"candidates": [{
+                "candidate_id": "semiconductors_ai_compute:US:NVDA",
+                "sector_id": "semiconductors_ai_compute",
+                "ticker": "NVDA",
+                "company_name": "NVIDIA",
+                "queue_stage": "valuation_expectations_gated",
+            }]},
+        )
+        self.assertEqual(payload["company_count"], 1)
+        self.assertEqual(payload["companies"][0]["ticker"], "NVDA")
 
     def test_verified_guidance_compares_only_exact_period_and_unit(self) -> None:
         validated = validate_guidance_record(guidance(), date.fromisoformat("2026-07-20"))

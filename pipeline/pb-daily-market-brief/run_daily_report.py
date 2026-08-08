@@ -66,7 +66,7 @@ def collect_market_membership_inputs(report_date: str) -> None:
 def pause_between_alpha_vantage_stages() -> None:
     """Keep the configured provider cadence across separate Python processes."""
     if os.getenv("ALPHAVANTAGE_API_KEY", "").strip():
-        delay = float(os.getenv("ALPHAVANTAGE_REQUEST_DELAY_SECONDS", "0"))
+        delay = float(os.getenv("ALPHAVANTAGE_REQUEST_DELAY_SECONDS", "13"))
         if delay > 0:
             time.sleep(delay)
 
@@ -169,7 +169,12 @@ def main() -> None:
 
     # GitHub-hosted runners are stateless. A short lookback keeps the report
     # useful without relying on a local state file surviving between runs.
-    run("fetch_sec_filings.py")
+    # The offline dry run must not make the official SEC request promised by
+    # verification mode; existing local SEC inbox rows remain available below.
+    if offline_validation:
+        print("Offline dry run: skipped SEC official-body network refresh.", flush=True)
+    else:
+        run("fetch_sec_filings.py")
     run(
         "collect_all.py", "--sources",
         "fred", "newsapi", "gdelt", "rss_candidates", "institutional_insights",
@@ -302,6 +307,9 @@ def main() -> None:
     run("collect_company_primary_facts.py", "--date", report_date)
     run("build_company_operating_bridge.py", "--date", report_date)
     run("build_company_tearsheets.py", "--date", report_date)
+    run("build_company_long_term_profiles.py", "--date", report_date)
+    run("collect_korea_company_exposure.py", "--date", report_date)
+    run("build_company_korea_transmission.py", "--date", report_date)
     pause_between_alpha_vantage_stages()
     run("collect_company_earnings_events.py", "--date", report_date)
     pause_between_alpha_vantage_stages()
@@ -339,7 +347,18 @@ def main() -> None:
         "--post-earnings-deep-dive-file", f"workspace/company_earnings_deep_dive/{report_date}/company_earnings_deep_dive.json",
         "--formal-thesis-updates-file", f"workspace/company_thesis_updates/{report_date}/company_thesis_update.json",
     )
-    run("analyze_market_snapshot.py", "--date", report_date)
+    market_analysis_args = ["analyze_market_snapshot.py", "--date", report_date]
+    if offline_validation:
+        market_analysis_args.append("--dry-run")
+    run(*market_analysis_args)
+    if offline_validation:
+        print(
+            "Daily brief offline dry run complete. Collection, deterministic build "
+            "stages, and the market-analysis request schema were validated. No OpenAI "
+            "request, report write, Notion page, or alert was created.",
+            flush=True,
+        )
+        return
     run("track_daily_hypotheses.py", "--date", report_date)
     broker_analysis_args = (
         "analyze_broker_research.py",
@@ -368,7 +387,7 @@ def main() -> None:
     run("route_intelligence_tasks.py", "--date", report_date)
     run("build_research_execution_pack.py", "--date", report_date)
     run("compose_v2_reader_report.py", "--date", report_date)
-    run(
+    compose_args = [
         "compose_daily_brief.py", "--date", report_date,
         "--inbox-file", str(triaged_inbox.relative_to(ROOT)),
         "--snapshot-file", f"workspace/snapshots/{report_date}/daily_snapshot.json",
@@ -403,7 +422,17 @@ def main() -> None:
         "--company-thesis-update-file", f"workspace/company_thesis_updates/{report_date}/company_thesis_update.json",
         "--company-thesis-review-calendar-file", f"workspace/company_thesis_review_calendar/{report_date}/company_thesis_review_calendar.json",
         "--company-thesis-review-file", f"workspace/history/company_thesis_reviews/{report_date}.json",
-    )
+    ]
+    if offline_validation:
+        compose_args.append("--dry-run")
+    run(*compose_args)
+    if offline_validation:
+        print(
+            "Daily brief offline dry run complete. Inputs were validated; no OpenAI "
+            "request, report write, Notion page, or alert was created.",
+            flush=True,
+        )
+        return
     brief = f"workspace/briefs/{report_date}_리포트.md"
     display_date = datetime.now(ZoneInfo(timezone_name))
     run(

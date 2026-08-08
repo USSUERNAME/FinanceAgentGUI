@@ -1,0 +1,89 @@
+{
+  "schema_version": "korea_company_exposure_sources.v1",
+  "companies": [
+    {
+      "market": "KR",
+      "ticker": "005930",
+      "company_name": "삼성전자",
+      "sector_id": "semiconductors_ai_compute",
+      "verified_pathway_ids": [
+        "accelerators_memory"
+      ],
+      "exposure_sources": [
+        {
+          "source_id": "samsung-hbm4-commercial-2026",
+          "source_type": "issuer_press_release",
+          "published_at": "2026-02-12",
+          "url": "https://news.samsung.com/global/samsung-ships-industry-first-commercial-hbm4-with-ultimate-performance-for-ai-computing",
+          "evidence_summary": "삼성전자는 HBM4 양산과 고객 대상 상업 출하, HBM 생산능력 확대 계획을 공식 발표했습니다.",
+          "required_term_groups": [
+            ["HBM4"],
+            ["mass production", "mass-producing"],
+            ["shipped commercial products", "commercial products to customers"]
+          ]
+        }
+      ],
+      "relationship_sources": [
+        {
+          "source_id": "samsung-nvidia-gtc-collaboration-2026",
+          "source_type": "issuer_press_release",
+          "published_at": "2026-03-17",
+          "url": "https://news.samsung.com/global/samsung-unveils-hbm4e-showcasing-comprehensive-ai-solutions-nvidia-partnership-and-vision-at-nvidia-gtc-2026",
+          "source_tickers": ["NVDA"],
+          "relationship_scope": "industry_collaboration",
+          "evidence_summary": "삼성전자는 NVIDIA GTC에서 HBM4E와 반도체 엔지니어링 협업을 공식적으로 제시했지만, NVIDIA 대상 HBM 직접 공급 근거로는 사용하지 않습니다.",
+          "required_term_groups": [
+            ["NVIDIA"],
+            ["HBM4E"],
+            ["partnership", "collaboration"]
+          ]
+        }
+      ]
+    },
+    {
+      "market": "KR",
+      "ticker": "000660",
+      "company_name": "SK하이닉스",
+      "sector_id": "semiconductors_ai_compute",
+      "verified_pathway_ids": [
+        "accelerators_memory"
+      ],
+      "exposure_sources": [
+        {
+          "source_id": "skhynix-hbm4-production-2025",
+          "source_type": "issuer_press_release",
+          "published_at": "2025-09-12",
+          "url": "https://news.skhynix.com/sk-hynix-completes-worlds-first-hbm4-development-and-readies-mass-production/",
+          "evidence_summary": "SK하이닉스는 HBM4 개발 완료와 양산 체계 준비를 공식 발표했습니다.",
+          "required_term_groups": [
+            ["HBM4"],
+            ["mass production"],
+            ["customers", "customer"]
+          ]
+        }
+      ],
+      "relationship_sources": [
+        {
+          "source_id": "skhynix-nvidia-multiyear-partnership-2026",
+          "source_type": "joint_company_announcement",
+          "published_at": "2026-06-07",
+          "url": "https://news.skhynix.com/multi-year-tech-partnership-with-nvidia/",
+          "source_tickers": ["NVDA"],
+          "relationship_scope": "direct_supply_or_codevelopment",
+          "evidence_summary": "SK하이닉스와 NVIDIA는 차세대 메모리 공동개발과 공급을 포함하는 다년 기술 파트너십을 공식 발표했습니다.",
+          "required_term_groups": [
+            ["NVIDIA"],
+            ["multi-year technology partnership"],
+            ["co-developing", "co-development"],
+            ["supply"]
+          ]
+        }
+      ]
+    }
+  ],
+  "policy": {
+    "primary_sources_only": true,
+    "missing_terms_fail_closed": true,
+    "industry_collaboration_is_not_direct_supply": true
+  }
+}

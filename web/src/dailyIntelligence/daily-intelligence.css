@@ -902,6 +902,231 @@
   background: #6388c0;
 }
 
+.daily-intelligence-long-term-card {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #dce3ec;
+}
+
+.daily-intelligence-long-term-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.daily-intelligence-long-term-card > header em {
+  color: #2f6fca;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.daily-intelligence-long-term-verdicts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.daily-intelligence-long-term-verdicts article {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid #dce3ec;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.daily-intelligence-long-term-verdicts span,
+.daily-intelligence-long-term-verdicts small,
+.daily-intelligence-long-term-metrics dt {
+  color: #718096;
+}
+
+.daily-intelligence-long-term-verdicts small {
+  line-height: 1.45;
+}
+
+.daily-intelligence-long-term-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.daily-intelligence-long-term-metrics div {
+  display: grid;
+  gap: 3px;
+}
+
+.daily-intelligence-long-term-metrics dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.daily-intelligence-judgment-policy {
+  margin: 10px 0;
+  border: 1px solid #dce3ec;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+}
+
+.daily-intelligence-judgment-policy > header,
+.daily-intelligence-judgment-policy h4,
+.daily-intelligence-judgment-policy li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.daily-intelligence-judgment-policy > header small,
+.daily-intelligence-judgment-policy h4 span,
+.daily-intelligence-judgment-policy > p {
+  color: #718096;
+}
+
+.daily-intelligence-korea-transmissions {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.daily-intelligence-korea-transmissions > article {
+  border: 1px solid #dce3ec;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 11px;
+}
+
+.daily-intelligence-korea-transmissions header,
+.daily-intelligence-korea-transmissions header > div,
+.daily-intelligence-korea-transmissions li > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.daily-intelligence-korea-transmissions header > div {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.daily-intelligence-korea-transmissions header span,
+.daily-intelligence-korea-transmissions small {
+  color: #718096;
+  font-size: 9px;
+}
+
+.daily-intelligence-korea-transmissions header em,
+.daily-intelligence-korea-transmissions li > div span {
+  border-radius: 999px;
+  background: #fff4d6;
+  padding: 3px 7px;
+  color: #8a5a00;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.daily-intelligence-korea-transmissions header em.is-ready,
+.daily-intelligence-korea-transmissions li > div span.is-direct {
+  background: #e7f5ec;
+  color: #23714b;
+}
+
+.daily-intelligence-korea-transmissions li > div span.is-industry {
+  background: #eaf2ff;
+  color: #2f63a5;
+}
+
+.daily-intelligence-korea-transmissions ul {
+  display: grid;
+  gap: 7px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.daily-intelligence-korea-transmissions li {
+  border-top: 1px solid #e3e9f0;
+  padding-top: 7px;
+}
+
+.daily-intelligence-korea-transmissions p {
+  margin: 5px 0 0;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.daily-intelligence-korea-transmissions li > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 5px;
+  color: #2f63a5;
+  font-size: 9px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.daily-intelligence-judgment-policy > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.daily-intelligence-judgment-policy article {
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 8px;
+}
+
+.daily-intelligence-judgment-policy h4 {
+  margin: 0 0 6px;
+  font-size: 10px;
+}
+
+.daily-intelligence-judgment-policy ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.daily-intelligence-judgment-policy li {
+  justify-content: flex-start;
+  font-size: 9px;
+}
+
+.daily-intelligence-judgment-policy li b {
+  min-width: 24px;
+  color: #9a6700;
+}
+
+.daily-intelligence-judgment-policy li.is-met b {
+  color: #23714b;
+}
+
+.daily-intelligence-judgment-policy > p {
+  margin: 8px 0 0;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+@media (max-width: 900px) {
+  .daily-intelligence-long-term-verdicts,
+  .daily-intelligence-long-term-metrics,
+  .daily-intelligence-judgment-policy > div {
+    grid-template-columns: 1fr;
+  }
+}
+
 .daily-intelligence-constituent-breadth {
   margin: 0 0 16px;
   border: 1px solid #dfe6ef;

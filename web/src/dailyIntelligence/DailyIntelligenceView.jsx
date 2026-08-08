@@ -2877,6 +2877,15 @@ function EarningsWatch({ earningsWatch }) {
     <div className="daily-intelligence-finding-list">
       {companies.map((company) => {
         const latest = company.historicalSurprises?.[0];
+        const longTerm = company.longTermAnalysis || {};
+        const financial = longTerm.financialSummary || {};
+        const framework = longTerm.judgmentFramework || {};
+        const decisionRows = [
+          ["기업의 질", framework.decisions?.companyQuality],
+          ["현재 주식 매력", framework.decisions?.stockAttractiveness],
+          ["포트폴리오 적합성", framework.decisions?.portfolioFit],
+        ].filter(([, decision]) => decision?.requiredCount);
+        const hasLongTerm = Boolean(longTerm.companyQuality?.status);
         return (
           <article key={company.ticker || company.companyName}>
             <h3>{[company.ticker, company.companyName].filter(Boolean).join(" · ")}</h3>
@@ -2912,6 +2921,76 @@ function EarningsWatch({ earningsWatch }) {
               <p className="daily-intelligence-muted">
                 발표 후 동일 기간 갱신 전망치 대기
               </p>
+            ) : null}
+            {hasLongTerm ? (
+              <section className="daily-intelligence-long-term-card">
+                <header>
+                  <strong>장기투자 점검</strong>
+                  <em>{longTerm.action?.grade || "관망"}</em>
+                </header>
+                <div className="daily-intelligence-long-term-verdicts">
+                  <article>
+                    <span>기업의 질</span>
+                    <strong>{longTerm.companyQuality?.label || "평가 보류"}</strong>
+                    <small>{longTerm.companyQuality?.reason}</small>
+                  </article>
+                  <article>
+                    <span>현재 주식 매력</span>
+                    <strong>{longTerm.stockAttractiveness?.label || "평가 보류"}</strong>
+                    <small>{longTerm.stockAttractiveness?.reason}</small>
+                  </article>
+                  <article>
+                    <span>포트폴리오 적합성</span>
+                    <strong>{longTerm.portfolioFit?.label || "평가 보류"}</strong>
+                    <small>{longTerm.portfolioFit?.reason}</small>
+                  </article>
+                </div>
+                <dl className="daily-intelligence-long-term-metrics">
+                  <div><dt>영업이익 CAGR</dt><dd>{signed(financial.operating_income_cagr_pct, 1, "%")}</dd></div>
+                  <div><dt>FCF CAGR</dt><dd>{signed(financial.fcf_cagr_pct, 1, "%")}</dd></div>
+                  <div><dt>FCF 전환율</dt><dd>{signed(financial.median_fcf_conversion_pct, 1, "%")}</dd></div>
+                  <div><dt>희석주식수 변화</dt><dd>{signed(financial.diluted_share_count_change_pct, 1, "%")}</dd></div>
+                </dl>
+                {decisionRows.length ? (
+                  <section className="daily-intelligence-judgment-policy">
+                    <header>
+                      <strong>{framework.policyName || "판단 원칙"}</strong>
+                      <small>사실 → 계산 → 판단 → 조건부 행동</small>
+                    </header>
+                    <div>
+                      {decisionRows.map(([label, decision]) => (
+                        <article key={label}>
+                          <h4>
+                            {label}
+                            <span>{decision.metCount}/{decision.requiredCount}</span>
+                          </h4>
+                          <ul>
+                            {(decision.gates || []).map((gate) => (
+                              <li className={gate.status === "met" ? "is-met" : "is-missing"} key={gate.gateId}>
+                                <b>{gate.status === "met" ? "확인" : "대기"}</b>
+                                <span>{gate.label}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </article>
+                      ))}
+                    </div>
+                    {longTerm.action?.nextRequiredEvidence?.length ? (
+                      <p>
+                        <b>다음 근거</b> {longTerm.action.nextRequiredEvidence.slice(0, 4).join(" · ")}
+                      </p>
+                    ) : null}
+                  </section>
+                ) : null}
+                <p className="daily-intelligence-muted">
+                  {longTerm.qualityGate?.status === "ready"
+                    ? "5개년 핵심 재무 확인"
+                    : `장기 데이터 보강: ${(longTerm.qualityGate?.missing || []).join(" · ") || "확인 중"}`}
+                  {longTerm.scorecard?.overallScore == null
+                    ? ` · 100점 환산 보류 (${longTerm.scorecard?.scoredPoints || 0}/${longTerm.scorecard?.scoredMax || 0}만 검증)`
+                    : ` · 기업점수 ${longTerm.scorecard.overallScore}`}
+                </p>
+              </section>
             ) : null}
           </article>
         );
@@ -6797,6 +6876,47 @@ export default function DailyIntelligenceView({
             <StatusPill status={koreaStatus} />
           </div>
           <MarkdownText text={report.koreaConnection.summary} />
+          {report.koreaConnection.companyTransmissions?.length ? (
+            <div className="daily-intelligence-korea-transmissions">
+              {report.koreaConnection.companyTransmissions.map((transmission) => (
+                <article key={`${transmission.sourceTicker}-${transmission.sectorNameKo}`}>
+                  <header>
+                    <div>
+                      <span>{transmission.sourceTicker} → 한국</span>
+                      <strong>{transmission.sectorNameKo || "산업 연결"}</strong>
+                    </div>
+                    <em className={transmission.marketConfirmationStatus === "ready" ? "is-ready" : "is-blocked"}>
+                      {transmission.marketConfirmationStatus === "ready" ? "시장 확인" : "시장 확인 대기"}
+                    </em>
+                  </header>
+                  {transmission.sourceSignalLabel ? (
+                    <p><b>미국 기업 신호</b> {transmission.sourceSignalLabel}</p>
+                  ) : null}
+                  <ul>
+                    {(transmission.targets || []).map((target) => (
+                      <li key={`${transmission.sourceTicker}-${target.ticker}`}>
+                        <div>
+                          <strong>{target.ticker} · {target.companyName}</strong>
+                          <span className={`is-${target.classification || "watch_candidate"}`}>
+                            {target.classificationLabel || "관찰 후보"}
+                          </span>
+                        </div>
+                        <p>{target.reason}</p>
+                        {target.nextRequiredEvidence?.length ? (
+                          <small>다음 근거: {target.nextRequiredEvidence.join(" · ")}</small>
+                        ) : null}
+                        {target.sourceUrls?.[0] ? (
+                          <a href={target.sourceUrls[0]} target="_blank" rel="noreferrer">
+                            공식 근거 열기 <ArrowUpRight size={12} />
+                          </a>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </article>
+              ))}
+            </div>
+          ) : null}
         </section>
 
         <section className="daily-intelligence-panel">

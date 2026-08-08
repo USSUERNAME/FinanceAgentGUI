@@ -86,7 +86,9 @@ CONTENT_PATTERNS = (
         "error",
         re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"),
     ),
-    FindingPattern("openai-api-key", "error", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b")),
+    # Avoid treating public SK hynix article slugs as OpenAI credentials while
+    # retaining the normal sk- and sk-proj- secret signatures.
+    FindingPattern("openai-api-key", "error", re.compile(r"\bsk-(?!hynix-)(?:proj-)?[A-Za-z0-9_-]{20,}\b", re.IGNORECASE)),
     FindingPattern("github-token", "error", re.compile(r"\bgh[opusr]_[A-Za-z0-9]{20,}\b")),
     FindingPattern("aws-access-key", "error", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")),
     FindingPattern("google-api-key", "error", re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b")),
