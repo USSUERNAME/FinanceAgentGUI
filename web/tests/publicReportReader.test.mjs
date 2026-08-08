@@ -225,6 +225,20 @@ test("static reader localizes the market scoreboard for Korean readers", async (
   assert.doesNotMatch(source, /"Breadth·변동성·신용·금리·규칙 기반 신호"/);
 });
 
+test("static reader localizes nested intelligence metadata and preserves original titles", async () => {
+  const source = await readFile(join(templateDir, "app.js"), "utf8");
+  assert.match(source, /schema_version: "스키마 버전"/);
+  assert.match(source, /collection_status: "수집 상태"/);
+  assert.match(source, /market_cutoff: "시장 데이터 기준"/);
+  assert.match(source, /priority_score: "종합 우선순위 점수"/);
+  assert.match(source, /source_policy: "출처 정책"/);
+  assert.match(source, /adjacent_close_context_not_causal: "인접 종가 참고값이며 인과관계 아님"/);
+  assert.match(source, /event\.topicTags\.forEach\(\(tag\) => tags\.append\(element\("span", "", valueLabel\(tag\)\)\)\)/);
+  assert.match(source, /entry\.kind && valueLabel\(entry\.kind\)/);
+  assert.match(source, /koreanSummaryForTitle\(event\.title, event\.commonFacts \|\| \[\]\)/);
+  assert.match(source, /heading\.append\(element\("strong", "", event\.title \|\| event\.eventId\)\)/);
+});
+
 test("static reader renders intelligence as a visual dashboard", async () => {
   const source = await readFile(join(templateDir, "app.js"), "utf8");
   const css = await readFile(join(templateDir, "styles.css"), "utf8");
