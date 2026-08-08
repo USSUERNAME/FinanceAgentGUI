@@ -1903,7 +1903,7 @@ function readCollectionPromptTemplate() {
   ].join("\n");
 }
 
-function buildBriefGenerationPrompt({ preflight, feedScan }) {
+export function buildBriefGenerationPrompt({ preflight, feedScan }) {
   return [
     readCollectionPromptTemplate().trim(),
     "",
@@ -1930,6 +1930,10 @@ function buildBriefGenerationPrompt({ preflight, feedScan }) {
     "- FEED 단독으로 불확실한 항목은 제외하거나 importance를 낮춘다.",
     "- 어닝, 가이던스, 정책, 중앙은행, 지정학, 공급망, 자본배분, 산업 실행 신호를 우선한다.",
     "- 중복 헤드라인은 하나의 durable brief로 압축한다.",
+    "- 기존 story는 사건 대상, 인과관계, 시장 전달경로가 모두 같은 후속 보도일 때만 재사용한다.",
+    "- 기관명이나 Treasury·금리·제재 같은 단어가 겹치는 것만으로 story를 연결하지 않는다.",
+    "- 적합한 기존 story가 불명확하면 story, story_thesis, story_checkpoint를 빈 문자열로 둔다.",
+    "- 제재·자금세탁·암호화폐 우회결제 단속은 국채 발행·재무부 바이백 story와 분리한다.",
     "",
     "사전 월드 메모리 상태:",
     preflight,
