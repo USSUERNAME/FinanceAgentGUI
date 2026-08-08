@@ -124,7 +124,8 @@ function valueLabel(value) {
     return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 4 }).format(value);
   }
   const normalized = String(value ?? "");
-  return FIELD_VALUES[normalized] || normalized.replaceAll("_", " ");
+  const readable = normalized.replaceAll("_", " ");
+  return FIELD_VALUES[normalized] || FIELD_VALUES[readable] || readable;
 }
 
 function fieldLabel(key) {
