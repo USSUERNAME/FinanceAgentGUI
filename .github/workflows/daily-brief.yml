@@ -292,6 +292,17 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Prepare sanitized World Memory snapshot
+        if: steps.brief.outcome == 'success' && vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        working-directory: .
+        env:
+          PRIVATE_READER_WORLD_MEMORY_JSON: ${{ secrets.PRIVATE_READER_WORLD_MEMORY_JSON }}
+        run: |
+          mkdir -p .generated
+          if [ -n "$PRIVATE_READER_WORLD_MEMORY_JSON" ]; then
+            printf '%s' "$PRIVATE_READER_WORLD_MEMORY_JSON" > .generated/private-reader-world-memory.json
+          fi
+
       - name: Build private mobile reader
         if: steps.brief.outcome == 'success'
         working-directory: .
@@ -300,6 +311,8 @@ jobs:
         run: |
           args=(
             --input pipeline/pb-daily-market-brief/workspace/v2_reader_reports
+            --intelligence pipeline/pb-daily-market-brief/workspace/intelligence
+            --world-memory .generated/private-reader-world-memory.json
             --output .generated/cloudflare-report-reader
             --previous .reader-public-history/reports.json
           )
@@ -406,12 +419,24 @@ jobs:
           restore-keys: |
             private-reader-history-
 
+      - name: Prepare sanitized World Memory snapshot
+        if: vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        env:
+          PRIVATE_READER_WORLD_MEMORY_JSON: ${{ secrets.PRIVATE_READER_WORLD_MEMORY_JSON }}
+        run: |
+          mkdir -p .generated
+          if [ -n "$PRIVATE_READER_WORLD_MEMORY_JSON" ]; then
+            printf '%s' "$PRIVATE_READER_WORLD_MEMORY_JSON" > .generated/private-reader-world-memory.json
+          fi
+
       - name: Build private mobile reader
         env:
           REPORTS_PROTECTED: ${{ vars.CLOUDFLARE_REPORTS_PROTECTED }}
         run: |
           args=(
             --input pipeline/pb-daily-market-brief/workspace/v2_reader_reports
+            --intelligence pipeline/pb-daily-market-brief/workspace/intelligence
+            --world-memory .generated/private-reader-world-memory.json
             --output .generated/cloudflare-report-reader
             --previous .reader-public-history/reports.json
           )

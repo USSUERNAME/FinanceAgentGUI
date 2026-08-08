@@ -12,26 +12,31 @@
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <div>
+        <div class="brand-block">
           <span class="eyebrow">PRIVATE RESEARCH READER</span>
           <strong>PB Daily Intelligence</strong>
         </div>
-        <span class="secure-badge">읽기 전용</span>
+        <nav id="view-tabs" class="view-tabs" aria-label="리서치 보기">
+          <button type="button" data-view="brief" class="is-active">데일리 브리프</button>
+          <button type="button" data-view="intelligence">전체 인텔리전스</button>
+          <button type="button" data-view="world-memory">월드 메모리</button>
+        </nav>
+        <span class="secure-badge">인증 전용</span>
       </header>
 
       <aside class="library-panel" aria-label="리포트 보관함">
         <div class="library-heading">
           <div>
-            <span class="eyebrow">ARCHIVE</span>
-            <h1>리포트 보관함</h1>
+            <span id="library-eyebrow" class="eyebrow">ARCHIVE</span>
+            <h1 id="library-title">리포트 보관함</h1>
           </div>
           <span id="report-count" class="report-count">0</span>
         </div>
         <label class="search-box">
-          <span class="sr-only">보고서 검색</span>
+          <span class="sr-only">리포트 검색</span>
           <input id="report-search" type="search" placeholder="날짜·제목·종목 검색" autocomplete="off" />
         </label>
-        <nav id="report-list" class="report-list" aria-label="보고서 날짜 목록"></nav>
+        <nav id="report-list" class="report-list" aria-label="리포트 날짜 목록"></nav>
       </aside>
 
       <main id="reader" class="reader" tabindex="-1" aria-live="polite">
