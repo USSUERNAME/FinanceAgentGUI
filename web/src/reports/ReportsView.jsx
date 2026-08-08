@@ -10,6 +10,13 @@ import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
 import { PortfolioEChart } from "../portfolio/PortfolioEChart.jsx";
 import { MarkdownText } from "../utils/MarkdownText.jsx";
 
+const REPORT_TYPE_FILTERS = [
+  { value: "all", label: "전체" },
+  { value: "pb_daily", label: "PB 데일리" },
+  { value: "world_memory", label: "World Memory" },
+  { value: "analysis", label: "분석 보고서" },
+];
+
 function reportSearchText(report = {}) {
   return [
     report.title,
@@ -359,19 +366,23 @@ function ReportListItem({ report, selected, onSelect, onDelete, deleting = false
             <span key={tag}>{tag}</span>
           ))}
         </span>
-        <button
-          className="report-delete-button"
-          type="button"
-          aria-label={`${report.title} 삭제`}
-          title="삭제"
-          onClick={(event) => {
-            event.stopPropagation();
-            onDelete(report);
-          }}
-          disabled={deleting}
-        >
-          {deleting ? <LoaderCircle size={15} strokeWidth={2.2} /> : <Trash2 size={15} strokeWidth={2.1} />}
-        </button>
+        {report.deletable !== false ? (
+          <button
+            className="report-delete-button"
+            type="button"
+            aria-label={`${report.title} 삭제`}
+            title="삭제"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete(report);
+            }}
+            disabled={deleting}
+          >
+            {deleting ? <LoaderCircle size={15} strokeWidth={2.2} /> : <Trash2 size={15} strokeWidth={2.1} />}
+          </button>
+        ) : (
+          <span className="report-auto-archive-badge" title="PB 엔진 원본에서 자동 보관됨">자동</span>
+        )}
       </span>
     </article>
   );
@@ -672,6 +683,7 @@ export default function ReportsView({
   const [reportsBusy, setReportsBusy] = useState(true);
   const [reportsError, setReportsError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedType, setSelectedType] = useState("all");
   const [selectedReportId, setSelectedReportId] = useState("");
   const [deletingReportId, setDeletingReportId] = useState("");
   const [deleteCandidate, setDeleteCandidate] = useState(null);
@@ -729,10 +741,19 @@ export default function ReportsView({
   }, [worldMemoryEnabled]);
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
+  const reportTypeCounts = useMemo(() => reports.reduce((counts, report) => {
+    counts.all += 1;
+    const type = report.type || "analysis";
+    counts[type] = (counts[type] || 0) + 1;
+    return counts;
+  }, { all: 0 }), [reports]);
   const filteredReports = useMemo(() => {
-    if (!normalizedQuery) return reports;
-    return reports.filter((report) => reportSearchText(report).includes(normalizedQuery));
-  }, [normalizedQuery, reports]);
+    return reports.filter((report) => {
+      const typeMatches = selectedType === "all" || (report.type || "analysis") === selectedType;
+      const queryMatches = !normalizedQuery || reportSearchText(report).includes(normalizedQuery);
+      return typeMatches && queryMatches;
+    });
+  }, [normalizedQuery, reports, selectedType]);
   const activeReport = filteredReports.find((report) => report.id === selectedReportId) || filteredReports[0] || null;
 
   useEffect(() => {
@@ -862,7 +883,7 @@ export default function ReportsView({
   }, [isSending, onResearchPrompt, selectedScoutIssue]);
 
   const requestDeleteReport = useCallback((report) => {
-    if (!report?.id) return;
+    if (!report?.id || report.deletable === false) return;
     setReportsError("");
     setDeleteCandidate(report);
   }, []);
@@ -930,6 +951,24 @@ export default function ReportsView({
             </button>
           ) : null}
         </header>
+
+        <div className="reports-type-filters" aria-label="보고서 유형 필터">
+          {REPORT_TYPE_FILTERS.map((filter) => (
+            <button
+              className={selectedType === filter.value ? "is-active" : ""}
+              type="button"
+              aria-pressed={selectedType === filter.value}
+              onClick={() => {
+                setSelectedType(filter.value);
+                setScoutStage("idle");
+              }}
+              key={filter.value}
+            >
+              <span>{filter.label}</span>
+              <small>{reportTypeCounts[filter.value] || 0}</small>
+            </button>
+          ))}
+        </div>
 
         <form className="reports-search-form" role="search" onSubmit={submitSearch}>
           <Search size={16} strokeWidth={2.1} aria-hidden="true" />

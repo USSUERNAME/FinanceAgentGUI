@@ -352,7 +352,8 @@ test("world memory collection cutoff is captured before report completion", () =
   assert.equal(collector.lastSuccessfulAt, "2026-07-05T12:20:00.000Z");
   assert.equal(collector.lastFinishedAt, "2026-07-05T12:45:00.000Z");
   assert.equal(collector.lastReportSuccessfulAt, "2026-07-05T12:45:00.000Z");
-  assert.match(collector.lastAction, /신규 후보 6건/);
+  assert.match(collector.lastAction, /수집·분석 완료/u);
+  assert.match(collector.lastAction, /신규 브리프 6건/u);
   assert.equal(collector.attempt, 2);
 });
 

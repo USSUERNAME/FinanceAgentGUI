@@ -45,12 +45,32 @@ function configuredReportDirs() {
   return [...new Set([DATA_REPORTS_DIR, GUIBUILD_REPORTS_DIR, ...envDirs])];
 }
 
+function pbReaderReportDir() {
+  const configured = String(process.env.PB_DAILY_INTELLIGENCE_DIR || "").trim();
+  if (!configured) return "";
+  const workspace = resolve(configured);
+  return basename(workspace).toLowerCase() === "v2_reader_reports"
+    ? workspace
+    : join(workspace, "v2_reader_reports");
+}
+
+function isPathWithin(root, filePath) {
+  if (!root) return false;
+  const rel = relative(resolve(root), resolve(filePath));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function isPbReaderReportPath(filePath) {
+  const root = pbReaderReportDir();
+  return Boolean(root) && basename(filePath).toLowerCase() === "reader_report.json" && isPathWithin(root, filePath);
+}
+
 function hashText(value) {
   return createHash("sha256").update(String(value)).digest("hex");
 }
 
 function reportIdForPath(path) {
-  return `report_${hashText(safeRelativePath(path)).slice(0, 18)}`;
+  return `report_${hashText(resolve(path).toLowerCase()).slice(0, 18)}`;
 }
 
 function safeRelativePath(path) {
@@ -557,8 +577,141 @@ function sectionFromChart(chart, index) {
   };
 }
 
+function markdownList(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      if (typeof item === "string") return `- ${cleanText(item)}`;
+      const source = item && typeof item === "object" ? item : {};
+      const title = cleanText(source.title || source.label || source.name || source.event || "항목");
+      const body = cleanText(source.body || source.summary || source.note || source.description || source.status || "");
+      return `- **${title}**${body ? ` — ${body}` : ""}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+const PB_FIELD_LABELS = Object.freeze({
+  status: "상태",
+  summary: "요약",
+  companies: "기업",
+  labels: "표기 기준",
+  metrics: "지표",
+  company_count: "기업 수",
+  confirmed_event_count: "확인된 이벤트 수",
+  estimate_revision_count: "추정치 변경 수",
+  guidance_count: "가이던스 수",
+  verified_result_count: "검증된 실적 수",
+  latest_price_as_of: "최신 가격 기준일",
+  verified_event_count: "검증된 이벤트 수",
+  korea_data_status: "한국 데이터 상태",
+  warnings: "주의사항",
+  estimate: "추정치",
+  guidance: "가이던스",
+  result: "실제치",
+});
+
+const PB_FIELD_VALUES = Object.freeze({
+  awaiting_company_profiles: "기업 프로필 대기",
+  insufficient: "데이터 부족",
+});
+
+function pbFieldLabel(key) {
+  return PB_FIELD_LABELS[key] || cleanText(key).replace(/_/g, " ");
+}
+
+function pbFieldValue(value) {
+  if (typeof value === "boolean") return value ? "예" : "아니오";
+  if (typeof value === "number") return String(value);
+  const normalized = cleanText(value);
+  return PB_FIELD_VALUES[normalized] || normalized.replace(/_/g, " ");
+}
+
+function objectAsMarkdown(value = {}, depth = 0) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return pbFieldValue(value);
+  const indent = "  ".repeat(depth);
+  return Object.entries(value)
+    .filter(([, item]) => item !== undefined && item !== null && item !== "" && (!Array.isArray(item) || item.length))
+    .flatMap(([key, item]) => {
+      const label = pbFieldLabel(key);
+      if (Array.isArray(item)) {
+        const simpleItems = item.filter((entry) => typeof entry !== "object");
+        const objectItems = item.filter((entry) => entry && typeof entry === "object");
+        const lines = simpleItems.length ? [`${indent}- **${label}**: ${simpleItems.map(pbFieldValue).join(", ")}`] : [`${indent}- **${label}**`];
+        objectItems.forEach((entry) => lines.push(objectAsMarkdown(entry, depth + 1)));
+        return lines;
+      }
+      if (typeof item === "object") {
+        return [`${indent}- **${label}**`, objectAsMarkdown(item, depth + 1)];
+      }
+      return [`${indent}- **${label}**: ${pbFieldValue(item)}`];
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function analystResearchMarkdown(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const source = item && typeof item === "object" ? item : {};
+      const publisher = cleanText(source.publisher || "리서치");
+      const title = cleanText(source.title || source.report_id || "제목 없음");
+      const meta = [source.analyst, source.report_type, source.stance].map(cleanText).filter(Boolean).join(" · ");
+      const lines = [`### ${publisher} · ${title}`];
+      if (meta) lines.push(meta);
+      if (source.summary) lines.push(cleanText(source.summary));
+      if (Array.isArray(source.key_claims) && source.key_claims.length) lines.push(`**핵심 주장**\n${markdownList(source.key_claims)}`);
+      if (Array.isArray(source.catalysts) && source.catalysts.length) lines.push(`**촉매**\n${markdownList(source.catalysts)}`);
+      if (Array.isArray(source.risks) && source.risks.length) lines.push(`**위험**\n${markdownList(source.risks)}`);
+      const url = cleanText(source.source?.url || "");
+      if (url) lines.push(`[원문 링크](${url})`);
+      return lines.join("\n\n");
+    })
+    .join("\n\n---\n\n");
+}
+
+export function parsePbDailyReaderReport(input, filePath = "reader_report.json") {
+  const parsed = typeof input === "string" ? JSON.parse(input) : input;
+  const executiveSummary = Array.isArray(parsed?.executive_summary) ? parsed.executive_summary : [];
+  const sources = (Array.isArray(parsed?.sources) ? parsed.sources : [])
+    .map((source) => {
+      const title = cleanText(source?.title || source?.source_id || "출처");
+      const url = cleanText(source?.url || "");
+      const asOf = cleanText(source?.as_of || "");
+      return `- ${url ? `[${title}](${url})` : title}${asOf ? ` · ${asOf}` : ""}`;
+    })
+    .join("\n");
+  const sections = [
+    executiveSummary.length ? { heading: "핵심 요약", body: markdownList(executiveSummary) } : null,
+    parsed?.market_findings?.length ? { heading: "시장 판단", body: markdownList(parsed.market_findings) } : null,
+    parsed?.today_changes?.length ? { heading: "오늘의 변화", body: markdownList(parsed.today_changes) } : null,
+    parsed?.verified_events?.length ? { heading: "검증된 이벤트", body: markdownList(parsed.verified_events) } : null,
+    parsed?.analyst_research?.length ? { heading: "애널리스트 리서치", body: analystResearchMarkdown(parsed.analyst_research) } : null,
+    parsed?.earnings_watch ? { heading: "실적 관찰", body: objectAsMarkdown(parsed.earnings_watch) } : null,
+    parsed?.korea_connection ? { heading: "한국 시장 연결", body: objectAsMarkdown(parsed.korea_connection) } : null,
+    parsed?.next_checks?.length ? { heading: "다음 확인", body: markdownList(parsed.next_checks) } : null,
+    parsed?.data_status ? { heading: "데이터 상태", body: objectAsMarkdown(parsed.data_status) } : null,
+    sources ? { heading: "출처", body: sources } : null,
+  ].filter((section) => section?.body);
+  const analystTags = (Array.isArray(parsed?.analyst_research) ? parsed.analyst_research : [])
+    .flatMap((item) => [...(item?.tickers || []), ...(item?.sectors || [])])
+    .map(cleanText)
+    .filter(Boolean);
+  return {
+    title: cleanText(parsed?.title || (parsed?.report_date ? `${parsed.report_date} Daily Market Intelligence` : titleFromFilename(filePath))),
+    summary: excerpt(executiveSummary[0] || parsed?.market_findings?.[0]?.body || "PB 데일리 리포트", 220).replace(/[*_`]/g, ""),
+    preamble: "",
+    tags: [...new Set(["PB", "데일리", ...analystTags])].slice(0, 5),
+    sections,
+    reportDate: cleanText(parsed?.report_date || ""),
+    generatedAt: cleanText(parsed?.generated_at || ""),
+  };
+}
+
 function parseJsonReport(content, filePath) {
   const parsed = JSON.parse(content);
+  if (parsed?.schema_version === "v2_reader_report.v1") {
+    return parsePbDailyReaderReport(parsed, filePath);
+  }
   const chartSections = (Array.isArray(parsed.charts) ? parsed.charts : [])
     .map((chart, index) => sectionFromChart(chart, index))
     .filter(Boolean);
@@ -654,25 +807,37 @@ async function readReportFile(filePath) {
   const parsed = parseReportContent(content.slice(0, MAX_REPORT_BYTES), filePath);
   const relPath = safeRelativePath(filePath);
   const isWorldMemoryReport = relPath.includes("world-memory");
+  const isPbDailyReport = isPbReaderReportPath(filePath);
+  const parsedGeneratedAt = parsed.generatedAt ? new Date(parsed.generatedAt) : null;
+  const updatedAtDate = parsedGeneratedAt && !Number.isNaN(parsedGeneratedAt.getTime()) ? parsedGeneratedAt : info.mtime;
   return {
     id: reportIdForPath(filePath),
     title: parsed.title || titleFromFilename(filePath),
-    category: isWorldMemoryReport ? "World Memory" : "보고서",
-    updatedAt: formatUpdatedAt(info.mtime),
-    updatedAtIso: info.mtime.toISOString(),
-    author: isWorldMemoryReport ? "World Memory" : "FinanceAgent",
+    category: isPbDailyReport ? "PB 데일리" : isWorldMemoryReport ? "World Memory" : "분석 보고서",
+    type: isPbDailyReport ? "pb_daily" : isWorldMemoryReport ? "world_memory" : "analysis",
+    updatedAt: formatUpdatedAt(updatedAtDate),
+    updatedAtIso: updatedAtDate.toISOString(),
+    reportDate: parsed.reportDate || "",
+    author: isPbDailyReport ? "PB Daily Intelligence" : isWorldMemoryReport ? "World Memory" : "FinanceAgent",
     summary: parsed.summary || "요약 없음",
     preamble: parsed.preamble || "",
     tags: [...new Set([isWorldMemoryReport ? "World Memory" : "", ...(parsed.tags || [])].filter(Boolean))].slice(0, 5),
     sections: parsed.sections || [],
     size: info.size,
+    deletable: !isPbDailyReport,
+    source: isPbDailyReport ? "pb_daily_intelligence" : "local",
   };
 }
 
 async function scanReportPaths({ dedupe = true } = {}) {
   ensureReportDirs();
   const roots = configuredReportDirs();
-  const files = (await Promise.all(roots.map((root) => walkReportFiles(root)))).flat();
+  const pbRoot = pbReaderReportDir();
+  const localFiles = (await Promise.all(roots.map((root) => walkReportFiles(root)))).flat();
+  const pbFiles = pbRoot
+    ? (await walkReportFiles(pbRoot)).filter((file) => basename(file).toLowerCase() === "reader_report.json")
+    : [];
+  const files = [...new Set([...localFiles, ...pbFiles])];
   return dedupe ? dedupeSiblingFormats(files) : files;
 }
 
@@ -696,6 +861,7 @@ export async function deleteReportFile(reportId) {
   const visibleFiles = dedupeSiblingFormats(files);
   const target = visibleFiles.find((file) => reportIdForPath(file) === reportId);
   if (!target) return { deleted: false, deletedCount: 0 };
+  if (isPbReaderReportPath(target)) return { deleted: false, deletedCount: 0, readonly: true };
 
   const targetStem = target.slice(0, -extname(target).length);
   const siblingFiles = files.filter((file) => file.slice(0, -extname(file).length) === targetStem);
@@ -869,6 +1035,10 @@ export async function handleReportsEndpoint(kind, req, res) {
         return;
       }
       const result = await deleteReportFile(reportId);
+      if (result.readonly) {
+        sendJson(res, { ok: false, error: "PB 자동 보관 리포트는 원본 보호를 위해 삭제할 수 없습니다." }, 403);
+        return;
+      }
       if (!result.deleted) {
         sendJson(res, { ok: false, error: "report not found" }, 404);
         return;

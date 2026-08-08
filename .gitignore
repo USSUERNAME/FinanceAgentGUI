@@ -62,4 +62,5 @@ venv/
 /web/dist/
 /web/test-results/
 /web/.vite/
+/.generated/
 npm-debug.log*
