@@ -220,6 +220,7 @@ test("static reader localizes the market scoreboard for Korean readers", async (
   assert.match(source, /rule_based_signal: "규칙 기반 신호"/);
   assert.match(source, /classification_reason: "판정 이유"/);
   assert.match(source, /mixed: "혼조"/);
+  assert.match(source, /FIELD_VALUES\[readable\]/);
   assert.match(source, /시장 폭·변동성·신용·금리·규칙 기반 신호/);
   assert.doesNotMatch(source, /"Breadth·변동성·신용·금리·규칙 기반 신호"/);
 });
