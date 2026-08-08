@@ -220,6 +220,58 @@ button { -webkit-tap-highlight-color: transparent; }
 .record-row dt { color: #537069; font-size: 12px; font-weight: 800; }
 .record-row dd { margin: 0; color: #3e4c48; font-size: 14px; line-height: 1.65; }
 
+.intelligence-overview { padding-top: 30px; }
+.overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.overview-card { display: grid; align-content: start; min-height: 142px; padding: 20px; overflow: hidden; border: 1px solid #d8e1dd; border-radius: 17px; background: rgba(255, 255, 255, 0.82); }
+.overview-card.is-primary { grid-column: span 2; min-height: 184px; color: #effaf5; border-color: #183e34; background: radial-gradient(circle at 90% 10%, rgba(84, 158, 129, 0.45), transparent 40%), linear-gradient(135deg, #0e2f27, #1c4c3e); }
+.overview-label { color: #658078; font-size: 10px; font-weight: 850; letter-spacing: 0.08em; text-transform: uppercase; }
+.is-primary .overview-label { color: #a9d9c5; }
+.overview-primary-value { margin-top: 14px; font-size: 34px; line-height: 1; letter-spacing: -0.05em; }
+.overview-summary { max-width: 600px; margin: 18px 0 0; color: #d5e8df; font-size: 14px; line-height: 1.7; }
+.overview-value { margin-top: 18px; color: #17372e; font-size: 24px; line-height: 1.15; letter-spacing: -0.035em; }
+.overview-detail { align-self: end; margin-top: 16px; color: #798681; font-size: 11px; line-height: 1.5; }
+.overview-card.tone-positive { border-color: #c7dfd4; background: #f3faf7; }
+.overview-card.tone-warning { border-color: #eadcc4; background: #fffaf0; }
+.evidence-section { padding-top: 28px; }
+
+.scoreboard-signal { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 24px; padding: 22px; border: 1px solid #c9dcd4; border-radius: 18px; background: linear-gradient(145deg, #f7fbf9, #eaf4ef); }
+.scoreboard-signal-copy { min-width: 0; }
+.scoreboard-signal-value { display: block; margin-top: 7px; color: #173a30; font-size: 25px; letter-spacing: -0.04em; }
+.scoreboard-signal-reason { margin: 10px 0 0; color: #5d6c67; font-size: 13px; line-height: 1.6; }
+.scoreboard-signal-score { display: grid; min-width: 86px; place-items: center; align-content: center; padding: 12px; border-radius: 14px; color: #174334; background: #dceee6; }
+.scoreboard-signal-score span { font-size: 10px; font-weight: 800; }
+.scoreboard-signal-score strong { margin-top: 4px; font-size: 28px; line-height: 1; }
+.scoreboard-signal-score small { margin-top: 5px; color: #5a746b; font-size: 9px; }
+.scoreboard-signal-chips { display: flex; grid-column: 1 / -1; flex-wrap: wrap; gap: 7px; }
+.signal-chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid #d1e1da; border-radius: 999px; color: #4f665e; background: rgba(255, 255, 255, 0.72); font-size: 10px; }
+.signal-chip b { font-weight: 750; }
+.signal-chip em { font-style: normal; font-weight: 900; }
+.is-positive { color: #24704f !important; }
+.is-negative { color: #9a4842 !important; }
+
+.scoreboard-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; margin-top: 14px; }
+.scoreboard-card { position: relative; display: grid; min-height: 158px; align-content: start; padding: 19px; overflow: hidden; border: 1px solid #d8e1dd; border-radius: 16px; background: rgba(255, 255, 255, 0.8); }
+.scoreboard-card::before { position: absolute; inset: 0 auto 0 0; width: 4px; background: #91a39c; content: ""; }
+.scoreboard-card.tone-positive::before { background: #3e9b71; }
+.scoreboard-card.tone-warning::before { background: #d39a42; }
+.scoreboard-card.tone-negative::before { background: #c5655d; }
+.scoreboard-card-label { color: #587069; font-size: 11px; font-weight: 800; }
+.scoreboard-card-value { margin-top: 15px; color: #18362e; font-size: 27px; letter-spacing: -0.04em; }
+.scoreboard-card-change { margin-top: 9px; color: #6c7975; font-size: 11px; }
+.scoreboard-card-date { align-self: end; margin-top: 17px; color: #929c98; font-size: 9px; font-weight: 700; }
+
+.relative-panel { display: grid; gap: 11px; margin-top: 14px; padding: 20px; border: 1px solid #d7e0dc; border-radius: 17px; background: #fff; }
+.relative-heading { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 3px; }
+.relative-heading strong { color: #24433a; font-size: 13px; }
+.relative-heading span { color: #8b9692; font-size: 10px; font-weight: 800; }
+.relative-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 58px; align-items: center; gap: 10px; }
+.relative-label { color: #4f625c; font-size: 11px; font-weight: 800; }
+.relative-track { position: relative; height: 10px; overflow: hidden; border-radius: 999px; background: #edf1ef; }
+.relative-track::after { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: #aab6b1; content: ""; }
+.relative-track i { position: absolute; top: 2px; height: 6px; border-radius: 999px; background: #3d9a70; }
+.relative-track i.is-negative { background: #c9675f; }
+.relative-row > strong { font-size: 11px; text-align: right; }
+
 .source-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .source-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; padding-bottom: 10px; border-bottom: 1px dotted #ccd7d2; }
 .source-list a { color: #276d57; font-size: 13px; font-weight: 700; text-underline-offset: 3px; }
@@ -267,7 +319,23 @@ button { -webkit-tap-highlight-color: transparent; }
   .research-card summary { padding: 16px; }
   .research-body { padding: 2px 16px 18px; }
   .record-row { grid-template-columns: 1fr; gap: 4px; }
+  .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-card.is-primary { grid-column: 1 / -1; }
+  .scoreboard-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scoreboard-signal { grid-template-columns: minmax(0, 1fr) 76px; padding: 18px; }
   .source-list li { display: grid; gap: 5px; }
   .signal-grid { grid-template-columns: 1fr; }
   .lead-narrative { font-size: 16px; }
+}
+
+@media (max-width: 430px) {
+  .overview-grid, .scoreboard-card-grid { grid-template-columns: 1fr; }
+  .overview-card.is-primary { grid-column: auto; min-height: 0; }
+  .overview-card { min-height: 128px; }
+  .scoreboard-card { min-height: 148px; }
+  .scoreboard-signal { grid-template-columns: 1fr; }
+  .scoreboard-signal-score { justify-self: start; min-width: 88px; }
+  .scoreboard-signal-chips { margin-top: 8px; }
+  .relative-panel { padding: 17px 14px; }
+  .relative-row { grid-template-columns: 38px minmax(0, 1fr) 52px; gap: 8px; }
 }

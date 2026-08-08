@@ -77,6 +77,9 @@ const FIELD_LABELS = {
 const FIELD_VALUES = {
   awaiting_company_profiles: "기업 프로필 대기",
   insufficient: "데이터 부족",
+  ready: "정상",
+  changed: "변화 있음",
+  not_available: "미제공",
   mixed: "혼조",
   "CBOE VIX": "CBOE 변동성지수(VIX)",
   "CBOE 3-Month Volatility Index": "CBOE 3개월 변동성지수",
@@ -322,20 +325,260 @@ function driverCards(values) {
   return grid;
 }
 
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === "" || typeof value === "boolean") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function metricValue(value) {
+  if (value && typeof value === "object") return finiteNumber(value.value);
+  return finiteNumber(value);
+}
+
+function metricDate(value, fallback = "") {
+  if (value && typeof value === "object" && value.as_of) return value.as_of;
+  return fallback;
+}
+
+function compactNumber(value, digits = 2) {
+  const number = finiteNumber(value);
+  if (number === null) return "자료 없음";
+  return new Intl.NumberFormat("ko-KR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: digits,
+  }).format(number);
+}
+
+function signedNumber(value, digits = 2, suffix = "") {
+  const number = finiteNumber(value);
+  if (number === null) return "자료 없음";
+  return `${number > 0 ? "+" : ""}${compactNumber(number, digits)}${suffix}`;
+}
+
+function appendIntelligenceOverview(parent, intelligence) {
+  const regime = intelligence.market?.regime || {};
+  const cutoff = intelligence.market?.dataCutoff || {};
+  const publicationAllowed = intelligence.sourceQuality?.publication_allowed;
+  const statusReady = publicationAllowed === true || cutoff.status === "ready";
+  const statusText = publicationAllowed === false
+    ? "검토 필요"
+    : statusReady
+      ? "정상"
+      : valueLabel(cutoff.status || "확인 필요");
+  const confidence = finiteNumber(regime.confidence);
+  const node = section("오늘의 시장 대시보드", "핵심 결론과 데이터 상태를 먼저 확인합니다.");
+  node.classList.add("intelligence-overview");
+  const grid = element("div", "overview-grid");
+
+  const regimeCard = element("article", "overview-card is-primary");
+  regimeCard.append(element("span", "overview-label", "시장 국면"));
+  regimeCard.append(element("strong", "overview-primary-value", valueLabel(regime.label || "확인 필요")));
+  if (regime.summary) regimeCard.append(element("p", "overview-summary", regime.summary));
+  grid.append(regimeCard);
+
+  [
+    {
+      label: "판단 신뢰도",
+      value: confidence === null ? "확인 필요" : `${Math.round(confidence * 100)}%`,
+      detail: confidence === null ? "정량 근거 확인 필요" : confidence >= 0.7 ? "높은 신뢰 구간" : confidence >= 0.5 ? "중간 신뢰 구간" : "보수적 해석 필요",
+      tone: confidence !== null && confidence >= 0.7 ? "positive" : "warning",
+    },
+    {
+      label: "검증 이벤트",
+      value: `${intelligence.events?.verifiedPrimaryFactCount || 0}건`,
+      detail: `선정 ${intelligence.events?.selectedCount || 0}건`,
+      tone: intelligence.events?.verifiedPrimaryFactCount ? "positive" : "neutral",
+    },
+    {
+      label: "가격 기준일",
+      value: cutoff.latest_price_as_of || "확인 필요",
+      detail: cutoff.price_basis ? valueLabel(cutoff.price_basis) : "최신 시장 데이터",
+      tone: cutoff.latest_price_as_of ? "neutral" : "warning",
+    },
+    {
+      label: "리포트 상태",
+      value: statusText,
+      detail: statusReady ? "보호된 리더 게시 가능" : "경고와 차단 요인 확인",
+      tone: statusReady ? "positive" : "warning",
+    },
+  ].forEach((item) => {
+    const card = element("article", `overview-card tone-${item.tone}`);
+    card.append(element("span", "overview-label", item.label));
+    card.append(element("strong", "overview-value", item.value));
+    card.append(element("small", "overview-detail", item.detail));
+    grid.append(card);
+  });
+  node.append(grid);
+  parent.append(node);
+}
+
+function scoreboardMetrics(scoreboard) {
+  const breadth = scoreboard?.breadth || {};
+  const volatility = scoreboard?.volatility || {};
+  const credit = scoreboard?.credit || {};
+  const rates = scoreboard?.rates || {};
+  const breadth5d = finiteNumber(breadth.rsp_vs_spy_5d_pct);
+  const vix = metricValue(volatility.vix);
+  const termRatio = finiteNumber(volatility.vix_term_ratio);
+  const creditChange = finiteNumber(credit.high_yield_oas?.change_5_sessions);
+  return [
+    {
+      label: "RSP/SPY 5일",
+      value: breadth5d,
+      unit: "%p",
+      change: finiteNumber(breadth.rsp_vs_spy_1d_pct),
+      changeLabel: "1일",
+      asOf: breadth.as_of,
+      tone: breadth5d === null ? "neutral" : breadth5d >= 0 ? "positive" : "negative",
+    },
+    {
+      label: "VIX",
+      value: vix,
+      unit: "",
+      change: finiteNumber(volatility.vix?.change_1d),
+      changeLabel: "1일",
+      asOf: metricDate(volatility.vix, volatility.as_of),
+      tone: vix !== null && vix < 20 ? "positive" : "warning",
+    },
+    {
+      label: "VIX/3개월물",
+      value: termRatio,
+      unit: "배",
+      change: null,
+      changeLabel: termRatio !== null && termRatio < 1 ? "콘탱고" : "백워데이션",
+      asOf: volatility.as_of,
+      tone: termRatio !== null && termRatio < 1 ? "positive" : "warning",
+    },
+    {
+      label: "하이일드 OAS",
+      value: metricValue(credit.high_yield_oas),
+      unit: "%",
+      change: creditChange,
+      changeLabel: "5거래일",
+      asOf: metricDate(credit.high_yield_oas),
+      tone: creditChange === null ? "neutral" : creditChange <= 0 ? "positive" : "warning",
+    },
+    {
+      label: "미국 10년 명목금리",
+      value: metricValue(rates.nominal_10y),
+      unit: "%",
+      change: finiteNumber(rates.nominal_10y?.change_5_sessions),
+      changeLabel: "5거래일",
+      asOf: metricDate(rates.nominal_10y),
+      tone: "neutral",
+    },
+    {
+      label: "미국 10년 실질금리",
+      value: metricValue(rates.real_10y),
+      unit: "%",
+      change: finiteNumber(rates.real_10y?.change_5_sessions),
+      changeLabel: "5거래일",
+      asOf: metricDate(rates.real_10y),
+      tone: "neutral",
+    },
+  ].filter((item) => item.value !== null);
+}
+
+function relativePerformance(scoreboard) {
+  const breadth = scoreboard?.breadth || {};
+  const participation = scoreboard?.rule_based_signal?.participation || {};
+  return [
+    ["RSP", breadth.rsp_vs_spy_5d_pct],
+    ["QQQ", participation.qqq_vs_spy_5d_pct],
+    ["IWM", participation.iwm_vs_spy_5d_pct],
+    ["GLD", participation.gld_vs_spy_5d_pct],
+  ].map(([label, value]) => ({ label, value: finiteNumber(value) })).filter((item) => item.value !== null);
+}
+
+function appendScoreboard(parent, scoreboard) {
+  if (!scoreboard || typeof scoreboard !== "object") return;
+  const metrics = scoreboardMetrics(scoreboard);
+  if (!metrics.length) return;
+  const node = section("시장 스코어보드", "시장 폭·변동성·신용·금리·상대성과를 한눈에 비교합니다.");
+  node.classList.add("scoreboard-section");
+
+  const signal = scoreboard.rule_based_signal || {};
+  if (Object.keys(signal).length) {
+    const banner = element("article", "scoreboard-signal");
+    const copy = element("div", "scoreboard-signal-copy");
+    copy.append(element("span", "overview-label", "규칙 기반 시장 신호"));
+    copy.append(element("strong", "scoreboard-signal-value", valueLabel(signal.label || "확인 필요")));
+    const reason = valueLabel(signal.classification_reason || signal.note || "상충 신호를 함께 확인합니다.");
+    copy.append(element("p", "scoreboard-signal-reason", reason));
+    banner.append(copy);
+    const score = element("div", "scoreboard-signal-score");
+    score.append(element("span", "", "점수"));
+    score.append(element("strong", "", compactNumber(signal.score, 0)));
+    if (Array.isArray(signal.range) && signal.range.length >= 2) {
+      score.append(element("small", "", `${signal.range[0]} ~ ${signal.range[1]}`));
+    }
+    banner.append(score);
+    const chips = element("div", "scoreboard-signal-chips");
+    (Array.isArray(signal.signals) ? signal.signals : []).forEach((item) => {
+      const chip = element("span", "signal-chip");
+      chip.append(element("b", "", valueLabel(item.label || "신호")));
+      chip.append(element("em", finiteNumber(item.contribution) >= 0 ? "is-positive" : "is-negative", signedNumber(item.contribution, 0)));
+      chips.append(chip);
+    });
+    if (chips.childElementCount) banner.append(chips);
+    node.append(banner);
+  }
+
+  const grid = element("div", "scoreboard-card-grid");
+  metrics.forEach((metric) => {
+    const card = element("article", `scoreboard-card tone-${metric.tone}`);
+    card.append(element("span", "scoreboard-card-label", metric.label));
+    card.append(element("strong", "scoreboard-card-value", `${compactNumber(metric.value)}${metric.unit}`));
+    const detail = metric.change === null
+      ? metric.changeLabel
+      : `${metric.changeLabel} ${signedNumber(metric.change, 2, metric.unit)}`;
+    card.append(element("small", "scoreboard-card-change", detail));
+    if (metric.asOf) card.append(element("time", "scoreboard-card-date", `기준 ${metric.asOf}`));
+    grid.append(card);
+  });
+  node.append(grid);
+
+  const relatives = relativePerformance(scoreboard);
+  if (relatives.length) {
+    const maxValue = Math.max(1, ...relatives.map((item) => Math.abs(item.value)));
+    const panel = element("article", "relative-panel");
+    const heading = element("div", "relative-heading");
+    heading.append(element("strong", "", "SPY 대비 5일 상대성과"));
+    heading.append(element("span", "", "%p"));
+    panel.append(heading);
+    relatives.forEach((item) => {
+      const row = element("div", "relative-row");
+      row.append(element("span", "relative-label", item.label));
+      const track = element("div", "relative-track");
+      const fill = element("i", item.value >= 0 ? "is-positive" : "is-negative");
+      fill.style.width = `${Math.max(3, (Math.abs(item.value) / maxValue) * 48)}%`;
+      fill.style[item.value >= 0 ? "left" : "right"] = "50%";
+      track.append(fill);
+      row.append(track);
+      row.append(element("strong", item.value >= 0 ? "is-positive" : "is-negative", signedNumber(item.value, 2)));
+      panel.append(row);
+    });
+    node.append(panel);
+  }
+  parent.append(node);
+}
+
 function renderIntelligence(intelligence) {
   const article = element("article", "report-document intelligence-document");
   const regime = intelligence.market?.regime || {};
+  const confidence = finiteNumber(regime.confidence);
   article.append(reportHeader({
     eyebrow: "FULL DAILY INTELLIGENCE",
     title: `${intelligence.reportDate} 전체 데일리 인텔리전스`,
     date: intelligence.reportDate,
-    meta: [regime.label && `시장 국면 ${regime.label}`, Number.isFinite(regime.confidence) && `신뢰도 ${regime.confidence}`, `선정 이벤트 ${intelligence.events?.selectedCount || 0}건`],
+    meta: [regime.label && `시장 국면 ${valueLabel(regime.label)}`, confidence !== null && `신뢰도 ${Math.round(confidence * 100)}%`, `선정 이벤트 ${intelligence.events?.selectedCount || 0}건`],
   }));
 
-  if (regime.summary) {
-    const lead = section("시장 국면");
-    lead.classList.add("lead-section");
-    lead.append(element("p", "lead-narrative", regime.summary));
+  appendIntelligenceOverview(article, intelligence);
+  if (regime.quantitative_evidence?.length) {
+    const lead = section("시장 판단 근거");
+    lead.classList.add("evidence-section");
     appendTextList(lead, regime.quantitative_evidence, "compact-list");
     article.append(lead);
   }
@@ -350,7 +593,7 @@ function renderIntelligence(intelligence) {
     appendTextList(node, values, title === "상위 위험" ? "risk-list" : "bullet-list");
     article.append(node);
   });
-  appendRecordSection(article, "시장 스코어보드", intelligence.market?.scoreboard, "시장 폭·변동성·신용·금리·규칙 기반 신호");
+  appendScoreboard(article, intelligence.market?.scoreboard);
   appendRecordSection(article, "전일 대비 변화", intelligence.market?.dayOverDayChanges);
   appendRecordSection(article, "한국 시장 전이", intelligence.market?.koreaTransmission);
 
