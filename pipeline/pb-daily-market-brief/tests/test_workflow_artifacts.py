@@ -6,9 +6,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "daily-brief.yml"
+APP_WORKFLOW = ROOT.parents[1] / ".github" / "workflows" / "daily-brief.yml"
 
 
 class WorkflowArtifactTests(unittest.TestCase):
+    def test_app_workflow_accepts_remote_runner_correlation_id(self) -> None:
+        workflow = APP_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("client_request_id:", workflow)
+        self.assertIn("inputs.client_request_id", workflow)
+
     def test_daily_artifact_preserves_market_input_and_provider_budget(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("workspace/provider_budget/", workflow)
@@ -79,6 +85,26 @@ class WorkflowArtifactTests(unittest.TestCase):
             'COLLECTOR_TIMEOUT_GOOGLE_DRIVE_RESEARCH_INBOX_SECONDS: "300"',
             workflow,
         )
+
+    def test_drive_approval_registry_is_restored_and_removed_ephemerally(self) -> None:
+        workflow = APP_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("Restore Drive approval registry", workflow)
+        self.assertIn(
+            "secrets.GOOGLE_DRIVE_APPROVALS_GZIP_BASE64",
+            workflow,
+        )
+        self.assertIn(
+            'google_drive_broker_research_approvals.v1',
+            workflow,
+        )
+        self.assertIn(
+            'workspace/broker_research_approvals/google_drive.json',
+            workflow,
+        )
+        self.assertIn("Remove ephemeral Drive approval registry", workflow)
+        cleanup = workflow.index("Remove ephemeral Drive approval registry")
+        preserve = workflow.index("Preserve structured evidence and analysis")
+        self.assertLess(cleanup, preserve)
 
     def test_broker_analysis_artifacts_are_preserved_without_cache_payload(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
