@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       run_mode:
-        description: "publish publishes; dry_run is offline evidence validation; verification_dry_run verifies official evidence without publishing; publish_cached reuses a prior artifact"
+        description: "publish publishes; dry_run validates; verification_dry_run verifies; publish_cached reuses an artifact; deploy_reader deploys only the private mobile reader"
         required: true
         default: publish
         type: choice
@@ -13,6 +13,7 @@ on:
           - dry_run
           - verification_dry_run
           - publish_cached
+          - deploy_reader
       source_run_id:
         description: "Required for publish_cached: successful dry-run Actions run ID"
         required: false
@@ -25,9 +26,11 @@ on:
 permissions:
   contents: read
   actions: read
+  deployments: write
 
 jobs:
   publish-brief:
+    if: github.event_name != 'workflow_dispatch' || inputs.run_mode != 'deploy_reader'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -119,6 +122,15 @@ jobs:
           key: ${{ runner.os }}-broker-research-v1-${{ github.run_id }}
           restore-keys: |
             ${{ runner.os }}-broker-research-v1-
+
+      - name: Restore sanitized private-reader history
+        if: vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .reader-public-history/reports.json
+          key: private-reader-history-${{ github.run_id }}
+          restore-keys: |
+            private-reader-history-
 
       - name: Restore Drive ingestion fingerprint state
         if: env.BRIEF_RUN_MODE != 'publish_cached'
@@ -274,6 +286,73 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+      - name: Set up Node for private reader
+        if: steps.brief.outcome == 'success'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build private mobile reader
+        if: steps.brief.outcome == 'success'
+        working-directory: .
+        env:
+          REPORTS_PROTECTED: ${{ vars.CLOUDFLARE_REPORTS_PROTECTED }}
+        run: |
+          args=(
+            --input pipeline/pb-daily-market-brief/workspace/v2_reader_reports
+            --output .generated/cloudflare-report-reader
+            --previous .reader-public-history/reports.json
+          )
+          if [ "$REPORTS_PROTECTED" != "true" ]; then
+            args+=(--locked)
+          fi
+          node scripts/build-public-report-reader.mjs "${args[@]}"
+
+      - name: Ensure Cloudflare Pages project exists
+        if: steps.brief.outcome == 'success'
+        working-directory: .
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          project_url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/finance-agent-reports"
+          status=$(curl --silent --show-error --output /tmp/cloudflare-project.json --write-out "%{http_code}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$project_url")
+          if [ "$status" = "404" ]; then
+            curl --fail-with-body --silent --show-error --request POST \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects" \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --header "Content-Type: application/json" \
+              --data '{"name":"finance-agent-reports","production_branch":"main"}' >/dev/null
+          elif [ "$status" != "200" ]; then
+            cat /tmp/cloudflare-project.json
+            exit 1
+          fi
+
+      - name: Deploy private reader to Cloudflare Pages
+        id: deploy_private_reader
+        if: steps.brief.outcome == 'success'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy .generated/cloudflare-report-reader --project-name=finance-agent-reports --branch=main
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Preserve sanitized reader history
+        if: steps.brief.outcome == 'success' && vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        working-directory: .
+        run: |
+          mkdir -p .reader-public-history
+          cp .generated/cloudflare-report-reader/reports.json .reader-public-history/reports.json
+
+      - name: Save sanitized private-reader history
+        if: steps.brief.outcome == 'success' && vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .reader-public-history/reports.json
+          key: private-reader-history-${{ github.run_id }}
+
       - name: Notify Telegram on success
         if: (env.BRIEF_RUN_MODE == 'publish' || env.BRIEF_RUN_MODE == 'publish_cached') && steps.preflight.outcome == 'success' && steps.brief.outcome == 'success'
         run: python send_telegram_notification.py --status success --notion-url "${{ steps.brief.outputs.notion_url }}"
@@ -285,3 +364,108 @@ jobs:
       - name: Mark failed brief as failed
         if: steps.preflight.outcome == 'failure' || steps.brief.outcome == 'failure'
         run: exit 1
+
+  deploy-reader:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_mode == 'deploy_reader'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out reader code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate protected deployment input
+        if: vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          if ! [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "source_run_id is required after private report publishing is enabled"
+            exit 1
+          fi
+
+      - name: Download reader report source
+        if: vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: daily-market-evidence-${{ inputs.source_run_id }}
+          path: pipeline/pb-daily-market-brief/workspace
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+
+      - name: Restore sanitized private-reader history
+        if: vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .reader-public-history/reports.json
+          key: private-reader-history-${{ github.run_id }}
+          restore-keys: |
+            private-reader-history-
+
+      - name: Build private mobile reader
+        env:
+          REPORTS_PROTECTED: ${{ vars.CLOUDFLARE_REPORTS_PROTECTED }}
+        run: |
+          args=(
+            --input pipeline/pb-daily-market-brief/workspace/v2_reader_reports
+            --output .generated/cloudflare-report-reader
+            --previous .reader-public-history/reports.json
+          )
+          if [ "$REPORTS_PROTECTED" != "true" ]; then
+            args+=(--locked)
+          fi
+          node scripts/build-public-report-reader.mjs "${args[@]}"
+
+      - name: Ensure Cloudflare Pages project exists
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          project_url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/finance-agent-reports"
+          status=$(curl --silent --show-error --output /tmp/cloudflare-project.json --write-out "%{http_code}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$project_url")
+          if [ "$status" = "404" ]; then
+            curl --fail-with-body --silent --show-error --request POST \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects" \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --header "Content-Type: application/json" \
+              --data '{"name":"finance-agent-reports","production_branch":"main"}' >/dev/null
+          elif [ "$status" != "200" ]; then
+            cat /tmp/cloudflare-project.json
+            exit 1
+          fi
+
+      - name: Deploy private reader to Cloudflare Pages
+        id: deploy_private_reader
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy .generated/cloudflare-report-reader --project-name=finance-agent-reports --branch=main
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Preserve sanitized reader history
+        if: vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        run: |
+          mkdir -p .reader-public-history
+          cp .generated/cloudflare-report-reader/reports.json .reader-public-history/reports.json
+
+      - name: Save sanitized private-reader history
+        if: vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .reader-public-history/reports.json
+          key: private-reader-history-${{ github.run_id }}
+
+      - name: Write deployment summary
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy_private_reader.outputs.deployment-url }}
+          REPORTS_PROTECTED: ${{ vars.CLOUDFLARE_REPORTS_PROTECTED }}
+        run: |
+          echo "### PB private reader" >> "$GITHUB_STEP_SUMMARY"
+          echo "- URL: ${DEPLOYMENT_URL:-https://finance-agent-reports.pages.dev}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Protected reports enabled: ${REPORTS_PROTECTED:-false}" >> "$GITHUB_STEP_SUMMARY"
