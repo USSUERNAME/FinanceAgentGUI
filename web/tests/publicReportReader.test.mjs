@@ -221,8 +221,22 @@ test("static reader localizes the market scoreboard for Korean readers", async (
   assert.match(source, /classification_reason: "판정 이유"/);
   assert.match(source, /mixed: "혼조"/);
   assert.match(source, /FIELD_VALUES\[readable\]/);
-  assert.match(source, /시장 폭·변동성·신용·금리·규칙 기반 신호/);
+  assert.match(source, /시장 폭·변동성·신용·금리·상대성과/);
   assert.doesNotMatch(source, /"Breadth·변동성·신용·금리·규칙 기반 신호"/);
+});
+
+test("static reader renders intelligence as a visual dashboard", async () => {
+  const source = await readFile(join(templateDir, "app.js"), "utf8");
+  const css = await readFile(join(templateDir, "styles.css"), "utf8");
+  assert.match(source, /appendIntelligenceOverview\(article, intelligence\)/);
+  assert.match(source, /appendScoreboard\(article, intelligence\.market\?\.scoreboard\)/);
+  assert.match(source, /scoreboard-card-grid/);
+  assert.match(source, /relative-track/);
+  assert.doesNotMatch(source, /appendRecordSection\(article, "시장 스코어보드"/);
+  assert.match(css, /\.overview-grid/);
+  assert.match(css, /\.scoreboard-signal/);
+  assert.match(css, /\.scoreboard-card-grid/);
+  assert.match(css, /@media \(max-width: 430px\)/);
 });
 
 test("Cloudflare workflow gates data and consumes encrypted World Memory secret", async () => {
