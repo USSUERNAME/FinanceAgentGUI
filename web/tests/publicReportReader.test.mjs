@@ -213,6 +213,17 @@ test("static reader uses DOM APIs and exposes all three read-only views", async 
   assert.match(html, /data-view="world-memory"/);
 });
 
+test("static reader localizes the market scoreboard for Korean readers", async () => {
+  const source = await readFile(join(templateDir, "app.js"), "utf8");
+  assert.match(source, /breadth: "시장 폭"/);
+  assert.match(source, /source_grade: "자료 등급"/);
+  assert.match(source, /rule_based_signal: "규칙 기반 신호"/);
+  assert.match(source, /classification_reason: "판정 이유"/);
+  assert.match(source, /mixed: "혼조"/);
+  assert.match(source, /시장 폭·변동성·신용·금리·규칙 기반 신호/);
+  assert.doesNotMatch(source, /"Breadth·변동성·신용·금리·규칙 기반 신호"/);
+});
+
 test("Cloudflare workflow gates data and consumes encrypted World Memory secret", async () => {
   const workflow = await readFile(fileURLToPath(new URL("../../.github/workflows/daily-brief.yml", import.meta.url)), "utf8");
   assert.match(workflow, /REPORTS_PROTECTED: \$\{\{ vars\.CLOUDFLARE_REPORTS_PROTECTED \}\}/);
