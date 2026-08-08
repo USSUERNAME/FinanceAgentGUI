@@ -204,6 +204,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .research-heading { display: grid; gap: 5px; min-width: 0; }
 .research-heading small { color: #4a816f; font-size: 10px; font-weight: 800; text-transform: uppercase; }
 .research-heading strong { color: #1c2d28; font-size: 15px; line-height: 1.45; }
+.event-korean-summary { color: #60726c; font-size: 12px; line-height: 1.55; font-weight: 600; }
 .details-mark { flex: 0 0 auto; color: #6c8179; font-size: 20px; }
 .research-card[open] .details-mark { transform: rotate(45deg); }
 .research-body { padding: 2px 20px 22px; border-top: 1px solid #edf0ef; }
