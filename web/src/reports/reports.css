@@ -10,11 +10,62 @@
 
 .reports-list-sidebar {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   border-right: 1px solid #e5e8e8;
   background: #f6f7f7;
+}
+
+.reports-type-filters {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 12px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.reports-type-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.reports-type-filters button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid #d9e0de;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #64706d;
+  font-size: 11px;
+  font-weight: 720;
+  cursor: pointer;
+}
+
+.reports-type-filters button small {
+  color: #8b9693;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.reports-type-filters button:hover,
+.reports-type-filters button:focus-visible {
+  border-color: #9fbab3;
+  outline: none;
+}
+
+.reports-type-filters button.is-active {
+  border-color: #2f806e;
+  background: #eaf4f1;
+  color: #226554;
+}
+
+.reports-type-filters button.is-active small {
+  color: #397968;
 }
 
 .reports-list-header {
@@ -260,6 +311,20 @@
 .report-delete-button:disabled {
   cursor: default;
   opacity: 0.64;
+}
+
+.report-auto-archive-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 22px;
+  border: 1px solid #cfe2dc;
+  border-radius: 7px;
+  background: #edf7f4;
+  color: #397565;
+  font-size: 10px;
+  font-weight: 780;
 }
 
 .report-delete-button:disabled svg {
