@@ -1,13 +1,53 @@
 const FIELD_LABELS = {
   status: "상태",
   summary: "요약",
+  breadth: "시장 폭",
+  proxy: "대리지표",
+  source_grade: "자료 등급",
+  as_of: "기준일",
+  rsp_return_1d_pct: "RSP 1일 수익률(%)",
+  spy_return_1d_pct: "SPY 1일 수익률(%)",
+  rsp_vs_spy_1d_pct: "RSP의 SPY 대비 1일 상대수익률(%p)",
+  rsp_vs_spy_5d_pct: "RSP의 SPY 대비 5일 상대수익률(%p)",
+  rsp_vs_spy_20d_pct: "RSP의 SPY 대비 20일 상대수익률(%p)",
+  volatility: "변동성",
+  vix: "VIX",
+  vix3m: "VIX 3개월물",
+  vix_term_ratio: "VIX/3개월물 비율",
+  series_id: "지표 코드",
+  value: "값",
+  change_1d: "1일 변화",
+  change_5_sessions: "5거래일 변화",
+  percentile_60_observations: "최근 60개 관측치 내 백분위",
+  source: "자료 출처",
+  evidence_label: "근거 분류",
+  credit: "신용",
+  high_yield_oas: "하이일드 OAS",
+  spread_change_5d_pct_point: "스프레드 5일 변화(%p)",
+  rates: "금리",
+  nominal_10y: "미국 10년 명목금리",
+  real_10y: "미국 10년 실질금리",
+  real_yield_change_5d_pct_point: "실질금리 5일 변화(%p)",
+  rule_based_signal: "규칙 기반 신호",
+  score: "점수",
+  range: "점수 범위",
+  signals: "구성 신호",
+  contribution: "기여도",
+  participation: "상대 성과",
+  qqq_vs_spy_5d_pct: "QQQ의 SPY 대비 5일 상대수익률(%p)",
+  iwm_vs_spy_5d_pct: "IWM의 SPY 대비 5일 상대수익률(%p)",
+  gld_vs_spy_5d_pct: "GLD의 SPY 대비 5일 상대수익률(%p)",
+  risk_participation: "위험자산 참여도",
+  growth: "성장주",
+  small_caps: "소형주",
+  classification_reason: "판정 이유",
   labels: "분류 기준",
   metrics: "지표",
   latest_price_as_of: "최신 가격 기준일",
   verified_event_count: "검증된 이벤트 수",
   korea_data_status: "한국 데이터 상태",
   warnings: "주의사항",
-  label: "시장 국면",
+  label: "항목명",
   confidence: "신뢰도",
   quantitative_evidence: "정량 근거",
   report_timezone: "보고서 시간대",
@@ -37,6 +77,16 @@ const FIELD_LABELS = {
 const FIELD_VALUES = {
   awaiting_company_profiles: "기업 프로필 대기",
   insufficient: "데이터 부족",
+  mixed: "혼조",
+  "CBOE VIX": "CBOE 변동성지수(VIX)",
+  "CBOE 3-Month Volatility Index": "CBOE 3개월 변동성지수",
+  "US High Yield Option-Adjusted Spread": "미국 하이일드 옵션조정스프레드",
+  "US 10-Year Treasury Yield": "미국 10년 국채금리",
+  "US 10-Year Real Yield": "미국 10년 실질금리",
+  "FRED latest available observation": "FRED 최신 관측치",
+  fact_provider_standardized: "표준화된 공급자 사실 데이터",
+  "safe asset strength conflicts with risk participation": "안전자산 강세가 위험자산 참여 신호와 엇갈림",
+  "Deterministic monitoring signal only; GPT analysis must discuss conflicts and may lower confidence.": "규칙 기반 모니터링 신호이며, AI 분석에서는 상충 신호를 함께 설명하고 신뢰도를 낮출 수 있습니다.",
 };
 
 const VIEW_META = {
@@ -70,6 +120,9 @@ function element(tag, className = "", content = "") {
 
 function valueLabel(value) {
   if (typeof value === "boolean") return value ? "예" : "아니오";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 4 }).format(value);
+  }
   const normalized = String(value ?? "");
   return FIELD_VALUES[normalized] || normalized.replaceAll("_", " ");
 }
@@ -296,7 +349,7 @@ function renderIntelligence(intelligence) {
     appendTextList(node, values, title === "상위 위험" ? "risk-list" : "bullet-list");
     article.append(node);
   });
-  appendRecordSection(article, "시장 스코어보드", intelligence.market?.scoreboard, "Breadth·변동성·신용·금리·규칙 기반 신호");
+  appendRecordSection(article, "시장 스코어보드", intelligence.market?.scoreboard, "시장 폭·변동성·신용·금리·규칙 기반 신호");
   appendRecordSection(article, "전일 대비 변화", intelligence.market?.dayOverDayChanges);
   appendRecordSection(article, "한국 시장 전이", intelligence.market?.koreaTransmission);
 
