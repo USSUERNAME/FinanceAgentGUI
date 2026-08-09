@@ -309,6 +309,12 @@ button { -webkit-tap-highlight-color: transparent; }
 .company-metric-value { display: block; margin-top: 9px; color: #17372e; font-size: 20px; letter-spacing: -0.035em; }
 .company-source-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .company-source-links .source-link { margin-top: 0; }
+.pending-company-stack { margin-top: 16px; }
+.pending-company-card { border-color: #e4dcc3; background: #fffdf7; }
+.pending-status { flex: 0 0 auto; padding: 6px 10px; border: 1px solid #e4d8ae; border-radius: 999px; color: #765d13; background: #fff8dc; font-size: 11px; font-weight: 850; }
+.pending-explanation { margin: 16px 0 0; padding: 13px 15px; border-left: 3px solid #d8ba53; color: #665a37; background: #fffbef; font-size: 12px; line-height: 1.7; }
+.pending-metric-grid { margin-top: 4px; }
+.empty-inline { margin: 16px 0 0; color: #71807b; font-size: 13px; }
 
 .loading-state, .empty-state, .error-state, .locked-state { width: min(620px, 100%); margin: 16vh auto 0; color: #66736e; text-align: center; }
 .locked-state { padding: 46px 26px; border: 1px solid #d6e1dc; border-radius: 20px; background: rgba(255, 255, 255, 0.78); }

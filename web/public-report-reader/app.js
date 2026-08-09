@@ -1194,6 +1194,90 @@ function companyVerdictCard(title, verdict) {
   return card;
 }
 
+const candidateReasonLabels = {
+  material_event: "중요 사건",
+  abnormal_spy_relative_move: "시장 대비 이례적 변동",
+  volume_anomaly: "거래량 이상",
+  sector_or_stock_sector_divergence: "업종 대비 괴리",
+  five_session_relative_strength: "5거래일 상대강도",
+};
+
+const candidateEvidenceLabels = {
+  market_anomaly_without_primary_material: "공식 근거 확인 중",
+  primary_metadata_only: "공식 문서 메타데이터 확인",
+  primary_body_without_supported_facts: "공식 본문 수치 확인 필요",
+};
+
+function signedPercent(value) {
+  const number = finiteNumber(value);
+  if (number === null) return "확인 불가";
+  return `${number > 0 ? "+" : ""}${compactNumber(number, 2)}%`;
+}
+
+function renderPendingCompanyCandidates(bundle) {
+  const pending = bundle.pendingCandidates || [];
+  const node = section(
+    `검증 대기 후보 ${pending.length}개`,
+    `전체 중요 후보 ${bundle.materialCandidateCount || pending.length}개 중 상위 후보입니다. 공식 공시·IR 본문과 수치가 확인되어야 심층분석으로 승격됩니다.`,
+  );
+  const stack = element("div", "research-stack pending-company-stack");
+  pending.forEach((candidate, index) => {
+    const details = element("details", "research-card pending-company-card");
+    if (index === 0 && !(bundle.profiles || []).length) details.open = true;
+    const summary = element("summary");
+    const heading = element("span", "research-heading");
+    heading.append(element("small", "", [candidate.ticker, `우선순위 ${candidate.selectionScore || 0}점`].filter(Boolean).join(" · ")));
+    heading.append(element("strong", "", candidate.companyName || candidate.ticker || "검증 대기 후보"));
+    summary.append(
+      heading,
+      element("span", "pending-status", candidateEvidenceLabels[candidate.evidenceStatus] || "근거 확인 중"),
+      element("span", "details-mark", "+"),
+    );
+    details.append(summary);
+    const body = element("div", "research-body");
+    const metrics = element("div", "company-metric-grid pending-metric-grid");
+    [
+      ["1일 수익률", signedPercent(candidate.marketReaction?.return_1d_pct)],
+      ["SPY 대비 1일", signedPercent(candidate.marketReaction?.spy_relative_1d_pct)],
+      ["5일 수익률", signedPercent(candidate.marketReaction?.return_5d_pct)],
+      ["20일 평균 대비 거래량", candidate.marketReaction?.volume_ratio_20d == null ? "확인 불가" : `${compactNumber(candidate.marketReaction.volume_ratio_20d, 2)}배`],
+    ].forEach(([label, value]) => {
+      const card = element("article", "company-metric-card");
+      card.append(element("span", "overview-label", label));
+      card.append(element("strong", "company-metric-value", value));
+      metrics.append(card);
+    });
+    body.append(metrics);
+    if (candidate.selectionReasons?.length) {
+      const tags = element("div", "tag-row");
+      candidate.selectionReasons.forEach((reason) => tags.append(element("span", "", candidateReasonLabels[reason] || valueLabel(reason))));
+      body.append(tags);
+    }
+    body.append(element(
+      "p",
+      "pending-explanation",
+      "이 종목은 시장 이상 움직임으로 발견됐지만 아직 장기투자 판단 대상이 아닙니다. 공식 본문에서 사건과 수치가 확인되면 기업의 질·현재 주식의 매력·포트폴리오 적합성을 분리해 분석합니다.",
+    ));
+    if (candidate.officialEvidence?.length) {
+      const links = element("div", "company-source-links");
+      candidate.officialEvidence.forEach((evidence, sourceIndex) => {
+        if (!evidence.sourceUrl) return;
+        const link = element("a", "source-link", evidence.title || `공식 근거 ${sourceIndex + 1}`);
+        link.href = evidence.sourceUrl;
+        link.target = "_blank";
+        link.rel = "noreferrer noopener";
+        links.append(link);
+      });
+      if (links.childElementCount) body.append(links);
+    }
+    details.append(body);
+    stack.append(details);
+  });
+  if (!pending.length) node.append(element("p", "empty-inline", "현재 검증 대기 중인 중요 후보가 없습니다."));
+  else node.append(stack);
+  return node;
+}
+
 function renderCompanyCandidates(bundle) {
   const article = element("article", "report-document company-document");
   article.append(reportHeader({
@@ -1207,6 +1291,7 @@ function renderCompanyCandidates(bundle) {
     "company-disclaimer",
     "후보 점수는 매수 신호가 아닙니다. 기업의 질, 현재 주식의 매력, 포트폴리오 적합성을 분리하고 근거가 부족하면 평가를 보류합니다.",
   ));
+  article.append(renderPendingCompanyCandidates(bundle));
   const node = section(`분석 카드 ${bundle.profiles?.length || 0}개`, "공식 공시와 정규화된 장기 재무를 기준으로 작성했습니다.");
   const stack = element("div", "research-stack");
   (bundle.profiles || []).forEach((profile, index) => {
@@ -1281,7 +1366,7 @@ function itemTitle(item) {
 function itemSummary(item) {
   if (state.view === "brief") return item.executiveSummary?.[0] || "요약 없음";
   if (state.view === "intelligence") return item.market?.regime?.summary || `${item.events?.selectedCount || 0}개 이벤트`;
-  if (state.view === "companies") return `${item.profileCount || 0}개 장기투자 검토 카드`;
+  if (state.view === "companies") return `${item.profileCount || 0}개 심층분석 · ${item.pendingCount || 0}개 검증 대기`;
   if (state.view === "telegram") return `${item.eventClusterCount || 0}개 사건 · ${item.representedChannelCount || 0}개 채널`;
   return item.report?.summary || "월드 메모리 스냅샷";
 }
@@ -1294,7 +1379,7 @@ function searchableText(item) {
     return [item.reportDate, item.market?.regime?.label, item.market?.regime?.summary, ...(item.market?.topRisks || []), ...(item.events?.items || []).flatMap((value) => [value.title, ...(value.topicTags || [])]), ...(item.continuity?.activeEntries || []).map((value) => value.title)].join(" ").toLowerCase();
   }
   if (state.view === "companies") {
-    return [item.reportDate, ...(item.profiles || []).flatMap((value) => [value.ticker, value.companyName, value.action?.grade, value.action?.reason, value.companyQuality?.label, value.stockAttractiveness?.label])].join(" ").toLowerCase();
+    return [item.reportDate, ...(item.profiles || []).flatMap((value) => [value.ticker, value.companyName, value.action?.grade, value.action?.reason, value.companyQuality?.label, value.stockAttractiveness?.label]), ...(item.pendingCandidates || []).flatMap((value) => [value.ticker, value.companyName, value.evidenceStatus, ...(value.selectionReasons || [])])].join(" ").toLowerCase();
   }
   if (state.view === "telegram") {
     return [item.generatedAt, ...(item.clusters || []).flatMap((value) => [value.title, value.eventType, ...(value.channels || [])])].join(" ").toLowerCase();

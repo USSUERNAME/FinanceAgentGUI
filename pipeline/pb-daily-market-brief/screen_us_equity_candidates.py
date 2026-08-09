@@ -140,7 +140,11 @@ def event_evidence(inbox: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             }
             verified_facts = []
             if body_verified:
-                for fact in (record.get("filing_facts") or {}).get("facts", [])[:4]:
+                source_facts = [
+                    *(record.get("verified_facts") or []),
+                    *((record.get("filing_facts") or {}).get("facts", [])),
+                ]
+                for fact in source_facts[:4]:
                     source_url = str(fact.get("source_url") or record.get("url") or "")
                     if not source_url.startswith("https://"):
                         continue
@@ -494,6 +498,7 @@ def main() -> None:
     parser.add_argument("--universe-file")
     parser.add_argument("--inbox-file")
     parser.add_argument("--market-input")
+    parser.add_argument("--additional-inbox-file")
     parser.add_argument("--output-file")
     args = parser.parse_args()
     universe_path = root_path(
@@ -514,10 +519,23 @@ def main() -> None:
         json.loads(market_path.read_text(encoding="utf-8"))
         if market_path.exists() else None
     )
+    inbox_records = json.loads(inbox_path.read_text(encoding="utf-8"))
+    if args.additional_inbox_file:
+        additional_path = root_path(args.additional_inbox_file, ROOT / args.additional_inbox_file)
+        if additional_path.exists():
+            additional_payload = json.loads(additional_path.read_text(encoding="utf-8"))
+            additional_records = (
+                additional_payload
+                if isinstance(additional_payload, list)
+                else additional_payload.get("records", [])
+            )
+            if not isinstance(additional_records, list):
+                raise SystemExit("Additional candidate evidence records must be an array")
+            inbox_records.extend(additional_records)
     payload = screen_us_equity_candidates(
         args.date,
         json.loads(universe_path.read_text(encoding="utf-8")),
-        json.loads(inbox_path.read_text(encoding="utf-8")),
+        inbox_records,
         market_input,
     )
     output = root_path(

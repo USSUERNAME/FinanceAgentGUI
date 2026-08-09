@@ -10,6 +10,7 @@ const REPORT_FILE_NAME = "reader_report.json";
 const INTELLIGENCE_FILE_NAME = "daily_intelligence.json";
 const TELEGRAM_FILE_NAME = "telegram_intelligence.json";
 const COMPANY_FILE_NAME = "company_long_term_profiles.json";
+const COMPANY_SCREEN_FILE_NAME = "candidate_screen.json";
 const MAX_REPORTS = 90;
 const PRIVATE_KEY_PATTERN = /(token|secret|password|cookie|authorization|credential|refresh|full.?text|raw.?content|absolute.?path)/i;
 
@@ -430,12 +431,92 @@ export function sanitizeCompanyProfiles(source = {}) {
     reportDate,
     profileCount: profiles.length,
     profiles,
+    pendingCount: 0,
+    pendingCandidates: [],
+    screenStatus: "screen_not_supplied",
+    materialCandidateCount: 0,
     policy: {
       companyStockPortfolioSeparated: true,
       overallScoreRequiresCompleteEvidence: true,
       automaticPositionActionsAllowed: false,
     },
   };
+}
+
+export function sanitizePendingCandidateScreen(source = {}) {
+  if (source?.schema_version !== "us_equity_candidate_screen.v1") {
+    throw new Error("unsupported U.S. equity candidate screen schema");
+  }
+  const reportDate = text(source.report_date, 20);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) throw new Error("invalid candidate screen date");
+  const pendingCandidates = (Array.isArray(source.candidates) ? source.candidates : [])
+    .filter((item) => item?.deep_analysis_eligible !== true)
+    .slice(0, 10)
+    .map((item) => ({
+      ticker: text(item?.ticker, 32),
+      companyName: prose(item?.company_name, 240),
+      selectionScore: Math.max(0, Number(item?.selection_score) || 0),
+      selectionReasons: textList(item?.selection_reasons, { limit: 8, maxLength: 120 }),
+      evidenceStatus: text(item?.evidence_status, 120),
+      nextWorkflow: text(item?.next_workflow, 120),
+      marketReaction: safeScalarMap(item?.market_reaction, [
+        "close", "return_1d_pct", "return_5d_pct", "return_20d_pct",
+        "volume_ratio_20d", "spy_relative_1d_pct", "spy_relative_5d_pct",
+        "sector_relative_1d_pct", "sector_return_1d_pct",
+      ]),
+      scoreBreakdown: safeScalarMap(item?.score_breakdown, [
+        "event_importance", "abnormal_price_move", "volume_anomaly",
+        "sector_influence", "official_material", "index_relative_strength",
+      ]),
+      officialEvidence: (Array.isArray(item?.event_evidence) ? item.event_evidence : [])
+        .filter((event) => event?.primary_source_confirmed === true)
+        .slice(0, 3)
+        .map((event) => ({
+          title: prose(event?.title, 320),
+          eventType: text(event?.event_type, 100),
+          evidenceScope: text(event?.evidence_scope, 120),
+          sourceUrl: safeUrl(event?.source_url),
+          verifiedFactCount: Array.isArray(event?.verified_facts) ? event.verified_facts.length : 0,
+        }))
+        .filter((event) => event.title || event.sourceUrl),
+    }))
+    .filter((item) => item.ticker || item.companyName);
+  return {
+    reportDate,
+    screenStatus: text(source.screen_status, 120),
+    materialCandidateCount: Math.max(0, Number(source.material_candidate_count) || 0),
+    pendingCount: pendingCandidates.length,
+    pendingCandidates,
+  };
+}
+
+async function collectCompanyCandidates(companiesDir, candidateScreensDir) {
+  const screensByDate = new Map();
+  for (const file of await findNamedFiles(candidateScreensDir, COMPANY_SCREEN_FILE_NAME)) {
+    try {
+      const screen = sanitizePendingCandidateScreen(JSON.parse(await readFile(file, "utf8")));
+      screensByDate.set(screen.reportDate, screen);
+    } catch (error) {
+      console.warn(`Skipped ${basename(file)}: ${error.message}`);
+    }
+  }
+  const byDate = new Map();
+  for (const file of await findNamedFiles(companiesDir, COMPANY_FILE_NAME)) {
+    try {
+      const item = sanitizeCompanyProfiles(JSON.parse(await readFile(file, "utf8")));
+      const screen = screensByDate.get(item.reportDate);
+      const combined = screen ? { ...item, ...screen } : item;
+      const current = byDate.get(combined.reportDate);
+      if (!current || String(combined.generatedAt) > String(current.generatedAt)) {
+        byDate.set(combined.reportDate, combined);
+      }
+    } catch (error) {
+      console.warn(`Skipped ${basename(file)}: ${error.message}`);
+    }
+  }
+  return [...byDate.values()]
+    .sort((a, b) => b.reportDate.localeCompare(a.reportDate))
+    .slice(0, MAX_REPORTS);
 }
 
 function sanitizeWorldMemoryView(view = {}) {
@@ -617,6 +698,7 @@ export async function buildPublicReportReader({
   inputDir,
   intelligenceDir = "",
   companiesDir = "",
+  candidateScreensDir = "",
   telegramDir = "",
   worldMemoryFile = "",
   outputDir,
@@ -632,7 +714,8 @@ export async function buildPublicReportReader({
   const resolvedIntelligenceDir = intelligenceDir || join(dirname(resolve(inputDir)), "intelligence");
   const currentIntelligence = locked ? [] : await collectByDate(resolve(resolvedIntelligenceDir), INTELLIGENCE_FILE_NAME, sanitizeDailyIntelligence);
   const resolvedCompaniesDir = companiesDir || join(dirname(resolve(inputDir)), "company_long_term_profiles");
-  const currentCompanies = locked ? [] : await collectByDate(resolve(resolvedCompaniesDir), COMPANY_FILE_NAME, sanitizeCompanyProfiles);
+  const resolvedCandidateScreensDir = candidateScreensDir || join(dirname(resolve(inputDir)), "us_equity_candidate_screen");
+  const currentCompanies = locked ? [] : await collectCompanyCandidates(resolve(resolvedCompaniesDir), resolve(resolvedCandidateScreensDir));
   const reports = locked ? [] : mergeByDate(previous.reports, currentReports);
   const intelligence = locked ? [] : mergeByDate(previous.intelligence, currentIntelligence);
   const companies = locked ? [] : mergeByDate(previous.companies, currentCompanies);
@@ -650,7 +733,7 @@ export async function buildPublicReportReader({
     telegram,
   };
   await writeFile(join(target, "reports.json"), `${JSON.stringify(payload)}\n`, "utf8");
-  return { outputDir: target, reportCount: reports.length, intelligenceCount: intelligence.length, companyDateCount: companies.length, companyProfileCount: companies.reduce((total, item) => total + item.profileCount, 0), worldMemory: Boolean(worldMemory), telegram: Boolean(telegram), locked: payload.locked };
+  return { outputDir: target, reportCount: reports.length, intelligenceCount: intelligence.length, companyDateCount: companies.length, companyProfileCount: companies.reduce((total, item) => total + item.profileCount, 0), companyPendingCount: companies.reduce((total, item) => total + (item.pendingCount || 0), 0), worldMemory: Boolean(worldMemory), telegram: Boolean(telegram), locked: payload.locked };
 }
 
 function argument(name, fallback = "") {
@@ -663,11 +746,12 @@ if (resolve(process.argv[1] || "") === fileURLToPath(import.meta.url)) {
   const inputDir = argument("input", join(APP_ROOT, "pipeline", "pb-daily-market-brief", "workspace", "v2_reader_reports"));
   const intelligenceDir = argument("intelligence", "");
   const companiesDir = argument("companies", "");
+  const candidateScreensDir = argument("candidate-screens", "");
   const telegramDir = argument("telegram", "");
   const worldMemoryFile = argument("world-memory", "");
   const outputDir = argument("output", join(APP_ROOT, ".generated", "cloudflare-report-reader"));
   const previousBundle = argument("previous", "");
-  buildPublicReportReader({ inputDir, intelligenceDir, companiesDir, telegramDir, worldMemoryFile, outputDir, previousBundle, locked })
+  buildPublicReportReader({ inputDir, intelligenceDir, companiesDir, candidateScreensDir, telegramDir, worldMemoryFile, outputDir, previousBundle, locked })
     .then((result) => console.log(JSON.stringify(result)))
     .catch((error) => {
       console.error(error.message);

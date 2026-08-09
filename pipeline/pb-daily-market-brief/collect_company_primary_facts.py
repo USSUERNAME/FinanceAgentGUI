@@ -21,7 +21,7 @@ SCHEMA_VERSION = "company_primary_facts.v1"
 SEC_API_DOCS_URL = "https://www.sec.gov/search-filings/edgar-application-programming-interfaces"
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 ACCEPTED_FORMS = {"10-Q", "10-Q/A", "10-K", "10-K/A", "20-F", "20-F/A", "6-K", "6-K/A"}
-DEFAULT_MAX_COMPANIES = 3
+DEFAULT_MAX_COMPANIES = 6
 CIK_PATTERN = re.compile(r"/Archives/edgar/data/(\d+)/", re.IGNORECASE)
 
 METRIC_CONCEPTS = {

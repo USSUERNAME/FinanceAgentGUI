@@ -255,6 +255,20 @@ def main() -> None:
         "screen_us_equity_candidates.py", "--date", report_date,
         "--inbox-file", str(triaged_inbox.relative_to(ROOT)),
     )
+    candidate_evidence_args = [
+        "enrich_us_equity_candidate_evidence.py", "--date", report_date,
+        "--candidate-screen-file",
+        f"workspace/us_equity_candidate_screen/{report_date}/candidate_screen.json",
+    ]
+    if offline_validation:
+        candidate_evidence_args.append("--no-network")
+    run(*candidate_evidence_args)
+    run(
+        "screen_us_equity_candidates.py", "--date", report_date,
+        "--inbox-file", str(triaged_inbox.relative_to(ROOT)),
+        "--additional-inbox-file",
+        f"workspace/candidate_official_evidence/{report_date}/candidate_official_evidence.json",
+    )
     run("build_us_market_internals.py", "--date", report_date)
     run("collect_sector_metrics.py", "--date", report_date)
     pause_between_alpha_vantage_stages()

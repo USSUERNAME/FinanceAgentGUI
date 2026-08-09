@@ -45,6 +45,7 @@ class WorkflowArtifactTests(unittest.TestCase):
         self.assertIn("workspace/briefs/", workflow)
         self.assertIn("workspace/charts/", workflow)
         self.assertIn("workspace/company_long_term_profiles/", workflow)
+        self.assertIn("workspace/candidate_official_evidence/", workflow)
 
     def test_private_reader_publishes_sanitized_company_candidates(self) -> None:
         workflow = APP_WORKFLOW.read_text(encoding="utf-8")
@@ -54,6 +55,22 @@ class WorkflowArtifactTests(unittest.TestCase):
             ),
             2,
         )
+        self.assertGreaterEqual(
+            workflow.count(
+                "--candidate-screens pipeline/pb-daily-market-brief/workspace/us_equity_candidate_screen"
+            ),
+            2,
+        )
+
+    def test_candidate_official_evidence_enrichment_runs_before_final_screen(self) -> None:
+        pipeline = (ROOT / "run_daily_report.py").read_text(encoding="utf-8")
+        first_screen = pipeline.index('"screen_us_equity_candidates.py"')
+        enrichment = pipeline.index('"enrich_us_equity_candidate_evidence.py"')
+        second_screen = pipeline.index('"screen_us_equity_candidates.py"', first_screen + 1)
+        self.assertLess(first_screen, enrichment)
+        self.assertLess(enrichment, second_screen)
+        self.assertIn('candidate_evidence_args.append("--no-network")', pipeline)
+        self.assertIn('"--additional-inbox-file"', pipeline)
 
     def test_cached_publish_downloads_prior_artifact_without_collection(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
