@@ -296,6 +296,20 @@ button { -webkit-tap-highlight-color: transparent; }
 .telegram-links { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
 .telegram-links .source-link { margin-top: 0; }
 
+.company-disclaimer { margin: 24px 0 0; padding: 16px 18px; border: 1px solid #cbded6; border-radius: 14px; color: #3f6558; background: #f3faf7; font-size: 13px; line-height: 1.7; }
+.company-grade { flex: 0 0 auto; padding: 6px 10px; border: 1px solid #cfe0d9; border-radius: 999px; color: #285f4d; background: #edf7f3; font-size: 11px; font-weight: 850; }
+.company-action-summary { margin: 18px 0; color: #243f36; font-size: 15px; font-weight: 700; line-height: 1.7; }
+.company-verdict-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
+.company-verdict-card { padding: 16px; border: 1px solid #d8e2de; border-radius: 14px; background: #f9fbfa; }
+.company-verdict-title { display: block; color: #72827c; font-size: 10px; font-weight: 850; }
+.company-verdict-label { display: block; margin-top: 8px; color: #20483a; font-size: 15px; }
+.company-verdict-card p { margin: 10px 0 0; color: #65716d; font-size: 12px; line-height: 1.6; }
+.company-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin: 18px 0; }
+.company-metric-card { padding: 15px; border: 1px solid #dce4e0; border-radius: 13px; background: #fff; }
+.company-metric-value { display: block; margin-top: 9px; color: #17372e; font-size: 20px; letter-spacing: -0.035em; }
+.company-source-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.company-source-links .source-link { margin-top: 0; }
+
 .loading-state, .empty-state, .error-state, .locked-state { width: min(620px, 100%); margin: 16vh auto 0; color: #66736e; text-align: center; }
 .locked-state { padding: 46px 26px; border: 1px solid #d6e1dc; border-radius: 20px; background: rgba(255, 255, 255, 0.78); }
 .locked-state h1 { margin: 12px 0; color: #17362e; font-size: 28px; letter-spacing: -0.045em; }
@@ -333,6 +347,8 @@ button { -webkit-tap-highlight-color: transparent; }
   .source-list li { display: grid; gap: 5px; }
   .signal-grid { grid-template-columns: 1fr; }
   .telegram-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .company-verdict-grid { grid-template-columns: 1fr; }
+  .company-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lead-narrative { font-size: 16px; }
 }
 
@@ -347,4 +363,5 @@ button { -webkit-tap-highlight-color: transparent; }
   .relative-panel { padding: 17px 14px; }
   .relative-row { grid-template-columns: 38px minmax(0, 1fr) 52px; gap: 8px; }
   .telegram-overview { grid-template-columns: 1fr; }
+  .company-metric-grid { grid-template-columns: 1fr; }
 }

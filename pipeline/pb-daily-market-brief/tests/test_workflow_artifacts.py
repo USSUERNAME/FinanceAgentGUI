@@ -44,6 +44,16 @@ class WorkflowArtifactTests(unittest.TestCase):
         self.assertIn("workspace/us_equity_market_inputs/", workflow)
         self.assertIn("workspace/briefs/", workflow)
         self.assertIn("workspace/charts/", workflow)
+        self.assertIn("workspace/company_long_term_profiles/", workflow)
+
+    def test_private_reader_publishes_sanitized_company_candidates(self) -> None:
+        workflow = APP_WORKFLOW.read_text(encoding="utf-8")
+        self.assertGreaterEqual(
+            workflow.count(
+                "--companies pipeline/pb-daily-market-brief/workspace/company_long_term_profiles"
+            ),
+            2,
+        )
 
     def test_cached_publish_downloads_prior_artifact_without_collection(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

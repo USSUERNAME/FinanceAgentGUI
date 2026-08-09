@@ -9,6 +9,7 @@ const TEMPLATE_FILES = ["index.html", "styles.css", "app.js", "_headers"];
 const REPORT_FILE_NAME = "reader_report.json";
 const INTELLIGENCE_FILE_NAME = "daily_intelligence.json";
 const TELEGRAM_FILE_NAME = "telegram_intelligence.json";
+const COMPANY_FILE_NAME = "company_long_term_profiles.json";
 const MAX_REPORTS = 90;
 const PRIVATE_KEY_PATTERN = /(token|secret|password|cookie|authorization|credential|refresh|full.?text|raw.?content|absolute.?path)/i;
 
@@ -345,6 +346,98 @@ export function sanitizeTelegramRefresh(source = {}) {
   };
 }
 
+function sanitizeCompanyVerdict(source = {}) {
+  return safeScalarMap(source, [
+    "status",
+    "label",
+    "reason",
+    "judgment_status",
+    "relative_status",
+    "premium_discount_pct",
+  ]);
+}
+
+export function sanitizeCompanyProfiles(source = {}) {
+  if (source?.schema_version !== "company_long_term_profiles.v2") {
+    throw new Error("unsupported long-term company profile schema");
+  }
+  const reportDate = text(source.report_date, 20);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) throw new Error("invalid company profile date");
+  const profiles = (Array.isArray(source.profiles) ? source.profiles : []).slice(0, 5).map((item) => {
+    const financials = item?.long_term_financials && typeof item.long_term_financials === "object"
+      ? item.long_term_financials
+      : {};
+    const action = item?.action && typeof item.action === "object" ? item.action : {};
+    const scorecard = item?.scorecard && typeof item.scorecard === "object" ? item.scorecard : {};
+    const framework = item?.judgment_framework && typeof item.judgment_framework === "object"
+      ? item.judgment_framework
+      : {};
+    return {
+      ticker: text(item?.ticker, 32),
+      companyName: prose(item?.company_name, 240),
+      asOfDate: text(item?.as_of_date || reportDate, 20),
+      candidateOrigin: text(item?.candidate_origin, 100),
+      companyQuality: sanitizeCompanyVerdict(item?.company_quality),
+      stockAttractiveness: sanitizeCompanyVerdict(item?.stock_attractiveness),
+      portfolioFit: sanitizeCompanyVerdict(item?.portfolio_fit),
+      longTermSummary: safeScalarMap(financials.summary, [
+        "observation_count",
+        "complete_core_years",
+        "first_period",
+        "last_period",
+        "revenue_cagr_pct",
+        "operating_income_cagr_pct",
+        "fcf_cagr_pct",
+        "latest_operating_margin_pct",
+        "latest_fcf_margin_pct",
+        "median_fcf_conversion_pct",
+        "positive_operating_income_years",
+        "positive_fcf_years",
+        "diluted_share_count_change_pct",
+        "dilution_comparability_status",
+        "cumulative_returns_to_fcf_pct",
+      ]),
+      qualityGate: safeScalarMap(financials.quality_gate, [
+        "status", "required_core_years", "complete_core_years",
+        "capital_allocation_available", "dilution_available", "missing",
+      ]),
+      scorecard: {
+        status: text(scorecard.status, 100),
+        overallScore: typeof scorecard.overall_score === "number" ? scorecard.overall_score : null,
+        scoredPoints: Number(scorecard.scored_points) || 0,
+        scoredMax: Number(scorecard.scored_max) || 0,
+        missingComponents: textList(scorecard.missing_components, { limit: 12, maxLength: 120 }),
+        reason: prose(scorecard.reason, 1200),
+      },
+      action: {
+        grade: text(action.grade, 80),
+        reason: prose(action.reason, 1600),
+        incompleteDecisions: textList(action.incomplete_decisions, { limit: 8, maxLength: 120 }),
+        nextRequiredEvidence: textList(action.next_required_evidence, { limit: 16, maxLength: 800 }),
+        confirmationConditions: textList(action.confirmation_conditions, { limit: 12, maxLength: 1000 }),
+        invalidationConditions: textList(action.invalidation_conditions, { limit: 12, maxLength: 1000 }),
+        readyForAnalystReview: Boolean(action.ready_for_analyst_review),
+      },
+      sourceGapCount: Math.max(0, Number(framework.source_gap_count) || 0),
+      sourceUrls: (Array.isArray(item?.source_urls) ? item.source_urls : [])
+        .map(safeUrl)
+        .filter(Boolean)
+        .slice(0, 12),
+    };
+  }).filter((item) => item.ticker || item.companyName);
+  return {
+    schemaVersion: "private_company_candidates.v1",
+    reportDate,
+    profileCount: profiles.length,
+    profiles,
+    policy: {
+      companyStockPortfolioSeparated: true,
+      overallScoreRequiresCompleteEvidence: true,
+      automaticPositionActionsAllowed: false,
+    },
+  };
+}
+
 function sanitizeWorldMemoryView(view = {}) {
   return {
     title: prose(view.title, 360),
@@ -473,18 +566,19 @@ function sanitizePreviousTelegram(source) {
 }
 
 async function previousPayload(previousBundle) {
-  if (!previousBundle) return { reports: [], intelligence: [], worldMemory: null, telegram: null };
+  if (!previousBundle) return { reports: [], intelligence: [], companies: [], worldMemory: null, telegram: null };
   try {
     const payload = JSON.parse(await readFile(resolve(previousBundle), "utf8"));
-    if (payload?.schemaVersion !== "public_pb_reader_bundle.v1") return { reports: [], intelligence: [], worldMemory: null, telegram: null };
+    if (payload?.schemaVersion !== "public_pb_reader_bundle.v1") return { reports: [], intelligence: [], companies: [], worldMemory: null, telegram: null };
     return {
       reports: (Array.isArray(payload.reports) ? payload.reports : []).filter((item) => item?.schemaVersion === "public_pb_reader.v1").slice(0, MAX_REPORTS),
       intelligence: (Array.isArray(payload.intelligence) ? payload.intelligence : []).filter((item) => item?.schemaVersion === "private_daily_intelligence.v1").slice(0, MAX_REPORTS),
+      companies: (Array.isArray(payload.companies) ? payload.companies : []).filter((item) => item?.schemaVersion === "private_company_candidates.v1").slice(0, MAX_REPORTS),
       worldMemory: sanitizeWorldMemorySnapshot(payload.worldMemory),
       telegram: sanitizePreviousTelegram(payload.telegram),
     };
   } catch {
-    return { reports: [], intelligence: [], worldMemory: null, telegram: null };
+    return { reports: [], intelligence: [], companies: [], worldMemory: null, telegram: null };
   }
 }
 
@@ -522,6 +616,7 @@ function mergeByDate(previous, current) {
 export async function buildPublicReportReader({
   inputDir,
   intelligenceDir = "",
+  companiesDir = "",
   telegramDir = "",
   worldMemoryFile = "",
   outputDir,
@@ -536,22 +631,26 @@ export async function buildPublicReportReader({
   const currentReports = locked ? [] : await collectByDate(resolve(inputDir), REPORT_FILE_NAME, sanitizeReaderReport);
   const resolvedIntelligenceDir = intelligenceDir || join(dirname(resolve(inputDir)), "intelligence");
   const currentIntelligence = locked ? [] : await collectByDate(resolve(resolvedIntelligenceDir), INTELLIGENCE_FILE_NAME, sanitizeDailyIntelligence);
+  const resolvedCompaniesDir = companiesDir || join(dirname(resolve(inputDir)), "company_long_term_profiles");
+  const currentCompanies = locked ? [] : await collectByDate(resolve(resolvedCompaniesDir), COMPANY_FILE_NAME, sanitizeCompanyProfiles);
   const reports = locked ? [] : mergeByDate(previous.reports, currentReports);
   const intelligence = locked ? [] : mergeByDate(previous.intelligence, currentIntelligence);
+  const companies = locked ? [] : mergeByDate(previous.companies, currentCompanies);
   const worldMemory = locked ? null : (await readWorldMemorySnapshot(worldMemoryFile)) || previous.worldMemory;
   const telegram = locked ? null : (await readLatestTelegramSnapshot(telegramDir)) || previous.telegram;
-  if (!locked && !reports.length && !intelligence.length && !worldMemory && !telegram) throw new Error(`no valid private reader content found in ${inputDir}`);
+  if (!locked && !reports.length && !intelligence.length && !companies.length && !worldMemory && !telegram) throw new Error(`no valid private reader content found in ${inputDir}`);
   const payload = {
     schemaVersion: "public_pb_reader_bundle.v1",
     generatedAt: new Date().toISOString(),
     locked: Boolean(locked),
     reports,
     intelligence,
+    companies,
     worldMemory,
     telegram,
   };
   await writeFile(join(target, "reports.json"), `${JSON.stringify(payload)}\n`, "utf8");
-  return { outputDir: target, reportCount: reports.length, intelligenceCount: intelligence.length, worldMemory: Boolean(worldMemory), telegram: Boolean(telegram), locked: payload.locked };
+  return { outputDir: target, reportCount: reports.length, intelligenceCount: intelligence.length, companyDateCount: companies.length, companyProfileCount: companies.reduce((total, item) => total + item.profileCount, 0), worldMemory: Boolean(worldMemory), telegram: Boolean(telegram), locked: payload.locked };
 }
 
 function argument(name, fallback = "") {
@@ -563,11 +662,12 @@ if (resolve(process.argv[1] || "") === fileURLToPath(import.meta.url)) {
   const locked = process.argv.includes("--locked");
   const inputDir = argument("input", join(APP_ROOT, "pipeline", "pb-daily-market-brief", "workspace", "v2_reader_reports"));
   const intelligenceDir = argument("intelligence", "");
+  const companiesDir = argument("companies", "");
   const telegramDir = argument("telegram", "");
   const worldMemoryFile = argument("world-memory", "");
   const outputDir = argument("output", join(APP_ROOT, ".generated", "cloudflare-report-reader"));
   const previousBundle = argument("previous", "");
-  buildPublicReportReader({ inputDir, intelligenceDir, telegramDir, worldMemoryFile, outputDir, previousBundle, locked })
+  buildPublicReportReader({ inputDir, intelligenceDir, companiesDir, telegramDir, worldMemoryFile, outputDir, previousBundle, locked })
     .then((result) => console.log(JSON.stringify(result)))
     .catch((error) => {
       console.error(error.message);

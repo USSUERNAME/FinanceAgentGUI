@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildPublicReportReader,
   buildWorldMemorySnapshot,
+  sanitizeCompanyProfiles,
   sanitizeDailyIntelligence,
   sanitizeReaderReport,
   sanitizeTelegramRefresh,
@@ -169,6 +170,34 @@ function privateTelegramRefresh() {
   };
 }
 
+function privateCompanyProfiles() {
+  return {
+    schema_version: "company_long_term_profiles.v2",
+    report_date: "2026-08-08",
+    profile_count: 1,
+    profiles: [{
+      ticker: "NVDA",
+      company_name: "NVIDIA",
+      as_of_date: "2026-08-08",
+      candidate_origin: "verified_event_screen",
+      company_quality: { status: "financial_compounding_supported", label: "재무 복리 확인", reason: "영업이익과 FCF가 확대됐습니다." },
+      stock_attractiveness: { status: "evaluation_withheld", label: "평가 보류", reason: "3개 시나리오가 필요합니다." },
+      portfolio_fit: { status: "evaluation_withheld", label: "평가 보류", score: null, reason: "개인 포트폴리오 정보가 없습니다." },
+      judgment_framework: { source_gap_count: 4 },
+      long_term_financials: {
+        summary: { complete_core_years: 5, operating_income_cagr_pct: 22.5, fcf_cagr_pct: 25.1, median_fcf_conversion_pct: 84.2 },
+        quality_gate: { status: "ready", complete_core_years: 5, missing: [] },
+        periods: [{ period: "2025", revenue: 999999999 }],
+      },
+      scorecard: { status: "withheld_incomplete_evidence", overall_score: null, scored_points: 31, scored_max: 35, missing_components: ["moat"], reason: "근거 부족" },
+      action: { grade: "관망", reason: "추가 근거가 필요합니다.", next_required_evidence: ["해자 검증"], confirmation_conditions: ["FCF 성장 지속"], invalidation_conditions: ["마진 훼손"], automatic_position_action: false },
+      source_urls: ["https://www.sec.gov/example", "javascript:alert(1)"],
+      full_text: "never publish company raw filing",
+      [sensitiveKey("api", "token")]: "drop-company-token",
+    }],
+  };
+}
+
 test("public report sanitizer keeps summaries and drops private or full-text fields", () => {
   const report = sanitizeReaderReport(privateReaderReport());
   const serialized = JSON.stringify(report);
@@ -209,6 +238,16 @@ test("Telegram refresh sanitizer keeps bounded discovery metadata only", () => {
   assert.doesNotMatch(serialized, /private-report|never publish|drop this body|drop-session|pdf_attachments|full_text/);
 });
 
+test("company candidate sanitizer keeps judgment cards and drops raw financial rows", () => {
+  const companies = sanitizeCompanyProfiles(privateCompanyProfiles());
+  const serialized = JSON.stringify(companies);
+  assert.equal(companies.profileCount, 1);
+  assert.equal(companies.profiles[0].ticker, "NVDA");
+  assert.equal(companies.profiles[0].action.grade, "관망");
+  assert.deepEqual(companies.profiles[0].sourceUrls, ["https://www.sec.gov/example"]);
+  assert.doesNotMatch(serialized, /999999999|never publish company|drop-company-token|periods|full_text|api_token/);
+});
+
 test("reader builder emits a locked placeholder without private data", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "public-report-reader-locked-"));
   const outputDir = join(root, "output");
@@ -218,36 +257,42 @@ test("reader builder emits a locked placeholder without private data", async (t)
   assert.equal(result.locked, true);
   assert.deepEqual(payload.reports, []);
   assert.deepEqual(payload.intelligence, []);
+  assert.deepEqual(payload.companies, []);
   assert.equal(payload.worldMemory, null);
   assert.equal(payload.telegram, null);
 });
 
-test("reader builder combines brief, full intelligence, Telegram, and World Memory", async (t) => {
+test("reader builder combines brief, full intelligence, company candidates, Telegram, and World Memory", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "public-report-reader-live-"));
   const inputDir = join(root, "workspace", "v2_reader_reports", "2026-08-08");
   const intelligenceDir = join(root, "workspace", "intelligence", "2026-08-08");
   const worldMemoryFile = join(root, "world-memory.json");
   const telegramDir = join(root, "workspace", "telegram_refresh", "2026-08-08");
+  const companiesDir = join(root, "workspace", "company_long_term_profiles", "2026-08-08");
   const outputDir = join(root, "output");
   await mkdir(inputDir, { recursive: true });
   await mkdir(intelligenceDir, { recursive: true });
   await mkdir(telegramDir, { recursive: true });
+  await mkdir(companiesDir, { recursive: true });
   await writeFile(join(inputDir, "reader_report.json"), JSON.stringify(privateReaderReport()), "utf8");
   await writeFile(join(intelligenceDir, "daily_intelligence.json"), JSON.stringify(privateDailyIntelligence()), "utf8");
   await writeFile(worldMemoryFile, JSON.stringify(privateWorldMemory()), "utf8");
   await writeFile(join(telegramDir, "telegram_intelligence.json"), JSON.stringify(privateTelegramRefresh()), "utf8");
+  await writeFile(join(companiesDir, "company_long_term_profiles.json"), JSON.stringify(privateCompanyProfiles()), "utf8");
   t.after(() => rm(root, { recursive: true, force: true }));
 
-  const result = await buildPublicReportReader({ inputDir: join(root, "workspace", "v2_reader_reports"), intelligenceDir: join(root, "workspace", "intelligence"), telegramDir: join(root, "workspace", "telegram_refresh"), worldMemoryFile, outputDir, templateDir });
+  const result = await buildPublicReportReader({ inputDir: join(root, "workspace", "v2_reader_reports"), intelligenceDir: join(root, "workspace", "intelligence"), companiesDir: join(root, "workspace", "company_long_term_profiles"), telegramDir: join(root, "workspace", "telegram_refresh"), worldMemoryFile, outputDir, templateDir });
   const serialized = await readFile(join(outputDir, "reports.json"), "utf8");
   const payload = JSON.parse(serialized);
   assert.equal(result.reportCount, 1);
   assert.equal(result.intelligenceCount, 1);
   assert.equal(result.worldMemory, true);
   assert.equal(result.telegram, true);
+  assert.equal(result.companyProfileCount, 1);
   assert.equal(payload.intelligence[0].events.items[0].eventId, "event-1");
   assert.equal(payload.worldMemory.theses.length, 1);
   assert.equal(payload.telegram.clusters[0].eventId, "telegram-event-1");
+  assert.equal(payload.companies[0].profiles[0].ticker, "NVDA");
   assert.doesNotMatch(serialized, /PDF 원문|never-publish-this|drop-oauth|drop thesis|private_token|private-report|never publish|drop this body|drop-session/);
 });
 
@@ -265,6 +310,7 @@ test("reader builder merges prior sanitized dates and preserves World Memory", a
     schemaVersion: "public_pb_reader_bundle.v1",
     reports: [sanitizeReaderReport({ ...privateReaderReport(), report_date: "2026-08-07", title: "older" })],
     intelligence: [sanitizeDailyIntelligence({ ...privateDailyIntelligence(), report_date: "2026-08-07" })],
+    companies: [sanitizeCompanyProfiles({ ...privateCompanyProfiles(), report_date: "2026-08-07" })],
     worldMemory: privateWorldMemory(),
     telegram: sanitizeTelegramRefresh(privateTelegramRefresh()),
   }), "utf8");
@@ -274,11 +320,12 @@ test("reader builder merges prior sanitized dates and preserves World Memory", a
   const payload = JSON.parse(await readFile(join(outputDir, "reports.json"), "utf8"));
   assert.deepEqual(payload.reports.map((report) => report.reportDate), ["2026-08-08", "2026-08-07"]);
   assert.deepEqual(payload.intelligence.map((report) => report.reportDate), ["2026-08-08", "2026-08-07"]);
+  assert.deepEqual(payload.companies.map((report) => report.reportDate), ["2026-08-07"]);
   assert.equal(payload.worldMemory.report.title, "현재 시장 상황 인식");
   assert.equal(payload.telegram.clusters[0].title, "반도체 공급망 점검");
 });
 
-test("static reader uses DOM APIs and exposes all four read-only views", async () => {
+test("static reader uses DOM APIs and exposes all five read-only views", async () => {
   const source = await readFile(join(templateDir, "app.js"), "utf8");
   const html = await readFile(join(templateDir, "index.html"), "utf8");
   assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|document\.write/);
@@ -287,6 +334,7 @@ test("static reader uses DOM APIs and exposes all four read-only views", async (
   assert.match(html, /data-view="brief"/);
   assert.match(html, /data-view="intelligence"/);
   assert.match(html, /data-view="telegram"/);
+  assert.match(html, /data-view="companies"/);
   assert.match(html, /data-view="world-memory"/);
 });
 
@@ -337,6 +385,7 @@ test("Cloudflare workflow gates data and consumes encrypted World Memory secret"
   assert.match(workflow, /if: vars\.CLOUDFLARE_REPORTS_PROTECTED == 'true'\s+uses: actions\/download-artifact@v4/);
   assert.match(workflow, /PRIVATE_READER_WORLD_MEMORY_JSON: \$\{\{ secrets\.PRIVATE_READER_WORLD_MEMORY_JSON \}\}/);
   assert.match(workflow, /--intelligence pipeline\/pb-daily-market-brief\/workspace\/intelligence/);
+  assert.match(workflow, /--companies pipeline\/pb-daily-market-brief\/workspace\/company_long_term_profiles/);
   assert.match(workflow, /--telegram pipeline\/pb-daily-market-brief\/workspace\/telegram_refresh/);
   assert.match(workflow, /--world-memory \.generated\/private-reader-world-memory\.json/);
   assert.match(workflow, /Cloudflare Pages project exists/);

@@ -8,11 +8,19 @@ the production hostname before real data is enabled.
 
 - Daily brief: sanitized `v2_reader_reports/*/reader_report.json` files.
 - Full intelligence: decision fields from `intelligence/*/daily_intelligence.json`.
+- Individual-stock candidates: sanitized long-term judgment cards from
+  `company_long_term_profiles/*/company_long_term_profiles.json`.
 - World Memory: the current report view and PB investment theses exported from
   local runtime state.
 
-The bundle excludes raw PDF text, OAuth/API credentials, cookies, raw source
-bodies, operational logs, absolute paths, and the World Memory SQLite database.
+The company view separates company quality, stock attractiveness, and portfolio
+fit. It withholds incomplete scores, keeps confirmation/invalidation conditions,
+and never emits automatic position actions. Only candidates backed by a verified
+primary event or an explicit local watchlist route enter bounded diligence.
+
+The bundle excludes raw PDF text, raw filing rows, OAuth/API credentials,
+cookies, raw source bodies, operational logs, absolute paths, and the World
+Memory SQLite database.
 The browser is read-only; collection, semantic search, and memory mutation stay
 in the local app.
 
