@@ -265,10 +265,11 @@ def fetch_kis_foreign_flow_snapshots(
 
     results: dict[str, dict[str, Any]] = {}
     for metric_id, config in KIS_FLOW_CONFIG.items():
-        request_url = f"{KIS_INVESTOR_ENDPOINT}?{urlencode({
+        query = urlencode({
             'fid_input_iscd': config['market'],
             'fid_input_iscd_2': config['subcode'],
-        })}"
+        })
+        request_url = f"{KIS_INVESTOR_ENDPOINT}?{query}"
         request = Request(
             request_url,
             headers={
