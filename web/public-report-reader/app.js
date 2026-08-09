@@ -1314,6 +1314,67 @@ function renderCompanyCandidates(bundle) {
     body.append(verdicts);
     const metrics = companyMetricCards(profile);
     if (metrics.childElementCount) body.append(metrics);
+    if (profile.officialBusinessEvidence?.status === "verified_primary") {
+      body.append(element("h4", "", "공식 사업모델 근거"));
+      if (profile.officialBusinessEvidence.summary) {
+        body.append(element("p", "research-summary", profile.officialBusinessEvidence.summary));
+      }
+      if (profile.officialBusinessEvidence.issuerExcerpt) {
+        body.append(element("p", "company-official-excerpt", profile.officialBusinessEvidence.issuerExcerpt));
+        body.append(element(
+          "p",
+          "research-meta",
+          "회사 공시의 사업 설명입니다. 독립 검증된 경쟁우위 판단과는 구분합니다.",
+        ));
+      }
+      if (profile.issuerCompetitiveClaims?.claims?.length) {
+        body.append(element("h4", "", "회사가 설명한 경쟁우위 단서"));
+        appendTextList(body, profile.issuerCompetitiveClaims.claims, "compact-list");
+        body.append(element(
+          "p",
+          "research-meta",
+          "회사 연차보고서의 주장입니다. 고객·가격·점유율·유지율 자료로 독립 검증되기 전에는 해자로 확정하지 않습니다.",
+        ));
+      }
+      if (profile.issuerCompetitiveClaims?.reason) {
+        body.append(element("h4", "", profile.issuerCompetitiveClaims.verified ? "해자 정량 검증" : "해자 검증 상태"));
+        body.append(element("p", "research-summary", profile.issuerCompetitiveClaims.reason));
+      }
+      if (profile.managementExecutionEvidence?.reason) {
+        body.append(element("h4", "", profile.managementExecutionEvidence.verified ? "경영진 실행력 정량 검증" : "경영진 실행력 검증 상태"));
+        body.append(element("p", "research-summary", profile.managementExecutionEvidence.reason));
+      }
+      if (profile.officialRiskFactors?.excerpt) {
+        body.append(element("h4", "", "공식 위험요인"));
+        body.append(element("p", "company-official-excerpt", profile.officialRiskFactors.excerpt));
+      }
+    }
+    if (profile.valuationScenarios?.status === "supported_screening_model") {
+      body.append(element("h4", "", "약세·기준·강세 가치평가"));
+      body.append(element("p", "research-meta", [
+        `${profile.valuationScenarios.priceAsOf || "기준일 확인 필요"} 가격 ${formatNumber(profile.valuationScenarios.currentPrice)}`,
+        `${profile.valuationScenarios.horizonYears || 5}년`,
+        `요구수익률 ${formatNumber(profile.valuationScenarios.requiredReturnPct)}%`,
+      ].join(" · ")));
+      const scenarioGrid = element("div", "company-scenario-grid");
+      (profile.valuationScenarios.scenarios || []).forEach((row) => {
+        const card = element("div", "company-scenario-card");
+        card.append(
+          element("strong", "", valueLabel(row.scenario)),
+          element("span", "", `현재가치 ${formatNumber(row.present_value_per_share)}`),
+          element("small", "", `매출 ${formatNumber(row.revenue_growth_pct)}% · FCF마진 ${formatNumber(row.fcf_margin_pct)}% · 종착 P/FCF ${formatNumber(row.terminal_price_to_fcf)}배`),
+          element("small", "", `현재가 대비 ${formatNumber(row.upside_downside_pct)}%`),
+        );
+        scenarioGrid.append(card);
+      });
+      body.append(scenarioGrid);
+      body.append(element(
+        "p",
+        "research-summary",
+        `현재 가격이 요구하는 FCF 성장률 ${formatNumber(profile.valuationScenarios.impliedFcfGrowthPct)}% · 기준 시나리오 ${formatNumber(profile.valuationScenarios.baseCaseFcfGrowthPct)}%`,
+      ));
+      appendTextList(body, profile.valuationScenarios.assumptionLimits, "compact-list");
+    }
     [["확인 조건", profile.action?.confirmationConditions], ["무효화 조건", profile.action?.invalidationConditions], ["다음 필요 근거", profile.action?.nextRequiredEvidence]].forEach(([title, values]) => {
       if (!values?.length) return;
       body.append(element("h4", "", title));

@@ -46,6 +46,7 @@ class WorkflowArtifactTests(unittest.TestCase):
         self.assertIn("workspace/charts/", workflow)
         self.assertIn("workspace/company_long_term_profiles/", workflow)
         self.assertIn("workspace/candidate_official_evidence/", workflow)
+        self.assertIn("workspace/company_primary_narratives/", workflow)
 
     def test_private_reader_publishes_sanitized_company_candidates(self) -> None:
         workflow = APP_WORKFLOW.read_text(encoding="utf-8")
@@ -71,6 +72,15 @@ class WorkflowArtifactTests(unittest.TestCase):
         self.assertLess(enrichment, second_screen)
         self.assertIn('candidate_evidence_args.append("--no-network")', pipeline)
         self.assertIn('"--additional-inbox-file"', pipeline)
+
+    def test_company_primary_narratives_run_after_queue_and_are_offline_safe(self) -> None:
+        pipeline = (ROOT / "run_daily_report.py").read_text(encoding="utf-8")
+        queue = pipeline.index('"build_company_research_queue.py"')
+        narratives = pipeline.index('"collect_company_primary_narratives.py"')
+        tearsheets = pipeline.index('"build_company_tearsheets.py"')
+        self.assertLess(queue, narratives)
+        self.assertLess(narratives, tearsheets)
+        self.assertIn('narrative_args.append("--no-network")', pipeline)
 
     def test_cached_publish_downloads_prior_artifact_without_collection(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

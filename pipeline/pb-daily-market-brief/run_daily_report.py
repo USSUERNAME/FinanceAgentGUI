@@ -316,6 +316,10 @@ def main() -> None:
     run("track_sector_theses.py", "--date", report_date)
     run("build_sector_leadership_radar.py", "--date", report_date)
     run("build_company_research_queue.py", "--date", report_date)
+    narrative_args = ["collect_company_primary_narratives.py", "--date", report_date]
+    if offline_validation:
+        narrative_args.append("--no-network")
+    run(*narrative_args)
     run("collect_company_market_context.py", "--date", report_date)
     pause_between_alpha_vantage_stages()
     run("collect_company_peer_context.py", "--date", report_date)

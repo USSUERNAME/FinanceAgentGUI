@@ -12,6 +12,7 @@ from typing import Any, Callable
 from urllib.parse import urlencode
 
 from collectors.common import ROOT, get_json, load_dotenv
+from collectors.alpaca_market import fetch_daily_series_batch
 
 SCHEMA_VERSION = "company_market_context.v1"
 ALPHA_VANTAGE_DOCS_URL = "https://www.alphavantage.co/documentation/"
@@ -54,8 +55,6 @@ def eligible_candidates(queue: dict[str, Any], max_candidates: int) -> tuple[lis
             })
             continue
         eligible.append(row)
-        if len(eligible) >= max_candidates:
-            break
     return eligible, skipped
 
 
@@ -172,6 +171,35 @@ def normalize_fallback_company_context(
     }
 
 
+def normalize_alpaca_series_context(
+    candidate: dict[str, Any], rows: list[dict[str, Any]], collected_at: str,
+) -> dict[str, Any]:
+    ordered = sorted(rows, key=lambda row: row.get("date"))
+    latest = ordered[-1]
+    prior = ordered[-2] if len(ordered) >= 2 else {}
+    close = _number(latest.get("close"))
+    previous_close = _number(prior.get("close"))
+    change_pct = (
+        round((close / previous_close - 1) * 100, 6)
+        if close is not None and previous_close is not None and previous_close > 0 else None
+    )
+    as_of = latest.get("date")
+    as_of_text = as_of.isoformat() if hasattr(as_of, "isoformat") else str(as_of or "")[:10]
+    return normalize_fallback_company_context(
+        candidate,
+        {
+            "market_reaction": {
+                "close": close,
+                "return_1d_pct": change_pct,
+                "volume": latest.get("volume"),
+            },
+            "market_source": {"as_of": as_of_text},
+        },
+        collected_at,
+        as_of_text,
+    )
+
+
 def normalize_company_context(
     candidate: dict[str, Any], quote_payload: dict[str, Any], overview: dict[str, Any], collected_at: str,
 ) -> dict[str, Any]:
@@ -254,6 +282,9 @@ def collect_company_market_context(
     delay_seconds: float = 0.0,
     max_candidates: int = DEFAULT_MAX_CANDIDATES,
     fallback_market: dict[str, Any] | None = None,
+    alpaca_api_key_id: str = "",
+    alpaca_secret_key: str = "",
+    alpaca_fetcher: Callable[..., dict[str, list[dict[str, Any]]]] = fetch_daily_series_batch,
 ) -> dict[str, Any]:
     candidates, skipped = eligible_candidates(queue, max_candidates)
     fallback_by_ticker = _fallback_market_map(fallback_market)
@@ -262,7 +293,7 @@ def collect_company_market_context(
     errors: list[dict[str, Any]] = []
     request_count = 0
     if api_key:
-        for candidate in candidates:
+        for candidate in candidates[:max_candidates]:
             payloads: dict[str, dict[str, Any]] = {}
             try:
                 for function in ("GLOBAL_QUOTE", "OVERVIEW"):
@@ -297,6 +328,48 @@ def collect_company_market_context(
                 contexts.append(normalize_fallback_company_context(
                     candidate, fallback, collected_at, report_date,
                 ))
+    collected_tickers = {str(row.get("ticker") or "").upper() for row in contexts}
+    for candidate in candidates:
+        ticker = str(candidate.get("ticker") or "").upper()
+        if ticker in collected_tickers:
+            continue
+        fallback = fallback_by_ticker.get(ticker)
+        if fallback:
+            contexts.append(normalize_fallback_company_context(
+                candidate, fallback, collected_at, report_date,
+            ))
+            collected_tickers.add(ticker)
+    collected_tickers = {str(row.get("ticker") or "").upper() for row in contexts}
+    missing_candidates = [
+        row for row in candidates
+        if str(row.get("ticker") or "").upper() not in collected_tickers
+    ]
+    if missing_candidates and alpaca_api_key_id and alpaca_secret_key:
+        try:
+            series = alpaca_fetcher(
+                [str(row.get("ticker") or "").upper() for row in missing_candidates],
+                alpaca_api_key_id,
+                alpaca_secret_key,
+                report_date,
+                feed=os.getenv("ALPACA_MARKET_DATA_FEED", "iex"),
+                lookback_days=14,
+                max_bars=3,
+                adjustment="all",
+            )
+            for candidate in missing_candidates:
+                ticker = str(candidate.get("ticker") or "").upper()
+                rows = series.get(ticker) or []
+                if not rows:
+                    continue
+                contexts.append(normalize_alpaca_series_context(candidate, rows, collected_at))
+                matching_error = next((row for row in errors if row.get("ticker") == ticker), None)
+                if matching_error is not None:
+                    matching_error["recovered_by"] = "alpaca_direct_batch_fallback"
+        except Exception as exc:
+            errors.append({
+                "ticker": None,
+                "error": f"alpaca_direct_batch_fallback_failed:{exc}",
+            })
     if not candidates:
         collection_status = "no_eligible_candidates"
     elif not api_key and contexts:
@@ -322,14 +395,15 @@ def collect_company_market_context(
         "errors": errors,
         "methodology": {
             "eligible_queue_stage": "valuation_expectations_gated",
+            "maximum_alpha_vantage_candidates": max_candidates,
             "supported_markets": ["US"],
             "relative_valuation_requires_benchmark": True,
             "decision_grade_without_consensus_liquidity_positioning": False,
             "source_url": ALPHA_VANTAGE_DOCS_URL,
             "fallback_source_url": ALPACA_MARKET_DATA_DOCS_URL,
             "fallback_policy": (
-                "Reuse the already-collected candidate-screen close and volume only; "
-                "never infer missing valuation multiples."
+                "Reuse the already-collected candidate-screen close and volume first, then fetch a bounded "
+                "Alpaca batch for still-missing candidates; never infer missing valuation multiples."
             ),
         },
         "posture": "market_context_only_not_investment_recommendation",
@@ -393,6 +467,14 @@ def main() -> None:
         json.loads(queue_path.read_text(encoding="utf-8")),
         os.getenv("ALPHAVANTAGE_API_KEY", "").strip(),
         fallback_market=fallback_market,
+        alpaca_api_key_id=(
+            os.getenv("APCA_API_KEY_ID", "").strip()
+            or os.getenv("ALPACA_API_KEY", "").strip()
+        ),
+        alpaca_secret_key=(
+            os.getenv("APCA_API_SECRET_KEY", "").strip()
+            or os.getenv("ALPACA_SECRET_KEY", "").strip()
+        ),
         delay_seconds=float(os.getenv("ALPHAVANTAGE_REQUEST_DELAY_SECONDS", "13")),
         max_candidates=max_candidates,
     )

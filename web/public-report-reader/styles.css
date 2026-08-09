@@ -307,6 +307,12 @@ button { -webkit-tap-highlight-color: transparent; }
 .company-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin: 18px 0; }
 .company-metric-card { padding: 15px; border: 1px solid #dce4e0; border-radius: 13px; background: #fff; }
 .company-metric-value { display: block; margin-top: 9px; color: #17372e; font-size: 20px; letter-spacing: -0.035em; }
+.company-official-excerpt { margin: 11px 0; padding: 13px 15px; border-left: 3px solid #739b8c; border-radius: 0 11px 11px 0; background: #f4f8f6; color: #465a53; font-size: 13px; line-height: 1.7; }
+.company-scenario-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 11px 0; }
+.company-scenario-card { display: grid; gap: 6px; padding: 13px; border: 1px solid #dce4e0; border-radius: 11px; background: #f8faf9; }
+.company-scenario-card span { color: #17372e; font-weight: 700; }
+.company-scenario-card small { color: #61736c; line-height: 1.45; }
+@media (max-width: 720px) { .company-scenario-grid { grid-template-columns: 1fr; } }
 .company-source-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .company-source-links .source-link { margin-top: 0; }
 .pending-company-stack { margin-top: 16px; }

@@ -330,6 +330,7 @@ jobs:
             pipeline/pb-daily-market-brief/workspace/company_peer_context/
             pipeline/pb-daily-market-brief/workspace/company_valuation_expectations/
             pipeline/pb-daily-market-brief/workspace/company_primary_facts/
+            pipeline/pb-daily-market-brief/workspace/company_primary_narratives/
             pipeline/pb-daily-market-brief/workspace/company_guidance_inputs/
             pipeline/pb-daily-market-brief/workspace/company_operating_bridge/
             pipeline/pb-daily-market-brief/workspace/company_operating_inputs/

@@ -115,6 +115,7 @@ def evaluate_judgment_gates(
     ]
 
     screen = valuation.get("valuation_screen") or {}
+    tearsheet_valuation = tearsheet.get("valuation_context") or {}
     comparisons = screen.get("comparisons") or []
     primary_comparison = next(
         (row for row in comparisons if row.get("status") == "available_screening_only"),
@@ -145,14 +146,14 @@ def evaluate_judgment_gates(
         ),
         _gate(
             "three_scenario_valuation", "약세·기준·강세 시나리오",
-            screen.get("selected_valuation_range_status") in {"available", "supported"},
+            tearsheet_valuation.get("selected_valuation_range_status") in {"available", "supported"},
             "매출·마진·FCF·종착 멀티플 가정 확인",
             "약세·기준·강세의 매출·마진·FCF·종착 멀티플",
         ),
         _gate(
             "priced_in_expectations", "현재 가격에 반영된 기대",
-            (tearsheet.get("valuation_context") or {}).get("priced_in_status")
-            in {"established", "verified"},
+            tearsheet_valuation.get("priced_in_status")
+            in {"established", "verified", "calculated_scenario_implied_growth"},
             "현재 가격이 요구하는 성장·마진 가정 확인",
             "현재 가격이 요구하는 성장·마진과 기대수익 근거",
         ),

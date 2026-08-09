@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import unittest
+from datetime import date
 
 from collect_company_market_context import (
     ALPACA_MARKET_DATA_DOCS_URL,
@@ -122,6 +123,45 @@ class CompanyMarketContextTests(unittest.TestCase):
         row = payload["contexts"][0]
         self.assertIsNone(row["valuation_context"]["forward_pe"])
         self.assertEqual(row["expectations_context"]["score"], 72.0)
+
+    def test_missing_candidate_screen_price_uses_direct_alpaca_batch(self) -> None:
+        calls = []
+
+        def alpaca_fetcher(tickers, key, secret, report_date, **kwargs):
+            calls.append((tickers, key, secret, report_date, kwargs))
+            return {"NVDA": [
+                {"date": date(2026, 7, 17), "close": 188.0, "volume": 10_000_000},
+                {"date": date(2026, 7, 18), "close": 190.5, "volume": 12_000_000},
+            ]}
+
+        payload = collect_company_market_context(
+            "2026-07-20", queue(candidate()), "",
+            alpaca_api_key_id="alpaca-key",
+            alpaca_secret_key="alpaca-secret",
+            alpaca_fetcher=alpaca_fetcher,
+        )
+        self.assertEqual(payload["collection_status"], "fallback_available")
+        self.assertEqual(payload["collected_candidate_count"], 1)
+        row = payload["contexts"][0]
+        self.assertEqual(row["market_data"]["price"], 190.5)
+        self.assertEqual(row["market_data"]["price_as_of"], "2026-07-18")
+        self.assertAlmostEqual(row["market_data"]["change_pct"], 1.329787, places=6)
+        self.assertEqual(row["source"]["source_url"], ALPACA_MARKET_DATA_DOCS_URL)
+        self.assertEqual(calls[0][0], ["NVDA"])
+        self.assertEqual(calls[0][4]["adjustment"], "all")
+
+    def test_fourth_candidate_uses_fallback_without_expanding_provider_budget(self) -> None:
+        rows = [candidate(ticker=ticker) for ticker in ("NVDA", "AMD", "AVGO", "TTD")]
+        fallback = fallback_market("TTD")
+        payload = collect_company_market_context(
+            "2026-07-29", queue(*rows), "secret",
+            fallback_market=fallback,
+            fetcher=lambda *args: {"Note": "rate limit"},
+            max_candidates=3,
+        )
+        self.assertEqual(payload["eligible_candidate_count"], 4)
+        self.assertEqual(payload["request_count"], 3)
+        self.assertEqual([row["ticker"] for row in payload["contexts"]], ["TTD"])
 
     def test_quote_and_raw_multiples_remain_unbenchmarked(self) -> None:
         sleeps = []
