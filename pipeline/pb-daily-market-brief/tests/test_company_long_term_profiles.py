@@ -98,6 +98,10 @@ class CompanyLongTermProfilesTests(unittest.TestCase):
         self.assertIn("three_scenario_valuation", framework["stock_attractiveness"]["missing_gate_ids"])
         self.assertEqual(profile["action"]["confirmation_conditions"], ["Confirm durable FCF growth."])
         self.assertTrue(profile["action"]["next_required_evidence"])
+        self.assertEqual(profile["official_business_evidence"]["status"], "verified_primary")
+        self.assertEqual(profile["official_business_evidence"]["source_url"], "https://www.sec.gov/example")
+        self.assertFalse(profile["issuer_competitive_claims"]["verified"])
+        self.assertFalse(profile["management_execution_evidence"]["verified"])
 
     def test_validator_rejects_fabricated_overall_score(self) -> None:
         payload = build_company_long_term_profiles(

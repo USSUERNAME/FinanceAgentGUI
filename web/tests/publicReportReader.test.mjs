@@ -185,6 +185,60 @@ function privateCompanyProfiles() {
       stock_attractiveness: { status: "evaluation_withheld", label: "평가 보류", reason: "3개 시나리오가 필요합니다." },
       portfolio_fit: { status: "evaluation_withheld", label: "평가 보류", score: null, reason: "개인 포트폴리오 정보가 없습니다." },
       judgment_framework: { source_gap_count: 4 },
+      official_business_evidence: {
+        status: "verified_primary",
+        evidence_summary: "10-K Item 1에서 핵심 사업을 확인했습니다.",
+        body_location: "10-K Item 1 Business",
+        issuer_excerpt: "회사는 가속 컴퓨팅 플랫폼과 소프트웨어 생태계를 운영한다고 설명합니다.",
+        evidence_class: "issuer_disclosed_fact_and_claim",
+        source_url: "https://www.sec.gov/example-business",
+      },
+      issuer_competitive_claims: {
+        status: "issuer_claims_available_not_independently_verified",
+        verified: false,
+        issuer_claims: ["회사는 생태계 규모가 경쟁력이라고 설명합니다."],
+      },
+      official_risk_factors: {
+        status: "verified_primary",
+        body_location: "10-K Item 1A Risk Factors",
+        excerpt: "수요, 공급, 경쟁과 규제 변화가 실적에 영향을 줄 수 있습니다.",
+      },
+      management_execution_evidence: {
+        status: "not_verified",
+        verified: false,
+        reason: "사업 설명만으로 실행력을 판정하지 않습니다.",
+      },
+      valuation_scenarios: {
+        status: "supported_screening_model",
+        model: "five_year_revenue_fcf_margin_terminal_multiple",
+        evidence_class: "derived_calculation_from_primary_financials_and_dated_market_price",
+        horizon_years: 5,
+        required_return_pct: 10,
+        current_price: 180,
+        price_as_of: "2026-08-08",
+        current_fcf_per_share: 4.2,
+        fair_value_range: { low: 121.4, high: 248.6, currency: "USD" },
+        implied_fcf_growth_pct: 15.2,
+        base_case_fcf_growth_pct: 14.1,
+        current_price_expectation: "requires_growth_near_base_case",
+        scenarios: [{
+          scenario: "bear", revenue_growth_pct: 8, operating_margin_pct: 45,
+          fcf_margin_pct: 32, terminal_price_to_fcf: 18,
+          terminal_fcf_per_share: 10, terminal_value_per_share: 180,
+          present_value_per_share: 121.4, upside_downside_pct: -32.56,
+        }, {
+          scenario: "base", revenue_growth_pct: 14, operating_margin_pct: 55,
+          fcf_margin_pct: 40, terminal_price_to_fcf: 24,
+          terminal_fcf_per_share: 12, terminal_value_per_share: 288,
+          present_value_per_share: 178.8, upside_downside_pct: -0.67,
+        }, {
+          scenario: "bull", revenue_growth_pct: 20, operating_margin_pct: 60,
+          fcf_margin_pct: 44, terminal_price_to_fcf: 29,
+          terminal_fcf_per_share: 14, terminal_value_per_share: 406,
+          present_value_per_share: 248.6, upside_downside_pct: 38.11,
+        }],
+        assumption_limits: ["희석주식수는 최근 수준으로 고정했습니다."],
+      },
       long_term_financials: {
         summary: { complete_core_years: 5, operating_income_cagr_pct: 22.5, fcf_cagr_pct: 25.1, median_fcf_conversion_pct: 84.2 },
         quality_gate: { status: "ready", complete_core_years: 5, missing: [] },
@@ -274,6 +328,13 @@ test("company candidate sanitizer keeps judgment cards and drops raw financial r
   assert.equal(companies.profileCount, 1);
   assert.equal(companies.profiles[0].ticker, "NVDA");
   assert.equal(companies.profiles[0].action.grade, "관망");
+  assert.equal(companies.profiles[0].officialBusinessEvidence.status, "verified_primary");
+  assert.match(companies.profiles[0].officialBusinessEvidence.issuerExcerpt, /가속 컴퓨팅/);
+  assert.equal(companies.profiles[0].issuerCompetitiveClaims.verified, false);
+  assert.match(companies.profiles[0].officialRiskFactors.excerpt, /규제 변화/);
+  assert.equal(companies.profiles[0].valuationScenarios.status, "supported_screening_model");
+  assert.equal(companies.profiles[0].valuationScenarios.scenarios.length, 3);
+  assert.equal(companies.profiles[0].valuationScenarios.fairValueRange.high, 248.6);
   assert.deepEqual(companies.profiles[0].sourceUrls, ["https://www.sec.gov/example"]);
   assert.doesNotMatch(serialized, /999999999|never publish company|drop-company-token|periods|full_text|api_token/);
 });

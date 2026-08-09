@@ -53,6 +53,34 @@ test("remote runner correlates the exact workflow request", () => {
   assert.equal(found.databaseId, 2);
 });
 
+test("remote runner prepares an enriched Telegram approval secret", async () => {
+  const workspace = join(tempRoot, "workspace");
+  const approvals = join(workspace, "telegram_research_approvals", "attachments.json");
+  const refresh = join(workspace, "telegram_refresh", "2026-08-10", "telegram_intelligence.json");
+  await mkdir(join(workspace, "telegram_research_approvals"), { recursive: true });
+  await mkdir(join(workspace, "telegram_refresh", "2026-08-10"), { recursive: true });
+  await writeFile(approvals, JSON.stringify({
+    schema_version: "telegram_research_attachment_approvals.v1",
+    decisions: [{ attachment_key: "a".repeat(64), decision: "approved" }],
+  }), "utf8");
+  await writeFile(refresh, JSON.stringify({
+    pdf_attachments: [{
+      attachment_key: "a".repeat(64),
+      message_id: 123,
+      channel_username: "OfficialBroker",
+      published_at: "2026-08-10T00:00:00Z",
+    }],
+  }), "utf8");
+
+  const prepared = __pbRemoteRunnerTestHooks.prepareTelegramApprovalSecret(
+    approvals,
+    workspace,
+  );
+  assert.equal(prepared.approvedCount, 1);
+  assert.equal(prepared.enrichedCount, 1);
+  assert.ok(prepared.encoded.length > 20);
+});
+
 test("remote runner copies only allowlisted report artifact directories", async () => {
   const staging = join(tempRoot, "staging");
   const workspace = join(tempRoot, "workspace");

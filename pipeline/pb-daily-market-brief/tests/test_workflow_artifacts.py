@@ -46,6 +46,7 @@ class WorkflowArtifactTests(unittest.TestCase):
         self.assertIn("workspace/charts/", workflow)
         self.assertIn("workspace/company_long_term_profiles/", workflow)
         self.assertIn("workspace/candidate_official_evidence/", workflow)
+        self.assertIn("workspace/company_primary_narratives/", workflow)
 
     def test_private_reader_publishes_sanitized_company_candidates(self) -> None:
         workflow = APP_WORKFLOW.read_text(encoding="utf-8")
@@ -71,6 +72,15 @@ class WorkflowArtifactTests(unittest.TestCase):
         self.assertLess(enrichment, second_screen)
         self.assertIn('candidate_evidence_args.append("--no-network")', pipeline)
         self.assertIn('"--additional-inbox-file"', pipeline)
+
+    def test_company_primary_narratives_run_after_queue_and_are_offline_safe(self) -> None:
+        pipeline = (ROOT / "run_daily_report.py").read_text(encoding="utf-8")
+        queue = pipeline.index('"build_company_research_queue.py"')
+        narratives = pipeline.index('"collect_company_primary_narratives.py"')
+        tearsheets = pipeline.index('"build_company_tearsheets.py"')
+        self.assertLess(queue, narratives)
+        self.assertLess(narratives, tearsheets)
+        self.assertIn('narrative_args.append("--no-network")', pipeline)
 
     def test_cached_publish_downloads_prior_artifact_without_collection(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -155,6 +165,15 @@ class WorkflowArtifactTests(unittest.TestCase):
             workflow,
         )
 
+    def test_korea_market_credentials_are_forwarded_to_actions(self) -> None:
+        workflow = APP_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "BOK_ECOS_API_KEY: ${{ secrets.BOK_ECOS_API_KEY || secrets.ECOS_API_KEY }}",
+            workflow,
+        )
+        self.assertIn("KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}", workflow)
+        self.assertIn("KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}", workflow)
+
     def test_drive_approval_registry_is_restored_and_removed_ephemerally(self) -> None:
         workflow = APP_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("Restore Drive approval registry", workflow)
@@ -170,8 +189,22 @@ class WorkflowArtifactTests(unittest.TestCase):
             'workspace/broker_research_approvals/google_drive.json',
             workflow,
         )
-        self.assertIn("Remove ephemeral Drive approval registry", workflow)
-        cleanup = workflow.index("Remove ephemeral Drive approval registry")
+
+    def test_telegram_approval_registry_is_restored_validated_and_removed(self) -> None:
+        workflow = APP_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("Restore Telegram PDF approval registry", workflow)
+        self.assertIn(
+            "secrets.TELEGRAM_RESEARCH_APPROVALS_GZIP_BASE64",
+            workflow,
+        )
+        self.assertIn("telegram_research_attachment_approvals.v1", workflow)
+        self.assertIn("python validate_telegram_research_run.py", workflow)
+        self.assertIn(
+            "workspace/telegram_research_approvals/attachments.json",
+            workflow,
+        )
+        self.assertIn("Remove ephemeral approval registries", workflow)
+        cleanup = workflow.index("Remove ephemeral approval registries")
         preserve = workflow.index("Preserve structured evidence and analysis")
         self.assertLess(cleanup, preserve)
 

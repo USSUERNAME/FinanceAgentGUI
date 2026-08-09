@@ -241,7 +241,8 @@ class V2ReaderReportTests(unittest.TestCase):
 
     def test_current_korea_transmission_ready_status_is_available(self) -> None:
         packet = self.intelligence()
-        packet["market"]["korea_transmission_inputs"] = {
+        packet["market"].pop("korea_transmission_inputs", None)
+        packet["market"]["korea_market"] = {
             "transmission_gate": {
                 "status": "ready_for_korea_transmission",
             },
@@ -256,6 +257,18 @@ class V2ReaderReportTests(unittest.TestCase):
                     "source_url": "https://data.krx.co.kr/",
                     "primary_source_confirmed": True,
                 },
+                "foreign_kospi_cash_net_buy_krw": {
+                    "metric_id": "foreign_kospi_cash_net_buy_krw",
+                    "label": "외국인 코스피 현물 순매수",
+                    "status": "available",
+                    "value": -865101000000.0,
+                    "unit": "KRW",
+                    "as_of": "2026-07-23",
+                    "source_url": "https://openapi.koreainvestment.com/",
+                    "source_grade": "B",
+                    "primary_source_confirmed": False,
+                    "evidence_label": "fact_licensed_provider_reported",
+                },
             },
         }
 
@@ -263,6 +276,10 @@ class V2ReaderReportTests(unittest.TestCase):
 
         self.assertEqual(report["korea_connection"]["status"], "available")
         self.assertEqual(report["korea_connection"]["metrics"][0]["label"], "코스피")
+        self.assertEqual(
+            report["korea_connection"]["metrics"][1]["label"],
+            "외국인 코스피 현물 순매수",
+        )
 
     def test_validation_rejects_position_authority(self) -> None:
         report = build_v2_reader_report(self.intelligence())

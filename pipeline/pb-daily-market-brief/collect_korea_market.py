@@ -22,9 +22,9 @@ ECOS_SOURCE_URL = "https://ecos.bok.or.kr/"
 ECOS_USDKRW_STAT_CODE = "731Y001"
 ECOS_USDKRW_ITEM_CODE = "0000001"
 KIS_API_BASE = "https://openapi.koreainvestment.com:9443"
-KIS_INVESTOR_ENDPOINT = (
+KIS_INVESTOR_DAILY_ENDPOINT = (
     f"{KIS_API_BASE}/uapi/domestic-stock/v1/quotations/"
-    "inquire-investor-time-by-market"
+    "inquire-investor-daily-by-market"
 )
 KIS_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -33,24 +33,14 @@ KIS_USER_AGENT = (
 KIS_TOKEN_CACHE_PATH = ROOT / "workspace" / "secrets" / "kis-access-token.json"
 KIS_FLOW_CONFIG = {
     "foreign_kospi_cash_net_buy_krw": {
-        "market": "KSP",
-        "subcode": "0001",
         "field": "frgn_ntby_tr_pbmn",
         "multiplier": 1_000_000,
         "unit": "KRW",
         "label": "외국인 코스피 현물 순매수",
         "provider_unit": "million KRW",
     },
-    "foreign_kospi200_futures_net_buy_contracts": {
-        "market": "K2I",
-        "subcode": "F001",
-        "field": "frgn_ntby_qty",
-        "multiplier": 1,
-        "unit": "contracts",
-        "label": "외국인 코스피200 선물 순매수",
-        "provider_unit": "contracts",
-    },
 }
+KIS_OPTIONAL_FUTURES_METRIC_ID = "foreign_kospi200_futures_net_buy_contracts"
 KRX_API_BASE = "https://data-dbg.krx.co.kr/svc/apis/idx"
 KRX_INDEX_ENDPOINTS = {
     "kospi": f"{KRX_API_BASE}/kospi_dd_trd",
@@ -78,7 +68,6 @@ KOREA_ALIGNMENT_METRIC_KEYS = (
     "kospi",
     "kosdaq",
     "foreign_kospi_cash_net_buy_krw",
-    "foreign_kospi200_futures_net_buy_contracts",
     "samsung_electronics",
     "sk_hynix",
 )
@@ -257,42 +246,42 @@ def get_kis_access_token(app_key: str, app_secret: str) -> str:
     return access_token
 
 
-def fetch_kis_foreign_flow_snapshots(
+def fetch_kis_foreign_cash_daily(
     app_key: str,
     app_secret: str,
-) -> dict[str, dict[str, Any]]:
+    report_date: str,
+) -> list[dict[str, Any]]:
     access_token = get_kis_access_token(app_key, app_secret)
-
-    results: dict[str, dict[str, Any]] = {}
-    for metric_id, config in KIS_FLOW_CONFIG.items():
-        query = urlencode({
-            'fid_input_iscd': config['market'],
-            'fid_input_iscd_2': config['subcode'],
-        })
-        request_url = f"{KIS_INVESTOR_ENDPOINT}?{query}"
-        request = Request(
-            request_url,
-            headers={
-                "authorization": f"Bearer {access_token}",
-                "appkey": app_key,
-                "appsecret": app_secret,
-                "tr_id": "FHPTJ04030000",
-                "custtype": "P",
-                "Accept": "application/json",
-                "User-Agent": KIS_USER_AGENT,
-            },
-        )
-        with urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        if str(payload.get("rt_cd") or "") != "0":
-            raise ValueError(f"KIS flow response failed for {metric_id}")
-        output = payload.get("output")
-        if isinstance(output, list) and len(output) == 1:
-            output = output[0]
-        if not isinstance(output, dict):
-            raise ValueError(f"KIS flow response is missing output for {metric_id}")
-        results[metric_id] = output
-    return results
+    compact_date = date.fromisoformat(report_date).strftime("%Y%m%d")
+    query = urlencode({
+        "FID_COND_MRKT_DIV_CODE": "U",
+        "FID_INPUT_ISCD": "0001",
+        "FID_INPUT_DATE_1": compact_date,
+        "FID_INPUT_ISCD_1": "KSP",
+        "FID_INPUT_DATE_2": compact_date,
+        "FID_INPUT_ISCD_2": "0001",
+    })
+    request_url = f"{KIS_INVESTOR_DAILY_ENDPOINT}?{query}"
+    request = Request(
+        request_url,
+        headers={
+            "authorization": f"Bearer {access_token}",
+            "appkey": app_key,
+            "appsecret": app_secret,
+            "tr_id": "FHPTJ04040000",
+            "custtype": "P",
+            "Accept": "application/json",
+            "User-Agent": KIS_USER_AGENT,
+        },
+    )
+    with urlopen(request, timeout=30) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if str(payload.get("rt_cd") or "") != "0":
+        raise ValueError("KIS daily foreign-flow response failed")
+    output = payload.get("output")
+    if not isinstance(output, list):
+        raise ValueError("KIS daily foreign-flow response is missing output rows")
+    return [row for row in output if isinstance(row, dict)]
 
 
 def parse_krx_number(value: Any) -> float:
@@ -577,28 +566,46 @@ def collect_kis_foreign_flows(
     report_date: str,
     app_key: str,
     app_secret: str,
-    fetcher: Callable[[str, str], dict[str, dict[str, Any]]] = fetch_kis_foreign_flow_snapshots,
+    fetcher: Callable[[str, str, str], list[dict[str, Any]]] = fetch_kis_foreign_cash_daily,
 ) -> dict[str, dict[str, Any]]:
     if not app_key or not app_secret:
         return {
             metric_id: missing_metric(
                 metric_id,
                 "missing_kis_open_api_authorization",
-                KIS_INVESTOR_ENDPOINT,
+                KIS_INVESTOR_DAILY_ENDPOINT,
             )
-            for metric_id in KIS_FLOW_CONFIG
+            for metric_id in (*KIS_FLOW_CONFIG, KIS_OPTIONAL_FUTURES_METRIC_ID)
         }
     report_day = date.fromisoformat(report_date)
-    session_day = report_day
-    while session_day.weekday() >= 5:
-        session_day -= timedelta(days=1)
     try:
-        snapshots = fetcher(app_key, app_secret)
+        rows = fetcher(app_key, app_secret, report_date)
+        dated_rows: list[tuple[date, dict[str, Any]]] = []
+        for row in rows:
+            raw_date = str(row.get("stck_bsop_date") or "").strip()
+            try:
+                session_day = datetime.strptime(raw_date, "%Y%m%d").date()
+            except ValueError:
+                continue
+            activity_fields = (
+                "bstp_nmix_prdy_vrss",
+                "frgn_ntby_tr_pbmn",
+                "orgn_ntby_tr_pbmn",
+                "prsn_ntby_tr_pbmn",
+                "etc_corp_ntby_tr_pbmn",
+            )
+            has_completed_activity = any(
+                abs(parse_krx_number(row.get(field))) > 0
+                for field in activity_fields
+                if str(row.get(field) or "").strip()
+            )
+            if session_day <= report_day and has_completed_activity:
+                dated_rows.append((session_day, row))
+        if not dated_rows:
+            raise ValueError("KIS daily foreign-flow response has no completed observation")
+        session_day, output = max(dated_rows, key=lambda item: item[0])
         results: dict[str, dict[str, Any]] = {}
         for metric_id, config in KIS_FLOW_CONFIG.items():
-            output = snapshots.get(metric_id)
-            if not isinstance(output, dict):
-                raise ValueError(f"KIS flow snapshot is missing {metric_id}")
             provider_value = parse_krx_number(output.get(config["field"]))
             multiplier = int(config["multiplier"])
             value = provider_value * multiplier
@@ -617,15 +624,20 @@ def collect_kis_foreign_flows(
                 "change_5d_pct": None,
                 "source_provider": "Korea Investment & Securities Open API",
                 "upstream_source": "Korea Exchange market data",
-                "source_url": KIS_INVESTOR_ENDPOINT,
+                "source_url": KIS_INVESTOR_DAILY_ENDPOINT,
                 "source_grade": "B",
                 "primary_source_confirmed": False,
                 "evidence_label": "fact_licensed_provider_reported",
-                "market_cutoff": "latest_provider_market_snapshot",
-                "as_of_derivation": "latest_weekday_on_or_before_report_date",
+                "market_cutoff": "latest_provider_daily_market_observation",
+                "as_of_derivation": "latest_completed_provider_stck_bsop_date",
                 "provider_value": provider_value,
                 "provider_unit": config["provider_unit"],
             }
+        results[KIS_OPTIONAL_FUTURES_METRIC_ID] = missing_metric(
+            KIS_OPTIONAL_FUTURES_METRIC_ID,
+            "not_available_from_verified_kis_endpoint",
+            KIS_INVESTOR_DAILY_ENDPOINT,
+        )
         return results
     except Exception as exc:
         return {
@@ -633,11 +645,11 @@ def collect_kis_foreign_flows(
                 **missing_metric(
                     metric_id,
                     "provider_or_authorization_error",
-                    KIS_INVESTOR_ENDPOINT,
+                    KIS_INVESTOR_DAILY_ENDPOINT,
                 ),
                 "error_type": type(exc).__name__,
             }
-            for metric_id in KIS_FLOW_CONFIG
+            for metric_id in (*KIS_FLOW_CONFIG, KIS_OPTIONAL_FUTURES_METRIC_ID)
         }
 
 
@@ -757,7 +769,7 @@ def build_korea_market(
     fred_fetcher: Callable[[str, str, str], list[tuple[date, float]]] = observations,
     ecos_fetcher: Callable[[str, str, str], list[tuple[date, float]]] = fetch_ecos_usdkrw,
     krx_fetcher: Callable[[str, str, str], dict[str, Any]] = fetch_krx_json,
-    kis_fetcher: Callable[[str, str], dict[str, dict[str, Any]]] = fetch_kis_foreign_flow_snapshots,
+    kis_fetcher: Callable[[str, str, str], list[dict[str, Any]]] = fetch_kis_foreign_cash_daily,
 ) -> dict[str, Any]:
     usdkrw = (
         collect_usdkrw_ecos(report_date, ecos_api_key, ecos_fetcher)
@@ -788,19 +800,14 @@ def build_korea_market(
     missing = [key for key, item in metrics.items() if item.get("status") != "available"]
     date_alignment = evaluate_market_date_alignment(metrics)
     price_ready = all(key in available for key in ("usdkrw", "kospi", "kosdaq"))
-    full_ready = price_ready and all(
-        key in available for key in (
-            "foreign_kospi_cash_net_buy_krw",
-            "foreign_kospi200_futures_net_buy_contracts",
-        )
-    )
+    transmission_ready = price_ready and "foreign_kospi_cash_net_buy_krw" in available
     gate_status = (
         "ready_for_korea_transmission"
-        if full_ready and date_alignment["status"] == "aligned" else
+        if transmission_ready and date_alignment["status"] == "aligned" else
         "ready_for_korea_transmission_with_source_lag"
-        if full_ready and date_alignment["status"] == "source_lag_within_tolerance" else
+        if transmission_ready and date_alignment["status"] == "source_lag_within_tolerance" else
         "misaligned_verified_korea_data"
-        if full_ready and date_alignment["status"] == "source_lag_exceeds_tolerance" else
+        if transmission_ready and date_alignment["status"] == "source_lag_exceeds_tolerance" else
         "partial_price_transmission_no_verified_flows"
         if price_ready else
         "insufficient_verified_korea_data"
@@ -824,8 +831,9 @@ def build_korea_market(
         "source_policy": (
             "USD/KRW prefers Bank of Korea ECOS when configured and otherwise uses FRED. "
             "KRX indices and listed-stock closes use approved KRX Open API services. "
-            "KOSPI cash and KOSPI 200 futures foreign flows use the licensed KIS Open API "
-            "market snapshot unless an official verified input overrides them."
+            "KOSPI cash foreign flow uses the licensed KIS Open API daily market series. "
+            "KOSPI 200 futures flow remains optional unless an official verified input "
+            "supplies it."
         ),
     }
 

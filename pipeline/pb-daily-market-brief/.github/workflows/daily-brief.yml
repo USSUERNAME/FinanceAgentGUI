@@ -273,6 +273,7 @@ jobs:
             workspace/company_peer_context/
             workspace/company_valuation_expectations/
             workspace/company_primary_facts/
+            workspace/company_primary_narratives/
             workspace/company_guidance_inputs/
             workspace/company_operating_bridge/
             workspace/company_operating_inputs/

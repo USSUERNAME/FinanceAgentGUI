@@ -96,9 +96,23 @@ def _financial_verdict(
 
 
 def _valuation_verdict(
-    valuation: dict[str, Any], judgment_gate: dict[str, Any],
+    valuation: dict[str, Any], tearsheet: dict[str, Any], judgment_gate: dict[str, Any],
 ) -> dict[str, Any]:
     screen = valuation.get("valuation_screen") or {}
+    scenario = (tearsheet.get("valuation_context") or {}).get("scenario_valuation") or {}
+    if scenario.get("status") == "supported_screening_model":
+        fair_range = scenario.get("fair_value_range") or {}
+        return {
+            "status": "scenario_screening_available",
+            "label": "3개 시나리오 계산",
+            "reason": (
+                f"5년 약세·기준·강세 현재가치 범위는 {fair_range.get('low')}~{fair_range.get('high')} "
+                f"{fair_range.get('currency') or ''}입니다. 종착 멀티플과 성장률 가정에 민감한 선별 계산입니다."
+            ),
+            "relative_status": screen.get("relative_valuation_status"),
+            "premium_discount_pct": screen.get("primary_premium_discount_pct"),
+            "judgment_status": judgment_gate.get("status"),
+        }
     if screen.get("status") != "screening_available":
         return {
             "status": "evaluation_withheld",
@@ -157,17 +171,31 @@ def _profile(
         "operating_income": {"score": _score_operating(summary, periods), "max": 20},
         "fcf": {"score": _score_fcf(summary, periods), "max": 15},
         "capital_allocation": {"score": _score_capital_allocation(summary, gate), "max": 15},
-        "moat": {"score": None, "max": 20},
-        "management_growth": {"score": None, "max": 15},
-        "valuation_risk_return": {"score": None, "max": 15},
+        "moat": {
+            "score": 12 if (tearsheet.get("competitive_advantage") or {}).get("verified") is True else None,
+            "max": 20,
+        },
+        "management_growth": {
+            "score": 10 if (tearsheet.get("management_execution") or {}).get("verified") is True else None,
+            "max": 15,
+        },
+        "valuation_risk_return": {
+            "score": 8 if ((tearsheet.get("valuation_context") or {}).get("scenario_valuation") or {}).get("status") == "supported_screening_model" else None,
+            "max": 15,
+        },
     }
     scored = [row for row in components.values() if isinstance(row["score"], int)]
+    missing_components = [name for name, row in components.items() if row["score"] is None]
     source_urls = []
     for metric_rows in (primary.get("annual_reported_metrics") or {}).values():
         for row in metric_rows:
             url = str(row.get("source_url") or "")
             if url.startswith("https://") and url not in source_urls:
                 source_urls.append(url)
+    for source in tearsheet.get("source_index", []):
+        url = str(source.get("source_location") or source.get("file_tab_page_url_or_location") or "")
+        if url.startswith("https://") and url not in source_urls:
+            source_urls.append(url)
     judgment_framework = evaluate_judgment_gates(
         policy, primary, valuation, tearsheet, queue_row,
     )
@@ -188,11 +216,22 @@ def _profile(
         "company_name": primary.get("company_name"),
         "as_of_date": report_date,
         "candidate_origin": queue_row.get("candidate_origin") or "sector_research",
+        "official_business_evidence": tearsheet.get("business_exposure") or {},
+        "issuer_competitive_claims": tearsheet.get("competitive_advantage") or {
+            "status": "not_verified", "verified": False, "issuer_claims": [],
+        },
+        "official_risk_factors": tearsheet.get("risk_factors") or {
+            "status": "not_collected", "excerpt": None,
+        },
+        "management_execution_evidence": tearsheet.get("management_execution") or {
+            "status": "not_verified", "verified": False,
+        },
+        "valuation_scenarios": (tearsheet.get("valuation_context") or {}).get("scenario_valuation") or {},
         "company_quality": _financial_verdict(
             summary, gate, judgment_framework["company_quality"],
         ),
         "stock_attractiveness": _valuation_verdict(
-            valuation, judgment_framework["stock_attractiveness"],
+            valuation, tearsheet, judgment_framework["stock_attractiveness"],
         ),
         "portfolio_fit": _portfolio_verdict(
             queue_row, judgment_framework["portfolio_fit"],
@@ -205,8 +244,12 @@ def _profile(
             "scored_points": sum(row["score"] for row in scored),
             "scored_max": sum(row["max"] for row in scored),
             "components": components,
-            "missing_components": [name for name, row in components.items() if row["score"] is None],
-            "reason": "해자·경영진·완전한 밸류에이션 근거가 없으므로 100점 환산을 하지 않습니다.",
+            "missing_components": missing_components,
+            "reason": (
+                "미완성 항목(" + ", ".join(missing_components) + ")이 있어 100점 환산을 하지 않습니다."
+                if missing_components else
+                "기업·가격 근거는 채워졌지만 포트폴리오 적합성과 담당자 검토 전에는 종합점수를 확정하지 않습니다."
+            ),
         },
         "action": action,
         "source_urls": source_urls[:12],

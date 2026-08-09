@@ -485,6 +485,16 @@ export function createPbDailyIntelligenceJobService({
             "--request-id", planRecord.requestId,
             "--workspace", config.remote.workspace,
             "--gh", config.remote.ghPath,
+            ...(job.id === "telegram_analyze"
+              ? [
+                  "--telegram-approvals",
+                  join(
+                    config.remote.workspace,
+                    "telegram_research_approvals",
+                    "attachments.json",
+                  ),
+                ]
+              : []),
           ]
         : [planRecord.scriptPath, ...job.args];
       child = spawnImpl(command, commandArgs, {

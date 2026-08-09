@@ -129,6 +129,77 @@ def operating() -> dict:
     }]}
 
 
+def decision_evidence_primary() -> dict:
+    payload = primary()
+    periods = []
+    for year, revenue, operating_income, fcf, shares in zip(
+        range(2021, 2026),
+        [20_000, 23_000, 27_000, 32_000, 38_000],
+        [2_400, 3_000, 3_800, 4_900, 6_200],
+        [2_000, 2_500, 3_200, 4_100, 5_200],
+        [280, 278, 276, 274, 272],
+    ):
+        periods.append({
+            "period": f"{year}-12-31",
+            "revenue": revenue,
+            "operating_income": operating_income,
+            "fcf": fcf,
+            "diluted_shares": shares,
+            "operating_margin_pct": operating_income / revenue * 100,
+            "fcf_margin_pct": fcf / revenue * 100,
+        })
+    payload["companies"][0]["long_term_financials"] = {
+        "periods": periods,
+        "summary": {
+            "revenue_cagr_pct": 17.42,
+            "operating_income_cagr_pct": 26.78,
+            "fcf_cagr_pct": 26.98,
+            "latest_operating_margin_pct": 16.32,
+            "latest_fcf_margin_pct": 13.68,
+            "positive_operating_income_years": 5,
+            "positive_fcf_years": 5,
+            "diluted_share_count_change_pct": -2.86,
+        },
+        "quality_gate": {
+            "status": "ready",
+            "required_core_years": 5,
+            "complete_core_years": 5,
+            "capital_allocation_available": True,
+            "dilution_available": True,
+        },
+    }
+    return payload
+
+
+def primary_narratives() -> dict:
+    return {"companies": [{
+        "candidate_id": "grid_electrification:US:GEV",
+        "annual_filing": {
+            "form": "10-K",
+            "filing_date": "2026-02-20",
+            "source_id": "SEC-ANNUAL-GEV",
+            "source_url": SEC_URL,
+        },
+        "business_model": {
+            "status": "verified_primary",
+            "body_location": "10-K Item 1 Business",
+            "excerpt": "The company provides power generation and electrification equipment and services.",
+            "evidence_class": "issuer_disclosed_fact_and_claim",
+        },
+        "risk_factors": {
+            "status": "verified_primary",
+            "body_location": "10-K Item 1A Risk Factors",
+            "excerpt": "Execution and supply-chain risks may affect results.",
+        },
+        "competitive_advantage": {
+            "status": "issuer_claims_available_not_independently_verified",
+            "verified": False,
+            "issuer_claims": ["The company states that its installed base provides scale."],
+        },
+        "management_execution": {"status": "not_verified", "verified": False},
+    }]}
+
+
 class CompanyTearsheetTests(unittest.TestCase):
     def build(self, price_as_of: str = "2026-07-17") -> dict:
         return build_company_tearsheets(
@@ -177,6 +248,47 @@ class CompanyTearsheetTests(unittest.TestCase):
             "2026-07-20", queue("sector_watchlist_only"), market(), valuation(), primary(), operating(),
         )
         self.assertEqual(payload["profile_count"], 0)
+
+    def test_annual_narrative_supplies_business_source_without_promoting_moat(self) -> None:
+        source_queue = queue()
+        source_queue["candidates"][0]["exposure_status"] = "verified_primary_event"
+        payload = build_company_tearsheets(
+            "2026-07-20", source_queue, market(), valuation(), primary(), operating(),
+            primary_narratives(),
+        )
+        profile = payload["profiles"][0]
+        self.assertEqual(profile["business_exposure"]["status"], "verified_primary")
+        self.assertEqual(profile["business_exposure"]["source_id"], "SEC-ANNUAL-GEV")
+        self.assertIn("Item 1", profile["business_exposure"]["body_location"])
+        self.assertFalse(profile["competitive_advantage"]["verified"])
+        self.assertEqual(profile["management_execution"]["status"], "not_verified")
+
+    def test_multi_year_primary_outcomes_support_quality_and_three_scenarios(self) -> None:
+        payload = build_company_tearsheets(
+            "2026-07-20", queue(), market(), valuation(), decision_evidence_primary(), operating(),
+            primary_narratives(),
+        )
+        profile = payload["profiles"][0]
+        self.assertTrue(profile["competitive_advantage"]["verified"])
+        self.assertEqual(
+            profile["competitive_advantage"]["verification_scope"],
+            "quantitative_indirect_evidence_not_direct_customer_or_market_share_proof",
+        )
+        self.assertTrue(profile["management_execution"]["verified"])
+        scenario = profile["valuation_context"]["scenario_valuation"]
+        self.assertEqual(scenario["status"], "supported_screening_model")
+        self.assertEqual([row["scenario"] for row in scenario["scenarios"]], ["bear", "base", "bull"])
+        self.assertEqual(profile["valuation_context"]["priced_in_status"], "calculated_scenario_implied_growth")
+
+    def test_supported_scenario_requires_all_three_cases(self) -> None:
+        payload = build_company_tearsheets(
+            "2026-07-20", queue(), market(), valuation(), decision_evidence_primary(), operating(),
+            primary_narratives(),
+        )
+        tampered = copy.deepcopy(payload)
+        tampered["profiles"][0]["valuation_context"]["scenario_valuation"]["scenarios"].pop()
+        with self.assertRaisesRegex(ValueError, "bear, base, and bull"):
+            validate_company_tearsheets(tampered)
 
     def test_tearsheet_source_inventory_is_deduplicated_in_report(self) -> None:
         rendered = source_section([], {
