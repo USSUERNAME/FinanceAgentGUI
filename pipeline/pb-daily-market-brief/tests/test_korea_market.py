@@ -346,7 +346,7 @@ class KoreaMarketContractTests(unittest.TestCase):
         )
         self.assertEqual(
             payload["transmission_gate"]["status"],
-            "partial_price_transmission_no_verified_flows",
+            "ready_for_korea_observation_without_verified_flows",
         )
 
     def test_krx_indices_are_fetched_when_key_is_present(self) -> None:
@@ -393,7 +393,7 @@ class KoreaMarketContractTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["sk_hynix"]["status"], "available")
         self.assertEqual(
             payload["transmission_gate"]["status"],
-            "partial_price_transmission_no_verified_flows",
+            "ready_for_korea_observation_without_verified_flows",
         )
 
     def test_verified_input_overrides_supplied_metrics_and_fetches_missing_stocks(self) -> None:

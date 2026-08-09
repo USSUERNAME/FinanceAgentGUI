@@ -808,7 +808,7 @@ def build_korea_market(
         if transmission_ready and date_alignment["status"] == "source_lag_within_tolerance" else
         "misaligned_verified_korea_data"
         if transmission_ready and date_alignment["status"] == "source_lag_exceeds_tolerance" else
-        "partial_price_transmission_no_verified_flows"
+        "ready_for_korea_observation_without_verified_flows"
         if price_ready else
         "insufficient_verified_korea_data"
     )
