@@ -188,6 +188,30 @@ class DailyIntelligenceTests(unittest.TestCase):
         self.assertFalse(primary["verification"]["publication_eligible_as_fact"])
         self.assertEqual(primary["common_facts"], [])
 
+    def test_structured_primary_fact_stays_confirmed_when_impact_synthesis_falls_back(self) -> None:
+        snapshot = self.snapshot()
+        snapshot["structured_event_evidence"]["events"][0][
+            "extraction_status"
+        ] = "structured"
+        snapshot["event_impact_synthesis"].update({
+            "synthesis_status": "not_run",
+            "fallback_reason": "RuntimeError",
+            "events": [],
+        })
+
+        packet = build_daily_intelligence(
+            self.report_date,
+            snapshot=snapshot,
+            analysis_payload=self.analysis(),
+            continuity_review=self.review(),
+        )
+
+        self.assertEqual(packet["events"]["verified_primary_fact_count"], 1)
+        primary = packet["events"]["items"][0]
+        self.assertTrue(primary["verification"]["primary_fact_confirmed"])
+        self.assertEqual(primary["verification"]["extraction_status"], "structured")
+        self.assertEqual(len(primary["common_facts"]), 1)
+
     def test_unverified_discovery_cluster_remains_visible_but_not_fact(self) -> None:
         packet = build_daily_intelligence(
             self.report_date,
