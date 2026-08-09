@@ -239,6 +239,31 @@ class V2ReaderReportTests(unittest.TestCase):
         self.assertEqual(target["classification"], "watch_candidate")
         self.assertNotIn("수혜", target["classification_label"])
 
+    def test_current_korea_transmission_ready_status_is_available(self) -> None:
+        packet = self.intelligence()
+        packet["market"]["korea_transmission_inputs"] = {
+            "transmission_gate": {
+                "status": "ready_for_korea_transmission",
+            },
+            "metrics": {
+                "kospi": {
+                    "metric_id": "kospi",
+                    "label": "코스피",
+                    "status": "available",
+                    "value": 3000.0,
+                    "unit": "index points",
+                    "as_of": "2026-07-23",
+                    "source_url": "https://data.krx.co.kr/",
+                    "primary_source_confirmed": True,
+                },
+            },
+        }
+
+        report = build_v2_reader_report(packet)
+
+        self.assertEqual(report["korea_connection"]["status"], "available")
+        self.assertEqual(report["korea_connection"]["metrics"][0]["label"], "코스피")
+
     def test_validation_rejects_position_authority(self) -> None:
         report = build_v2_reader_report(self.intelligence())
         report["policy"]["position_actions_allowed"] = True

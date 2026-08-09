@@ -25,6 +25,11 @@ MAX_VERIFIED_EVENTS = 5
 MAX_ANALYST_RESEARCH = 3
 MAX_NEXT_CHECKS = 5
 MAX_EARNINGS_WATCH = 8
+KOREA_TRANSMISSION_READY_STATUSES = {
+    "ready",
+    "ready_for_korea_transmission",
+    "ready_for_korea_transmission_with_source_lag",
+}
 
 REGIME_LABELS = {
     "risk_on": "위험선호",
@@ -408,7 +413,7 @@ def _korea_section(market: dict[str, Any]) -> dict[str, Any]:
                 "market_confirmation_status": str((transmission.get("market_confirmation") or {}).get("status") or "blocked"),
                 "targets": targets,
             })
-    if gate.get("status") != "ready":
+    if gate.get("status") not in KOREA_TRANSMISSION_READY_STATUSES:
         return {
             "status": "insufficient",
             "summary": (
