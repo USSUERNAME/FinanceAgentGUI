@@ -74,7 +74,8 @@ class WorkflowArtifactTests(unittest.TestCase):
             workflow.count("workspace/broker_research_cache/drive_ingestion_state.json"),
             2,
         )
-        self.assertIn("drive-ingestion-v2", workflow)
+        self.assertIn("drive-ingestion-v1", workflow)
+        self.assertNotIn("drive-ingestion-v2", workflow)
         self.assertIn('GOOGLE_DRIVE_RESEARCH_MAX_FILES: "60"', workflow)
         self.assertIn("Restore broker research digest history", workflow)
         self.assertIn("Save broker research digest history", workflow)
@@ -86,6 +87,12 @@ class WorkflowArtifactTests(unittest.TestCase):
             "${{ runner.os }}-broker-research-digest-v1-${{ github.run_id }}",
             workflow,
         )
+        self.assertIn("Restore rights-safe broker research digest seed", workflow)
+        self.assertIn(
+            "secrets.BROKER_RESEARCH_DIGEST_HISTORY_GZIP_BASE64",
+            workflow,
+        )
+        self.assertIn("python restore_broker_research_digest_seed.py", workflow)
 
     def test_broker_research_cold_ocr_has_bounded_actions_timeout(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

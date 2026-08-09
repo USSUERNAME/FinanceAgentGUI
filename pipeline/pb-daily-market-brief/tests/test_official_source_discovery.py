@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import unittest
+import zipfile
 from email.message import Message
+from io import BytesIO
 from unittest.mock import patch
 
 from discover_official_event_sources import (
     candidate_links_from_landing,
     discover_sources,
+    fetch_dart_filing_html,
     fetch_official_html,
     publication_date_from_official_url,
 )
@@ -60,6 +63,43 @@ class CandidateLinkTests(unittest.TestCase):
 
 
 class FetchTests(unittest.TestCase):
+    def test_dart_filing_uses_document_api_and_synthesizes_publication_metadata(self) -> None:
+        archive_buffer = BytesIO()
+        with zipfile.ZipFile(archive_buffer, "w") as archive:
+            archive.writestr(
+                "report.xml",
+                "<DOCUMENT><TITLE>셀피글로벌 주요사항보고서</TITLE>"
+                "<BODY>셀피글로벌은 전환사채 발행 결정을 공시했다.</BODY></DOCUMENT>",
+            )
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self, _limit):
+                return archive_buffer.getvalue()
+
+        with patch(
+            "discover_official_event_sources.urlopen",
+            return_value=FakeResponse(),
+        ) as fetch:
+            result = fetch_dart_filing_html(
+                "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260807000778",
+                "20260807000778",
+                "test-key",
+                timeout_seconds=1,
+                max_response_bytes=100_000,
+            )
+        self.assertEqual(result["status"], "html_fetched")
+        self.assertEqual(result["transport"], "opendart_document_api")
+        self.assertIn("2026-08-07T00:00:00+09:00", result["html"])
+        self.assertIn("셀피글로벌", result["html"])
+        requested_url = fetch.call_args.args[0].full_url
+        self.assertIn("opendart.fss.or.kr/api/document.xml", requested_url)
+
     def test_redirect_outside_official_domain_is_rejected(self) -> None:
         headers = Message()
         headers["Content-Type"] = "text/html"
