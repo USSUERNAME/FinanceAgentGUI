@@ -727,6 +727,56 @@ class MarketAnalysisValidationTests(unittest.TestCase):
         self.assertEqual(result, expected)
         self.assertEqual(usage["output_tokens"], 20)
 
+    def test_transport_timeout_retries_then_uses_valid_deterministic_fallback(self) -> None:
+        candidate = {
+            "ticker": "NVDA",
+            "evidence_status": "primary_facts_available",
+            "market_reaction": {"return_1d_pct": 1.2, "volume_ratio_20d": 1.4},
+            "event_evidence": [{
+                "verified_facts": [{
+                    "fact_id": "fact-1",
+                    "source_url": "https://www.sec.gov/example",
+                }],
+            }],
+        }
+        snapshot = {
+            "report_date": "2026-08-09",
+            "records": [],
+            "market_scoreboard": {
+                "breadth": {"rsp_vs_spy_5d_pct": 0.2},
+                "rule_based_signal": {"label": "selective_rotation", "score": 1},
+            },
+            "etf_metrics": {"items": []},
+            "upcoming_events": [{
+                "event_id": "2026-08-10-E1",
+                "consensus": None,
+                "date_confidence": "confirmed_primary",
+                "monitoring_assets": ["SPY"],
+            }],
+            "us_equity_candidate_screen": {
+                "deep_analysis_shortlist": [candidate],
+            },
+        }
+        with patch.dict(os.environ, {
+            "OPENAI_API_KEY": "test-key",
+            "OPENAI_ANALYSIS_MAX_ATTEMPTS": "2",
+        }), patch(
+            "analyze_market_snapshot.urlopen", side_effect=TimeoutError("read timed out")
+        ) as mocked_urlopen, patch("analyze_market_snapshot.time.sleep") as mocked_sleep:
+            result, usage = analyze(snapshot)
+
+        self.assertEqual(mocked_urlopen.call_count, 2)
+        mocked_sleep.assert_called_once()
+        self.assertEqual(result["market_regime"]["label"], "selective_rotation")
+        self.assertEqual(result["market_regime"]["confidence"], 0.2)
+        self.assertEqual(result["event_scenarios"][0]["event_id"], "2026-08-10-E1")
+        self.assertEqual(result["stock_analysis_cards"][0]["ticker"], "NVDA")
+        self.assertTrue(any(
+            "저확신 규칙 기반 분석" in warning for warning in result["data_warnings"]
+        ))
+        self.assertTrue(usage["fallback"])
+        self.assertEqual(usage["attempts"], 2)
+
     def test_schema_and_input_exclude_unavailable_hypothesis_metrics(self) -> None:
         snapshot = {
             "market_scoreboard": {
