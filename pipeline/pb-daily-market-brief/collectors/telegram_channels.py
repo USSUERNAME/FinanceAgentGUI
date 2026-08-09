@@ -166,11 +166,11 @@ def attachment_for_message(
     }
 
 
-def load_attachment_approvals(
+def load_attachment_approval_registry(
     path: Path = ATTACHMENT_APPROVALS_PATH,
-) -> tuple[dict[str, str], str | None]:
+) -> tuple[dict[str, str], list[dict[str, Any]], str | None]:
     if not path.exists():
-        return {}, None
+        return {}, [], None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if (
@@ -179,6 +179,7 @@ def load_attachment_approvals(
         ):
             raise ValueError("unexpected approval registry schema")
         decisions: dict[str, str] = {}
+        approved_targets: list[dict[str, Any]] = []
         for row in payload["decisions"]:
             if not isinstance(row, dict):
                 continue
@@ -186,9 +187,24 @@ def load_attachment_approvals(
             decision = str(row.get("decision") or "").strip()
             if key and decision in {"approved", "excluded"}:
                 decisions[key] = decision
-        return decisions, None
+            message_id = int(row.get("message_id") or 0)
+            channel_username = str(row.get("channel_username") or "").strip().lstrip("@")
+            if decision == "approved" and key and message_id > 0 and channel_username:
+                approved_targets.append({
+                    "attachment_key": key,
+                    "message_id": message_id,
+                    "channel_username": channel_username,
+                })
+        return decisions, approved_targets, None
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
-        return {}, "Telegram attachment approval registry is invalid; downloads were blocked"
+        return {}, [], "Telegram attachment approval registry is invalid; downloads were blocked"
+
+
+def load_attachment_approvals(
+    path: Path = ATTACHMENT_APPROVALS_PATH,
+) -> tuple[dict[str, str], str | None]:
+    decisions, _, notice = load_attachment_approval_registry(path)
+    return decisions, notice
 
 
 def broker_attachment_metadata(
@@ -343,7 +359,9 @@ async def collect_async(
     cutoff = datetime.now(timezone.utc) - timedelta(hours=float(policy["lookback_hours"]))
     items: list[dict[str, Any]] = []
     failures: list[str] = []
-    approval_decisions, approval_notice = load_attachment_approvals()
+    approval_decisions, approval_targets, approval_notice = (
+        load_attachment_approval_registry()
+    )
     if approval_notice:
         failures.append("attachment_approvals:invalid_registry")
     client = TelegramClient(StringSession(session_string), api_id, api_hash)
@@ -357,17 +375,18 @@ async def collect_async(
         ):
             username = str(channel["username"]).lstrip("@")
             try:
-                async for message in client.iter_messages(
-                    username,
-                    limit=int(policy["max_messages_per_channel"]),
-                ):
+                seen_message_ids: set[int] = set()
+
+                async def consume_message(message: Any, *, enforce_cutoff: bool) -> bool:
                     message_date = getattr(message, "date", None)
                     if not message_date:
-                        continue
+                        return False
                     if message_date.tzinfo is None:
                         message_date = message_date.replace(tzinfo=timezone.utc)
-                    if message_date.astimezone(timezone.utc) < cutoff:
-                        break
+                    if enforce_cutoff and message_date.astimezone(timezone.utc) < cutoff:
+                        return True
+                    message_id = int(message.id)
+                    seen_message_ids.add(message_id)
                     attachment = attachment_for_message(channel, message)
                     if attachment:
                         attachment["approval_state"] = approval_decisions.get(
@@ -376,12 +395,12 @@ async def collect_async(
                         )
                     text = str(getattr(message, "raw_text", None) or "").strip()
                     if not text and not attachment:
-                        continue
+                        return False
                     if not text and attachment:
                         text = attachment["filename"]
                     items.append(message_item(
                         channel,
-                        message_id=int(message.id),
+                        message_id=message_id,
                         published_at=message_date,
                         text=text,
                         entity_urls=entity_urls_for_message(message),
@@ -390,49 +409,62 @@ async def collect_async(
                         forwarded_from=forwarded_source_for_message(message),
                         attachments=[attachment] if attachment else [],
                     ))
-                    if (
-                        attachment
-                        and attachment["approval_state"] == "approved"
-                    ):
-                        max_bytes = max(
-                            1,
-                            int(
-                                policy.get(
-                                    "max_attachment_bytes",
-                                    DEFAULT_MAX_ATTACHMENT_BYTES,
-                                )
+                    if not attachment or attachment["approval_state"] != "approved":
+                        return False
+                    max_bytes = max(
+                        1,
+                        int(policy.get("max_attachment_bytes", DEFAULT_MAX_ATTACHMENT_BYTES)),
+                    )
+                    if attachment["size"] > max_bytes:
+                        failures.append(f"{username}:{message_id}:attachment_too_large")
+                        return False
+                    try:
+                        payload = await message.download_media(file=bytes)
+                        if not isinstance(payload, bytes) or not payload:
+                            raise RuntimeError("empty attachment payload")
+                        if len(payload) > max_bytes:
+                            raise RuntimeError("attachment exceeds size limit")
+                        record = report_record(
+                            source_id=f"telegram_broker_pdf_{username.casefold()}",
+                            file_name=attachment["filename"],
+                            payload=payload,
+                            metadata=broker_attachment_metadata(
+                                channel,
+                                attachment,
+                                published_at=message_date,
                             ),
+                            document_text_cache_dir=DOCUMENT_TEXT_CACHE_DIR,
                         )
-                        if attachment["size"] > max_bytes:
-                            failures.append(f"{username}:{message.id}:attachment_too_large")
-                            continue
-                        try:
-                            payload = await message.download_media(file=bytes)
-                            if not isinstance(payload, bytes) or not payload:
-                                raise RuntimeError("empty attachment payload")
-                            if len(payload) > max_bytes:
-                                raise RuntimeError("attachment exceeds size limit")
-                            record = report_record(
-                                source_id=f"telegram_broker_pdf_{username.casefold()}",
-                                file_name=attachment["filename"],
-                                payload=payload,
-                                metadata=broker_attachment_metadata(
-                                    channel,
-                                    attachment,
-                                    published_at=message_date,
-                                ),
-                                document_text_cache_dir=DOCUMENT_TEXT_CACHE_DIR,
-                            )
-                            record["telegram_attachment"] = {
-                                **attachment,
-                                "approval_state": "approved",
-                                "downloaded": True,
-                            }
-                            items.append(record)
-                        except Exception as exc:
-                            failures.append(
-                                f"{username}:{message.id}:attachment_{bounded_failure(exc)}"
-                            )
+                        record["telegram_attachment"] = {
+                            **attachment,
+                            "approval_state": "approved",
+                            "downloaded": True,
+                        }
+                        items.append(record)
+                    except Exception as exc:
+                        failures.append(
+                            f"{username}:{message_id}:attachment_{bounded_failure(exc)}"
+                        )
+                    return False
+
+                async for message in client.iter_messages(
+                    username,
+                    limit=int(policy["max_messages_per_channel"]),
+                ):
+                    if await consume_message(message, enforce_cutoff=True):
+                        break
+
+                backfill_ids = sorted({
+                    int(target["message_id"])
+                    for target in approval_targets
+                    if str(target["channel_username"]).casefold() == username.casefold()
+                    and int(target["message_id"]) not in seen_message_ids
+                })
+                if backfill_ids:
+                    backfill_messages = await client.get_messages(username, ids=backfill_ids)
+                    for message in backfill_messages or []:
+                        if message:
+                            await consume_message(message, enforce_cutoff=False)
             except Exception as exc:
                 failures.append(f"{username}:{bounded_failure(exc)}")
     finally:

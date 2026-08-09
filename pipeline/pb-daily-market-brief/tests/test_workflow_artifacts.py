@@ -180,8 +180,22 @@ class WorkflowArtifactTests(unittest.TestCase):
             'workspace/broker_research_approvals/google_drive.json',
             workflow,
         )
-        self.assertIn("Remove ephemeral Drive approval registry", workflow)
-        cleanup = workflow.index("Remove ephemeral Drive approval registry")
+
+    def test_telegram_approval_registry_is_restored_validated_and_removed(self) -> None:
+        workflow = APP_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("Restore Telegram PDF approval registry", workflow)
+        self.assertIn(
+            "secrets.TELEGRAM_RESEARCH_APPROVALS_GZIP_BASE64",
+            workflow,
+        )
+        self.assertIn("telegram_research_attachment_approvals.v1", workflow)
+        self.assertIn("python validate_telegram_research_run.py", workflow)
+        self.assertIn(
+            "workspace/telegram_research_approvals/attachments.json",
+            workflow,
+        )
+        self.assertIn("Remove ephemeral approval registries", workflow)
+        cleanup = workflow.index("Remove ephemeral approval registries")
         preserve = workflow.index("Preserve structured evidence and analysis")
         self.assertLess(cleanup, preserve)
 

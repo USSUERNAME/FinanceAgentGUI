@@ -289,6 +289,39 @@ class TelegramMessageTests(unittest.TestCase):
         self.assertEqual(decisions, {})
         self.assertIn("downloads were blocked", str(notice))
 
+    def test_approved_attachment_registry_exposes_targeted_backfill(self) -> None:
+        payload = {
+            "schema_version": "telegram_research_attachment_approvals.v1",
+            "decisions": [
+                {
+                    "attachment_key": "a" * 64,
+                    "decision": "approved",
+                    "channel_username": "OfficialBroker",
+                    "message_id": 321,
+                },
+                {
+                    "attachment_key": "b" * 64,
+                    "decision": "excluded",
+                    "channel_username": "OfficialBroker",
+                    "message_id": 322,
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "attachments.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            decisions, targets, notice = (
+                telegram_channels.load_attachment_approval_registry(path)
+            )
+        self.assertIsNone(notice)
+        self.assertEqual(decisions["a" * 64], "approved")
+        self.assertEqual(decisions["b" * 64], "excluded")
+        self.assertEqual(targets, [{
+            "attachment_key": "a" * 64,
+            "message_id": 321,
+            "channel_username": "OfficialBroker",
+        }])
+
 
 if __name__ == "__main__":
     unittest.main()

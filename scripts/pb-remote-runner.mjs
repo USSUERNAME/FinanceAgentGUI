@@ -6,14 +6,18 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 const ALLOWED_RUN_MODES = new Set(["dry_run", "verification_dry_run", "publish"]);
+const TELEGRAM_APPROVAL_SCHEMA = "telegram_research_attachment_approvals.v1";
+const TELEGRAM_APPROVAL_SECRET = "TELEGRAM_RESEARCH_APPROVALS_GZIP_BASE64";
 const DRY_RUN_EVIDENCE_DIRS = Object.freeze(["snapshots", "analysis"]);
 const FINAL_REPORT_DIRS = Object.freeze([
   "v2_reader_reports",
@@ -124,12 +128,13 @@ function sleep(ms) {
   Atomics.wait(waiter, 0, 0, ms);
 }
 
-function runGh(ghPath, args, { json = false, allowFailure = false } = {}) {
+function runGh(ghPath, args, { json = false, allowFailure = false, input } = {}) {
   const result = spawnSync(ghPath, args, {
     encoding: "utf8",
     windowsHide: true,
     shell: false,
     maxBuffer: 8 * 1024 * 1024,
+    input,
   });
   if (result.error) throw result.error;
   if (result.status !== 0 && !allowFailure) {
@@ -153,6 +158,9 @@ function validateOptions(raw) {
   const requestId = cleanText(raw["request-id"], 120);
   const ghPath = cleanText(raw.gh || "gh", 4000);
   const workspace = resolve(cleanText(raw.workspace, 4000));
+  const telegramApprovals = raw["telegram-approvals"]
+    ? resolve(cleanText(raw["telegram-approvals"], 4000))
+    : "";
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
     throw new Error("Repository must use owner/name form");
   }
@@ -171,10 +179,112 @@ function validateOptions(raw) {
   if (!raw.workspace || workspace === resolve(sep)) {
     throw new Error("A narrow local workspace path is required");
   }
+  if (
+    telegramApprovals
+    && telegramApprovals !== workspace
+    && !telegramApprovals.startsWith(`${workspace}${sep}`)
+  ) {
+    throw new Error("Telegram approval registry must be inside the configured workspace");
+  }
   if (isAbsolute(ghPath) && !existsSync(ghPath)) {
     throw new Error(`GitHub CLI not found: ${ghPath}`);
   }
-  return { repository, workflow, ref, runMode, requestId, ghPath, workspace };
+  return {
+    repository,
+    workflow,
+    ref,
+    runMode,
+    requestId,
+    ghPath,
+    workspace,
+    telegramApprovals,
+  };
+}
+
+function latestTelegramAttachmentMetadata(workspace) {
+  const refreshRoot = join(workspace, "telegram_refresh");
+  if (!existsSync(refreshRoot)) return new Map();
+  const candidates = [];
+  for (const entry of readdirSync(refreshRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const path = join(refreshRoot, entry.name, "telegram_intelligence.json");
+    if (existsSync(path)) candidates.push(path);
+  }
+  candidates.sort().reverse();
+  for (const path of candidates) {
+    try {
+      const payload = JSON.parse(readFileSync(path, "utf8"));
+      const attachments = Array.isArray(payload?.pdf_attachments) ? payload.pdf_attachments : [];
+      if (!attachments.length) continue;
+      return new Map(attachments
+        .filter((item) => item?.attachment_key)
+        .map((item) => [String(item.attachment_key), item]));
+    } catch {
+      // Try the next dated snapshot. Invalid runtime snapshots are never uploaded.
+    }
+  }
+  return new Map();
+}
+
+function prepareTelegramApprovalSecret(path, workspace) {
+  if (!path || !existsSync(path)) {
+    throw new Error("Telegram approval registry is missing; approve a PDF before remote analysis");
+  }
+  let payload;
+  try {
+    payload = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new Error("Telegram approval registry is not valid JSON");
+  }
+  if (
+    payload?.schema_version !== TELEGRAM_APPROVAL_SCHEMA
+    || !Array.isArray(payload?.decisions)
+  ) {
+    throw new Error("Telegram approval registry schema is unsupported");
+  }
+  const metadata = latestTelegramAttachmentMetadata(workspace);
+  const decisions = payload.decisions.map((decision) => {
+    if (!decision || typeof decision !== "object") return decision;
+    const attachment = metadata.get(String(decision.attachment_key || ""));
+    if (!attachment) return decision;
+    return {
+      ...decision,
+      message_id: Number(decision.message_id || attachment.message_id || 0),
+      channel_username: cleanText(
+        decision.channel_username || attachment.channel_username,
+        80,
+      ),
+      published_at: cleanText(decision.published_at || attachment.published_at, 80),
+    };
+  });
+  const approvedCount = decisions.filter((item) => item?.decision === "approved").length;
+  if (!approvedCount) {
+    throw new Error("Telegram approval registry has no approved PDFs");
+  }
+  const enrichedCount = decisions.filter((item) => (
+    item?.decision === "approved"
+    && Number(item?.message_id) > 0
+    && cleanText(item?.channel_username, 80)
+  )).length;
+  const encoded = gzipSync(Buffer.from(JSON.stringify({ ...payload, decisions }), "utf8"))
+    .toString("base64");
+  return { encoded, approvedCount, enrichedCount };
+}
+
+function syncTelegramApprovalSecret(options) {
+  if (!options.telegramApprovals) return null;
+  const prepared = prepareTelegramApprovalSecret(
+    options.telegramApprovals,
+    options.workspace,
+  );
+  runGh(options.ghPath, [
+    "secret", "set", TELEGRAM_APPROVAL_SECRET,
+    "-R", options.repository,
+  ], { input: prepared.encoded });
+  console.log(
+    `Synced Telegram PDF approvals (${prepared.approvedCount} approved, ${prepared.enrichedCount} backfill-ready)`,
+  );
+  return prepared;
 }
 
 function findRun(rows, requestId, startedAtMs) {
@@ -245,6 +355,7 @@ function syncArtifact(stagingRoot, workspace, { runMode = "publish" } = {}) {
 export function runRemoteWorkflow(rawOptions, { timeoutMs = 30 * 60 * 1000 } = {}) {
   const options = validateOptions(rawOptions);
   const startedAtMs = Date.now();
+  syncTelegramApprovalSecret(options);
   console.log(`Dispatching ${options.repository}/${options.workflow} (${options.runMode})`);
   runGh(options.ghPath, [
     "workflow", "run", options.workflow,
@@ -304,6 +415,7 @@ export function runRemoteWorkflow(rawOptions, { timeoutMs = 30 * 60 * 1000 } = {
 
 export const __pbRemoteRunnerTestHooks = Object.freeze({
   findRun,
+  prepareTelegramApprovalSecret,
   syncArtifact,
   validateOptions,
 });

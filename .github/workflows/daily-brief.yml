@@ -152,6 +152,44 @@ jobs:
           print(f"Restored Drive approval registry ({len(decisions)} decisions).")
           PY
 
+      - name: Restore Telegram PDF approval registry
+        if: env.BRIEF_RUN_MODE != 'publish_cached'
+        env:
+          TELEGRAM_RESEARCH_APPROVALS_GZIP_BASE64: ${{ secrets.TELEGRAM_RESEARCH_APPROVALS_GZIP_BASE64 }}
+        run: |
+          python - <<'PY'
+          import base64
+          import gzip
+          import json
+          import os
+          from pathlib import Path
+
+          encoded = os.environ.get("TELEGRAM_RESEARCH_APPROVALS_GZIP_BASE64", "").strip()
+          if not encoded:
+              print("Telegram PDF approval registry secret is not configured; downloads remain blocked.")
+              raise SystemExit(0)
+
+          try:
+              raw = gzip.decompress(base64.b64decode(encoded, validate=True))
+              payload = json.loads(raw.decode("utf-8"))
+          except (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+              raise SystemExit("Telegram PDF approval registry secret is invalid") from exc
+
+          if payload.get("schema_version") != "telegram_research_attachment_approvals.v1":
+              raise SystemExit("Telegram PDF approval registry schema is unsupported")
+          decisions = payload.get("decisions")
+          if not isinstance(decisions, list):
+              raise SystemExit("Telegram PDF approval registry decisions must be a list")
+
+          destination = Path("workspace/telegram_research_approvals/attachments.json")
+          destination.parent.mkdir(parents=True, exist_ok=True)
+          destination.write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(f"Restored Telegram PDF approval registry ({len(decisions)} decisions).")
+          PY
+
       - name: Restore report history
         if: env.BRIEF_RUN_MODE != 'publish_cached'
         uses: actions/cache/restore@v4
@@ -257,9 +295,15 @@ jobs:
             python run_daily_report.py
           fi
 
-      - name: Remove ephemeral Drive approval registry
+      - name: Validate approved Telegram PDF analysis
+        id: telegram_pdf_check
+        continue-on-error: true
+        if: env.BRIEF_RUN_MODE == 'verification_dry_run' && steps.brief.outcome == 'success'
+        run: python validate_telegram_research_run.py
+
+      - name: Remove ephemeral approval registries
         if: always()
-        run: rm -f workspace/broker_research_approvals/google_drive.json
+        run: rm -f workspace/broker_research_approvals/google_drive.json workspace/telegram_research_approvals/attachments.json
 
       - name: Save report history
         if: env.BRIEF_RUN_MODE == 'publish' && steps.brief.outcome == 'success'
@@ -468,7 +512,7 @@ jobs:
         run: python send_telegram_notification.py --status failure --run-url "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - name: Mark failed brief as failed
-        if: steps.preflight.outcome == 'failure' || steps.brief.outcome == 'failure'
+        if: steps.preflight.outcome == 'failure' || steps.brief.outcome == 'failure' || steps.telegram_pdf_check.outcome == 'failure'
         run: exit 1
 
   deploy-reader:

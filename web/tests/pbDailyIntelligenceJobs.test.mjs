@@ -382,6 +382,43 @@ test("PB job service dispatches configured report jobs through GitHub Actions", 
   assert.equal(service.status().run.status, "succeeded");
 });
 
+test("PB job service forwards local Telegram approvals to remote analysis", async () => {
+  await createEngine();
+  const remoteRunnerPath = join(tempRoot, "pb-remote-runner.mjs");
+  const workspace = join(tempRoot, "workspace");
+  await writeFile(remoteRunnerPath, "console.log('remote runner')\n", "utf8");
+  const calls = [];
+  const service = createPbDailyIntelligenceJobService({
+    env: { PB_DAILY_INTELLIGENCE_DIR: workspace },
+    remoteUserConfig: {
+      enabled: true,
+      repository: "USSUERNAME/pb-daily-market-brief",
+      workflow: "daily-brief.yml",
+      ref: "main",
+      workspace,
+      ghPath: "gh-test",
+    },
+    remoteRunnerPath,
+    uuid: () => "telegram-approval-request-12345678",
+    spawnImpl(command, args) {
+      calls.push({ command, args });
+      return fakeChild();
+    },
+    async syncThesesImpl() {
+      return { status: "skipped", message: "test sync skipped" };
+    },
+  });
+
+  const plan = service.plan("telegram_analyze");
+  service.execute(plan.token);
+  const approvalFlag = calls[0].args.indexOf("--telegram-approvals");
+  assert.ok(approvalFlag > 0);
+  assert.equal(
+    calls[0].args[approvalFlag + 1],
+    join(workspace, "telegram_research_approvals", "attachments.json"),
+  );
+});
+
 test("PB job service keeps collection-only jobs local when remote reports are enabled", async () => {
   await createEngine();
   const remoteRunnerPath = join(tempRoot, "pb-remote-runner.mjs");

@@ -262,6 +262,8 @@ export function createPbTelegramResearchApprovalService({
           attachment_key: normalizedKey,
           filename: attachment.filename,
           channel_username: attachment.channelUsername,
+          message_id: attachment.messageId,
+          published_at: attachment.publishedAt,
           decision: normalizedDecision,
           decided_at: now(),
         },
