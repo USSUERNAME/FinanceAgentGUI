@@ -1798,6 +1798,14 @@ gates, but does not create a Notion page, deliver a company-review alert, send
 a Telegram result alert, or restore/save the persistent history cache. The
 scheduled weekday run always uses `publish`.
 
+Telegram discovery monitoring is separated from the full publication job.
+`.github/workflows/telegram-refresh.yml` runs every three hours at minute 17,
+collects and clusters Telegram posts without calling OpenAI or publishing a
+report, and retains each diagnostic artifact for 14 days. Its latest successful
+payload is cached and restored into the next daily workflow artifact. A refresh
+with no usable posts fails visibly so an expired session or lost channel access
+does not appear healthy.
+
 To receive a Telegram result alert, add two more GitHub Actions secrets:
 `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. The workflow sends the new Notion
 link after success. On failure, it sends the GitHub Actions log link instead.

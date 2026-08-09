@@ -159,6 +159,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-hypothesis-history-
 
+      - name: Restore latest Telegram intelligence
+        if: env.BRIEF_RUN_MODE != 'publish_cached'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: pipeline/pb-daily-market-brief/workspace/telegram_refresh
+          key: ${{ runner.os }}-telegram-refresh-v1-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-telegram-refresh-v1-
+
       - name: Restore broker research structured analysis cache
         if: env.BRIEF_RUN_MODE != 'publish_cached'
         continue-on-error: true
@@ -291,6 +301,7 @@ jobs:
             pipeline/pb-daily-market-brief/workspace/briefs/
             pipeline/pb-daily-market-brief/workspace/charts/
             pipeline/pb-daily-market-brief/workspace/source_status/
+            pipeline/pb-daily-market-brief/workspace/telegram_refresh/
             pipeline/pb-daily-market-brief/workspace/triaged/
             pipeline/pb-daily-market-brief/workspace/event_evidence/
             pipeline/pb-daily-market-brief/workspace/market_calendar/

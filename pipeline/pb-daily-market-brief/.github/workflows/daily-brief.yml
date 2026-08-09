@@ -115,6 +115,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-hypothesis-history-
 
+      - name: Restore latest Telegram intelligence
+        if: env.BRIEF_RUN_MODE != 'publish_cached'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/telegram_refresh
+          key: ${{ runner.os }}-telegram-refresh-v1-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-telegram-refresh-v1-
+
       - name: Restore broker research structured analysis cache
         if: env.BRIEF_RUN_MODE != 'publish_cached'
         continue-on-error: true
@@ -234,6 +244,7 @@ jobs:
             workspace/briefs/
             workspace/charts/
             workspace/source_status/
+            workspace/telegram_refresh/
             workspace/triaged/
             workspace/event_evidence/
             workspace/market_calendar/
