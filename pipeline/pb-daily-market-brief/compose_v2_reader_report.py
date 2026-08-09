@@ -29,6 +29,7 @@ KOREA_TRANSMISSION_READY_STATUSES = {
     "ready",
     "ready_for_korea_transmission",
     "ready_for_korea_transmission_with_source_lag",
+    "ready_for_korea_observation_without_verified_flows",
 }
 
 REGIME_LABELS = {
@@ -460,9 +461,16 @@ def _korea_section(market: dict[str, Any]) -> dict[str, Any]:
             "metrics": [],
             "company_transmissions": company_transmissions,
         }
+    observation_only = (
+        gate.get("status")
+        == "ready_for_korea_observation_without_verified_flows"
+    )
     return {
         "status": "available",
         "summary": (
+            "환율·지수·대표주 공식 수치는 확인됐지만 외국인 수급은 "
+            "검증되지 않아 국내 전이 방향성은 단정하지 않는다."
+            if observation_only else
             "국내시장 연결은 환율·지수·외국인 수급이 같은 방향으로 "
             "확인되는지에 한해 조건부로 해석한다."
         ),

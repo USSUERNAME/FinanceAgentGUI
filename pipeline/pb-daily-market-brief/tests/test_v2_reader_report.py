@@ -281,6 +281,37 @@ class V2ReaderReportTests(unittest.TestCase):
             "외국인 코스피 현물 순매수",
         )
 
+    def test_korea_official_prices_remain_visible_without_verified_flows(self) -> None:
+        packet = self.intelligence()
+        packet["market"].pop("korea_transmission_inputs", None)
+        packet["market"]["korea_market"] = {
+            "transmission_gate": {
+                "status": "ready_for_korea_observation_without_verified_flows",
+            },
+            "metrics": {
+                "kospi": {
+                    "metric_id": "kospi",
+                    "label": "코스피",
+                    "status": "available",
+                    "value": 3000.0,
+                    "unit": "index points",
+                    "as_of": "2026-07-23",
+                    "source_url": "https://data.krx.co.kr/",
+                    "primary_source_confirmed": True,
+                },
+                "foreign_kospi_cash_net_buy_krw": {
+                    "status": "provider_or_authorization_error",
+                    "value": None,
+                },
+            },
+        }
+
+        report = build_v2_reader_report(packet)
+
+        self.assertEqual(report["korea_connection"]["status"], "available")
+        self.assertEqual(len(report["korea_connection"]["metrics"]), 1)
+        self.assertIn("외국인 수급은 검증되지 않아", report["korea_connection"]["summary"])
+
     def test_validation_rejects_position_authority(self) -> None:
         report = build_v2_reader_report(self.intelligence())
         report["policy"]["position_actions_allowed"] = True
