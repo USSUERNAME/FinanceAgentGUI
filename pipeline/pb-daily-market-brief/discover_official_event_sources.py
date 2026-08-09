@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import parse_qs, urljoin, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -52,6 +52,7 @@ DEFAULT_SETTINGS: dict[str, int | float] = {
     "max_body_chars": 12_000,
     "publication_window_hours": 96,
 }
+EMBEDDED_URL_PATTERN = re.compile(r"https?://[^\s<>\"'\]\[()]+", re.IGNORECASE)
 
 
 class DiscoveryHTMLParser(HTMLParser):
@@ -183,6 +184,21 @@ def publication_window_matches(
     return abs((document_time - event_time).total_seconds()) <= max_hours * 3600
 
 
+def publication_date_from_official_url(url: str) -> str | None:
+    """Read a publication date only from an official identifier with date semantics."""
+    parsed = urlsplit(url)
+    if domain_matches(parsed.hostname or "", ["dart.fss.or.kr"]):
+        receipt = str((parse_qs(parsed.query).get("rcpNo") or [""])[0])
+        if re.fullmatch(r"20\d{12}", receipt):
+            try:
+                return datetime.strptime(receipt[:8], "%Y%m%d").replace(
+                    tzinfo=ZoneInfo("Asia/Seoul")
+                ).isoformat()
+            except ValueError:
+                return None
+    return None
+
+
 def candidate_links_from_landing(
     landing_url: str,
     html: str,
@@ -218,6 +234,122 @@ def candidate_links_from_landing(
     return sorted(candidates.values(), key=lambda item: (item["score"], item["url"]), reverse=True)
 
 
+def embedded_official_urls(
+    event: dict[str, Any],
+    records_by_id: dict[str, dict[str, Any]],
+    official_domains: list[str],
+) -> list[str]:
+    """Return event-linked URLs only when their domain is explicitly official."""
+    discovered: list[str] = []
+    seen: set[str] = set()
+    for record_id in event.get("record_ids") or []:
+        record = records_by_id.get(str(record_id)) or {}
+        values: list[str] = [
+            str(record.get("canonical_url") or ""),
+            str(record.get("url") or ""),
+            *(str(value) for value in record.get("linked_urls") or []),
+        ]
+        values.extend(EMBEDDED_URL_PATTERN.findall(str(record.get("raw_text") or "")))
+        for value in values:
+            canonical = canonicalize_url(value.rstrip(".,;:!?"))
+            if (
+                not canonical
+                or canonical in seen
+                or not domain_matches(domain_for_url(canonical), official_domains)
+            ):
+                continue
+            seen.add(canonical)
+            discovered.append(canonical)
+    return discovered
+
+
+def fetch_candidate_documents(
+    candidates: list[dict[str, Any]],
+    event: dict[str, Any],
+    official_domains: list[str],
+    settings: dict[str, int | float],
+    audit: dict[str, Any],
+    remaining_fetches: int,
+) -> tuple[list[dict[str, Any]], int]:
+    records: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if remaining_fetches <= 0:
+            audit["status"] = "fetch_budget_exhausted"
+            break
+        result = fetch_official_html(
+            candidate["url"],
+            official_domains,
+            timeout_seconds=int(settings["timeout_seconds"]),
+            max_response_bytes=int(settings["max_response_bytes"]),
+        )
+        remaining_fetches -= 1
+        candidate_audit = {
+            **candidate,
+            "fetch_status": result["status"],
+            "accepted": False,
+        }
+        audit["candidate_documents"].append(candidate_audit)
+        if result["status"] != "html_fetched":
+            candidate_audit["error"] = result.get("error")
+            continue
+        parser = DiscoveryHTMLParser()
+        parser.feed(result["html"])
+        body = extract_visible_text(result["html"], int(settings["max_body_chars"]))
+        linked, overlap, entity_overlap = strong_event_link(
+            event, f"{parser.title} {body}"
+        )
+        published_at = parser.published_at or publication_date_from_official_url(
+            result["url"]
+        )
+        time_matches = publication_window_matches(
+            published_at,
+            event,
+            float(settings["publication_window_hours"]),
+        )
+        candidate_audit.update({
+            "title": parser.title,
+            "published_at": published_at,
+            "published_at_source": (
+                "document_metadata" if parser.published_at
+                else "official_url_identifier" if published_at
+                else "missing"
+            ),
+            "body_linked": linked,
+            "publication_window_match": time_matches,
+            "body_term_overlap": overlap,
+            "body_entity_overlap": entity_overlap,
+        })
+        if not (linked and time_matches):
+            continue
+        discovery_route = str(candidate.get("discovery_route") or "registry_landing_page")
+        record = make_item(
+            source_id="official_event_discovery",
+            source_type="official_release",
+            published_at=published_at or "",
+            title=parser.title or candidate["anchor_text"] or event.get("representative_title", ""),
+            url=result["url"],
+            tickers=[],
+            tags=[str(event.get("event_type") or "other")],
+            raw_text=body,
+            rights_label="official public source; automated extraction for research",
+            source_grade="A",
+            primary_source_confirmed=True,
+            evidence_scope="official_body_extracted",
+            evidence_label="fact_source_reported",
+            freshness_state="current",
+            publisher=domain_for_url(result["url"]),
+            source_url_kind="primary_source",
+            derivation_note=(
+                f"Discovered via {discovery_route} for event {event.get('event_id')}; "
+                "body and publication window validated."
+            ),
+        )
+        record["discovery_event_id"] = event.get("event_id")
+        records.append(record)
+        candidate_audit["accepted"] = True
+    return records, remaining_fetches
+
+
 def discover_event(
     event: dict[str, Any],
     source_match: dict[str, Any],
@@ -225,6 +357,7 @@ def discover_event(
     *,
     no_network: bool,
     remaining_fetches: int,
+    direct_urls: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], int]:
     route = source_match.get("official_route") or {}
     official_domains = list(route.get("origin_domains") or [])
@@ -241,8 +374,35 @@ def discover_event(
     }
     if no_network:
         return [], audit, remaining_fetches
+
+    direct_candidates = [
+        {
+            "url": url,
+            "anchor_text": "embedded official source",
+            "score": 10_000,
+            "term_overlap": [],
+            "entity_overlap": [],
+            "discovery_route": "embedded_event_url",
+        }
+        for url in direct_urls or []
+    ][: int(settings["max_candidate_links_per_event"])]
+    direct_records, remaining_fetches = fetch_candidate_documents(
+        direct_candidates,
+        event,
+        official_domains,
+        settings,
+        audit,
+        remaining_fetches,
+    )
+    if direct_records:
+        audit["accepted_record_count"] = len(direct_records)
+        audit["status"] = "verified_embedded_official_document"
+        return direct_records, audit, remaining_fetches
     if not landing_pages:
-        audit["status"] = "no_registered_landing_pages"
+        audit["status"] = (
+            "no_verified_document_found" if direct_candidates
+            else "no_registered_landing_pages"
+        )
         return [], audit, remaining_fetches
 
     candidates: list[dict[str, Any]] = []
@@ -278,74 +438,14 @@ def discover_event(
         reverse=True,
     )[: int(settings["max_candidate_links_per_event"])]
 
-    records: list[dict[str, Any]] = []
-    for candidate in ranked:
-        if remaining_fetches <= 0:
-            audit["status"] = "fetch_budget_exhausted"
-            break
-        result = fetch_official_html(
-            candidate["url"],
-            official_domains,
-            timeout_seconds=int(settings["timeout_seconds"]),
-            max_response_bytes=int(settings["max_response_bytes"]),
-        )
-        remaining_fetches -= 1
-        candidate_audit = {
-            **candidate,
-            "fetch_status": result["status"],
-            "accepted": False,
-        }
-        audit["candidate_documents"].append(candidate_audit)
-        if result["status"] != "html_fetched":
-            candidate_audit["error"] = result.get("error")
-            continue
-        parser = DiscoveryHTMLParser()
-        parser.feed(result["html"])
-        body = extract_visible_text(result["html"], int(settings["max_body_chars"]))
-        linked, overlap, entity_overlap = strong_event_link(
-            event, f"{parser.title} {body}"
-        )
-        published_at = parser.published_at
-        time_matches = publication_window_matches(
-            published_at,
-            event,
-            float(settings["publication_window_hours"]),
-        )
-        candidate_audit.update({
-            "title": parser.title,
-            "published_at": published_at,
-            "body_linked": linked,
-            "publication_window_match": time_matches,
-            "body_term_overlap": overlap,
-            "body_entity_overlap": entity_overlap,
-        })
-        if not (linked and time_matches):
-            continue
-        record = make_item(
-            source_id="official_event_discovery",
-            source_type="official_release",
-            published_at=published_at or "",
-            title=parser.title or candidate["anchor_text"] or event.get("representative_title", ""),
-            url=result["url"],
-            tickers=[],
-            tags=[str(event.get("event_type") or "other")],
-            raw_text=body,
-            rights_label="official public source; automated extraction for research",
-            source_grade="A",
-            primary_source_confirmed=True,
-            evidence_scope="official_body_extracted",
-            evidence_label="fact_source_reported",
-            freshness_state="current",
-            publisher=domain_for_url(result["url"]),
-            source_url_kind="primary_source",
-            derivation_note=(
-                f"Discovered from registry landing page for event {event.get('event_id')}; "
-                "body and publication window validated."
-            ),
-        )
-        record["discovery_event_id"] = event.get("event_id")
-        records.append(record)
-        candidate_audit["accepted"] = True
+    records, remaining_fetches = fetch_candidate_documents(
+        ranked,
+        event,
+        official_domains,
+        settings,
+        audit,
+        remaining_fetches,
+    )
     audit["accepted_record_count"] = len(records)
     if audit["status"] == "searched" and not records:
         audit["status"] = "no_verified_document_found"
@@ -358,18 +458,45 @@ def discover_sources(
     *,
     no_network: bool,
     settings: dict[str, int | float] | None = None,
+    inbox_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     resolved_settings = {**DEFAULT_SETTINGS, **(settings or {})}
     events_by_id = {
         str(item.get("event_id")): item
         for item in clusters_payload.get("clusters", [])
     }
+    records_by_id = {
+        str(item.get("id")): item
+        for item in inbox_records or []
+        if isinstance(item, dict) and item.get("id")
+    }
     records: list[dict[str, Any]] = []
     audits: list[dict[str, Any]] = []
     remaining_fetches = int(resolved_settings["max_document_fetches"])
-    pending = [
+    pending_all = [
         item for item in matches_payload.get("events", [])
         if item.get("resolution_status") == "search_required"
+    ]
+    direct_urls_by_event: dict[str, list[str]] = {}
+    for source_match in pending_all:
+        event_id = str(source_match.get("event_id") or "")
+        event = events_by_id.get(event_id)
+        if not event:
+            continue
+        direct_urls_by_event[event_id] = embedded_official_urls(
+            event,
+            records_by_id,
+            list((source_match.get("official_route") or {}).get("origin_domains") or []),
+        )
+    pending = [
+        item
+        for _index, item in sorted(
+            enumerate(pending_all),
+            key=lambda pair: (
+                not bool(direct_urls_by_event.get(str(pair[1].get("event_id") or ""))),
+                pair[0],
+            ),
+        )
     ][: int(resolved_settings["max_events"])]
     for source_match in pending:
         event = events_by_id.get(str(source_match.get("event_id")))
@@ -386,6 +513,7 @@ def discover_sources(
             resolved_settings,
             no_network=no_network,
             remaining_fetches=remaining_fetches,
+            direct_urls=direct_urls_by_event.get(str(source_match.get("event_id") or ""), []),
         )
         records.extend(discovered)
         audits.append(audit)
@@ -415,13 +543,23 @@ def main() -> None:
     parser.add_argument("--date", required=True)
     parser.add_argument("--source-matches-file", required=True)
     parser.add_argument("--clusters-file", required=True)
+    parser.add_argument("--inbox-file")
     parser.add_argument("--no-network", action="store_true")
     args = parser.parse_args()
     load_dotenv()
 
     matches = json.loads(Path(args.source_matches_file).read_text(encoding="utf-8"))
     clusters = json.loads(Path(args.clusters_file).read_text(encoding="utf-8"))
-    payload = discover_sources(matches, clusters, no_network=args.no_network)
+    inbox_records = (
+        json.loads(Path(args.inbox_file).read_text(encoding="utf-8"))
+        if args.inbox_file else []
+    )
+    payload = discover_sources(
+        matches,
+        clusters,
+        no_network=args.no_network,
+        inbox_records=inbox_records,
+    )
     payload["report_date"] = args.date
     payload["generated_at"] = datetime.now(
         ZoneInfo(os.getenv("BRIEF_TIMEZONE", "Asia/Seoul"))

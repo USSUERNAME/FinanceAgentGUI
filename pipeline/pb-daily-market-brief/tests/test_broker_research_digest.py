@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
-from build_broker_research_digest import build_digest, validate_digest
+from build_broker_research_digest import (
+    build_digest,
+    load_retained_drive_reports,
+    validate_digest,
+)
 
 
 def report(
@@ -113,6 +120,47 @@ class BrokerResearchDigestTests(unittest.TestCase):
             {"GLOBAL": 1, "KR": 1, "US": 1},
         )
         self.assertEqual(packet["reports"][0]["base_currency"], "USD")
+
+    def test_digest_retains_prior_approved_pdf_card_without_source_text(self) -> None:
+        prior = build_digest(
+            "2026-07-24",
+            [report("kr-prior", market_scope="KR")],
+        )
+        current = build_digest(
+            "2026-07-25",
+            [report("us-current", market_scope="US")],
+            retained_reports=prior["reports"],
+        )
+        self.assertEqual(current["summary"]["retained_report_count"], 1)
+        self.assertEqual(current["summary"]["domestic_report_count"], 1)
+        self.assertEqual(current["summary"]["overseas_report_count"], 1)
+        self.assertNotIn("raw_text", str(current["reports"]))
+
+    def test_retained_loader_keeps_only_still_approved_drive_cards(self) -> None:
+        prior = build_digest("2026-07-24", [report("kr-prior", market_scope="KR")])
+        prior["reports"][0]["source"]["reference"] = "drive:approved-file"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            digest_path = (
+                root / "broker_research_digest" / "2026-07-24" /
+                "broker_research_digest.json"
+            )
+            digest_path.parent.mkdir(parents=True)
+            digest_path.write_text(json.dumps(prior), encoding="utf-8")
+            approval_path = root / "approvals.json"
+            approval_path.write_text(json.dumps({
+                "decisions": [
+                    {"file_id": "approved-file", "decision": "approved"},
+                    {"file_id": "excluded-file", "decision": "excluded"},
+                ],
+            }), encoding="utf-8")
+            retained = load_retained_drive_reports(
+                "2026-07-25",
+                workspace_root=root,
+                approval_path=approval_path,
+            )
+        self.assertEqual([item["report_id"] for item in retained], ["kr-prior"])
+        self.assertNotIn("raw_text", retained[0])
 
     def test_default_operator_stance_does_not_hide_generated_analysis(self) -> None:
         source = report("generated-stance", stance="not_stated", structured=False)

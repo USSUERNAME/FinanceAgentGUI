@@ -71,3 +71,33 @@ test("remote runner copies only allowlisted report artifact directories", async 
   assert.ok(synced.includes("source_status"));
   assert.equal(synced.includes("not-allowlisted"), false);
 });
+
+test("remote runner accepts evidence-only artifacts for dry runs", async () => {
+  const staging = join(tempRoot, "staging");
+  const workspace = join(tempRoot, "workspace");
+  await mkdir(join(staging, "snapshots", "2026-08-09"), { recursive: true });
+  await mkdir(join(staging, "analysis", "2026-08-09"), { recursive: true });
+  await mkdir(join(staging, "source_status", "2026-08-09"), { recursive: true });
+  await writeFile(join(staging, "analysis", "2026-08-09", "market_analysis.json"), "{}", "utf8");
+
+  const synced = __pbRemoteRunnerTestHooks.syncArtifact(staging, workspace, {
+    runMode: "dry_run",
+  });
+  assert.ok(synced.includes("snapshots"));
+  assert.ok(synced.includes("analysis"));
+  assert.ok(synced.includes("source_status"));
+});
+
+test("remote runner keeps final-report validation strict outside dry runs", async () => {
+  const staging = join(tempRoot, "staging");
+  const workspace = join(tempRoot, "workspace");
+  await mkdir(join(staging, "snapshots", "2026-08-09"), { recursive: true });
+  await mkdir(join(staging, "analysis", "2026-08-09"), { recursive: true });
+
+  assert.throws(
+    () => __pbRemoteRunnerTestHooks.syncArtifact(staging, workspace, {
+      runMode: "verification_dry_run",
+    }),
+    /validated report workspace/
+  );
+});

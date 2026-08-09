@@ -8,6 +8,7 @@ from discover_official_event_sources import (
     candidate_links_from_landing,
     discover_sources,
     fetch_official_html,
+    publication_date_from_official_url,
 )
 
 
@@ -85,6 +86,12 @@ class FetchTests(unittest.TestCase):
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_dart_receipt_identifier_provides_official_publication_date(self) -> None:
+        published_at = publication_date_from_official_url(
+            "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260807000778"
+        )
+        self.assertEqual(published_at, "2026-08-07T00:00:00+09:00")
+
     def test_no_network_writes_explicit_audit_without_records(self) -> None:
         payload = discover_sources(
             source_matches(),
@@ -128,6 +135,103 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(record["source_grade"], "A")
         self.assertTrue(record["primary_source_confirmed"])
         self.assertEqual(record["evidence_label"], "fact_source_reported")
+
+    def test_embedded_official_url_is_verified_before_landing_page_search(self) -> None:
+        document = """
+        <html><head><title>Oracle Pentagon software contract</title>
+        <meta property="article:published_time" content="2026-07-23T21:00:00Z"></head>
+        <body><main><h1>Oracle Pentagon software contract</h1>
+        <p>Oracle received a Pentagon software contract worth 7 billion dollars.</p>
+        </main></body></html>
+        """
+        inbox = [{
+            "id": "secondary",
+            "url": "https://t.me/example/1",
+            "raw_text": (
+                "Official document: "
+                "https://www.defense.gov/News/Contracts/Contract/Article/999/"
+                "oracle-software-contract/ and unrelated "
+                "https://publisher.example/story"
+            ),
+        }]
+        with patch(
+            "discover_official_event_sources.fetch_official_html",
+            return_value={
+                "status": "html_fetched",
+                "url": (
+                    "https://defense.gov/News/Contracts/Contract/Article/999/"
+                    "oracle-software-contract"
+                ),
+                "html": document,
+            },
+        ) as fetch:
+            payload = discover_sources(
+                source_matches(),
+                {"clusters": [event()]},
+                no_network=False,
+                inbox_records=inbox,
+            )
+        self.assertEqual(payload["discovered_record_count"], 1)
+        self.assertEqual(payload["fetches_used"], 1)
+        self.assertEqual(fetch.call_count, 1)
+        audit = payload["event_audit"][0]
+        self.assertEqual(audit["status"], "verified_embedded_official_document")
+        self.assertEqual(
+            audit["candidate_documents"][0]["discovery_route"],
+            "embedded_event_url",
+        )
+        self.assertNotIn("publisher.example", str(audit))
+
+    def test_event_with_embedded_official_url_gets_priority_under_event_budget(self) -> None:
+        generic_event = {**event(), "event_id": "generic", "record_ids": ["generic-record"]}
+        direct_event = {**event(), "event_id": "direct", "record_ids": ["direct-record"]}
+        matches = {
+            "events": [
+                {
+                    "event_id": "generic",
+                    "resolution_status": "search_required",
+                    "search_plan": {"official_landing_pages": ["https://defense.gov/news/"]},
+                    "official_route": {"origin_domains": ["defense.gov"]},
+                },
+                {
+                    "event_id": "direct",
+                    "resolution_status": "search_required",
+                    "search_plan": {"official_landing_pages": ["https://defense.gov/news/"]},
+                    "official_route": {"origin_domains": ["defense.gov"]},
+                },
+            ],
+        }
+        document = """
+        <html><head><title>Oracle Pentagon software contract</title>
+        <meta property="article:published_time" content="2026-07-23T21:00:00Z"></head>
+        <body><p>Oracle received a Pentagon software contract worth 7 billion dollars.</p></body>
+        </html>
+        """
+        inbox = [
+            {"id": "generic-record", "raw_text": "No official link."},
+            {
+                "id": "direct-record",
+                "raw_text": "https://defense.gov/News/Contracts/oracle-software-contract",
+            },
+        ]
+        with patch(
+            "discover_official_event_sources.fetch_official_html",
+            return_value={
+                "status": "html_fetched",
+                "url": "https://defense.gov/News/Contracts/oracle-software-contract",
+                "html": document,
+            },
+        ) as fetch:
+            payload = discover_sources(
+                matches,
+                {"clusters": [generic_event, direct_event]},
+                no_network=False,
+                inbox_records=inbox,
+                settings={"max_events": 1},
+            )
+        self.assertEqual(payload["event_audit"][0]["event_id"], "direct")
+        self.assertEqual(payload["discovered_record_count"], 1)
+        self.assertEqual(fetch.call_count, 1)
 
     def test_unrelated_official_document_is_not_accepted(self) -> None:
         landing = """
