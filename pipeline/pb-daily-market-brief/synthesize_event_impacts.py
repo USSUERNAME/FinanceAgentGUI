@@ -474,9 +474,16 @@ def synthesize_with_openai(
     max_output_tokens = int(
         os.getenv("OPENAI_EVENT_SYNTHESIS_MAX_OUTPUT_TOKENS", "8000")
     )
+    timeout_seconds = int(
+        os.getenv("OPENAI_EVENT_SYNTHESIS_TIMEOUT_SECONDS", "240")
+    )
     if max_output_tokens < 1000 or max_output_tokens > 16000:
         raise ValueError(
             "OPENAI_EVENT_SYNTHESIS_MAX_OUTPUT_TOKENS must be between 1000 and 16000"
+        )
+    if timeout_seconds < 30 or timeout_seconds > 600:
+        raise ValueError(
+            "OPENAI_EVENT_SYNTHESIS_TIMEOUT_SECONDS must be between 30 and 600"
         )
     sector_ids = [str(item.get("sector_id") or "") for item in master.get("sectors", [])]
     instructions = """You are the senior public-equity synthesis stage for a Korean PB daily brief.
@@ -512,7 +519,7 @@ Write all reader-facing strings in concise Korean."""
         "Content-Type": "application/json",
     })
     try:
-        with urlopen(request, timeout=120) as response:
+        with urlopen(request, timeout=timeout_seconds) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")

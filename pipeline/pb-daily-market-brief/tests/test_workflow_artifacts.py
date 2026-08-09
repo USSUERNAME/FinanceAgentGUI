@@ -146,6 +146,10 @@ class WorkflowArtifactTests(unittest.TestCase):
             'OPENAI_EVENT_SYNTHESIS_MAX_OUTPUT_TOKENS: "8000"',
             workflow,
         )
+        self.assertIn(
+            'OPENAI_EVENT_SYNTHESIS_TIMEOUT_SECONDS: "240"',
+            workflow,
+        )
         self.assertIn('OPENAI_BRIEF_TIMEOUT_SECONDS: "180"', workflow)
         self.assertIn('OPENAI_BRIEF_MAX_ATTEMPTS: "2"', workflow)
         self.assertNotIn('OPENAI_BRIEF_MAX_OUTPUT_TOKENS: "5600"', workflow)
