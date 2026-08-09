@@ -253,6 +253,7 @@ jobs:
             workspace/us_equity_universe/
             workspace/us_equity_market_inputs/
             workspace/us_equity_candidate_screen/
+            workspace/candidate_official_evidence/
             workspace/us_market_internals/
             workspace/history/
             workspace/operations_reports/

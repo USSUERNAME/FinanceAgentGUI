@@ -9,7 +9,9 @@ the production hostname before real data is enabled.
 - Daily brief: sanitized `v2_reader_reports/*/reader_report.json` files.
 - Full intelligence: decision fields from `intelligence/*/daily_intelligence.json`.
 - Individual-stock candidates: sanitized long-term judgment cards from
-  `company_long_term_profiles/*/company_long_term_profiles.json`.
+  `company_long_term_profiles/*/company_long_term_profiles.json`, plus the
+  bounded verification queue from
+  `us_equity_candidate_screen/*/candidate_screen.json`.
 - World Memory: the current report view and PB investment theses exported from
   local runtime state.
 
@@ -17,6 +19,13 @@ The company view separates company quality, stock attractiveness, and portfolio
 fit. It withholds incomplete scores, keeps confirmation/invalidation conditions,
 and never emits automatic position actions. Only candidates backed by a verified
 primary event or an explicit local watchlist route enter bounded diligence.
+Market anomalies without primary evidence remain visible as `verification
+pending`; they show only bounded price/volume context and the reason they have
+not been promoted. The pipeline checks up to six top-ranked pending candidates
+against SEC filings and the SEC-declared company investor-relations site. A
+candidate is promoted only when an official body, exact fact excerpt, source
+URL, and current market snapshot are all present. At most three candidates are
+promoted per run.
 
 The bundle excludes raw PDF text, raw filing rows, OAuth/API credentials,
 cookies, raw source bodies, operational logs, absolute paths, and the World
