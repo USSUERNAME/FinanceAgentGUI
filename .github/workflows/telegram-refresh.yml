@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  deployments: write
 
 concurrency:
   group: telegram-intelligence-refresh
@@ -29,6 +30,15 @@ jobs:
     steps:
       - name: Check out private brief code
         uses: actions/checkout@v4
+
+      - name: Restore sanitized private-reader history
+        if: vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .reader-public-history/reports.json
+          key: private-reader-history-${{ github.run_id }}
+          restore-keys: |
+            private-reader-history-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -104,6 +114,51 @@ jobs:
           ]
           summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
+
+      - name: Set up Node for private reader
+        if: steps.validate.outcome == 'success' && vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate previous private-reader bundle
+        if: steps.validate.outcome == 'success' && vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        working-directory: .
+        run: |
+          node -e "const fs=require('fs'); const p='.reader-public-history/reports.json'; if(!fs.existsSync(p)) throw new Error('Previous private-reader bundle is missing; refusing to replace report history'); const v=JSON.parse(fs.readFileSync(p,'utf8')); if(v.schemaVersion!=='public_pb_reader_bundle.v1') throw new Error('Previous private-reader bundle is invalid');"
+
+      - name: Build private reader with latest Telegram monitor
+        if: steps.validate.outcome == 'success' && vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        working-directory: .
+        run: |
+          node scripts/build-public-report-reader.mjs \
+            --input pipeline/pb-daily-market-brief/workspace/v2_reader_reports \
+            --intelligence pipeline/pb-daily-market-brief/workspace/intelligence \
+            --telegram pipeline/pb-daily-market-brief/workspace/telegram_refresh \
+            --output .generated/cloudflare-report-reader \
+            --previous .reader-public-history/reports.json
+
+      - name: Deploy Telegram monitor to Cloudflare Pages
+        id: deploy_private_reader
+        if: steps.validate.outcome == 'success' && vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy .generated/cloudflare-report-reader --project-name=finance-agent-reports --branch=main
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Preserve updated private-reader history
+        if: steps.deploy_private_reader.outcome == 'success'
+        working-directory: .
+        run: cp .generated/cloudflare-report-reader/reports.json .reader-public-history/reports.json
+
+      - name: Save updated private-reader history
+        if: steps.deploy_private_reader.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: .reader-public-history/reports.json
+          key: private-reader-history-${{ github.run_id }}
 
       - name: Preserve Telegram refresh artifact
         if: always()

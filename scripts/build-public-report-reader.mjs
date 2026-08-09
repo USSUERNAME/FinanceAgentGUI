@@ -8,6 +8,7 @@ const DEFAULT_TEMPLATE_DIR = join(APP_ROOT, "web", "public-report-reader");
 const TEMPLATE_FILES = ["index.html", "styles.css", "app.js", "_headers"];
 const REPORT_FILE_NAME = "reader_report.json";
 const INTELLIGENCE_FILE_NAME = "daily_intelligence.json";
+const TELEGRAM_FILE_NAME = "telegram_intelligence.json";
 const MAX_REPORTS = 90;
 const PRIVATE_KEY_PATTERN = /(token|secret|password|cookie|authorization|credential|refresh|full.?text|raw.?content|absolute.?path)/i;
 
@@ -40,6 +41,17 @@ function safeUrl(value) {
   try {
     const url = new URL(candidate);
     return url.protocol === "https:" || url.protocol === "http:" ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function safeTelegramUrl(value) {
+  const candidate = safeUrl(value);
+  if (!candidate) return "";
+  try {
+    const url = new URL(candidate);
+    return ["t.me", "www.t.me"].includes(url.hostname.toLowerCase()) ? url.href : "";
   } catch {
     return "";
   }
@@ -300,6 +312,39 @@ export function sanitizeDailyIntelligence(source = {}) {
   };
 }
 
+export function sanitizeTelegramRefresh(source = {}) {
+  if (source?.schema_version !== "telegram_intelligence_refresh.v1") {
+    throw new Error("unsupported Telegram refresh schema");
+  }
+  const generatedAt = text(source.generated_at, 80);
+  if (!generatedAt || Number.isNaN(new Date(generatedAt).getTime())) {
+    throw new Error("invalid Telegram refresh timestamp");
+  }
+  return {
+    schemaVersion: "private_telegram_intelligence.v1",
+    generatedAt,
+    status: text(source.status, 80),
+    rawPostCount: Math.max(0, Number(source.raw_post_count) || 0),
+    deduplicatedPostCount: Math.max(0, Number(source.deduplicated_post_count) || 0),
+    eventClusterCount: Math.max(0, Number(source.event_cluster_count) || 0),
+    representedChannelCount: Math.max(0, Number(source.represented_channel_count) || 0),
+    pdfAttachmentCount: Math.max(0, Number(source.pdf_attachment_count) || 0),
+    clusters: (Array.isArray(source.clusters) ? source.clusters : []).slice(0, 20).map((item) => ({
+      eventId: text(item?.event_id, 160),
+      title: prose(item?.title, 480),
+      eventType: text(item?.event_type, 120),
+      verificationStatus: text(item?.verification_status, 120),
+      latestPublishedAt: text(item?.latest_published_at, 80),
+      postCount: Math.max(0, Number(item?.post_count) || 0),
+      channels: textList(item?.channels, { limit: 8, maxLength: 160 }),
+      postUrls: (Array.isArray(item?.post_urls) ? item.post_urls : [])
+        .map(safeTelegramUrl)
+        .filter(Boolean)
+        .slice(0, 4),
+    })).filter((item) => item.title || item.eventId),
+  };
+}
+
 function sanitizeWorldMemoryView(view = {}) {
   return {
     title: prose(view.title, 360),
@@ -399,18 +444,47 @@ async function collectByDate(inputDir, fileName, sanitizer) {
     .slice(0, MAX_REPORTS);
 }
 
+function sanitizePreviousTelegram(source) {
+  if (source?.schemaVersion !== "private_telegram_intelligence.v1") return null;
+  try {
+    return sanitizeTelegramRefresh({
+      schema_version: "telegram_intelligence_refresh.v1",
+      generated_at: source.generatedAt,
+      status: source.status,
+      raw_post_count: source.rawPostCount,
+      deduplicated_post_count: source.deduplicatedPostCount,
+      event_cluster_count: source.eventClusterCount,
+      represented_channel_count: source.representedChannelCount,
+      pdf_attachment_count: source.pdfAttachmentCount,
+      clusters: (source.clusters || []).map((item) => ({
+        event_id: item.eventId,
+        title: item.title,
+        event_type: item.eventType,
+        verification_status: item.verificationStatus,
+        latest_published_at: item.latestPublishedAt,
+        post_count: item.postCount,
+        channels: item.channels,
+        post_urls: item.postUrls,
+      })),
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function previousPayload(previousBundle) {
-  if (!previousBundle) return { reports: [], intelligence: [], worldMemory: null };
+  if (!previousBundle) return { reports: [], intelligence: [], worldMemory: null, telegram: null };
   try {
     const payload = JSON.parse(await readFile(resolve(previousBundle), "utf8"));
-    if (payload?.schemaVersion !== "public_pb_reader_bundle.v1") return { reports: [], intelligence: [], worldMemory: null };
+    if (payload?.schemaVersion !== "public_pb_reader_bundle.v1") return { reports: [], intelligence: [], worldMemory: null, telegram: null };
     return {
       reports: (Array.isArray(payload.reports) ? payload.reports : []).filter((item) => item?.schemaVersion === "public_pb_reader.v1").slice(0, MAX_REPORTS),
       intelligence: (Array.isArray(payload.intelligence) ? payload.intelligence : []).filter((item) => item?.schemaVersion === "private_daily_intelligence.v1").slice(0, MAX_REPORTS),
       worldMemory: sanitizeWorldMemorySnapshot(payload.worldMemory),
+      telegram: sanitizePreviousTelegram(payload.telegram),
     };
   } catch {
-    return { reports: [], intelligence: [], worldMemory: null };
+    return { reports: [], intelligence: [], worldMemory: null, telegram: null };
   }
 }
 
@@ -421,6 +495,20 @@ async function readWorldMemorySnapshot(path) {
   } catch {
     return null;
   }
+}
+
+async function readLatestTelegramSnapshot(inputDir) {
+  if (!inputDir) return null;
+  let latest = null;
+  for (const file of await findNamedFiles(resolve(inputDir), TELEGRAM_FILE_NAME)) {
+    try {
+      const item = sanitizeTelegramRefresh(JSON.parse(await readFile(file, "utf8")));
+      if (!latest || item.generatedAt > latest.generatedAt) latest = item;
+    } catch (error) {
+      console.warn(`Skipped ${basename(file)}: ${error.message}`);
+    }
+  }
+  return latest;
 }
 
 function mergeByDate(previous, current) {
@@ -434,6 +522,7 @@ function mergeByDate(previous, current) {
 export async function buildPublicReportReader({
   inputDir,
   intelligenceDir = "",
+  telegramDir = "",
   worldMemoryFile = "",
   outputDir,
   templateDir = DEFAULT_TEMPLATE_DIR,
@@ -450,7 +539,8 @@ export async function buildPublicReportReader({
   const reports = locked ? [] : mergeByDate(previous.reports, currentReports);
   const intelligence = locked ? [] : mergeByDate(previous.intelligence, currentIntelligence);
   const worldMemory = locked ? null : (await readWorldMemorySnapshot(worldMemoryFile)) || previous.worldMemory;
-  if (!locked && !reports.length && !intelligence.length && !worldMemory) throw new Error(`no valid private reader content found in ${inputDir}`);
+  const telegram = locked ? null : (await readLatestTelegramSnapshot(telegramDir)) || previous.telegram;
+  if (!locked && !reports.length && !intelligence.length && !worldMemory && !telegram) throw new Error(`no valid private reader content found in ${inputDir}`);
   const payload = {
     schemaVersion: "public_pb_reader_bundle.v1",
     generatedAt: new Date().toISOString(),
@@ -458,9 +548,10 @@ export async function buildPublicReportReader({
     reports,
     intelligence,
     worldMemory,
+    telegram,
   };
   await writeFile(join(target, "reports.json"), `${JSON.stringify(payload)}\n`, "utf8");
-  return { outputDir: target, reportCount: reports.length, intelligenceCount: intelligence.length, worldMemory: Boolean(worldMemory), locked: payload.locked };
+  return { outputDir: target, reportCount: reports.length, intelligenceCount: intelligence.length, worldMemory: Boolean(worldMemory), telegram: Boolean(telegram), locked: payload.locked };
 }
 
 function argument(name, fallback = "") {
@@ -472,10 +563,11 @@ if (resolve(process.argv[1] || "") === fileURLToPath(import.meta.url)) {
   const locked = process.argv.includes("--locked");
   const inputDir = argument("input", join(APP_ROOT, "pipeline", "pb-daily-market-brief", "workspace", "v2_reader_reports"));
   const intelligenceDir = argument("intelligence", "");
+  const telegramDir = argument("telegram", "");
   const worldMemoryFile = argument("world-memory", "");
   const outputDir = argument("output", join(APP_ROOT, ".generated", "cloudflare-report-reader"));
   const previousBundle = argument("previous", "");
-  buildPublicReportReader({ inputDir, intelligenceDir, worldMemoryFile, outputDir, previousBundle, locked })
+  buildPublicReportReader({ inputDir, intelligenceDir, telegramDir, worldMemoryFile, outputDir, previousBundle, locked })
     .then((result) => console.log(JSON.stringify(result)))
     .catch((error) => {
       console.error(error.message);

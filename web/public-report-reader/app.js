@@ -425,6 +425,7 @@ const FIELD_VALUES = {
 const VIEW_META = {
   brief: { title: "리포트 보관함", eyebrow: "ARCHIVE", placeholder: "날짜·제목·종목 검색" },
   intelligence: { title: "전체 인텔리전스", eyebrow: "FULL DAILY", placeholder: "날짜·사건·지표 검색" },
+  telegram: { title: "텔레그램 모니터", eyebrow: "3-HOUR REFRESH", placeholder: "사건·채널 검색" },
   "world-memory": { title: "월드 메모리", eyebrow: "CONTINUITY", placeholder: "현재 스냅샷" },
 };
 
@@ -1072,25 +1073,106 @@ function renderWorldMemory(memory) {
   return article;
 }
 
+function renderTelegram(telegram) {
+  const article = element("article", "report-document telegram-document");
+  article.append(reportHeader({
+    eyebrow: "TELEGRAM DISCOVERY MONITOR",
+    title: "텔레그램 정보 채널",
+    meta: [
+      `최근 수집 ${formatDateTime(telegram.generatedAt)}`,
+      `상태 ${valueLabel(telegram.status || "확인 필요")}`,
+      "3시간 주기",
+    ],
+  }));
+  article.append(element(
+    "p",
+    "telegram-disclaimer",
+    "텔레그램 게시물은 발견·관점 자료입니다. 공식자료로 확인되기 전에는 사실이나 투자 판단 근거로 확정하지 않습니다.",
+  ));
+
+  const overview = section("수집 현황", "중복 제거와 사건 묶기 결과입니다.");
+  const grid = element("div", "overview-grid telegram-overview");
+  [
+    ["수집 게시물", telegram.rawPostCount || 0],
+    ["중복 제거 후", telegram.deduplicatedPostCount || 0],
+    ["사건 묶음", telegram.eventClusterCount || 0],
+    ["참여 채널", telegram.representedChannelCount || 0],
+    ["PDF 승인 후보", telegram.pdfAttachmentCount || 0],
+  ].forEach(([label, value]) => {
+    const card = element("article", "overview-card");
+    card.append(element("span", "overview-label", label));
+    card.append(element("strong", "overview-value", `${value}건`));
+    grid.append(card);
+  });
+  overview.append(grid);
+  article.append(overview);
+
+  if (telegram.clusters?.length) {
+    const node = section(`최신 사건 ${telegram.clusters.length}개`, "같은 사건으로 추정되는 게시물을 채널별로 묶었습니다.");
+    const stack = element("div", "research-stack");
+    telegram.clusters.forEach((cluster, index) => {
+      const details = element("details", "research-card telegram-card");
+      if (index === 0) details.open = true;
+      const summary = element("summary");
+      const heading = element("span", "research-heading");
+      heading.append(element("small", "", [valueLabel(cluster.eventType || "other"), `${cluster.postCount || 0}건`].join(" · ")));
+      heading.append(element("strong", "", cluster.title || cluster.eventId || "제목 없음"));
+      summary.append(heading, element("span", "details-mark", "+"));
+      details.append(summary);
+      const body = element("div", "research-body");
+      const metadata = [
+        cluster.latestPublishedAt && `최근 게시 ${formatDateTime(cluster.latestPublishedAt)}`,
+        cluster.verificationStatus && `검증 ${valueLabel(cluster.verificationStatus)}`,
+      ].filter(Boolean);
+      if (metadata.length) body.append(element("p", "research-meta", metadata.join(" · ")));
+      if (cluster.channels?.length) {
+        const tags = element("div", "tag-row");
+        cluster.channels.forEach((channel) => tags.append(element("span", "", channel)));
+        body.append(tags);
+      }
+      if (cluster.postUrls?.length) {
+        const links = element("div", "telegram-links");
+        cluster.postUrls.forEach((url, linkIndex) => {
+          const link = element("a", "source-link", `게시물 ${linkIndex + 1} 열기`);
+          link.href = url;
+          link.target = "_blank";
+          link.rel = "noreferrer noopener";
+          links.append(link);
+        });
+        body.append(links);
+      }
+      details.append(body);
+      stack.append(details);
+    });
+    node.append(stack);
+    article.append(node);
+  }
+  article.append(element("footer", "report-footer", "채널명·제목·사건 분류·게시물 링크만 표시하며 게시물 원문과 PDF 본문은 배포하지 않습니다."));
+  return article;
+}
+
 function currentItems() {
   if (state.view === "brief") return state.payload?.reports || [];
   if (state.view === "intelligence") return state.payload?.intelligence || [];
+  if (state.view === "telegram") return state.payload?.telegram ? [state.payload.telegram] : [];
   return state.payload?.worldMemory ? [state.payload.worldMemory] : [];
 }
 
 function itemId(item) {
-  return state.view === "world-memory" ? "current" : item.reportDate;
+  return ["world-memory", "telegram"].includes(state.view) ? "current" : item.reportDate;
 }
 
 function itemTitle(item) {
   if (state.view === "brief") return item.title;
   if (state.view === "intelligence") return `${item.reportDate} 전체 인텔리전스`;
+  if (state.view === "telegram") return "최신 텔레그램 모니터";
   return item.report?.title || "현재 월드 메모리";
 }
 
 function itemSummary(item) {
   if (state.view === "brief") return item.executiveSummary?.[0] || "요약 없음";
   if (state.view === "intelligence") return item.market?.regime?.summary || `${item.events?.selectedCount || 0}개 이벤트`;
+  if (state.view === "telegram") return `${item.eventClusterCount || 0}개 사건 · ${item.representedChannelCount || 0}개 채널`;
   return item.report?.summary || "월드 메모리 스냅샷";
 }
 
@@ -1100,6 +1182,9 @@ function searchableText(item) {
   }
   if (state.view === "intelligence") {
     return [item.reportDate, item.market?.regime?.label, item.market?.regime?.summary, ...(item.market?.topRisks || []), ...(item.events?.items || []).flatMap((value) => [value.title, ...(value.topicTags || [])]), ...(item.continuity?.activeEntries || []).map((value) => value.title)].join(" ").toLowerCase();
+  }
+  if (state.view === "telegram") {
+    return [item.generatedAt, ...(item.clusters || []).flatMap((value) => [value.title, value.eventType, ...(value.channels || [])])].join(" ").toLowerCase();
   }
   return [item.report?.title, item.report?.summary, item.report?.narrative, ...(item.report?.highlights || []).flatMap((value) => [value.title, value.body]), ...(item.theses || []).flatMap((value) => [value.title, value.thesis])].join(" ").toLowerCase();
 }
@@ -1111,7 +1196,13 @@ function renderActive() {
     readerNode.append(element("div", "empty-state", state.view === "world-memory" ? "동기화된 월드 메모리가 없습니다." : "표시할 리포트가 없습니다."));
     return;
   }
-  const documentNode = state.view === "brief" ? renderBrief(item) : state.view === "intelligence" ? renderIntelligence(item) : renderWorldMemory(item);
+  const documentNode = state.view === "brief"
+    ? renderBrief(item)
+    : state.view === "intelligence"
+      ? renderIntelligence(item)
+      : state.view === "telegram"
+        ? renderTelegram(item)
+        : renderWorldMemory(item);
   readerNode.append(documentNode);
   readerNode.focus({ preventScroll: true });
 }
@@ -1123,7 +1214,7 @@ function renderList() {
     const id = itemId(item);
     const button = element("button", id === state.activeId ? "report-list-item is-active" : "report-list-item");
     button.type = "button";
-    button.append(element("time", "", state.view === "world-memory" ? formatDateTime(item.generatedAt) : formatDate(item.reportDate)));
+    button.append(element("time", "", ["world-memory", "telegram"].includes(state.view) ? formatDateTime(item.generatedAt) : formatDate(item.reportDate)));
     button.append(element("strong", "", itemTitle(item)));
     button.append(element("span", "", itemSummary(item)));
     button.addEventListener("click", () => activate(id));

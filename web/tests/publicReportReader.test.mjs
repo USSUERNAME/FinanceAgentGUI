@@ -10,6 +10,7 @@ import {
   buildWorldMemorySnapshot,
   sanitizeDailyIntelligence,
   sanitizeReaderReport,
+  sanitizeTelegramRefresh,
   sanitizeWorldMemorySnapshot,
 } from "../../scripts/build-public-report-reader.mjs";
 
@@ -142,6 +143,32 @@ function privateWorldMemory() {
   });
 }
 
+function privateTelegramRefresh() {
+  return {
+    schema_version: "telegram_intelligence_refresh.v1",
+    generated_at: "2026-08-08T12:17:00+09:00",
+    status: "ok",
+    raw_post_count: 155,
+    deduplicated_post_count: 128,
+    event_cluster_count: 2,
+    represented_channel_count: 17,
+    pdf_attachment_count: 18,
+    pdf_attachments: [{ filename: "private-report.pdf", raw_content: "never publish" }],
+    clusters: [{
+      event_id: "telegram-event-1",
+      title: "반도체 공급망 점검",
+      event_type: "supply_chain",
+      verification_status: "discovery_metadata_only",
+      latest_published_at: "2026-08-08T11:50:00+09:00",
+      post_count: 3,
+      channels: ["채널 A", "채널 B"],
+      post_urls: ["https://t.me/example/1", "https://example.com/not-telegram"],
+      full_text: "drop this body",
+    }],
+    [sensitiveKey("telegram", "session", "token")]: "drop-session",
+  };
+}
+
 test("public report sanitizer keeps summaries and drops private or full-text fields", () => {
   const report = sanitizeReaderReport(privateReaderReport());
   const serialized = JSON.stringify(report);
@@ -173,6 +200,15 @@ test("World Memory snapshot exposes report and theses without runtime state or s
   assert.doesNotMatch(serialized, /drop raw|drop thesis|secret|rawText|private_token/);
 });
 
+test("Telegram refresh sanitizer keeps bounded discovery metadata only", () => {
+  const telegram = sanitizeTelegramRefresh(privateTelegramRefresh());
+  const serialized = JSON.stringify(telegram);
+  assert.equal(telegram.rawPostCount, 155);
+  assert.equal(telegram.clusters[0].title, "반도체 공급망 점검");
+  assert.deepEqual(telegram.clusters[0].postUrls, ["https://t.me/example/1"]);
+  assert.doesNotMatch(serialized, /private-report|never publish|drop this body|drop-session|pdf_attachments|full_text/);
+});
+
 test("reader builder emits a locked placeholder without private data", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "public-report-reader-locked-"));
   const outputDir = join(root, "output");
@@ -183,30 +219,36 @@ test("reader builder emits a locked placeholder without private data", async (t)
   assert.deepEqual(payload.reports, []);
   assert.deepEqual(payload.intelligence, []);
   assert.equal(payload.worldMemory, null);
+  assert.equal(payload.telegram, null);
 });
 
-test("reader builder combines brief, full intelligence, and World Memory", async (t) => {
+test("reader builder combines brief, full intelligence, Telegram, and World Memory", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "public-report-reader-live-"));
   const inputDir = join(root, "workspace", "v2_reader_reports", "2026-08-08");
   const intelligenceDir = join(root, "workspace", "intelligence", "2026-08-08");
   const worldMemoryFile = join(root, "world-memory.json");
+  const telegramDir = join(root, "workspace", "telegram_refresh", "2026-08-08");
   const outputDir = join(root, "output");
   await mkdir(inputDir, { recursive: true });
   await mkdir(intelligenceDir, { recursive: true });
+  await mkdir(telegramDir, { recursive: true });
   await writeFile(join(inputDir, "reader_report.json"), JSON.stringify(privateReaderReport()), "utf8");
   await writeFile(join(intelligenceDir, "daily_intelligence.json"), JSON.stringify(privateDailyIntelligence()), "utf8");
   await writeFile(worldMemoryFile, JSON.stringify(privateWorldMemory()), "utf8");
+  await writeFile(join(telegramDir, "telegram_intelligence.json"), JSON.stringify(privateTelegramRefresh()), "utf8");
   t.after(() => rm(root, { recursive: true, force: true }));
 
-  const result = await buildPublicReportReader({ inputDir: join(root, "workspace", "v2_reader_reports"), intelligenceDir: join(root, "workspace", "intelligence"), worldMemoryFile, outputDir, templateDir });
+  const result = await buildPublicReportReader({ inputDir: join(root, "workspace", "v2_reader_reports"), intelligenceDir: join(root, "workspace", "intelligence"), telegramDir: join(root, "workspace", "telegram_refresh"), worldMemoryFile, outputDir, templateDir });
   const serialized = await readFile(join(outputDir, "reports.json"), "utf8");
   const payload = JSON.parse(serialized);
   assert.equal(result.reportCount, 1);
   assert.equal(result.intelligenceCount, 1);
   assert.equal(result.worldMemory, true);
+  assert.equal(result.telegram, true);
   assert.equal(payload.intelligence[0].events.items[0].eventId, "event-1");
   assert.equal(payload.worldMemory.theses.length, 1);
-  assert.doesNotMatch(serialized, /PDF 원문|never-publish-this|drop-oauth|drop thesis|private_token/);
+  assert.equal(payload.telegram.clusters[0].eventId, "telegram-event-1");
+  assert.doesNotMatch(serialized, /PDF 원문|never-publish-this|drop-oauth|drop thesis|private_token|private-report|never publish|drop this body|drop-session/);
 });
 
 test("reader builder merges prior sanitized dates and preserves World Memory", async (t) => {
@@ -224,6 +266,7 @@ test("reader builder merges prior sanitized dates and preserves World Memory", a
     reports: [sanitizeReaderReport({ ...privateReaderReport(), report_date: "2026-08-07", title: "older" })],
     intelligence: [sanitizeDailyIntelligence({ ...privateDailyIntelligence(), report_date: "2026-08-07" })],
     worldMemory: privateWorldMemory(),
+    telegram: sanitizeTelegramRefresh(privateTelegramRefresh()),
   }), "utf8");
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -232,9 +275,10 @@ test("reader builder merges prior sanitized dates and preserves World Memory", a
   assert.deepEqual(payload.reports.map((report) => report.reportDate), ["2026-08-08", "2026-08-07"]);
   assert.deepEqual(payload.intelligence.map((report) => report.reportDate), ["2026-08-08", "2026-08-07"]);
   assert.equal(payload.worldMemory.report.title, "현재 시장 상황 인식");
+  assert.equal(payload.telegram.clusters[0].title, "반도체 공급망 점검");
 });
 
-test("static reader uses DOM APIs and exposes all three read-only views", async () => {
+test("static reader uses DOM APIs and exposes all four read-only views", async () => {
   const source = await readFile(join(templateDir, "app.js"), "utf8");
   const html = await readFile(join(templateDir, "index.html"), "utf8");
   assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|document\.write/);
@@ -242,6 +286,7 @@ test("static reader uses DOM APIs and exposes all three read-only views", async 
   assert.match(source, /rel = "noreferrer noopener"/);
   assert.match(html, /data-view="brief"/);
   assert.match(html, /data-view="intelligence"/);
+  assert.match(html, /data-view="telegram"/);
   assert.match(html, /data-view="world-memory"/);
 });
 
@@ -292,6 +337,17 @@ test("Cloudflare workflow gates data and consumes encrypted World Memory secret"
   assert.match(workflow, /if: vars\.CLOUDFLARE_REPORTS_PROTECTED == 'true'\s+uses: actions\/download-artifact@v4/);
   assert.match(workflow, /PRIVATE_READER_WORLD_MEMORY_JSON: \$\{\{ secrets\.PRIVATE_READER_WORLD_MEMORY_JSON \}\}/);
   assert.match(workflow, /--intelligence pipeline\/pb-daily-market-brief\/workspace\/intelligence/);
+  assert.match(workflow, /--telegram pipeline\/pb-daily-market-brief\/workspace\/telegram_refresh/);
   assert.match(workflow, /--world-memory \.generated\/private-reader-world-memory\.json/);
   assert.match(workflow, /Cloudflare Pages project exists/);
+});
+
+test("three-hour Telegram workflow rebuilds and deploys the protected reader safely", async () => {
+  const workflow = await readFile(fileURLToPath(new URL("../../.github/workflows/telegram-refresh.yml", import.meta.url)), "utf8");
+  assert.match(workflow, /cron: "17 \*\/3 \* \* \*"/);
+  assert.match(workflow, /Validate previous private-reader bundle/);
+  assert.match(workflow, /--telegram pipeline\/pb-daily-market-brief\/workspace\/telegram_refresh/);
+  assert.match(workflow, /Deploy Telegram monitor to Cloudflare Pages/);
+  assert.match(workflow, /vars\.CLOUDFLARE_REPORTS_PROTECTED == 'true'/);
+  assert.match(workflow, /private-reader-history-/);
 });
