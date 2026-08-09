@@ -254,27 +254,43 @@ class KoreaMarketContractTests(unittest.TestCase):
         self.assertEqual(metric["source_provider"], "Bank of Korea ECOS")
         self.assertEqual(metric["series_code"], "731Y001")
 
-    def test_kis_foreign_cash_and_futures_flows_are_normalized(self) -> None:
+    def test_kis_daily_cash_flow_uses_provider_trading_date(self) -> None:
         flows = collect_kis_foreign_flows(
             "2026-08-08",
             "app-key",
             "app-secret",
-            fetcher=lambda _key, _secret: {
-                "foreign_kospi_cash_net_buy_krw": {
+            fetcher=lambda _key, _secret, _date: [
+                {
+                    "stck_bsop_date": "20260808",
+                    "frgn_ntby_tr_pbmn": "0",
+                    "bstp_nmix_prdy_vrss": "0.00",
+                    "orgn_ntby_tr_pbmn": "0",
+                    "prsn_ntby_tr_pbmn": "0",
+                    "etc_corp_ntby_tr_pbmn": "0",
+                },
+                {
+                    "stck_bsop_date": "20260807",
                     "frgn_ntby_tr_pbmn": "-865101",
                 },
-                "foreign_kospi200_futures_net_buy_contracts": {
-                    "frgn_ntby_qty": "3913",
+                {
+                    "stck_bsop_date": "20260806",
+                    "frgn_ntby_tr_pbmn": "250000",
                 },
-            },
+            ],
         )
         cash = flows["foreign_kospi_cash_net_buy_krw"]
         futures = flows["foreign_kospi200_futures_net_buy_contracts"]
         self.assertEqual(cash["value"], -865101000000.0)
         self.assertEqual(cash["unit"], "KRW")
         self.assertEqual(cash["as_of"], "2026-08-07")
-        self.assertEqual(futures["value"], 3913)
-        self.assertEqual(futures["unit"], "contracts")
+        self.assertEqual(
+            cash["as_of_derivation"],
+            "latest_completed_provider_stck_bsop_date",
+        )
+        self.assertEqual(
+            futures["status"],
+            "not_available_from_verified_kis_endpoint",
+        )
 
     def test_market_date_alignment_allows_only_one_business_day_lag(self) -> None:
         keys = (
@@ -282,7 +298,6 @@ class KoreaMarketContractTests(unittest.TestCase):
             "kospi",
             "kosdaq",
             "foreign_kospi_cash_net_buy_krw",
-            "foreign_kospi200_futures_net_buy_contracts",
             "samsung_electronics",
             "sk_hynix",
         )
@@ -443,16 +458,14 @@ class KoreaMarketContractTests(unittest.TestCase):
                 (date(2026, 7, 22), 1378.0),
                 (date(2026, 7, 23), 1382.0),
             ],
-            kis_fetcher=lambda _key, _secret: {
-                "foreign_kospi_cash_net_buy_krw": {
+            kis_fetcher=lambda _key, _secret, _date: [
+                {
+                    "stck_bsop_date": "20260723",
                     "frgn_ntby_tr_pbmn": "250000",
                 },
-                "foreign_kospi200_futures_net_buy_contracts": {
-                    "frgn_ntby_qty": "1200",
-                },
-            },
+            ],
         )
-        self.assertEqual(payload["collection_status"], "complete")
+        self.assertEqual(payload["collection_status"], "partial")
         self.assertEqual(
             payload["transmission_gate"]["status"],
             "ready_for_korea_transmission",

@@ -165,6 +165,15 @@ class WorkflowArtifactTests(unittest.TestCase):
             workflow,
         )
 
+    def test_korea_market_credentials_are_forwarded_to_actions(self) -> None:
+        workflow = APP_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "BOK_ECOS_API_KEY: ${{ secrets.BOK_ECOS_API_KEY || secrets.ECOS_API_KEY }}",
+            workflow,
+        )
+        self.assertIn("KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}", workflow)
+        self.assertIn("KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}", workflow)
+
     def test_drive_approval_registry_is_restored_and_removed_ephemerally(self) -> None:
         workflow = APP_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("Restore Drive approval registry", workflow)

@@ -377,7 +377,11 @@ def _verified_events(daily_intelligence: dict[str, Any]) -> list[dict[str, Any]]
 
 
 def _korea_section(market: dict[str, Any]) -> dict[str, Any]:
-    korea = market.get("korea_transmission_inputs") or {}
+    korea = (
+        market.get("korea_market")
+        or market.get("korea_transmission_inputs")
+        or {}
+    )
     company_payload = market.get("company_korea_transmission") or {}
     gate = korea.get("transmission_gate") or {}
     metrics = korea.get("metrics") or {}
@@ -428,8 +432,13 @@ def _korea_section(market: dict[str, Any]) -> dict[str, Any]:
     for metric in metrics.values():
         if not isinstance(metric, dict):
             continue
+        verified_for_reader = metric.get("primary_source_confirmed") or (
+            metric.get("source_grade") == "B"
+            and metric.get("evidence_label")
+            == "fact_licensed_provider_reported"
+        )
         if (
-            metric.get("primary_source_confirmed")
+            verified_for_reader
             and _number(metric.get("value")) is not None
             and metric.get("status") in {"available", "fresh", "ok"}
         ):
