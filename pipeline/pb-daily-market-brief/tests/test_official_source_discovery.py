@@ -222,6 +222,54 @@ class DiscoveryTests(unittest.TestCase):
         )
         self.assertNotIn("publisher.example", str(audit))
 
+    def test_embedded_dart_url_matches_full_body_with_one_specific_korean_term(self) -> None:
+        korean_event = {
+            "event_id": "event_korean",
+            "event_type": "corporate_action",
+            "representative_title": "기업명: 셀피글로벌",
+            "record_ids": ["secondary"],
+            "published_from": "2026-08-07T09:02:22+00:00",
+            "published_to": "2026-08-07T09:02:22+00:00",
+            "entities": [],
+            "topic_tags": ["corporate_action", "domestic_filing_discovery", "유상증자"],
+        }
+        matches = {
+            "events": [{
+                "event_id": "event_korean",
+                "resolution_status": "search_required",
+                "search_plan": {"official_landing_pages": ["https://dart.fss.or.kr/"]},
+                "official_route": {"origin_domains": ["dart.fss.or.kr"]},
+            }],
+        }
+        document = """
+        <html><head><title>DART filing 20260807000778</title>
+        <meta property="article:published_time" content="2026-08-07T00:00:00+09:00"></head>
+        <body><p>앞부분에는 일반 공시 문구만 있다.</p></body></html>
+        """
+        inbox = [{
+            "id": "secondary",
+            "raw_text": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260807000778",
+        }]
+        with patch(
+            "discover_official_event_sources.fetch_official_html",
+            return_value={
+                "status": "html_fetched",
+                "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260807000778",
+                "html": document,
+                "match_text": "첨부 문서 뒤쪽의 셀피글로벌 주요사항보고서",
+            },
+        ):
+            payload = discover_sources(
+                matches,
+                {"clusters": [korean_event]},
+                no_network=False,
+                inbox_records=inbox,
+            )
+        self.assertEqual(payload["discovered_record_count"], 1)
+        audit = payload["event_audit"][0]["candidate_documents"][0]
+        self.assertEqual(audit["body_link_rule"], "embedded_event_url_specific_term")
+        self.assertEqual(audit["direct_specific_overlap"], ["셀피글로벌"])
+
     def test_event_with_embedded_official_url_gets_priority_under_event_budget(self) -> None:
         generic_event = {**event(), "event_id": "generic", "record_ids": ["generic-record"]}
         direct_event = {**event(), "event_id": "direct", "record_ids": ["direct-record"]}
