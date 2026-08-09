@@ -290,6 +290,12 @@ button { -webkit-tap-highlight-color: transparent; }
 .risk-list { display: grid; gap: 9px; margin: 0; padding-left: 22px; }
 .risk-list li { padding-left: 4px; color: #6d4744; line-height: 1.72; }
 
+.telegram-disclaimer { margin: 24px 0 0; padding: 16px 18px; border: 1px solid #e5d5ae; border-radius: 14px; color: #725a2e; background: #fff9e9; font-size: 13px; line-height: 1.7; }
+.telegram-overview { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.telegram-overview .overview-card { min-height: 122px; }
+.telegram-links { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
+.telegram-links .source-link { margin-top: 0; }
+
 .loading-state, .empty-state, .error-state, .locked-state { width: min(620px, 100%); margin: 16vh auto 0; color: #66736e; text-align: center; }
 .locked-state { padding: 46px 26px; border: 1px solid #d6e1dc; border-radius: 20px; background: rgba(255, 255, 255, 0.78); }
 .locked-state h1 { margin: 12px 0; color: #17362e; font-size: 28px; letter-spacing: -0.045em; }
@@ -326,6 +332,7 @@ button { -webkit-tap-highlight-color: transparent; }
   .scoreboard-signal { grid-template-columns: minmax(0, 1fr) 76px; padding: 18px; }
   .source-list li { display: grid; gap: 5px; }
   .signal-grid { grid-template-columns: 1fr; }
+  .telegram-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lead-narrative { font-size: 16px; }
 }
 
@@ -339,4 +346,5 @@ button { -webkit-tap-highlight-color: transparent; }
   .scoreboard-signal-chips { margin-top: 8px; }
   .relative-panel { padding: 17px 14px; }
   .relative-row { grid-template-columns: 38px minmax(0, 1fr) 52px; gap: 8px; }
+  .telegram-overview { grid-template-columns: 1fr; }
 }

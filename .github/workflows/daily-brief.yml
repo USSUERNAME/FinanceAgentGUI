@@ -397,6 +397,7 @@ jobs:
           args=(
             --input pipeline/pb-daily-market-brief/workspace/v2_reader_reports
             --intelligence pipeline/pb-daily-market-brief/workspace/intelligence
+            --telegram pipeline/pb-daily-market-brief/workspace/telegram_refresh
             --world-memory .generated/private-reader-world-memory.json
             --output .generated/cloudflare-report-reader
             --previous .reader-public-history/reports.json
@@ -521,6 +522,7 @@ jobs:
           args=(
             --input pipeline/pb-daily-market-brief/workspace/v2_reader_reports
             --intelligence pipeline/pb-daily-market-brief/workspace/intelligence
+            --telegram pipeline/pb-daily-market-brief/workspace/telegram_refresh
             --world-memory .generated/private-reader-world-memory.json
             --output .generated/cloudflare-report-reader
             --previous .reader-public-history/reports.json
