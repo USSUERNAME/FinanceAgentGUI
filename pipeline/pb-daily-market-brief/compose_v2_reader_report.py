@@ -373,16 +373,51 @@ def _verified_events(daily_intelligence: dict[str, Any]) -> list[dict[str, Any]]
 
 def _korea_section(market: dict[str, Any]) -> dict[str, Any]:
     korea = market.get("korea_transmission_inputs") or {}
+    company_payload = market.get("company_korea_transmission") or {}
     gate = korea.get("transmission_gate") or {}
     metrics = korea.get("metrics") or {}
+    company_transmissions = []
+    for transmission in company_payload.get("transmissions", [])[:6]:
+        targets = []
+        for target in transmission.get("targets", [])[:8]:
+            if target.get("classification") == "rejected":
+                continue
+            targets.append({
+                "ticker": str(target.get("ticker") or ""),
+                "company_name": _clean_text(target.get("company_name")),
+                "classification": str(target.get("classification") or "watch_candidate"),
+                "classification_label": _clean_text(target.get("classification_label")) or "관찰 후보",
+                "reason": _clean_text(target.get("reason")),
+                "market_confirmation_status": str(target.get("market_confirmation_status") or "not_confirmed"),
+                "actionability": str(target.get("actionability") or "research_watchlist_only"),
+                "next_required_evidence": [
+                    str(item) for item in (target.get("next_required_evidence") or [])[:4]
+                    if _clean_text(item)
+                ],
+                "source_urls": [
+                    url for url in (_valid_url(item) for item in (target.get("source_urls") or [])[:6])
+                    if url
+                ],
+            })
+        if targets:
+            company_transmissions.append({
+                "source_ticker": str(transmission.get("source_ticker") or ""),
+                "source_company_name": _clean_text(transmission.get("source_company_name")),
+                "sector_name_ko": _clean_text(transmission.get("sector_name_ko")),
+                "source_signal_label": _clean_text((transmission.get("source_signal") or {}).get("label")),
+                "market_confirmation_status": str((transmission.get("market_confirmation") or {}).get("status") or "blocked"),
+                "targets": targets,
+            })
     if gate.get("status") != "ready":
         return {
             "status": "insufficient",
             "summary": (
                 "검증된 KOSPI·KOSDAQ·외국인 수급 데이터가 부족해 "
-                "미국 시장 움직임의 국내 전이를 방향성으로 단정하지 않는다."
+                "미국 시장 움직임의 국내 전이를 방향성으로 단정하지 않는다. "
+                "기업 연결 후보는 수혜주가 아닌 근거 보강용 관찰 목록으로만 표시한다."
             ),
             "metrics": [],
+            "company_transmissions": company_transmissions,
         }
     available = []
     for metric in metrics.values():
@@ -409,6 +444,7 @@ def _korea_section(market: dict[str, Any]) -> dict[str, Any]:
             "status": "insufficient",
             "summary": "국내시장 전이 판단에 사용할 최신 공식 수치가 없다.",
             "metrics": [],
+            "company_transmissions": company_transmissions,
         }
     return {
         "status": "available",
@@ -417,6 +453,7 @@ def _korea_section(market: dict[str, Any]) -> dict[str, Any]:
             "확인되는지에 한해 조건부로 해석한다."
         ),
         "metrics": available[:7],
+        "company_transmissions": company_transmissions,
     }
 
 
@@ -658,6 +695,7 @@ def _earnings_watch(daily_intelligence: dict[str, Any]) -> dict[str, Any]:
             "post_result_estimate_revision": dict(
                 company.get("post_result_estimate_revision") or {}
             ),
+            "long_term_analysis": dict(company.get("long_term_analysis") or {}),
             "sources": _dedupe_sources(
                 _source(
                     source_id=str(row.get("source_id") or "earnings"),
@@ -744,6 +782,14 @@ def build_v2_reader_report(
                     as_of=metric.get("as_of"),
                 )
             )
+    for transmission in korea.get("company_transmissions") or []:
+        for target in transmission.get("targets") or []:
+            for index, url in enumerate(target.get("source_urls") or []):
+                sources.append(_source(
+                    source_id=f"korea-company:{target.get('ticker')}:{index + 1}",
+                    title=f"{target.get('company_name') or target.get('ticker')} 공식 사업·관계 근거",
+                    url=str(url),
+                ))
     cutoff = market.get("data_cutoff") or {}
     warnings = [
         text
@@ -1000,6 +1046,57 @@ def render_v2_reader_markdown(report: dict[str, Any]) -> str:
                 lines.append(
                     "- **발표 후 추정치 변화:** 동일 기간 갱신 전망치 대기"
                 )
+            long_term = company.get("long_term_analysis") or {}
+            if long_term:
+                quality = long_term.get("company_quality") or {}
+                valuation = long_term.get("stock_attractiveness") or {}
+                portfolio = long_term.get("portfolio_fit") or {}
+                summary = (
+                    (long_term.get("long_term_financials") or {}).get("summary") or {}
+                )
+                lines.extend([
+                    f"- **기업의 질:** {quality.get('label') or '평가 보류'} — {quality.get('reason') or '근거 보강 대기'}",
+                    f"- **현재 주식 매력:** {valuation.get('label') or '평가 보류'} — {valuation.get('reason') or '가격·기대 근거 보강 대기'}",
+                    f"- **포트폴리오 적합성:** {portfolio.get('label') or '평가 보류'} — {portfolio.get('reason') or '비중·집중도 정보 대기'}",
+                    "- **5개년 핵심 지표:** "
+                    f"매출 CAGR {summary.get('revenue_cagr_pct') if summary.get('revenue_cagr_pct') is not None else '확인 불가'}% · "
+                    f"영업이익 CAGR {summary.get('operating_income_cagr_pct') if summary.get('operating_income_cagr_pct') is not None else '확인 불가'}% · "
+                    f"FCF CAGR {summary.get('fcf_cagr_pct') if summary.get('fcf_cagr_pct') is not None else '확인 불가'}%",
+                ])
+                scorecard = long_term.get("scorecard") or {}
+                if scorecard.get("overall_score") is None:
+                    lines.append(
+                        f"- **기업 종합점수:** 평가 보류 — {scorecard.get('reason') or '필수 근거 미완성'}"
+                    )
+                framework = long_term.get("judgment_framework") or {}
+                decision_labels = {
+                    "company_quality": "기업의 질",
+                    "stock_attractiveness": "현재 주식 매력",
+                    "portfolio_fit": "포트폴리오 적합성",
+                }
+                if framework:
+                    lines.append("- **판단 원칙 충족도:**")
+                    for key in (
+                        "company_quality", "stock_attractiveness", "portfolio_fit",
+                    ):
+                        decision = framework.get(key) or {}
+                        lines.append(
+                            f"  - {decision_labels[key]} "
+                            f"{decision.get('met_count', 0)}/{decision.get('required_count', 0)}"
+                        )
+                    missing = (long_term.get("action") or {}).get(
+                        "next_required_evidence"
+                    ) or []
+                    if missing:
+                        lines.append(
+                            f"- **다음 근거:** {' · '.join(str(item) for item in missing[:4])}"
+                        )
+                action = long_term.get("action") or {}
+                if action:
+                    lines.append(
+                        f"- **조건부 행동:** {action.get('grade') or '관망'} — "
+                        f"{action.get('reason') or '담당자 검토 대기'}"
+                    )
             lines.append("")
     if report.get("analyst_research"):
         lines.extend(["## 애널리스트 리서치", ""])
@@ -1060,6 +1157,30 @@ def render_v2_reader_markdown(report: dict[str, Any]) -> str:
             lines.append("")
     korea = report["korea_connection"]
     lines.extend(["## 한국시장 연결", "", str(korea["summary"]), ""])
+    classification_labels = {
+        "direct": "직접 연결",
+        "industry": "산업 연결",
+        "watch_candidate": "관찰 후보",
+        "rejected": "연결 제외",
+    }
+    for transmission in korea.get("company_transmissions") or []:
+        source_name = " · ".join(
+            value for value in (
+                str(transmission.get("source_ticker") or ""),
+                str(transmission.get("source_company_name") or ""),
+            ) if value
+        )
+        lines.append(f"### {source_name} → 한국 {transmission.get('sector_name_ko') or '산업'}")
+        lines.append("")
+        for target in transmission.get("targets") or []:
+            label = classification_labels.get(
+                target.get("classification"), target.get("classification_label") or "관찰 후보",
+            )
+            lines.append(
+                f"- **{target.get('ticker')} {target.get('company_name') or ''}: {label}** — "
+                f"{target.get('reason') or '근거 보강 대기'}"
+            )
+        lines.append("")
     if korea["status"] == "available":
         for metric in korea["metrics"]:
             change = _pct(metric.get("change_1d_pct"), suffix="%")

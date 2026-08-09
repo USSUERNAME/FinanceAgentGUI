@@ -323,7 +323,7 @@ def main() -> None:
         json.loads(queue_path.read_text(encoding="utf-8")),
         load_peer_registry(registry_path),
         os.getenv("ALPHAVANTAGE_API_KEY", "").strip(),
-        delay_seconds=float(os.getenv("ALPHAVANTAGE_REQUEST_DELAY_SECONDS", "0")),
+        delay_seconds=float(os.getenv("ALPHAVANTAGE_REQUEST_DELAY_SECONDS", "13")),
         max_requests=args.max_requests,
         cached_profiles=cached_profiles,
     )

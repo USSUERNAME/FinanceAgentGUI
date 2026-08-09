@@ -27,15 +27,23 @@ SOURCE_URL_KINDS = {
 
 
 def load_dotenv() -> None:
-    env_file = ROOT / ".env"
-    if not env_file.exists():
-        return
-    for raw in env_file.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    # Prefer the pipeline-specific file, then fill missing shared settings from
+    # the repository root.  This keeps provider credentials scoped locally
+    # while allowing shared keys (for example OPENAI_API_KEY) to live once.
+    env_files = (ROOT / ".env", ROOT.parents[1] / ".env")
+    for env_file in env_files:
+        if not env_file.exists():
             continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"'))
+        for raw in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"'))
+    if not os.environ.get("ALPHAVANTAGE_API_KEY", "").strip():
+        alias = os.environ.get("ALPHA_VANTAGE_API_KEY", "").strip()
+        if alias:
+            os.environ["ALPHAVANTAGE_API_KEY"] = alias
 
 
 def get_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:

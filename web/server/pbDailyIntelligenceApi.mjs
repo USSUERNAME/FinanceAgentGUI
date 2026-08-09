@@ -781,6 +781,96 @@ function normalizeEarningsWatch(value = {}) {
       status: cleanText(company?.post_result_estimate_revision?.status, 100),
       modelUpdateApplied: company?.post_result_estimate_revision?.model_update_applied === true,
     },
+    longTermAnalysis: {
+      companyQuality: {
+        status: cleanText(company?.long_term_analysis?.company_quality?.status, 80),
+        label: cleanText(company?.long_term_analysis?.company_quality?.label, 100),
+        reason: cleanText(company?.long_term_analysis?.company_quality?.reason, 500),
+      },
+      stockAttractiveness: {
+        status: cleanText(company?.long_term_analysis?.stock_attractiveness?.status, 80),
+        label: cleanText(company?.long_term_analysis?.stock_attractiveness?.label, 100),
+        reason: cleanText(company?.long_term_analysis?.stock_attractiveness?.reason, 500),
+      },
+      portfolioFit: {
+        status: cleanText(company?.long_term_analysis?.portfolio_fit?.status, 80),
+        label: cleanText(company?.long_term_analysis?.portfolio_fit?.label, 100),
+        reason: cleanText(company?.long_term_analysis?.portfolio_fit?.reason, 500),
+        score: company?.long_term_analysis?.portfolio_fit?.score != null
+          && Number.isFinite(Number(company.long_term_analysis.portfolio_fit.score))
+          ? Number(company.long_term_analysis.portfolio_fit.score)
+          : null,
+      },
+      financialSummary: {
+        ...Object.fromEntries(Object.entries(
+          company?.long_term_analysis?.long_term_financials?.summary || {},
+        ).map(([key, value]) => [key, Number.isFinite(Number(value)) ? Number(value) : value])),
+      },
+      qualityGate: {
+        status: cleanText(company?.long_term_analysis?.long_term_financials?.quality_gate?.status, 80),
+        completeCoreYears: Number(company?.long_term_analysis?.long_term_financials?.quality_gate?.complete_core_years || 0),
+        missing: cleanList(company?.long_term_analysis?.long_term_financials?.quality_gate?.missing, 6)
+          .map((item) => cleanText(item, 120)).filter(Boolean),
+      },
+      scorecard: {
+        status: cleanText(company?.long_term_analysis?.scorecard?.status, 80),
+        overallScore: company?.long_term_analysis?.scorecard?.overall_score != null
+          && Number.isFinite(Number(company.long_term_analysis.scorecard.overall_score))
+          ? Number(company.long_term_analysis.scorecard.overall_score)
+          : null,
+        scoredPoints: Number(company?.long_term_analysis?.scorecard?.scored_points || 0),
+        scoredMax: Number(company?.long_term_analysis?.scorecard?.scored_max || 0),
+        reason: cleanText(company?.long_term_analysis?.scorecard?.reason, 500),
+      },
+      judgmentFramework: {
+        policyName: cleanText(
+          company?.long_term_analysis?.judgment_framework?.policy_name,
+          120,
+        ),
+        policySchemaVersion: cleanText(
+          company?.long_term_analysis?.judgment_framework?.policy_schema_version,
+          80,
+        ),
+        decisionSequence: cleanList(
+          company?.long_term_analysis?.judgment_framework?.decision_sequence,
+          4,
+        ).map((item) => cleanText(item, 60)).filter(Boolean),
+        decisions: Object.fromEntries([
+          ["companyQuality", company?.long_term_analysis?.judgment_framework?.company_quality],
+          ["stockAttractiveness", company?.long_term_analysis?.judgment_framework?.stock_attractiveness],
+          ["portfolioFit", company?.long_term_analysis?.judgment_framework?.portfolio_fit],
+        ].map(([key, decision]) => [key, {
+          status: cleanText(decision?.status, 40),
+          metCount: Number(decision?.met_count || 0),
+          requiredCount: Number(decision?.required_count || 0),
+          gates: cleanList(decision?.gates, 8).map((gate) => ({
+            gateId: cleanText(gate?.gate_id, 80),
+            label: cleanText(gate?.label, 120),
+            status: cleanText(gate?.status, 40),
+            evidence: cleanText(gate?.evidence, 500),
+            missingEvidence: cleanText(gate?.missing_evidence, 500),
+          })),
+        }])),
+      },
+      action: {
+        grade: cleanText(company?.long_term_analysis?.action?.grade, 40),
+        reason: cleanText(company?.long_term_analysis?.action?.reason, 500),
+        nextRequiredEvidence: cleanList(
+          company?.long_term_analysis?.action?.next_required_evidence,
+          8,
+        ).map((item) => cleanText(item, 160)).filter(Boolean),
+        confirmationConditions: cleanList(
+          company?.long_term_analysis?.action?.confirmation_conditions,
+          4,
+        ).map((item) => cleanText(item, 500)).filter(Boolean),
+        invalidationConditions: cleanList(
+          company?.long_term_analysis?.action?.invalidation_conditions,
+          4,
+        ).map((item) => cleanText(item, 500)).filter(Boolean),
+        automaticPositionAction:
+          company?.long_term_analysis?.action?.automatic_position_action === true,
+      },
+    },
   }));
   return {
     status: cleanText(value.status, 60) || "not_available",
@@ -819,6 +909,38 @@ function normalizeReaderReport(reader = {}) {
       status: cleanText(reader.korea_connection?.status, 40) || "unknown",
       summary: cleanText(reader.korea_connection?.summary, 1200),
       metrics: cleanList(reader.korea_connection?.metrics, 12),
+      companyTransmissions: cleanList(
+        reader.korea_connection?.company_transmissions,
+        6,
+      ).map((transmission) => ({
+        sourceTicker: cleanText(transmission?.source_ticker, 40),
+        sourceCompanyName: cleanText(transmission?.source_company_name, 160),
+        sectorNameKo: cleanText(transmission?.sector_name_ko, 160),
+        sourceSignalLabel: cleanText(transmission?.source_signal_label, 160),
+        marketConfirmationStatus: cleanText(
+          transmission?.market_confirmation_status,
+          60,
+        ),
+        targets: cleanList(transmission?.targets, 8).map((target) => ({
+          ticker: cleanText(target?.ticker, 40),
+          companyName: cleanText(target?.company_name, 160),
+          classification: cleanText(target?.classification, 60),
+          classificationLabel: cleanText(target?.classification_label, 80),
+          reason: cleanText(target?.reason, 500),
+          marketConfirmationStatus: cleanText(
+            target?.market_confirmation_status,
+            60,
+          ),
+          actionability: cleanText(target?.actionability, 80),
+          nextRequiredEvidence: cleanList(
+            target?.next_required_evidence,
+            4,
+          ).map((item) => cleanText(item, 200)).filter(Boolean),
+          sourceUrls: cleanList(target?.source_urls, 6)
+            .map((url) => String(url || ""))
+            .filter((url) => /^https?:\/\//i.test(url)),
+        })),
+      })),
     },
     nextChecks: cleanList(reader.next_checks, 12)
       .map((item) => cleanText(item, 500))

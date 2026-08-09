@@ -155,6 +155,26 @@ class V2ReaderReportTests(unittest.TestCase):
                     },
                     "metrics": {},
                 },
+                "company_korea_transmission": {
+                    "schema_version": "company_korea_transmission.v1",
+                    "transmissions": [{
+                        "source_ticker": "NVDA",
+                        "source_company_name": "NVIDIA",
+                        "sector_name_ko": "반도체·AI 컴퓨트",
+                        "source_signal": {"label": "재무 복리 확인·질 평가 보류"},
+                        "market_confirmation": {"status": "blocked"},
+                        "targets": [{
+                            "ticker": "000660",
+                            "company_name": "SK하이닉스",
+                            "classification": "watch_candidate",
+                            "classification_label": "관찰 후보",
+                            "reason": "국내 기업의 매출·수주 민감도는 아직 검증되지 않았습니다.",
+                            "market_confirmation_status": "not_confirmed",
+                            "actionability": "research_watchlist_only",
+                            "next_required_evidence": ["관련 매출·수주 민감도"],
+                        }],
+                    }],
+                },
             },
             "events": {
                 "items": [event],
@@ -215,6 +235,9 @@ class V2ReaderReportTests(unittest.TestCase):
             "방향성으로 단정하지 않는다",
             report["korea_connection"]["summary"],
         )
+        target = report["korea_connection"]["company_transmissions"][0]["targets"][0]
+        self.assertEqual(target["classification"], "watch_candidate")
+        self.assertNotIn("수혜", target["classification_label"])
 
     def test_validation_rejects_position_authority(self) -> None:
         report = build_v2_reader_report(self.intelligence())

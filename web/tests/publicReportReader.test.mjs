@@ -24,6 +24,21 @@ function privateReaderReport() {
     title: "2026-08-08 Daily Market Intelligence",
     executive_summary: ["시장 핵심 요약"],
     market_findings: [{ title: "금리", body: "실질금리 상승" }],
+    korea_connection: {
+      status: "ready",
+      summary: "Korea market ready",
+      metrics: [{
+        metric_id: "foreign_kospi_cash_net_buy_krw",
+        label: "Foreign KOSPI cash flow",
+        status: "available",
+        value: 987654321,
+        provider_value: 987.654321,
+        source_provider: "private-provider",
+        as_of: "2026-08-07",
+        source_grade: "A",
+        primary_source_confirmed: true,
+      }],
+    },
     analyst_research: [{
       publisher: "Example Securities",
       title: "반도체 점검",
@@ -56,7 +71,19 @@ function privateDailyIntelligence() {
       top_risks: ["물가 재가속"],
       scoreboard: { rates: { nominal_10y: { value: 4.4 }, [sensitiveKey("api", "token")]: "drop-me" } },
       day_over_day_changes: { status: "changed" },
-      korea_transmission_inputs: { metrics: { usdkrw: { value: 1400 } } },
+      korea_transmission_inputs: {
+        report_date: "2026-08-08",
+        collection_status: "complete",
+        metrics: {
+          usdkrw: { label: "USD/KRW", status: "available", value: 1400, change_1d_pct: 0.3, as_of: "2026-08-07", source_provider: "BOK", source_grade: "A", primary_source_confirmed: true },
+          foreign_kospi_cash_net_buy_krw: { label: "Foreign KOSPI cash flow", status: "available", value: 987654321, provider_value: 987.654321, provider_unit: "million_krw", source_provider: "private-provider", as_of: "2026-08-07", source_grade: "A", primary_source_confirmed: true },
+          foreign_kospi200_futures_net_buy_contracts: { label: "Foreign KOSPI200 futures flow", status: "available", value: -4321, provider_value: -4321, source_provider: "private-provider", as_of: "2026-08-07", source_grade: "A", primary_source_confirmed: true },
+        },
+        transmission_gate: {
+          status: "ready_for_korea_transmission",
+          date_alignment: { status: "aligned", earliest_as_of: "2026-08-07", latest_as_of: "2026-08-07", business_day_gap: 0, metric_dates: { usdkrw: "2026-08-07" } },
+        },
+      },
     },
     events: {
       selected_count: 1,
@@ -121,7 +148,8 @@ test("public report sanitizer keeps summaries and drops private or full-text fie
   assert.equal(report.reportDate, "2026-08-08");
   assert.equal(report.analystResearch[0].summary, "수요 회복을 확인했습니다.");
   assert.equal(report.sources[1].url, "");
-  assert.doesNotMatch(serialized, /PDF 원문|never-publish-this|full_text|rights/);
+  assert.equal(report.koreaConnection.metrics[0].direction, "net_buy");
+  assert.doesNotMatch(serialized, /PDF 원문|never-publish-this|full_text|rights|987654321|987\.654321|private-provider|provider_value/);
 });
 
 test("daily intelligence sanitizer keeps decision fields and drops raw, token, and linkage rows", () => {
@@ -130,7 +158,11 @@ test("daily intelligence sanitizer keeps decision fields and drops raw, token, a
   assert.equal(report.market.regime.label, "중립");
   assert.equal(report.events.items[0].title, "연준 정책 경로 재평가");
   assert.equal(report.sourceQuality.record_count, 10);
-  assert.doesNotMatch(serialized, /drop-me|drop raw|drop-oauth|record_linkage|oauth_refresh_token|api_token/);
+  assert.equal(report.market.koreaTransmission.metrics.usdkrw.direction, "up");
+  assert.equal(report.market.koreaTransmission.metrics.foreign_kospi_cash_net_buy_krw.direction, "net_buy");
+  assert.equal(report.market.koreaTransmission.metrics.foreign_kospi200_futures_net_buy_contracts.direction, "net_sell");
+  assert.equal(report.market.koreaTransmission.transmissionGate.dateAlignment.status, "aligned");
+  assert.doesNotMatch(serialized, /drop-me|drop raw|drop-oauth|record_linkage|oauth_refresh_token|api_token|987654321|987\.654321|private-provider|provider_value|metric_dates/);
 });
 
 test("World Memory snapshot exposes report and theses without runtime state or secrets", () => {

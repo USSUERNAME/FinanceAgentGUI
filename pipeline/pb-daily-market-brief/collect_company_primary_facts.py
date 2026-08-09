@@ -13,11 +13,13 @@ from typing import Any, Callable
 from urllib.request import Request, urlopen
 
 from collectors.common import ROOT, load_dotenv
+from company_long_term_metrics import LONG_TERM_METRIC_IDS, build_long_term_metrics
 from collect_company_market_context import _number, root_path
 from collect_sector_fundamentals import load_fundamental_registry
 
 SCHEMA_VERSION = "company_primary_facts.v1"
 SEC_API_DOCS_URL = "https://www.sec.gov/search-filings/edgar-application-programming-interfaces"
+SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 ACCEPTED_FORMS = {"10-Q", "10-Q/A", "10-K", "10-K/A", "20-F", "20-F/A", "6-K", "6-K/A"}
 DEFAULT_MAX_COMPANIES = 3
 CIK_PATTERN = re.compile(r"/Archives/edgar/data/(\d+)/", re.IGNORECASE)
@@ -46,8 +48,27 @@ METRIC_CONCEPTS = {
         ("ifrs-full", "CashFlowsFromUsedInOperatingActivities"),
     ],
     "capital_expenditures": [
+        ("us-gaap", "PaymentsToAcquireProductiveAssets"),
         ("us-gaap", "PaymentsToAcquirePropertyPlantAndEquipment"),
         ("ifrs-full", "PurchaseOfPropertyPlantAndEquipment"),
+    ],
+    "dividends_paid": [
+        ("us-gaap", "PaymentsOfDividendsCommonStock"),
+        ("us-gaap", "PaymentsOfDividends"),
+        ("ifrs-full", "DividendsPaid"),
+    ],
+    "share_repurchases": [
+        ("us-gaap", "PaymentsForRepurchaseOfCommonStock"),
+        ("us-gaap", "PaymentsForRepurchaseOfEquity"),
+    ],
+    "share_issuance": [
+        ("us-gaap", "ProceedsFromStockOptionsExercised"),
+        ("us-gaap", "ProceedsFromIssuanceOfCommonStock"),
+        ("us-gaap", "ProceedsFromIssuanceOrSaleOfEquity"),
+    ],
+    "diluted_shares": [
+        ("us-gaap", "WeightedAverageNumberOfDilutedSharesOutstanding"),
+        ("ifrs-full", "AdjustedWeightedAverageShares"),
     ],
 }
 
@@ -57,6 +78,17 @@ def sec_companyfacts(cik: str, user_agent: str) -> dict[str, Any]:
     request = Request(url, headers={"User-Agent": user_agent, "Accept": "application/json"})
     with urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def sec_company_tickers(user_agent: str) -> dict[str, str]:
+    request = Request(SEC_TICKERS_URL, headers={"User-Agent": user_agent, "Accept": "application/json"})
+    with urlopen(request, timeout=30) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    rows = payload.values() if isinstance(payload, dict) else []
+    return {
+        str(row.get("ticker") or "").upper(): str(row.get("cik_str") or "").zfill(10)
+        for row in rows if isinstance(row, dict) and row.get("ticker") and row.get("cik_str")
+    }
 
 
 def company_cik_map(registry: dict[str, Any]) -> dict[tuple[str, str], str]:
@@ -135,6 +167,42 @@ def latest_reported_metric(payload: dict[str, Any], metric_id: str, report_day: 
         "confidence": "high",
         "period_note": "Use the exact start/end and form; quarterly filings may contain year-to-date duration facts.",
     }
+
+
+def annual_reported_metrics(
+    payload: dict[str, Any], metric_id: str, report_day: date, cik: str, limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Select comparable annual duration facts, keeping exact filing lineage."""
+    annual: list[dict[str, Any]] = []
+    for row in _all_metric_records(payload, metric_id, report_day):
+        if row.get("form") not in {"10-K", "10-K/A", "20-F", "20-F/A"}:
+            continue
+        start = row.get("period_start")
+        end = row.get("period_end")
+        if not start or not end:
+            continue
+        try:
+            duration = (date.fromisoformat(str(end)) - date.fromisoformat(str(start))).days
+        except ValueError:
+            continue
+        if duration < 300 or duration > 390:
+            continue
+        annual.append(row)
+    annual.sort(key=lambda row: (
+        str(row.get("period_end") or ""),
+        str(row.get("filed_date") or ""),
+    ), reverse=True)
+    selected_by_period: dict[str, dict[str, Any]] = {}
+    for row in annual:
+        selected_by_period.setdefault(str(row["period_end"]), row)
+    selected = sorted(selected_by_period.values(), key=lambda row: str(row["period_end"]))[-limit:]
+    return [{
+        **row,
+        "source_url": _filing_index_url(cik, str(row["accession_number"])),
+        "evidence_label": "fact_source_reported_annual",
+        "confidence": "high",
+        "period_note": "Annual duration fact selected from a 10-K/20-F; exact start/end and unit remain controlling.",
+    } for row in selected]
 
 
 def _guidance_input_dir(report_date: str) -> Path:
@@ -254,8 +322,21 @@ def collect_company_primary_facts(
     max_companies: int = DEFAULT_MAX_COMPANIES,
     guidance_inputs: list[dict[str, Any]] | None = None,
     guidance_errors: list[dict[str, Any]] | None = None,
+    ticker_cik_fetcher: Callable[[str], dict[str, str]] = sec_company_tickers,
+    research_queue: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    candidates = list(valuation_expectations.get("companies", []))[:max_companies]
+    candidate_map: dict[str, dict[str, Any]] = {}
+    for candidate in valuation_expectations.get("companies", []):
+        ticker = str(candidate.get("ticker") or "").upper()
+        if ticker:
+            candidate_map[ticker] = candidate
+    for candidate in (research_queue or {}).get("candidates", []):
+        if candidate.get("queue_stage") != "valuation_expectations_gated":
+            continue
+        ticker = str(candidate.get("ticker") or "").upper()
+        if ticker and ticker not in candidate_map:
+            candidate_map[ticker] = candidate
+    candidates = list(candidate_map.values())[:max_companies]
     cik_map = company_cik_map(registry)
     guidance_inputs = guidance_inputs or []
     guidance_errors = guidance_errors or []
@@ -263,11 +344,24 @@ def collect_company_primary_facts(
     skipped: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     request_count = 0
+    ticker_cik_requests = 0
     collected_at = datetime.now(timezone.utc).isoformat()
     if user_agent:
+        missing_tickers = [
+            str(candidate.get("ticker") or "").upper()
+            for candidate in candidates
+            if not cik_map.get((str(candidate.get("sector_id")), str(candidate.get("ticker") or "").upper()))
+        ]
+        ticker_cik_map: dict[str, str] = {}
+        if missing_tickers:
+            try:
+                ticker_cik_map = ticker_cik_fetcher(user_agent)
+                ticker_cik_requests = 1
+            except Exception as exc:
+                errors.append({"status": "sec_ticker_map_failed", "error": str(exc)})
         for candidate in candidates:
             key = (str(candidate.get("sector_id")), str(candidate.get("ticker")).upper())
-            cik = cik_map.get(key)
+            cik = cik_map.get(key) or ticker_cik_map.get(str(candidate.get("ticker") or "").upper())
             if not cik:
                 skipped.append({
                     "candidate_id": candidate.get("candidate_id"),
@@ -284,6 +378,13 @@ def collect_company_primary_facts(
                     value for metric_id in METRIC_CONCEPTS
                     if (value := latest_reported_metric(payload, metric_id, date.fromisoformat(report_date), cik))
                 ]
+                annual_metrics = {
+                    metric_id: annual_reported_metrics(
+                        payload, metric_id, date.fromisoformat(report_date), cik,
+                    )
+                    for metric_id in LONG_TERM_METRIC_IDS
+                }
+                long_term = build_long_term_metrics(annual_metrics)
                 company_guidance = [
                     row for row in guidance_inputs if row["ticker"] == str(candidate.get("ticker")).upper()
                 ]
@@ -305,6 +406,8 @@ def collect_company_primary_facts(
                     "fact_status": "available" if len(metrics) >= 3 else "partial",
                     "reported_metrics": metrics,
                     "reported_metric_count": len(metrics),
+                    "annual_reported_metrics": annual_metrics,
+                    "long_term_financials": long_term,
                     "guidance_status": "body_verified_primary" if guidance_rows else "not_collected",
                     "guidance": guidance_rows,
                     "source_urls": source_urls,
@@ -322,6 +425,7 @@ def collect_company_primary_facts(
                         "Reported metrics may cover different durations; exact start/end dates control comparability.",
                         "Company guidance is absent unless a body-verified company source was supplied.",
                         "Custom XBRL extension KPIs, segment detail, adjustments, and transcript commentary are not collected.",
+                        *(["Five comparable annual core periods are not yet available."] if long_term["quality_gate"]["status"] != "ready" else []),
                     ],
                     "posture": "reported_fact_baseline_not_investment_recommendation",
                 })
@@ -348,6 +452,7 @@ def collect_company_primary_facts(
         "candidate_count": len(candidates),
         "company_count": len(companies),
         "request_count": request_count,
+        "ticker_cik_request_count": ticker_cik_requests,
         "max_companies": max_companies,
         "companies": companies,
         "skipped": skipped,
@@ -358,6 +463,9 @@ def collect_company_primary_facts(
             "source_url": SEC_API_DOCS_URL,
             "accepted_forms": sorted(ACCEPTED_FORMS),
             "standard_taxonomies_only": ["us-gaap", "ifrs-full"],
+            "annual_duration_days": [300, 390],
+            "long_term_history_years": 5,
+            "fcf_definition": "operating_cash_flow_minus_absolute_capital_expenditures",
             "exact_period_and_unit_required_for_guidance_comparison": True,
             "no_cross_period_actual_estimate_comparison": True,
         },
@@ -394,6 +502,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Collect primary company fact baselines from SEC XBRL")
     parser.add_argument("--date", required=True)
     parser.add_argument("--valuation-expectations-file")
+    parser.add_argument("--queue-file")
     parser.add_argument("--output-file")
     parser.add_argument("--max-companies", type=int)
     args = parser.parse_args()
@@ -405,6 +514,10 @@ def main() -> None:
     if not valuation_path.exists():
         raise SystemExit(f"Company valuation expectations does not exist: {valuation_path}")
     guidance, guidance_errors = load_guidance_inputs(args.date)
+    queue_path = root_path(
+        args.queue_file,
+        ROOT / "workspace" / "company_research_queue" / args.date / "company_research_queue.json",
+    )
     payload = collect_company_primary_facts(
         args.date,
         json.loads(valuation_path.read_text(encoding="utf-8")),
@@ -414,6 +527,9 @@ def main() -> None:
         max_companies=args.max_companies or DEFAULT_MAX_COMPANIES,
         guidance_inputs=guidance,
         guidance_errors=guidance_errors,
+        research_queue=(
+            json.loads(queue_path.read_text(encoding="utf-8")) if queue_path.exists() else {}
+        ),
     )
     output = root_path(
         args.output_file,

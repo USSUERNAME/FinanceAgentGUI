@@ -55,6 +55,15 @@ class DailyRunModePolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mutually exclusive"):
             run_mode_policy(dry_run=True, verification_dry_run=True)
 
+    def test_offline_pipeline_validates_compose_without_openai(self) -> None:
+        pipeline = (__import__("pathlib").Path(__file__).parents[1] / "run_daily_report.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('compose_args.append("--dry-run")', pipeline)
+        self.assertIn('market_analysis_args.append("--dry-run")', pipeline)
+        self.assertIn("Offline dry run: skipped SEC official-body network refresh.", pipeline)
+        self.assertIn("if offline_validation:", pipeline)
+
 
 if __name__ == "__main__":
     unittest.main()

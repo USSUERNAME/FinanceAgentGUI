@@ -5,8 +5,12 @@ from datetime import date
 
 from collect_korea_market import (
     build_korea_market,
+    collect_kis_foreign_flows,
     collect_krx_index,
+    collect_krx_stock,
     collect_usdkrw,
+    collect_usdkrw_ecos,
+    evaluate_market_date_alignment,
     validate_krx_input,
 )
 
@@ -149,6 +153,50 @@ class KoreaMarketContractTests(unittest.TestCase):
         self.assertNotIn(secret, rendered)
         self.assertNotIn("remote body", rendered)
 
+    def test_krx_stock_parser_uses_exact_security_code(self) -> None:
+        closes = {
+            "20260723": ("70,000", "1.20"),
+            "20260722": ("69,200", "0.10"),
+            "20260721": ("69,000", "-0.20"),
+            "20260720": ("69,100", "0.30"),
+            "20260717": ("68,900", "0.40"),
+            "20260716": ("68,000", "0.50"),
+        }
+
+        def fetcher(_url: str, _key: str, bas_dd: str) -> dict:
+            if bas_dd not in closes:
+                return {"OutBlock_1": []}
+            close, change = closes[bas_dd]
+            return {"OutBlock_1": [
+                {
+                    "BAS_DD": bas_dd,
+                    "ISU_CD": "005930",
+                    "ISU_NM": "삼성전자",
+                    "TDD_CLSPRC": close,
+                    "FLUC_RT": change,
+                },
+                {
+                    "BAS_DD": bas_dd,
+                    "ISU_CD": "005935",
+                    "ISU_NM": "삼성전자우",
+                    "TDD_CLSPRC": "55,000",
+                    "FLUC_RT": "9.99",
+                },
+            ]}
+
+        metric = collect_krx_stock(
+            "2026-07-23",
+            "samsung_electronics",
+            "secret-key",
+            fetcher=fetcher,
+        )
+        self.assertEqual(metric["status"], "available")
+        self.assertEqual(metric["value"], 70000.0)
+        self.assertEqual(metric["change_1d_pct"], 1.2)
+        self.assertEqual(metric["change_5d_pct"], 2.9412)
+        self.assertEqual(metric["security_code"], "005930")
+        self.assertEqual(metric["source_provider"], "Korea Exchange")
+
     def test_usdkrw_uses_only_observations_available_by_report_date(self) -> None:
         values = [
             (date(2026, 7, 16), 1370.0),
@@ -188,6 +236,73 @@ class KoreaMarketContractTests(unittest.TestCase):
         self.assertEqual(metric["status"], "stale")
         self.assertEqual(metric["age_days"], 6)
 
+    def test_ecos_usdkrw_is_preferred_official_reference_rate(self) -> None:
+        metric = collect_usdkrw_ecos(
+            "2026-07-23",
+            "ecos-key",
+            fetcher=lambda _key, _start, _end: [
+                (date(2026, 7, 16), 1370.0),
+                (date(2026, 7, 17), 1372.0),
+                (date(2026, 7, 20), 1375.0),
+                (date(2026, 7, 21), 1380.0),
+                (date(2026, 7, 22), 1378.0),
+                (date(2026, 7, 23), 1382.0),
+            ],
+        )
+        self.assertEqual(metric["status"], "available")
+        self.assertEqual(metric["value"], 1382.0)
+        self.assertEqual(metric["source_provider"], "Bank of Korea ECOS")
+        self.assertEqual(metric["series_code"], "731Y001")
+
+    def test_kis_foreign_cash_and_futures_flows_are_normalized(self) -> None:
+        flows = collect_kis_foreign_flows(
+            "2026-08-08",
+            "app-key",
+            "app-secret",
+            fetcher=lambda _key, _secret: {
+                "foreign_kospi_cash_net_buy_krw": {
+                    "frgn_ntby_tr_pbmn": "-865101",
+                },
+                "foreign_kospi200_futures_net_buy_contracts": {
+                    "frgn_ntby_qty": "3913",
+                },
+            },
+        )
+        cash = flows["foreign_kospi_cash_net_buy_krw"]
+        futures = flows["foreign_kospi200_futures_net_buy_contracts"]
+        self.assertEqual(cash["value"], -865101000000.0)
+        self.assertEqual(cash["unit"], "KRW")
+        self.assertEqual(cash["as_of"], "2026-08-07")
+        self.assertEqual(futures["value"], 3913)
+        self.assertEqual(futures["unit"], "contracts")
+
+    def test_market_date_alignment_allows_only_one_business_day_lag(self) -> None:
+        keys = (
+            "usdkrw",
+            "kospi",
+            "kosdaq",
+            "foreign_kospi_cash_net_buy_krw",
+            "foreign_kospi200_futures_net_buy_contracts",
+            "samsung_electronics",
+            "sk_hynix",
+        )
+        metrics = {
+            key: {"status": "available", "as_of": "2026-08-07"}
+            for key in keys
+        }
+        self.assertEqual(
+            evaluate_market_date_alignment(metrics)["status"],
+            "aligned",
+        )
+        metrics["kospi"]["as_of"] = "2026-08-06"
+        alignment = evaluate_market_date_alignment(metrics)
+        self.assertEqual(alignment["status"], "source_lag_within_tolerance")
+        self.assertEqual(alignment["business_day_gap"], 1)
+        metrics["kospi"]["as_of"] = "2026-08-05"
+        alignment = evaluate_market_date_alignment(metrics)
+        self.assertEqual(alignment["status"], "source_lag_exceeds_tolerance")
+        self.assertEqual(alignment["business_day_gap"], 2)
+
     def test_official_krx_input_requires_primary_lineage(self) -> None:
         payload = official_input()
         validate_krx_input(payload, "2026-07-23")
@@ -212,7 +327,7 @@ class KoreaMarketContractTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["kosdaq"]["status"], "available")
         self.assertEqual(
             payload["metrics"]["foreign_kospi_cash_net_buy_krw"]["status"],
-            "not_supplied_by_verified_input",
+            "missing_kis_open_api_authorization",
         )
         self.assertEqual(
             payload["transmission_gate"]["status"],
@@ -226,6 +341,23 @@ class KoreaMarketContractTests(unittest.TestCase):
         ]
 
         def krx_fetcher(url: str, _key: str, _date: str) -> dict:
+            if "/sto/" in url:
+                return {"OutBlock_1": [
+                    {
+                        "BAS_DD": "20260723",
+                        "ISU_CD": "005930",
+                        "ISU_NM": "삼성전자",
+                        "TDD_CLSPRC": "70,000",
+                        "FLUC_RT": "1.20",
+                    },
+                    {
+                        "BAS_DD": "20260723",
+                        "ISU_CD": "000660",
+                        "ISU_NM": "SK하이닉스",
+                        "TDD_CLSPRC": "180,000",
+                        "FLUC_RT": "0.80",
+                    },
+                ]}
             market = "kospi" if "kospi_" in url else "kosdaq"
             return self.krx_response(market)
 
@@ -240,14 +372,16 @@ class KoreaMarketContractTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["kosdaq"]["status"], "available")
         self.assertEqual(
             payload["metrics"]["foreign_kospi_cash_net_buy_krw"]["status"],
-            "not_available_in_connected_krx_index_services",
+            "missing_kis_open_api_authorization",
         )
+        self.assertEqual(payload["metrics"]["samsung_electronics"]["status"], "available")
+        self.assertEqual(payload["metrics"]["sk_hynix"]["status"], "available")
         self.assertEqual(
             payload["transmission_gate"]["status"],
             "partial_price_transmission_no_verified_flows",
         )
 
-    def test_verified_input_overrides_krx_api(self) -> None:
+    def test_verified_input_overrides_supplied_metrics_and_fetches_missing_stocks(self) -> None:
         calls: list[str] = []
         payload = build_korea_market(
             "2026-07-23",
@@ -262,7 +396,7 @@ class KoreaMarketContractTests(unittest.TestCase):
         )
         self.assertEqual(payload["metrics"]["kospi"]["value"], 2800.5)
         self.assertEqual(payload["metrics"]["kosdaq"]["value"], 850.2)
-        self.assertEqual(calls, [])
+        self.assertEqual(calls, ["https://data-dbg.krx.co.kr/svc/apis/sto/stk_bydd_trd"])
 
     def test_without_krx_authorization_transmission_remains_blocked(self) -> None:
         values = [
@@ -283,6 +417,46 @@ class KoreaMarketContractTests(unittest.TestCase):
             "insufficient_verified_korea_data",
         )
         self.assertIn("kospi", payload["transmission_gate"]["missing_metrics"])
+
+    def test_ecos_and_kis_make_the_transmission_gate_ready(self) -> None:
+        verified = official_input()
+        verified["metrics"].update({
+            "samsung_electronics": {
+                "value": 70000,
+                "unit": "KRW per share",
+                "as_of": "2026-07-23",
+            },
+            "sk_hynix": {
+                "value": 180000,
+                "unit": "KRW per share",
+                "as_of": "2026-07-23",
+            },
+        })
+        payload = build_korea_market(
+            "2026-07-23",
+            "",
+            official_krx_input=verified,
+            ecos_api_key="test-ecos-key",
+            kis_app_key="app-key",
+            kis_app_secret="app-secret",
+            ecos_fetcher=lambda _key, _start, _end: [
+                (date(2026, 7, 22), 1378.0),
+                (date(2026, 7, 23), 1382.0),
+            ],
+            kis_fetcher=lambda _key, _secret: {
+                "foreign_kospi_cash_net_buy_krw": {
+                    "frgn_ntby_tr_pbmn": "250000",
+                },
+                "foreign_kospi200_futures_net_buy_contracts": {
+                    "frgn_ntby_qty": "1200",
+                },
+            },
+        )
+        self.assertEqual(payload["collection_status"], "complete")
+        self.assertEqual(
+            payload["transmission_gate"]["status"],
+            "ready_for_korea_transmission",
+        )
 
 
 if __name__ == "__main__":
