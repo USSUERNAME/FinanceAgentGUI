@@ -471,6 +471,13 @@ def synthesize_with_openai(
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is missing")
     model = os.getenv("OPENAI_EVENT_SYNTHESIS_MODEL", "gpt-5").strip()
+    max_output_tokens = int(
+        os.getenv("OPENAI_EVENT_SYNTHESIS_MAX_OUTPUT_TOKENS", "8000")
+    )
+    if max_output_tokens < 1000 or max_output_tokens > 16000:
+        raise ValueError(
+            "OPENAI_EVENT_SYNTHESIS_MAX_OUTPUT_TOKENS must be between 1000 and 16000"
+        )
     sector_ids = [str(item.get("sector_id") or "") for item in master.get("sectors", [])]
     instructions = """You are the senior public-equity synthesis stage for a Korean PB daily brief.
 Use only the supplied structured events and sector universe.
@@ -497,7 +504,7 @@ Write all reader-facing strings in concise Korean."""
             "strict": True,
             "schema": synthesis_schema(sector_ids),
         }},
-        "max_output_tokens": 5000,
+        "max_output_tokens": max_output_tokens,
         "store": False,
     }, ensure_ascii=False).encode("utf-8")
     request = Request("https://api.openai.com/v1/responses", method="POST", data=body, headers={

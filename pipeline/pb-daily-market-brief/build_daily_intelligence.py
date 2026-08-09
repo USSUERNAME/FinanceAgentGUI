@@ -139,7 +139,7 @@ def _event_card(
     primary_fact_confirmed = bool(
         origin_sources
         and facts
-        and extraction_status in {"complete", "completed"}
+        and extraction_status in {"complete", "completed", "structured"}
     )
     return {
         "event_id": event_id,
