@@ -336,6 +336,7 @@ class OpenAISynthesisTests(unittest.TestCase):
         self.assertEqual(captured["body"]["model"], "gpt-5")
         self.assertEqual(captured["body"]["reasoning"]["effort"], "medium")
         self.assertEqual(captured["body"]["max_output_tokens"], 8000)
+        self.assertEqual(captured["timeout"], 240)
         self.assertTrue(captured["body"]["text"]["format"]["strict"])
 
 
