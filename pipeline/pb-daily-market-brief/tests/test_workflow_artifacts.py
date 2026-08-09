@@ -202,6 +202,8 @@ class WorkflowArtifactTests(unittest.TestCase):
         )
         self.assertIn('OPENAI_BRIEF_TIMEOUT_SECONDS: "180"', workflow)
         self.assertIn('OPENAI_BRIEF_MAX_ATTEMPTS: "2"', workflow)
+        self.assertIn('OPENAI_ANALYSIS_TIMEOUT_SECONDS: "90"', workflow)
+        self.assertIn('OPENAI_ANALYSIS_MAX_ATTEMPTS: "2"', workflow)
         self.assertNotIn('OPENAI_BRIEF_MAX_OUTPUT_TOKENS: "5600"', workflow)
 
     def test_daily_pipeline_keeps_drive_research_optional_and_rights_gated(self) -> None:

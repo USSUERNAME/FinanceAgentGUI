@@ -6,10 +6,11 @@ import argparse
 import copy
 import json
 import os
+import time
 from datetime import date
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from collectors.common import ROOT, load_dotenv
@@ -137,6 +138,10 @@ HYPOTHESIS_FALLBACKS = {
     "real_10y": ("실질금리 부담 완화 여부", "decrease"),
     "spy_return_5d_pct": ("미국 주식의 단기 흐름 개선 여부", "increase"),
 }
+
+
+class RetryableMarketAnalysisError(RuntimeError):
+    """A temporary OpenAI transport or service failure safe to retry."""
 
 
 def response_text(payload: dict[str, Any]) -> str:
@@ -436,6 +441,98 @@ def fallback_hypothesis(snapshot: dict[str, Any]) -> dict[str, Any]:
     raise ValueError("No hypothesis tracking metric is available for deterministic fallback")
 
 
+def deterministic_fallback_analysis(
+    snapshot: dict[str, Any], *, reason: str,
+) -> dict[str, Any]:
+    """Keep publication available when the optional interpretation call is delayed.
+
+    The fallback deliberately stays low-confidence and only restates structured fields
+    already present in the snapshot. It does not create new causal claims.
+    """
+    available = available_hypothesis_metrics(snapshot)
+    evidence = [
+        f"{key}={value:g}"
+        for key, value in list(available.items())[:2]
+    ]
+    if len(evidence) < 2:
+        evidence.append(f"사용 가능한 가설 추적 지표={len(available)}개")
+
+    rule_signal = (snapshot.get("market_scoreboard") or {}).get("rule_based_signal") or {}
+    allowed_labels = set(
+        ANALYSIS_SCHEMA["properties"]["market_regime"]["properties"]["label"]["enum"]
+    )
+    regime_label = str(rule_signal.get("label") or "neutral")
+    if regime_label not in allowed_labels:
+        regime_label = "neutral"
+
+    scenarios = []
+    for event in snapshot.get("upcoming_events", []):
+        consensus = event.get("consensus")
+        scenarios.append({
+            "event_id": str(event.get("event_id") or ""),
+            "baseline": str(consensus) if consensus not in (None, "") else "컨센서스 자료 없음",
+            "higher_or_stronger_case": "실제 결과가 기준보다 강하면 관련 자산 반응을 확인한다.",
+            "lower_or_weaker_case": "실제 결과가 기준보다 약하면 관련 자산 반응을 확인한다.",
+            "monitoring_assets": list(event.get("monitoring_assets") or []),
+            "source_posture": str(event.get("date_confidence") or "manual_unverified"),
+        })
+
+    stock_cards = []
+    deep_rows = (
+        (snapshot.get("us_equity_candidate_screen") or {})
+        .get("deep_analysis_shortlist", [])
+    )[:3]
+    for row in deep_rows:
+        ticker = str(row.get("ticker") or "")
+        reaction = row.get("market_reaction") or {}
+        observed = []
+        for key, label in (
+            ("return_1d_pct", "1일 수익률"),
+            ("return_5d_pct", "5일 수익률"),
+            ("volume_ratio_20d", "20일 대비 거래량 비율"),
+        ):
+            value = reaction.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                observed.append(f"{label} {value:g}")
+        reaction_text = ", ".join(observed) or "가격·거래량 관측치 제한"
+        sector_etf = str(reaction.get("sector_etf") or "관련 섹터")
+        stock_cards.append({
+            "ticker": ticker,
+            "selection_reason": "공식 1차 자료의 검증 사실이 확보되어 심층 검토 우선순위에 포함됐다.",
+            "market_reaction_interpretation": f"{reaction_text}; 공시와 가격 반응의 인과관계는 확정하지 않는다.",
+            "sector_read_through": f"{sector_etf} 동행 여부를 조건부로 확인한다.",
+            "confirmation_condition": "후속 공식 공시에서 검증 사실이 유지되고 상대강도와 거래량이 함께 확인되는지 본다.",
+            "invalidation_condition": "후속 공식 공시가 기존 사실을 뒤집거나 종목 상대강도가 약화되면 우선순위를 재검토한다.",
+            "evidence_status": "verified_primary_facts",
+            "action_posture": "deeper_research_candidate",
+        })
+
+    analysis = {
+        "market_regime": {
+            "label": regime_label,
+            "confidence": 0.2,
+            "summary": "모델 응답 지연으로 규칙 기반 신호와 현재 정량 관측치만 표시한다.",
+            "quantitative_evidence": evidence,
+        },
+        "key_drivers": [{
+            "observation": evidence[0],
+            "interpretation": "단일 관측만으로 방향을 확정하지 않고 후속 데이터와 교차 확인한다.",
+            "confirmation_condition": "다음 보고서에서 같은 방향의 정량 지표가 추가로 확인되는지 본다.",
+            "invalidation_condition": "후속 관측이 반대 방향으로 전환되면 현재 해석을 폐기한다.",
+        }],
+        "hypotheses": [fallback_hypothesis(snapshot)],
+        "event_scenarios": scenarios,
+        "stock_analysis_cards": stock_cards,
+        "conflicting_signals": ["모델 해설을 확보하지 못해 신호 간 충돌 평가는 보류한다."],
+        "top_risks": ["정량 스냅샷만으로는 사건의 인과관계를 확인할 수 없다."],
+        "data_warnings": [
+            f"OpenAI 시장 해설 요청이 일시적으로 실패해 저확신 규칙 기반 분석으로 대체했다: {reason}",
+        ],
+    }
+    validate_analysis(analysis, snapshot)
+    return analysis
+
+
 def request_analysis(
     snapshot: dict[str, Any], api_key: str, model: str, instructions: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -457,11 +554,16 @@ def request_analysis(
     request = Request("https://api.openai.com/v1/responses", method="POST", data=body, headers={
         "Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
     })
+    timeout_seconds = max(10, int(os.getenv("OPENAI_ANALYSIS_TIMEOUT_SECONDS", "90")))
     try:
-        with urlopen(request, timeout=90) as response:
+        with urlopen(request, timeout=timeout_seconds) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
+        if exc.code in {408, 409, 429} or exc.code >= 500:
+            raise RetryableMarketAnalysisError(
+                f"OpenAI market analysis returned retryable HTTP {exc.code}: {detail}"
+            ) from exc
         raise SystemExit(f"OpenAI market analysis returned HTTP {exc.code}: {detail}") from exc
     if payload.get("status") == "incomplete":
         reason = (payload.get("incomplete_details") or {}).get("reason", "unknown")
@@ -549,14 +651,31 @@ Create event scenarios only for supplied upcoming_events. Copy event_id exactly.
     )
     payload: dict[str, Any] = {}
     analysis: dict[str, Any] = {}
-    for attempt in range(2):
+    max_attempts = max(1, int(os.getenv("OPENAI_ANALYSIS_MAX_ATTEMPTS", "2")))
+    metric_retry = False
+    for attempt in range(max_attempts):
         attempt_instructions = instructions
-        if attempt:
+        if metric_retry:
             attempt_instructions += (
                 "\n\nYour previous response selected an unavailable hypothesis metric. "
                 "Regenerate the full response and select metric_key only from the allowed list."
             )
-        analysis, payload = request_analysis(snapshot, api_key, model, attempt_instructions)
+        try:
+            analysis, payload = request_analysis(snapshot, api_key, model, attempt_instructions)
+        except (TimeoutError, URLError, RetryableMarketAnalysisError) as exc:
+            if attempt + 1 < max_attempts:
+                time.sleep(min(2 ** attempt, 4))
+                continue
+            fallback = deterministic_fallback_analysis(
+                snapshot, reason=f"{type(exc).__name__}: {exc}",
+            )
+            return fallback, {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "fallback": True,
+                "fallback_reason": type(exc).__name__,
+                "attempts": max_attempts,
+            }
         canonicalize_event_scenarios(analysis, snapshot)
         try:
             validate_analysis(analysis, snapshot)
@@ -564,6 +683,7 @@ Create event scenarios only for supplied upcoming_events. Copy event_id exactly.
         except ValueError as exc:
             if "Hypotheses reference unavailable metrics" not in str(exc):
                 raise
+            metric_retry = True
 
     analysis["hypotheses"] = [fallback_hypothesis(snapshot)]
     warnings = analysis.setdefault("data_warnings", [])
