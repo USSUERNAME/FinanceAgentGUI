@@ -15,11 +15,14 @@ import argparse
 import json
 import os
 import re
+import zipfile
+from html import escape, unescape
+from io import BytesIO
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urljoin, urlsplit
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -112,6 +115,85 @@ class DiscoveryHTMLParser(HTMLParser):
         return None
 
 
+def dart_receipt_number(url: str) -> str | None:
+    parsed = urlsplit(url)
+    if not domain_matches(parsed.hostname or "", ["dart.fss.or.kr"]):
+        return None
+    receipt = str((parse_qs(parsed.query).get("rcpNo") or [""])[0])
+    return receipt if re.fullmatch(r"20\d{12}", receipt) else None
+
+
+def fetch_dart_filing_html(
+    canonical_url: str,
+    receipt: str,
+    api_key: str,
+    *,
+    timeout_seconds: int,
+    max_response_bytes: int,
+) -> dict[str, Any]:
+    """Fetch a DART filing body through OpenDART instead of the slow UI page."""
+    endpoint = "https://opendart.fss.or.kr/api/document.xml?" + urlencode({
+        "crtfc_key": api_key,
+        "rcept_no": receipt,
+    })
+    request = Request(
+        endpoint,
+        headers={
+            "User-Agent": os.getenv(
+                "PB_REPORT_USER_AGENT",
+                "pb-daily-market-brief/1.0 research@example.com",
+            ),
+            "Accept": "application/zip,application/octet-stream",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            raw = response.read(max_response_bytes + 1)
+        if len(raw) > max_response_bytes:
+            return {"status": "response_too_large", "url": canonical_url}
+        with zipfile.ZipFile(BytesIO(raw)) as archive:
+            documents: list[str] = []
+            for name in archive.namelist():
+                if not name.casefold().endswith((".xml", ".xhtml", ".html", ".txt")):
+                    continue
+                payload = archive.read(name)
+                try:
+                    documents.append(payload.decode("utf-8"))
+                except UnicodeDecodeError:
+                    documents.append(payload.decode("euc-kr", errors="replace"))
+        joined = "\n".join(documents)
+        body = extract_visible_text(joined, max_response_bytes)
+        if not body:
+            body = re.sub(
+                r"\s+",
+                " ",
+                unescape(re.sub(r"<[^>]+>", " ", joined)),
+            ).strip()[:max_response_bytes]
+        if not body:
+            return {"status": "empty_official_body", "url": canonical_url}
+        published_at = publication_date_from_official_url(canonical_url)
+        meta = (
+            f'<meta property="article:published_time" content="{published_at}">'
+            if published_at else ""
+        )
+        html = (
+            f"<html><head><title>DART filing {receipt}</title>{meta}</head>"
+            f"<body><main>{escape(body)}</main></body></html>"
+        )
+        return {
+            "status": "html_fetched",
+            "url": canonical_url,
+            "html": html,
+            "transport": "opendart_document_api",
+        }
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        return {
+            "status": "fetch_failed",
+            "url": canonical_url,
+            "error": f"{type(exc).__name__}: OpenDART document fetch failed",
+        }
+
+
 def fetch_official_html(
     url: str,
     official_domains: list[str],
@@ -122,6 +204,16 @@ def fetch_official_html(
     canonical = canonicalize_url(url)
     if not canonical or not domain_matches(domain_for_url(canonical), official_domains):
         return {"status": "not_permitted_non_official_domain", "url": canonical}
+    receipt = dart_receipt_number(canonical)
+    dart_api_key = os.getenv("OPENDART_API_KEY", "").strip()
+    if receipt and dart_api_key:
+        return fetch_dart_filing_html(
+            canonical,
+            receipt,
+            dart_api_key,
+            timeout_seconds=timeout_seconds,
+            max_response_bytes=max_response_bytes,
+        )
     request = Request(
         canonical,
         headers={
@@ -186,16 +278,14 @@ def publication_window_matches(
 
 def publication_date_from_official_url(url: str) -> str | None:
     """Read a publication date only from an official identifier with date semantics."""
-    parsed = urlsplit(url)
-    if domain_matches(parsed.hostname or "", ["dart.fss.or.kr"]):
-        receipt = str((parse_qs(parsed.query).get("rcpNo") or [""])[0])
-        if re.fullmatch(r"20\d{12}", receipt):
-            try:
-                return datetime.strptime(receipt[:8], "%Y%m%d").replace(
-                    tzinfo=ZoneInfo("Asia/Seoul")
-                ).isoformat()
-            except ValueError:
-                return None
+    receipt = dart_receipt_number(url)
+    if receipt:
+        try:
+            return datetime.strptime(receipt[:8], "%Y%m%d").replace(
+                tzinfo=ZoneInfo("Asia/Seoul")
+            ).isoformat()
+        except ValueError:
+            return None
     return None
 
 
