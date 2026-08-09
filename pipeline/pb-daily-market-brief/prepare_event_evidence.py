@@ -165,7 +165,23 @@ def evidence_record(
         and str(record.get("source_url_kind") or "") == "primary_source"
         and domain_matches(domain_for_url(url), allowed_domains)
     )
-    if official and fetch_body:
+    reusable_body = (
+        official
+        and str(record.get("evidence_scope") or "") == "official_body_extracted"
+        and bool(str(record.get("raw_text") or "").strip())
+    )
+    if reusable_body:
+        text = str(record.get("raw_text") or "")[:max_body_chars]
+        extraction = {
+            "status": "official_body_extracted",
+            "final_url": url,
+            "content_type": "text/html; reused=verified_discovery",
+            "text": text,
+            "text_chars": len(text),
+            "byte_limit_reached": False,
+            "reused_verified_discovery_body": True,
+        }
+    elif official and fetch_body:
         extraction = fetch_official_text(url, allowed_domains, max_chars=max_body_chars)
     elif official:
         extraction = {"status": "official_fetch_budget_exhausted", "text": None}
@@ -230,8 +246,14 @@ def build_evidence_packets(
         )
         evidence: list[dict[str, Any]] = []
         for record in representatives:
+            reusable_body = (
+                bool(record.get("primary_source_confirmed"))
+                and str(record.get("evidence_scope") or "") == "official_body_extracted"
+                and bool(str(record.get("raw_text") or "").strip())
+            )
             eligible_fetch = (
                 fetches_used < max_official_fetches
+                and not reusable_body
                 and bool(record.get("primary_source_confirmed"))
                 and domain_matches(
                     domain_for_url(str(record.get("canonical_url") or record.get("url") or "")),
@@ -283,11 +305,23 @@ def main() -> None:
     parser.add_argument("--inbox-file", required=True)
     parser.add_argument("--clusters-file", required=True)
     parser.add_argument("--source-matches-file", required=True)
+    parser.add_argument(
+        "--additional-sources-file",
+        help="Optional discovered_official_sources.v1 artifact merged into the evidence inbox.",
+    )
     parser.add_argument("--no-network", action="store_true")
     args = parser.parse_args()
     load_dotenv()
 
     records = json.loads(Path(args.inbox_file).read_text(encoding="utf-8"))
+    if args.additional_sources_file:
+        additional_path = Path(args.additional_sources_file)
+        if not additional_path.exists():
+            raise SystemExit(f"Additional source file does not exist: {additional_path}")
+        additional_payload = json.loads(additional_path.read_text(encoding="utf-8"))
+        if additional_payload.get("schema_version") != "discovered_official_sources.v1":
+            raise SystemExit("Unsupported additional source schema")
+        records.extend(additional_payload.get("records", []))
     clusters_payload = json.loads(Path(args.clusters_file).read_text(encoding="utf-8"))
     matches_payload = json.loads(Path(args.source_matches_file).read_text(encoding="utf-8"))
     settings = dict(load_source_config().get("event_evidence", {}))

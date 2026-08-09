@@ -170,6 +170,8 @@ class WorkflowArtifactTests(unittest.TestCase):
         preparation = pipeline.index('"prepare_event_evidence.py"')
         self.assertLess(discovery, second_resolution)
         self.assertLess(second_resolution, preparation)
+        evidence_command = pipeline[preparation:pipeline.index("]", preparation)]
+        self.assertIn('"--additional-sources-file"', evidence_command)
         self.assertIn('discovery_args.append("--no-network")', pipeline)
 
     def test_cross_source_events_feed_memory_before_reader_intelligence(self) -> None:
