@@ -46,7 +46,7 @@ APPROVAL_REGISTRY_PATH = (
     / "broker_research_approvals"
     / "google_drive.json"
 )
-INGESTION_STATE_SCHEMA = "google_drive_research_ingestion_state.v1"
+INGESTION_STATE_SCHEMA = "google_drive_research_ingestion_state.v2"
 INGESTION_STATE_PATH = (
     Path(__file__).resolve().parents[1]
     / "workspace"

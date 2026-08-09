@@ -18,6 +18,9 @@ SCHEMA_VERSION = "broker_research_digest.v1"
 MAX_REPORTS = 20
 PUBLICATION_POLICIES = {"private_analysis_only", "summary_and_link_only"}
 STANCE_ORDER = ("positive", "neutral", "cautious", "negative", "not_stated")
+APPROVAL_REGISTRY_PATH = (
+    ROOT / "workspace" / "broker_research_approvals" / "google_drive.json"
+)
 
 
 def _clean(value: Any, limit: int) -> str:
@@ -132,6 +135,80 @@ def _eligible(record: dict[str, Any]) -> bool:
         and rights.get("redistribution_allowed") is False
         and rights.get("publication_policy") in PUBLICATION_POLICIES
     )
+
+
+def _retained_card(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or "raw_text" in value:
+        return None
+    report_id = _clean(value.get("report_id"), 120)
+    rights = value.get("rights") or {}
+    if (
+        not report_id
+        or rights.get("redistribution_allowed") is not False
+        or rights.get("full_text_included") is not False
+        or rights.get("publication_policy") not in PUBLICATION_POLICIES
+    ):
+        return None
+    card = deepcopy(value)
+    card["report_id"] = report_id
+    card["linked_telegram_events"] = []
+    return card
+
+
+def load_retained_drive_reports(
+    report_date: str,
+    *,
+    workspace_root: Path | None = None,
+    approval_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Load prior rights-safe Drive cards that remain explicitly approved."""
+    workspace = workspace_root or ROOT / "workspace"
+    registry_path = approval_path or APPROVAL_REGISTRY_PATH
+    if not registry_path.exists():
+        return []
+    try:
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    approved_references = {
+        f"drive:{str(row.get('file_id') or '').strip()}"
+        for row in registry.get("decisions") or []
+        if isinstance(row, dict)
+        and row.get("decision") == "approved"
+        and str(row.get("file_id") or "").strip()
+    }
+    if not approved_references:
+        return []
+
+    retained: dict[str, dict[str, Any]] = {}
+    digest_root = workspace / "broker_research_digest"
+    if not digest_root.exists():
+        return []
+    prior_dirs = sorted(
+        (
+            path for path in digest_root.iterdir()
+            if path.is_dir() and path.name < report_date
+        ),
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    for date_dir in prior_dirs[:32]:
+        digest_path = date_dir / "broker_research_digest.json"
+        try:
+            payload = json.loads(digest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if payload.get("schema_version") != SCHEMA_VERSION:
+            continue
+        for value in payload.get("reports") or []:
+            card = _retained_card(value)
+            if card is None:
+                continue
+            reference = str((card.get("source") or {}).get("reference") or "")
+            if reference not in approved_references:
+                continue
+            retained.setdefault(card["report_id"], card)
+    return list(retained.values())
 
 
 def _report_type(record: dict[str, Any], metadata: dict[str, Any]) -> str:
@@ -250,6 +327,7 @@ def build_digest(
     records: list[dict[str, Any]],
     *,
     analysis_payload: dict[str, Any] | None = None,
+    retained_reports: list[dict[str, Any]] | None = None,
     generated_at: str | None = None,
     max_reports: int = MAX_REPORTS,
 ) -> dict[str, Any]:
@@ -259,7 +337,7 @@ def build_digest(
         for row in analysis_payload.get("reports") or []
         if isinstance(row, dict) and row.get("report_id")
     }
-    eligible = [
+    current_cards = [
         _card(
             record,
             generated_analysis=analysis_by_id.get(
@@ -269,6 +347,16 @@ def build_digest(
         for record in records
         if isinstance(record, dict) and _eligible(record)
     ]
+    retained_by_id = {
+        card["report_id"]: card
+        for value in retained_reports or []
+        if (card := _retained_card(value)) is not None
+    }
+    current_ids = {card["report_id"] for card in current_cards}
+    retained_only_count = sum(report_id not in current_ids for report_id in retained_by_id)
+    merged_by_id = dict(retained_by_id)
+    merged_by_id.update({card["report_id"]: card for card in current_cards})
+    eligible = list(merged_by_id.values())
     eligible.sort(key=lambda row: (row["published_at"], row["report_id"]), reverse=True)
     cards = eligible[: max(0, min(max_reports, MAX_REPORTS))]
     for card in cards:
@@ -352,6 +440,7 @@ def build_digest(
         "generated_at": generated_at or datetime.now(ZoneInfo("Asia/Seoul")).isoformat(),
         "summary": {
             "archived_report_count": len(eligible),
+            "retained_report_count": retained_only_count,
             "selected_report_count": len(cards),
             "structured_report_count": sum(
                 card["processing"]["structured_analysis_available"] for card in cards
@@ -450,6 +539,7 @@ def main() -> None:
         args.date,
         load_records(ROOT / args.inbox_file),
         analysis_payload=load_optional_object(analysis_path),
+        retained_reports=load_retained_drive_reports(args.date),
     )
     output = ROOT / "workspace" / "broker_research_digest" / args.date / "broker_research_digest.json"
     output.parent.mkdir(parents=True, exist_ok=True)

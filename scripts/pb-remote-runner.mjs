@@ -14,6 +14,12 @@ import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ALLOWED_RUN_MODES = new Set(["dry_run", "verification_dry_run", "publish"]);
+const DRY_RUN_EVIDENCE_DIRS = Object.freeze(["snapshots", "analysis"]);
+const FINAL_REPORT_DIRS = Object.freeze([
+  "v2_reader_reports",
+  "intelligence",
+  "operations_manifest",
+]);
 const ALLOWED_WORKSPACE_DIRS = Object.freeze([
   "snapshots",
   "analysis",
@@ -214,14 +220,19 @@ function copyDirectory(source, target) {
   }
 }
 
-function syncArtifact(stagingRoot, workspace) {
+function syncArtifact(stagingRoot, workspace, { runMode = "publish" } = {}) {
   const nestedWorkspace = join(stagingRoot, "workspace");
   const artifactRoot = existsSync(nestedWorkspace) ? nestedWorkspace : stagingRoot;
   const available = new Set(readdirSync(artifactRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name));
   const selected = ALLOWED_WORKSPACE_DIRS.filter((name) => available.has(name));
-  if (!selected.some((name) => ["v2_reader_reports", "intelligence", "operations_manifest"].includes(name))) {
+  if (runMode === "dry_run") {
+    const hasDryRunEvidence = DRY_RUN_EVIDENCE_DIRS.every((name) => available.has(name));
+    if (!hasDryRunEvidence) {
+      throw new Error("Downloaded artifact does not contain validated dry-run evidence");
+    }
+  } else if (!selected.some((name) => FINAL_REPORT_DIRS.includes(name))) {
     throw new Error("Downloaded artifact does not contain a validated report workspace");
   }
   mkdirSync(workspace, { recursive: true });
@@ -274,9 +285,12 @@ export function runRemoteWorkflow(rawOptions, { timeoutMs = 30 * 60 * 1000 } = {
   const stagingRoot = mkdtempSync(join(tmpdir(), "finance-agent-pb-artifact-"));
   try {
     const artifactName = downloadArtifact(options, matchedRun.databaseId, stagingRoot);
-    const synced = syncArtifact(stagingRoot, options.workspace);
+    const synced = syncArtifact(stagingRoot, options.workspace, { runMode: options.runMode });
     console.log(`Downloaded ${artifactName}`);
     console.log(`Synced ${synced.length} workspace section(s) into ${options.workspace}`);
+    if (options.runMode === "dry_run") {
+      console.log("Dry run completed. Evidence was synchronized; no final report was expected.");
+    }
     console.log(`REMOTE_RUN_ID=${matchedRun.databaseId}`);
     return { runId: matchedRun.databaseId, artifactName, synced };
   } finally {

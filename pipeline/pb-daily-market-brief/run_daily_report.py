@@ -219,6 +219,7 @@ def main() -> None:
         "discover_official_event_sources.py", "--date", report_date,
         "--source-matches-file", str(event_source_matches.relative_to(ROOT)),
         "--clusters-file", str(event_clusters.relative_to(ROOT)),
+        "--inbox-file", str(triaged_inbox.relative_to(ROOT)),
     ]
     if offline_validation:
         discovery_args.append("--no-network")

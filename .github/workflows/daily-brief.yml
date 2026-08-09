@@ -72,7 +72,7 @@ jobs:
       GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GOOGLE_DRIVE_CLIENT_SECRET }}
       GOOGLE_DRIVE_REFRESH_TOKEN: ${{ secrets.GOOGLE_DRIVE_REFRESH_TOKEN }}
       GOOGLE_DRIVE_RESEARCH_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_RESEARCH_FOLDER_ID }}
-      GOOGLE_DRIVE_RESEARCH_MAX_FILES: "40"
+      GOOGLE_DRIVE_RESEARCH_MAX_FILES: "60"
       GOOGLE_GMAIL_CLIENT_ID: ${{ secrets.GOOGLE_GMAIL_CLIENT_ID }}
       GOOGLE_GMAIL_CLIENT_SECRET: ${{ secrets.GOOGLE_GMAIL_CLIENT_SECRET }}
       GOOGLE_GMAIL_REFRESH_TOKEN: ${{ secrets.GOOGLE_GMAIL_REFRESH_TOKEN }}
@@ -167,6 +167,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-broker-research-v1-
 
+      - name: Restore broker research digest history
+        if: env.BRIEF_RUN_MODE != 'publish_cached'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: pipeline/pb-daily-market-brief/workspace/broker_research_digest
+          key: ${{ runner.os }}-broker-research-digest-v1-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-broker-research-digest-v1-
+
       - name: Restore sanitized private-reader history
         if: vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
         uses: actions/cache/restore@v4
@@ -182,9 +192,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: pipeline/pb-daily-market-brief/workspace/broker_research_cache/drive_ingestion_state.json
-          key: ${{ runner.os }}-drive-ingestion-v1-${{ github.run_id }}
+          key: ${{ runner.os }}-drive-ingestion-v2-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-drive-ingestion-v1-
+            ${{ runner.os }}-drive-ingestion-v2-
 
       - name: Validate cached publication input
         if: env.BRIEF_RUN_MODE == 'publish_cached'
@@ -246,13 +256,21 @@ jobs:
           path: pipeline/pb-daily-market-brief/workspace/broker_research_cache/structured_analysis
           key: ${{ runner.os }}-broker-research-v1-${{ github.run_id }}
 
+      - name: Save broker research digest history
+        if: env.BRIEF_RUN_MODE != 'publish_cached' && steps.brief.outcome == 'success'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: pipeline/pb-daily-market-brief/workspace/broker_research_digest
+          key: ${{ runner.os }}-broker-research-digest-v1-${{ github.run_id }}
+
       - name: Save Drive ingestion fingerprint state
         if: env.BRIEF_RUN_MODE != 'publish_cached' && steps.brief.outcome == 'success'
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: pipeline/pb-daily-market-brief/workspace/broker_research_cache/drive_ingestion_state.json
-          key: ${{ runner.os }}-drive-ingestion-v1-${{ github.run_id }}
+          key: ${{ runner.os }}-drive-ingestion-v2-${{ github.run_id }}
 
       - name: Preserve structured evidence and analysis
         if: always()
