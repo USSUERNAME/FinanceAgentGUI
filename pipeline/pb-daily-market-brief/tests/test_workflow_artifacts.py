@@ -7,9 +7,32 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "daily-brief.yml"
 APP_WORKFLOW = ROOT.parents[1] / ".github" / "workflows" / "daily-brief.yml"
+TELEGRAM_WORKFLOW = ROOT / ".github" / "workflows" / "telegram-refresh.yml"
+APP_TELEGRAM_WORKFLOW = (
+    ROOT.parents[1] / ".github" / "workflows" / "telegram-refresh.yml"
+)
 
 
 class WorkflowArtifactTests(unittest.TestCase):
+    def test_telegram_refresh_runs_every_three_hours_and_preserves_results(self) -> None:
+        for path in (TELEGRAM_WORKFLOW, APP_TELEGRAM_WORKFLOW):
+            workflow = path.read_text(encoding="utf-8")
+            self.assertIn('cron: "17 */3 * * *"', workflow)
+            self.assertIn("python refresh_telegram_intelligence.py", workflow)
+            self.assertIn("actions/upload-artifact@v4", workflow)
+            self.assertIn("telegram-refresh-v1", workflow)
+            self.assertIn("Validate collection result", workflow)
+            self.assertIn("steps.validate.outcome == 'success'", workflow)
+            self.assertNotIn("run_daily_report.py", workflow)
+            self.assertNotIn("OPENAI_API_KEY", workflow)
+
+    def test_daily_workflow_restores_latest_telegram_refresh(self) -> None:
+        for path in (WORKFLOW, APP_WORKFLOW):
+            workflow = path.read_text(encoding="utf-8")
+            self.assertIn("Restore latest Telegram intelligence", workflow)
+            self.assertIn("telegram-refresh-v1", workflow)
+            self.assertIn("workspace/telegram_refresh/", workflow)
+
     def test_app_workflow_accepts_remote_runner_correlation_id(self) -> None:
         workflow = APP_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("client_request_id:", workflow)
