@@ -235,6 +235,7 @@ def main() -> None:
         "--inbox-file", str(triaged_inbox.relative_to(ROOT)),
         "--clusters-file", str(event_clusters.relative_to(ROOT)),
         "--source-matches-file", str(event_source_matches.relative_to(ROOT)),
+        "--additional-sources-file", str(discovered_official_sources.relative_to(ROOT)),
     ]
     if offline_validation:
         evidence_args.append("--no-network")

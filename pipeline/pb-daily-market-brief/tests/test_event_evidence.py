@@ -198,6 +198,52 @@ class OfficialBodyExtractionTests(unittest.TestCase):
         self.assertEqual(result["status"], "official_body_extracted")
         self.assertIn("Official text", result["text"])
 
+    def test_verified_discovery_body_is_reused_without_another_network_fetch(self) -> None:
+        discovered = record(
+            record_id_source="official_event_discovery",
+            title="DART filing 20260723000001",
+            url="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260723000001",
+            source_type="official_release",
+            grade="A",
+            primary=True,
+            tier="primary",
+        )
+        discovered["evidence_scope"] = "official_body_extracted"
+        discovered["raw_text"] = "셀피글로벌 유상증자 공식 공시 본문"
+        event = event_for([discovered], event_type="corporate_action")
+        source_match = {
+            "event_id": event["event_id"],
+            "resolution_status": "origin_primary_matched",
+            "evidence_posture": "research_grade_primary_available",
+            "matched_sources": [{
+                "record_id": discovered["id"],
+                "source_role": "origin_primary",
+            }],
+            "official_route": {"origin_domains": ["dart.fss.or.kr"]},
+            "search_plan": None,
+        }
+
+        with patch("prepare_event_evidence.fetch_official_text") as fetch:
+            payload = build_evidence_packets(
+                [event],
+                [source_match],
+                [discovered],
+                {
+                    "max_events": 10,
+                    "max_representatives_per_event": 2,
+                    "max_official_fetches": 3,
+                    "max_official_body_chars": 12000,
+                },
+            )
+
+        self.assertEqual(payload["official_fetches_used"], 0)
+        evidence = payload["events"][0]["representatives"][0]
+        self.assertEqual(evidence["evidence_label"], "fact_source_reported")
+        self.assertTrue(
+            evidence["body_extraction"]["reused_verified_discovery_body"]
+        )
+        fetch.assert_not_called()
+
     def test_nonmember_official_record_outside_event_window_does_not_match(self) -> None:
         official = record(
             record_id_source="fed_speeches",
