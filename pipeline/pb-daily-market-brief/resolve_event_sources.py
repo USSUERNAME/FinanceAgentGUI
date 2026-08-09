@@ -112,7 +112,19 @@ def match_score(
     else:
         score += 30
         reasons.append("official_provider_record")
-    if record.get("id") in set(event.get("record_ids", [])):
+    discovered_for_event = (
+        bool(record.get("discovery_event_id"))
+        and str(record.get("discovery_event_id")) == str(event.get("event_id"))
+    )
+    if discovered_for_event:
+        if not publication_window_matches(record, event):
+            return 0, [], None
+        score += 30
+        reasons.extend([
+            "verified_discovery_event_link",
+            "publication_window_match",
+        ])
+    elif record.get("id") in set(event.get("record_ids", [])):
         score += 30
         reasons.append("event_cluster_member")
     elif not publication_window_matches(record, event):
@@ -125,6 +137,7 @@ def match_score(
     entity_overlap = normalized_terms(event.get("entities", [])) & record_term_set
     if (
         "event_cluster_member" not in reasons
+        and "verified_discovery_event_link" not in reasons
         and not entity_overlap
         and len(meaningful_overlap) < 3
     ):

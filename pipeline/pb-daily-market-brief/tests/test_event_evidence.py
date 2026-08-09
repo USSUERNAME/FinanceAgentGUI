@@ -93,6 +93,64 @@ class SourceResolutionTests(unittest.TestCase):
         self.assertIn("federalreserve.gov", resolved["search_plan"]["official_domains"])
         self.assertNotIn("evidence_url", resolved["search_plan"])
 
+    def test_verified_discovery_record_links_back_to_its_event(self) -> None:
+        publisher = record(
+            record_id_source="publisher",
+            title="기업 공시 검증 대기",
+            url="https://publisher.example/filing",
+            tier="trusted",
+        )
+        event = event_for([publisher], event_type="corporate_action")
+        event["representative_title"] = "기업명: 셀피글로벌"
+        event["entities"] = []
+        event["topic_tags"] = ["유상증자"]
+        discovered = record(
+            record_id_source="official_event_discovery",
+            title="DART filing 20260723000001",
+            url="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260723000001",
+            source_type="official_release",
+            grade="A",
+            primary=True,
+            tier="primary",
+        )
+        discovered["discovery_event_id"] = event["event_id"]
+        discovered["raw_text"] = "앞부분 일반 공시 문구"
+
+        resolved = resolve_event(event, [publisher, discovered], load_registry())
+
+        self.assertEqual(resolved["resolution_status"], "origin_primary_matched")
+        self.assertIn(
+            "verified_discovery_event_link",
+            resolved["matched_sources"][0]["match_reasons"],
+        )
+
+    def test_verified_discovery_record_does_not_link_to_another_event(self) -> None:
+        publisher = record(
+            record_id_source="publisher",
+            title="기업 공시 검증 대기",
+            url="https://publisher.example/filing",
+            tier="trusted",
+        )
+        event = event_for([publisher], event_type="corporate_action")
+        event["representative_title"] = "기업명: 셀피글로벌"
+        event["entities"] = []
+        event["topic_tags"] = ["유상증자"]
+        discovered = record(
+            record_id_source="official_event_discovery",
+            title="DART filing 20260723000001",
+            url="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260723000001",
+            source_type="official_release",
+            grade="A",
+            primary=True,
+            tier="primary",
+        )
+        discovered["discovery_event_id"] = "different_event"
+        discovered["raw_text"] = "앞부분 일반 공시 문구"
+
+        resolved = resolve_event(event, [publisher, discovered], load_registry())
+
+        self.assertEqual(resolved["resolution_status"], "search_required")
+
 
 class OfficialBodyExtractionTests(unittest.TestCase):
     def test_visible_text_excludes_scripts_navigation_and_footer(self) -> None:
