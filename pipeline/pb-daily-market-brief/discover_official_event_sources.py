@@ -41,6 +41,10 @@ GENERIC_ENTITY_TERMS = {
     "ai", "cnbc", "morningstar", "marketwatch", "reuters", "bloomberg",
     "news", "markets", "report",
 }
+DIRECT_URL_GENERIC_TERMS = {
+    "action", "corporate", "discovery", "domestic", "earnings", "filing",
+    "general", "guidance", "official", "source", "telegram",
+}
 DATE_META_KEYS = {
     "article:published_time", "date", "datepublished", "dc.date",
     "dcterms.date", "publishdate", "pubdate", "sailthru.date",
@@ -184,6 +188,9 @@ def fetch_dart_filing_html(
             "status": "html_fetched",
             "url": canonical_url,
             "html": html,
+            # Keep the complete extracted filing body for event matching. The
+            # published evidence record is still capped by max_body_chars.
+            "match_text": body,
             "transport": "opendart_document_api",
         }
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
@@ -385,9 +392,21 @@ def fetch_candidate_documents(
         parser = DiscoveryHTMLParser()
         parser.feed(result["html"])
         body = extract_visible_text(result["html"], int(settings["max_body_chars"]))
+        match_text = str(result.get("match_text") or body)
         linked, overlap, entity_overlap = strong_event_link(
-            event, f"{parser.title} {body}"
+            event, f"{parser.title} {match_text}"
         )
+        discovery_route = str(candidate.get("discovery_route") or "registry_landing_page")
+        direct_specific_overlap = sorted(set(overlap) - DIRECT_URL_GENERIC_TERMS)
+        if (
+            not linked
+            and discovery_route == "embedded_event_url"
+            and (entity_overlap or direct_specific_overlap)
+        ):
+            # This exact official URL came from a record already assigned to the
+            # event. A company/claim term plus the publication window is enough;
+            # landing-page candidates retain the stricter three-term rule.
+            linked = True
         published_at = parser.published_at or publication_date_from_official_url(
             result["url"]
         )
@@ -408,10 +427,18 @@ def fetch_candidate_documents(
             "publication_window_match": time_matches,
             "body_term_overlap": overlap,
             "body_entity_overlap": entity_overlap,
+            "direct_specific_overlap": direct_specific_overlap,
+            "body_link_rule": (
+                "embedded_event_url_specific_term"
+                if linked
+                and discovery_route == "embedded_event_url"
+                and not entity_overlap
+                and len(overlap) < 3
+                else "strong_event_link"
+            ),
         })
         if not (linked and time_matches):
             continue
-        discovery_route = str(candidate.get("discovery_route") or "registry_landing_page")
         record = make_item(
             source_id="official_event_discovery",
             source_type="official_release",
