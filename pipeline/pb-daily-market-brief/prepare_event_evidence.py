@@ -227,8 +227,21 @@ def build_evidence_packets(
     max_body_chars = int(settings.get("max_official_body_chars", 12000))
     fetches_used = 0
     packets: list[dict[str, Any]] = []
+    prioritized_clusters = [
+        event
+        for _index, event in sorted(
+            enumerate(clusters),
+            key=lambda pair: (
+                matches_by_event.get(
+                    str(pair[1].get("event_id") or ""), {}
+                ).get("resolution_status") == "origin_primary_matched",
+                -pair[0],
+            ),
+            reverse=True,
+        )
+    ]
 
-    for event in clusters[:max_events]:
+    for event in prioritized_clusters[:max_events]:
         event_id = str(event.get("event_id") or "")
         source_match = matches_by_event.get(event_id, {
             "resolution_status": "search_required",

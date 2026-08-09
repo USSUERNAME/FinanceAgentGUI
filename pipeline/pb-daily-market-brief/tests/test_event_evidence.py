@@ -244,6 +244,72 @@ class OfficialBodyExtractionTests(unittest.TestCase):
         )
         fetch.assert_not_called()
 
+    def test_primary_matched_event_is_prioritized_inside_evidence_budget(self) -> None:
+        generic_events = []
+        generic_matches = []
+        generic_records = []
+        for index in range(10):
+            secondary = record(
+                record_id_source=f"publisher-{index}",
+                title=f"Generic market event {index}",
+                url=f"https://publisher.example/{index}",
+                tier="trusted",
+            )
+            generic_records.append(secondary)
+            generic_event = event_for([secondary])
+            generic_event["event_id"] = f"generic-{index}"
+            generic_events.append(generic_event)
+            generic_matches.append({
+                "event_id": generic_event["event_id"],
+                "resolution_status": "search_required",
+                "evidence_posture": "missing_required_source",
+                "matched_sources": [],
+                "official_route": {"origin_domains": []},
+                "search_plan": None,
+            })
+
+        discovered = record(
+            record_id_source="official_event_discovery",
+            title="DART filing 20260723000001",
+            url="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260723000001",
+            source_type="official_release",
+            grade="A",
+            primary=True,
+            tier="primary",
+        )
+        discovered["evidence_scope"] = "official_body_extracted"
+        discovered["raw_text"] = "알테오젠 순이익 공식 공시 본문"
+        verified_event = event_for([discovered], event_type="earnings_guidance")
+        verified_event["event_id"] = "verified-late-event"
+        verified_match = {
+            "event_id": verified_event["event_id"],
+            "resolution_status": "origin_primary_matched",
+            "evidence_posture": "research_grade_primary_available",
+            "matched_sources": [{
+                "record_id": discovered["id"],
+                "source_role": "origin_primary",
+            }],
+            "official_route": {"origin_domains": ["dart.fss.or.kr"]},
+            "search_plan": None,
+        }
+
+        payload = build_evidence_packets(
+            [*generic_events, verified_event],
+            [*generic_matches, verified_match],
+            [*generic_records, discovered],
+            {
+                "max_events": 10,
+                "max_representatives_per_event": 2,
+                "max_official_fetches": 3,
+                "max_official_body_chars": 12000,
+            },
+        )
+
+        event_ids = [row["event_id"] for row in payload["events"]]
+        self.assertEqual(event_ids[0], "verified-late-event")
+        self.assertEqual(len(event_ids), 10)
+        self.assertNotIn("generic-9", event_ids)
+
     def test_nonmember_official_record_outside_event_window_does_not_match(self) -> None:
         official = record(
             record_id_source="fed_speeches",
