@@ -172,6 +172,17 @@ const FIELD_LABELS = {
   collector: "수집기",
   companies: "기업",
   company_name: "기업명",
+  complete_core_years: "완성된 핵심 재무 연도",
+  revenue_cagr_pct: "매출 CAGR(%)",
+  operating_income_cagr_pct: "영업이익 CAGR(%)",
+  fcf_cagr_pct: "FCF CAGR(%)",
+  latest_operating_margin_pct: "최근 영업이익률(%)",
+  latest_fcf_margin_pct: "최근 FCF 마진(%)",
+  median_fcf_conversion_pct: "FCF 전환율 중앙값(%)",
+  positive_operating_income_years: "영업이익 흑자 연도",
+  positive_fcf_years: "FCF 흑자 연도",
+  diluted_share_count_change_pct: "희석주식수 변화(%)",
+  cumulative_returns_to_fcf_pct: "누적 주주환원/FCF(%)",
   company_thesis: "기업 투자 가설",
   comparability_limit: "비교 가능성 제한",
   confirmation_condition: "확인 조건",
@@ -383,6 +394,11 @@ const FIELD_VALUES = {
   telegram_priority_1: "텔레그램 우선순위 1",
   telegram_priority_2: "텔레그램 우선순위 2",
   telegram_priority_3: "텔레그램 우선순위 3",
+  verified_event_screen: "공식 사건 선별",
+  direct_user_watchlist: "직접 등록 후보",
+  sector_research: "섹터 리서치 후보",
+  financial_compounding_supported: "재무 복리 확인",
+  evaluation_withheld: "평가 보류",
   broker_research: "증권사 리서치",
   broker_us_equity_research: "미국 주식 리서치",
   broker_asset_strategy: "자산전략 리서치",
@@ -425,6 +441,7 @@ const FIELD_VALUES = {
 const VIEW_META = {
   brief: { title: "리포트 보관함", eyebrow: "ARCHIVE", placeholder: "날짜·제목·종목 검색" },
   intelligence: { title: "전체 인텔리전스", eyebrow: "FULL DAILY", placeholder: "날짜·사건·지표 검색" },
+  companies: { title: "개별주식 후보", eyebrow: "LONG-TERM REVIEW", placeholder: "날짜·기업·종목 검색" },
   telegram: { title: "텔레그램 모니터", eyebrow: "3-HOUR REFRESH", placeholder: "사건·채널 검색" },
   "world-memory": { title: "월드 메모리", eyebrow: "CONTINUITY", placeholder: "현재 스냅샷" },
 };
@@ -1151,9 +1168,100 @@ function renderTelegram(telegram) {
   return article;
 }
 
+function companyMetricCards(profile) {
+  const summary = profile.longTermSummary || {};
+  const metrics = [
+    ["영업이익 CAGR", summary.operating_income_cagr_pct, "%"],
+    ["FCF CAGR", summary.fcf_cagr_pct, "%"],
+    ["최근 영업이익률", summary.latest_operating_margin_pct, "%"],
+    ["FCF 전환율", summary.median_fcf_conversion_pct, "%"],
+  ].filter(([, value]) => finiteNumber(value) !== null);
+  const grid = element("div", "company-metric-grid");
+  metrics.forEach(([label, value, suffix]) => {
+    const card = element("article", "company-metric-card");
+    card.append(element("span", "overview-label", label));
+    card.append(element("strong", "company-metric-value", `${compactNumber(value, 2)}${suffix}`));
+    grid.append(card);
+  });
+  return grid;
+}
+
+function companyVerdictCard(title, verdict) {
+  const card = element("article", "company-verdict-card");
+  card.append(element("span", "company-verdict-title", title));
+  card.append(element("strong", "company-verdict-label", verdict?.label || valueLabel(verdict?.status || "평가 보류")));
+  if (verdict?.reason) card.append(element("p", "", verdict.reason));
+  return card;
+}
+
+function renderCompanyCandidates(bundle) {
+  const article = element("article", "report-document company-document");
+  article.append(reportHeader({
+    eyebrow: "LONG-TERM COMPANY REVIEW",
+    title: `${bundle.reportDate} 개별주식 후보`,
+    date: bundle.reportDate,
+    meta: [`분석 후보 ${bundle.profileCount || 0}개`, "공식 근거 우선", "조건부 판단"],
+  }));
+  article.append(element(
+    "p",
+    "company-disclaimer",
+    "후보 점수는 매수 신호가 아닙니다. 기업의 질, 현재 주식의 매력, 포트폴리오 적합성을 분리하고 근거가 부족하면 평가를 보류합니다.",
+  ));
+  const node = section(`분석 카드 ${bundle.profiles?.length || 0}개`, "공식 공시와 정규화된 장기 재무를 기준으로 작성했습니다.");
+  const stack = element("div", "research-stack");
+  (bundle.profiles || []).forEach((profile, index) => {
+    const details = element("details", "research-card company-card");
+    if (index === 0) details.open = true;
+    const summary = element("summary");
+    const heading = element("span", "research-heading");
+    heading.append(element("small", "", [profile.ticker, valueLabel(profile.candidateOrigin || "research_candidate")].filter(Boolean).join(" · ")));
+    heading.append(element("strong", "", profile.companyName || profile.ticker || "기업 후보"));
+    summary.append(heading, element("span", "company-grade", profile.action?.grade || "평가 보류"), element("span", "details-mark", "+"));
+    details.append(summary);
+    const body = element("div", "research-body");
+    if (profile.action?.reason) body.append(element("p", "company-action-summary", profile.action.reason));
+    const verdicts = element("div", "company-verdict-grid");
+    verdicts.append(
+      companyVerdictCard("기업의 질", profile.companyQuality),
+      companyVerdictCard("현재 주식의 매력", profile.stockAttractiveness),
+      companyVerdictCard("포트폴리오 적합성", profile.portfolioFit),
+    );
+    body.append(verdicts);
+    const metrics = companyMetricCards(profile);
+    if (metrics.childElementCount) body.append(metrics);
+    [["확인 조건", profile.action?.confirmationConditions], ["무효화 조건", profile.action?.invalidationConditions], ["다음 필요 근거", profile.action?.nextRequiredEvidence]].forEach(([title, values]) => {
+      if (!values?.length) return;
+      body.append(element("h4", "", title));
+      appendTextList(body, values, "compact-list");
+    });
+    if (profile.scorecard?.reason) {
+      body.append(element("h4", "", "점수 상태"));
+      body.append(element("p", "research-summary", `${profile.scorecard.scoredPoints || 0}/${profile.scorecard.scoredMax || 0}점 범위만 계산 · ${profile.scorecard.reason}`));
+    }
+    if (profile.sourceUrls?.length) {
+      const links = element("div", "company-source-links");
+      profile.sourceUrls.forEach((url, sourceIndex) => {
+        const link = element("a", "source-link", `공식 근거 ${sourceIndex + 1}`);
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noreferrer noopener";
+        links.append(link);
+      });
+      body.append(links);
+    }
+    details.append(body);
+    stack.append(details);
+  });
+  node.append(stack);
+  article.append(node);
+  article.append(element("footer", "report-footer", "개별주식 후보는 공개·공유용 장기투자 검토 자료이며 자동 주문이나 개인화된 매수 지시를 생성하지 않습니다."));
+  return article;
+}
+
 function currentItems() {
   if (state.view === "brief") return state.payload?.reports || [];
   if (state.view === "intelligence") return state.payload?.intelligence || [];
+  if (state.view === "companies") return state.payload?.companies || [];
   if (state.view === "telegram") return state.payload?.telegram ? [state.payload.telegram] : [];
   return state.payload?.worldMemory ? [state.payload.worldMemory] : [];
 }
@@ -1165,6 +1273,7 @@ function itemId(item) {
 function itemTitle(item) {
   if (state.view === "brief") return item.title;
   if (state.view === "intelligence") return `${item.reportDate} 전체 인텔리전스`;
+  if (state.view === "companies") return `${item.reportDate} 개별주식 후보`;
   if (state.view === "telegram") return "최신 텔레그램 모니터";
   return item.report?.title || "현재 월드 메모리";
 }
@@ -1172,6 +1281,7 @@ function itemTitle(item) {
 function itemSummary(item) {
   if (state.view === "brief") return item.executiveSummary?.[0] || "요약 없음";
   if (state.view === "intelligence") return item.market?.regime?.summary || `${item.events?.selectedCount || 0}개 이벤트`;
+  if (state.view === "companies") return `${item.profileCount || 0}개 장기투자 검토 카드`;
   if (state.view === "telegram") return `${item.eventClusterCount || 0}개 사건 · ${item.representedChannelCount || 0}개 채널`;
   return item.report?.summary || "월드 메모리 스냅샷";
 }
@@ -1182,6 +1292,9 @@ function searchableText(item) {
   }
   if (state.view === "intelligence") {
     return [item.reportDate, item.market?.regime?.label, item.market?.regime?.summary, ...(item.market?.topRisks || []), ...(item.events?.items || []).flatMap((value) => [value.title, ...(value.topicTags || [])]), ...(item.continuity?.activeEntries || []).map((value) => value.title)].join(" ").toLowerCase();
+  }
+  if (state.view === "companies") {
+    return [item.reportDate, ...(item.profiles || []).flatMap((value) => [value.ticker, value.companyName, value.action?.grade, value.action?.reason, value.companyQuality?.label, value.stockAttractiveness?.label])].join(" ").toLowerCase();
   }
   if (state.view === "telegram") {
     return [item.generatedAt, ...(item.clusters || []).flatMap((value) => [value.title, value.eventType, ...(value.channels || [])])].join(" ").toLowerCase();
@@ -1200,6 +1313,8 @@ function renderActive() {
     ? renderBrief(item)
     : state.view === "intelligence"
       ? renderIntelligence(item)
+      : state.view === "companies"
+        ? renderCompanyCandidates(item)
       : state.view === "telegram"
         ? renderTelegram(item)
         : renderWorldMemory(item);

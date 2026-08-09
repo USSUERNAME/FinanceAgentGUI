@@ -138,6 +138,60 @@ class CompanyResearchQueueTests(unittest.TestCase):
         self.assertEqual(row["queue_stage"], "valuation_expectations_gated")
         self.assertEqual(payload["advance_count"], 1)
 
+    def test_verified_event_screen_candidate_advances_to_bounded_diligence(self) -> None:
+        payload = build_company_research_queue(
+            "2026-07-20",
+            {"schema_version": "sector_leadership_radar.v1", "funnel": {}},
+            self.master,
+            self.registry,
+            {"estimate_observations": [], "operating_observations": []},
+            candidate_screen={
+                "schema_version": "us_equity_candidate_screen.v1",
+                "deep_analysis_shortlist": [{
+                    "ticker": "MSFT",
+                    "company_name": "Microsoft",
+                    "sector_ids": [],
+                    "selection_score": 62,
+                    "selection_reasons": ["material_event", "volume_anomaly"],
+                    "deep_analysis_eligible": True,
+                    "market_reaction": {"return_1d_pct": 4.2},
+                    "event_evidence": [{
+                        "primary_source_confirmed": True,
+                        "source_url": "https://www.sec.gov/example-msft",
+                        "verified_facts": [{
+                            "source_url": "https://www.sec.gov/example-msft",
+                            "value_text": "Item 2.02",
+                        }],
+                    }],
+                }],
+            },
+        )
+        self.assertEqual(payload["advance_count"], 1)
+        row = payload["candidates"][0]
+        self.assertEqual(row["candidate_origin"], "verified_event_screen")
+        self.assertEqual(row["queue_stage"], "valuation_expectations_gated")
+        self.assertEqual(row["selection_score"], 62)
+        self.assertEqual(row["exposure_status"], "verified_primary_event")
+
+    def test_event_screen_without_source_linked_fact_stays_out(self) -> None:
+        payload = build_company_research_queue(
+            "2026-07-20",
+            {"schema_version": "sector_leadership_radar.v1", "funnel": {}},
+            self.master,
+            self.registry,
+            {"estimate_observations": [], "operating_observations": []},
+            candidate_screen={"deep_analysis_shortlist": [{
+                "ticker": "MSFT",
+                "deep_analysis_eligible": True,
+                "event_evidence": [{
+                    "primary_source_confirmed": True,
+                    "source_url": "https://www.sec.gov/example-msft",
+                    "verified_facts": [],
+                }],
+            }]},
+        )
+        self.assertEqual(payload["candidate_count"], 0)
+
     def test_company_evidence_url_is_added_to_deterministic_sources(self) -> None:
         rendered = source_section([], {
             "company_research_queue": {"candidates": [{

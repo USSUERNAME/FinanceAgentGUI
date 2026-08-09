@@ -331,6 +331,7 @@ jobs:
             pipeline/pb-daily-market-brief/workspace/company_operating_bridge/
             pipeline/pb-daily-market-brief/workspace/company_operating_inputs/
             pipeline/pb-daily-market-brief/workspace/company_tearsheets/
+            pipeline/pb-daily-market-brief/workspace/company_long_term_profiles/
             pipeline/pb-daily-market-brief/workspace/company_earnings_events/
             pipeline/pb-daily-market-brief/workspace/company_earnings_event_inputs/
             pipeline/pb-daily-market-brief/workspace/company_earnings_reaction_context/
@@ -397,6 +398,7 @@ jobs:
           args=(
             --input pipeline/pb-daily-market-brief/workspace/v2_reader_reports
             --intelligence pipeline/pb-daily-market-brief/workspace/intelligence
+            --companies pipeline/pb-daily-market-brief/workspace/company_long_term_profiles
             --telegram pipeline/pb-daily-market-brief/workspace/telegram_refresh
             --world-memory .generated/private-reader-world-memory.json
             --output .generated/cloudflare-report-reader
@@ -522,6 +524,7 @@ jobs:
           args=(
             --input pipeline/pb-daily-market-brief/workspace/v2_reader_reports
             --intelligence pipeline/pb-daily-market-brief/workspace/intelligence
+            --companies pipeline/pb-daily-market-brief/workspace/company_long_term_profiles
             --telegram pipeline/pb-daily-market-brief/workspace/telegram_refresh
             --world-memory .generated/private-reader-world-memory.json
             --output .generated/cloudflare-report-reader

@@ -333,6 +333,88 @@ def _direct_candidate_rows(
     return rows
 
 
+def _screen_candidate_rows(candidate_screen: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Promote only evidence-ready anomaly candidates into bounded diligence.
+
+    The upstream screen already requires a current market snapshot, a verified
+    primary body excerpt, and at least one source-linked fact.  Rechecking those
+    gates here prevents a malformed or stale screen artifact from bypassing the
+    company-research evidence boundary.
+    """
+    rows: list[dict[str, Any]] = []
+    for candidate in (candidate_screen or {}).get("deep_analysis_shortlist", []):
+        if candidate.get("deep_analysis_eligible") is not True:
+            continue
+        events = candidate.get("event_evidence") or []
+        verified_events = [
+            event for event in events
+            if event.get("primary_source_confirmed") is True
+            and str(event.get("source_url") or "").startswith("https://")
+            and any(
+                str(fact.get("source_url") or "").startswith("https://")
+                for fact in event.get("verified_facts") or []
+            )
+        ]
+        if not verified_events:
+            continue
+        ticker = str(candidate.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        source_urls = sorted({
+            str(url)
+            for event in verified_events
+            for url in [
+                event.get("source_url"),
+                *[fact.get("source_url") for fact in event.get("verified_facts") or []],
+            ]
+            if str(url or "").startswith("https://")
+        })
+        selection_score = int(candidate.get("selection_score") or 0)
+        reasons = [str(value) for value in candidate.get("selection_reasons") or []]
+        rows.append({
+            "candidate_id": f"event_screen:US:{ticker}",
+            "sector_id": (candidate.get("sector_ids") or ["event_screen"])[0],
+            "sector_name_ko": "공식 사건 기반 후보",
+            "sector_radar_stage": "verified_event_candidate",
+            "sector_radar_bucket": "event_screen_deep_analysis",
+            "sector_leadership_score": None,
+            "market": "US",
+            "ticker": ticker,
+            "company_name": candidate.get("company_name") or ticker,
+            "instrument_type": "equity",
+            "queue_stage": "valuation_expectations_gated",
+            "actionability": "advance_to_company_diligence",
+            "candidate_origin": "verified_event_screen",
+            "direct_input_sources": [],
+            "exposure_status": "verified_primary_event",
+            "exposure_source_url": source_urls[0],
+            "exposure_body_location": "verified primary event body and structured fact",
+            "exposure_evidence_summary": (
+                f"공식 원문 사실이 확인된 사건 후보이며 선별 점수는 {selection_score}/100입니다."
+            ),
+            "beneficiary_pathways": [],
+            "estimate_signal": None,
+            "operating_signals": [],
+            "source_urls": source_urls,
+            "selection_score": selection_score,
+            "selection_reasons": reasons,
+            "market_reaction": candidate.get("market_reaction") or {},
+            "why_now": "공식 원문 사실과 유의미한 가격·거래량 신호가 함께 확인돼 장기 기업분석 후보로 승격됐습니다.",
+            "variant_wedge": "단기 사건이 장기 영업이익·FCF와 경쟁력에 미치는 영향은 아직 확정하지 않습니다.",
+            "priced_in_status": "data_gap",
+            "valuation_status": "not_collected",
+            "market_data_as_of": None,
+            "liquidity_status": "screened_market_snapshot_only",
+            "positioning_status": "not_collected",
+            "first_rejection": "공식 사건 확인만으로 장기 경쟁력이나 현재 가격의 매력을 확정할 수 없습니다.",
+            "what_would_make_it_investable": "5개년 영업이익·FCF, 사업 해자, 자본배분, 현재 밸류에이션과 3개 시나리오를 확인합니다.",
+            "what_would_kill_it": "공식 사실의 중요성이 낮거나 현금창출력·마진·경쟁력이 훼손되고 시장 기대가 과도하면 후보 논리를 폐기합니다.",
+            "next_workflow": "collect_long_term_company_facts_then_quality_valuation_review",
+            "posture": "verified_event_research_candidate_not_investment_recommendation",
+        })
+    return rows
+
+
 def validate_company_research_queue(payload: dict[str, Any]) -> None:
     if payload.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("Unexpected company research queue schema")
@@ -342,10 +424,16 @@ def validate_company_research_queue(payload: dict[str, Any]) -> None:
             raise ValueError(f"Duplicate company candidate: {row['candidate_id']}")
         ids.add(row["candidate_id"])
         if row["queue_stage"] == "valuation_expectations_gated":
-            direct = row.get("candidate_origin") == "direct_user_watchlist"
-            if not direct and (row["exposure_status"] != "verified_primary" or not row.get("exposure_source_url")):
+            origin = row.get("candidate_origin")
+            bypasses_sector_exposure = origin in {"direct_user_watchlist", "verified_event_screen"}
+            if not bypasses_sector_exposure and (row["exposure_status"] != "verified_primary" or not row.get("exposure_source_url")):
                 raise ValueError("Advanced company diligence requires primary exposure proof")
-            if not direct and not (
+            if origin == "verified_event_screen" and (
+                row.get("exposure_status") != "verified_primary_event"
+                or not row.get("source_urls")
+            ):
+                raise ValueError("Event-screen diligence requires verified primary event evidence")
+            if not bypasses_sector_exposure and not (
                 bool((row.get("estimate_signal") or {}).get("eligible"))
                 or bool(row.get("operating_signals"))
             ):
@@ -363,6 +451,7 @@ def build_company_research_queue(
     registry: dict[str, Any],
     fundamentals: dict[str, Any],
     direct_inputs: list[dict[str, Any]] | None = None,
+    candidate_screen: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     sectors = {row["sector_id"]: row for row in master["sectors"]}
     exposure_map = _verified_exposure_map(registry)
@@ -380,12 +469,19 @@ def build_company_research_queue(
     direct_rows = _direct_candidate_rows(
         direct_inputs or [], master, exposure_map, estimates, operating,
     )
-    direct_tickers = {(row["market"], row["ticker"]) for row in direct_rows}
+    screen_rows = _screen_candidate_rows(candidate_screen)
+    priority_rows = [*direct_rows, *screen_rows]
+    priority_tickers = {(row["market"], row["ticker"]) for row in priority_rows}
     candidates = [
         row for row in candidates
-        if (row["market"], row["ticker"]) not in direct_tickers
+        if (row["market"], row["ticker"]) not in priority_tickers
     ]
+    direct_tickers = {(row["market"], row["ticker"]) for row in direct_rows}
     candidates.extend(direct_rows)
+    candidates.extend(
+        row for row in screen_rows
+        if (row["market"], row["ticker"]) not in direct_tickers
+    )
     stage_priority = {
         "valuation_expectations_gated": 0,
         "verified_exposure_needs_financial_signal": 1,
@@ -425,6 +521,8 @@ def build_company_research_queue(
         "methodology": {
             "advanced_sector_required_for_company_advance": True,
             "direct_user_research_bypasses_sector_radar": True,
+            "verified_event_screen_bypasses_sector_radar": True,
+            "verified_primary_event_required_for_screen_advance": True,
             "primary_exposure_proof_required": True,
             "company_estimate_or_operating_signal_required": True,
             "valuation_and_priced_in_gate_present": False,
@@ -446,6 +544,7 @@ def main() -> None:
     parser.add_argument("--radar-file")
     parser.add_argument("--fundamentals-file")
     parser.add_argument("--direct-input-file")
+    parser.add_argument("--candidate-screen-file")
     parser.add_argument("--output-file")
     args = parser.parse_args()
     radar_path = root_path(
@@ -469,6 +568,10 @@ def main() -> None:
         load_direct_company_inputs(
             root_path(args.direct_input_file, TRANSACTION_SETTINGS_PATH)
         ),
+        json.loads(root_path(
+            args.candidate_screen_file,
+            ROOT / "workspace" / "us_equity_candidate_screen" / args.date / "candidate_screen.json",
+        ).read_text(encoding="utf-8-sig")),
     )
     output = root_path(
         args.output_file,
