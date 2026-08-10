@@ -86,6 +86,32 @@ class CompanyKoreaTransmissionTests(unittest.TestCase):
         confirmation = payload["transmissions"][0]["market_confirmation"]
         self.assertEqual(confirmation["status"], "ready")
 
+    def test_profile_only_us_ticker_uses_explicit_sector_master_membership(self) -> None:
+        inputs = self.inputs()
+        inputs["queue"] = {"candidates": []}
+        inputs["long_term_profiles"]["profiles"][0].update({
+            "company_name": "NVIDIA",
+            "candidate_origin": "direct_user_watchlist",
+        })
+        inputs["sector_master"]["sectors"][0]["representative_companies"].insert(0, {
+            "market": "US",
+            "ticker": "NVDA",
+            "name": "NVIDIA",
+        })
+        payload = build_company_korea_transmission("2026-08-09", **inputs)
+        self.assertEqual(payload["summary"]["source_company_count"], 1)
+        self.assertEqual(
+            payload["transmissions"][0]["source_origin"],
+            "company_long_term_profile",
+        )
+
+    def test_profile_only_unknown_ticker_does_not_get_sector_inferred(self) -> None:
+        inputs = self.inputs()
+        inputs["queue"] = {"candidates": []}
+        inputs["long_term_profiles"]["profiles"][0]["ticker"] = "UNKNOWN"
+        payload = build_company_korea_transmission("2026-08-09", **inputs)
+        self.assertEqual(payload["summary"]["source_company_count"], 0)
+
     def test_validator_rejects_invented_direct_link(self) -> None:
         payload = build_company_korea_transmission("2026-08-09", **self.inputs())
         tampered = copy.deepcopy(payload)
