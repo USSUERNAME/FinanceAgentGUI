@@ -156,6 +156,7 @@ class WorkflowArtifactTests(unittest.TestCase):
 
     def test_broker_research_cold_ocr_has_bounded_actions_timeout(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
         self.assertIn(
             'COLLECTOR_TIMEOUT_AUTHORIZED_REPORT_DROP_SECONDS: "300"',
             workflow,
@@ -173,6 +174,7 @@ class WorkflowArtifactTests(unittest.TestCase):
             'COLLECTOR_TIMEOUT_TELEGRAM_CHANNELS_SECONDS: "300"',
             app_workflow,
         )
+        self.assertIn("cryptography>=3.1", requirements)
 
     def test_korea_market_credentials_are_forwarded_to_actions(self) -> None:
         workflow = APP_WORKFLOW.read_text(encoding="utf-8")
