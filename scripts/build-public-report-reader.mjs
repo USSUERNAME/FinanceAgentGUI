@@ -568,6 +568,21 @@ async function collectCompanyCandidates(companiesDir, candidateScreensDir) {
       console.warn(`Skipped ${basename(file)}: ${error.message}`);
     }
   }
+  for (const [reportDate, screen] of screensByDate.entries()) {
+    if (byDate.has(reportDate)) continue;
+    byDate.set(reportDate, {
+      schemaVersion: "private_company_candidates.v1",
+      reportDate,
+      profileCount: 0,
+      profiles: [],
+      ...screen,
+      policy: {
+        companyStockPortfolioSeparated: true,
+        overallScoreRequiresCompleteEvidence: true,
+        automaticPositionActionsAllowed: false,
+      },
+    });
+  }
   return [...byDate.values()]
     .sort((a, b) => b.reportDate.localeCompare(a.reportDate))
     .slice(0, MAX_REPORTS);

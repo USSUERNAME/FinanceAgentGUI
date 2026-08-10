@@ -424,6 +424,31 @@ test("reader builder combines brief, full intelligence, company candidates, Tele
   assert.doesNotMatch(serialized, /PDF 원문|never-publish-this|drop-oauth|drop thesis|private_token|private-report|never publish|drop this body|drop-session/);
 });
 
+test("reader builder keeps a candidate-only date as a C-grade performance observation", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "public-report-reader-screen-only-"));
+  const candidateScreensDir = join(root, "workspace", "us_equity_candidate_screen", "2026-08-08");
+  const outputDir = join(root, "output");
+  await mkdir(candidateScreensDir, { recursive: true });
+  await writeFile(join(candidateScreensDir, "candidate_screen.json"), JSON.stringify(privateCandidateScreen()), "utf8");
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const result = await buildPublicReportReader({
+    inputDir: join(root, "workspace", "v2_reader_reports"),
+    companiesDir: join(root, "workspace", "company_long_term_profiles"),
+    candidateScreensDir: join(root, "workspace", "us_equity_candidate_screen"),
+    outputDir,
+    templateDir,
+  });
+  const payload = JSON.parse(await readFile(join(outputDir, "reports.json"), "utf8"));
+  assert.equal(result.companyDateCount, 1);
+  assert.equal(result.companyProfileCount, 0);
+  assert.equal(result.companyPendingCount, 1);
+  assert.equal(payload.companies[0].pendingCandidates[0].ticker, "TTD");
+  assert.equal(payload.candidatePerformance[0].ticker, "TTD");
+  assert.equal(payload.candidatePerformance[0].grade, "C");
+  assert.equal(payload.candidatePerformance[0].firstPrice, 13.79);
+});
+
 test("reader builder merges prior sanitized dates and preserves World Memory", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "public-report-reader-history-"));
   const inputDir = join(root, "input", "2026-08-08");
@@ -529,6 +554,10 @@ test("three-hour Telegram workflow rebuilds and deploys the protected reader saf
   assert.match(workflow, /cron: "17 \*\/3 \* \* \*"/);
   assert.match(workflow, /Validate previous private-reader bundle/);
   assert.match(workflow, /--telegram pipeline\/pb-daily-market-brief\/workspace\/telegram_refresh/);
+  assert.match(workflow, /Restore latest verified stock reader inputs/);
+  assert.match(workflow, /stock-reader-inputs-v1-/);
+  assert.match(workflow, /--candidate-screens pipeline\/pb-daily-market-brief\/workspace\/us_equity_candidate_screen/);
+  assert.match(workflow, /Validate stock gate and performance observation/);
   assert.match(workflow, /Deploy Telegram monitor to Cloudflare Pages/);
   assert.match(workflow, /vars\.CLOUDFLARE_REPORTS_PROTECTED == 'true'/);
   assert.match(workflow, /private-reader-history-/);

@@ -33,6 +33,23 @@ class WorkflowArtifactTests(unittest.TestCase):
             self.assertIn("telegram-refresh-v1", workflow)
             self.assertIn("workspace/telegram_refresh/", workflow)
 
+    def test_three_hour_reader_reuses_latest_verified_stock_inputs(self) -> None:
+        daily = APP_WORKFLOW.read_text(encoding="utf-8")
+        telegram = APP_TELEGRAM_WORKFLOW.read_text(encoding="utf-8")
+        self.assertGreaterEqual(daily.count("Save verified stock reader inputs"), 2)
+        self.assertIn("stock-reader-inputs-v1", daily)
+        self.assertIn("Restore latest verified stock reader inputs", telegram)
+        self.assertIn("stock-reader-inputs-v1", telegram)
+        self.assertIn(
+            "--companies pipeline/pb-daily-market-brief/workspace/company_long_term_profiles",
+            telegram,
+        )
+        self.assertIn(
+            "--candidate-screens pipeline/pb-daily-market-brief/workspace/us_equity_candidate_screen",
+            telegram,
+        )
+        self.assertIn("Validate stock gate and performance observation", telegram)
+
     def test_app_workflow_accepts_remote_runner_correlation_id(self) -> None:
         workflow = APP_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("client_request_id:", workflow)
