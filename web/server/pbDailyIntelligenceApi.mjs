@@ -1162,6 +1162,7 @@ function normalizeScoreboard(intelligence = {}) {
   const volatility = scoreboard.volatility || {};
   const credit = scoreboard.credit || {};
   const rates = scoreboard.rates || {};
+  const macroIndicators = scoreboard.macro_indicators || {};
   const participation = scoreboard.rule_based_signal?.participation || {};
   return {
     regime: {
@@ -1235,6 +1236,30 @@ function normalizeScoreboard(intelligence = {}) {
       { label: "IWM/SPY", value: finiteNumber(participation.iwm_vs_spy_5d_pct) },
       { label: "GLD/SPY", value: finiteNumber(participation.gld_vs_spy_5d_pct) },
     ].filter((item) => item.value !== null),
+    macroIndicators: {
+      status: cleanText(macroIndicators.status, 80) || "not_collected",
+      availableCount: Number(macroIndicators.available_count || 0),
+      requiredMetricIds: cleanList(macroIndicators.required_metric_ids, 10)
+        .map((item) => cleanText(item, 80)).filter(Boolean),
+      observations: cleanList(macroIndicators.observations, 10).map((item) => ({
+        metricId: cleanText(item?.metric_id, 80),
+        label: cleanText(item?.label, 160),
+        axis: cleanText(item?.axis, 40),
+        value: finiteNumber(item?.value),
+        rawValue: finiteNumber(item?.raw_value),
+        unit: cleanText(item?.unit, 40),
+        change: finiteNumber(item?.change),
+        comparison: cleanText(item?.comparison, 100),
+        direction: cleanText(item?.direction, 40),
+        asOf: cleanText(item?.as_of, 40),
+        provider: cleanText(item?.provider, 120),
+        sourceUrl: /^https?:\/\//i.test(String(item?.source_url || ""))
+          ? String(item.source_url)
+          : "",
+        primarySourceConfirmed: item?.primary_source_confirmed === true,
+        evidenceBoundary: cleanText(item?.evidence_boundary, 240),
+      })).filter((item) => item.metricId && item.value !== null),
+    },
   };
 }
 
@@ -1253,7 +1278,7 @@ function authoritativeMacroEvidence(item = {}) {
   );
   return item?.primarySourceConfirmed === true
     || item?.primary_source_confirmed === true
-    || /\b(BLS|BEA|Federal Reserve|Fed|US Treasury)\b/i.test(sourceType);
+    || /\b(BLS|BEA|Federal Reserve|Fed|US Treasury|ISM)\b/i.test(sourceType);
 }
 
 function macroEvidenceAxis(item = {}) {
@@ -1321,14 +1346,10 @@ export function buildMarketRegimeFramework({
   const sectorLeadershipReady = cleanList(marketInternals?.sectors?.["5d"], 20).length > 0;
   const earningsSummary = report?.earningsWatch?.summary || {};
   const earningsCompanies = cleanList(report?.earningsWatch?.companies, 30);
-  const earningsEvidenceCount = Number(earningsSummary.confirmedEventCount || 0)
-    + Number(earningsSummary.estimateRevisionCount || 0)
-    + Number(earningsSummary.guidanceCount || 0)
-    + Number(earningsSummary.verifiedResultCount || 0);
-  const earningsDates = earningsCompanies.flatMap((company) => [
-    company?.estimateRevision?.freezeAsOf,
-    ...cleanList(company?.historicalSurprises, 8).map((item) => item?.reportedDate),
-  ]);
+  const marketEarningsCycle = market.earnings_cycle || {};
+  const marketEarningsCoverage = Number(marketEarningsCycle.coverage_company_count || 0);
+  const marketEarningsReady = marketEarningsCycle.status === "ready_market_wide"
+    && marketEarningsCycle.market_wide === true;
   const volatilityFields = {
     vix: cards.get("vix") || null,
     vixTerm: cards.get("vix-term") || null,
@@ -1337,9 +1358,14 @@ export function buildMarketRegimeFramework({
   };
   const volatilityReady = Boolean(volatilityFields.vix && volatilityFields.vixTerm);
   const positioningReady = Boolean(volatilityFields.positioning);
+  const volatilityObserved = Object.values(volatilityFields).filter(Boolean).length;
   const indexTrend = null;
   const macroRegime = market.growth_inflation_regime || market.macro_regime || {};
-  const macroEvidence = cleanList(macroRegime.evidence || macroRegime.quantitative_evidence, 20)
+  const indicatorEvidence = cleanList(scoreboard?.macroIndicators?.observations, 10);
+  const macroEvidence = [
+    ...cleanList(macroRegime.evidence || macroRegime.quantitative_evidence, 20),
+    ...indicatorEvidence,
+  ]
     .map((item) => (typeof item === "string" ? { observation: cleanText(item, 500) } : item));
   const authoritativeGrowthEvidence = macroEvidence.filter(
     (item) => authoritativeMacroEvidence(item) && macroEvidenceAxis(item) === "growth",
@@ -1347,13 +1373,37 @@ export function buildMarketRegimeFramework({
   const authoritativeInflationEvidence = macroEvidence.filter(
     (item) => authoritativeMacroEvidence(item) && macroEvidenceAxis(item) === "inflation",
   );
-  const growthDirection = cleanText(
+  const explicitGrowthDirection = cleanText(
     macroRegime.growthDirection || macroRegime.growth_direction,
     40,
   );
-  const inflationDirection = cleanText(
+  const explicitInflationDirection = cleanText(
     macroRegime.inflationDirection || macroRegime.inflation_direction,
     40,
+  );
+  const growthIndicatorDirections = authoritativeGrowthEvidence
+    .map((item) => cleanText(item?.direction, 40)).filter(Boolean);
+  const inflationIndicatorDirections = authoritativeInflationEvidence
+    .map((item) => cleanText(item?.direction, 40)).filter(Boolean);
+  const growthDirection = explicitGrowthDirection || (
+    growthIndicatorDirections.some((item) => /contract/.test(item))
+      ? growthIndicatorDirections.some((item) => /expand|accelerat/.test(item))
+        ? "mixed"
+        : "contracting"
+      : growthIndicatorDirections.length
+        ? "expanding"
+        : ""
+  );
+  const inflationDirection = explicitInflationDirection || (
+    inflationIndicatorDirections.includes("heating") && inflationIndicatorDirections.includes("cooling")
+      ? "mixed"
+      : inflationIndicatorDirections.includes("heating")
+        ? "heating"
+        : inflationIndicatorDirections.includes("cooling")
+          ? "cooling"
+          : inflationIndicatorDirections.length
+            ? "stable"
+            : ""
   );
   const regimeReady = Boolean(growthDirection && inflationDirection)
     && authoritativeGrowthEvidence.length >= 1
@@ -1387,6 +1437,21 @@ export function buildMarketRegimeFramework({
         inflationDirection: inflationDirection || "unknown",
         quadrant: cleanText(macroRegime.quadrant, 80) || "unknown",
         evidence: macroEvidence,
+        officialIndicators: indicatorEvidence,
+        observations: indicatorEvidence.map((item) => ({
+          labelKo: item.label,
+          value: item.value,
+          unit: item.unit ? ` ${item.unit}` : "",
+          asOf: item.asOf,
+        })),
+        missingInputs: cleanList(scoreboard?.macroIndicators?.requiredMetricIds, 10)
+          .filter((metricId) => !indicatorEvidence.some((item) => item.metricId === metricId))
+          .map((metricId) => ({
+            cpiaucsl: "CPI",
+            pcepi: "PCE 물가",
+            payems: "비농업 고용",
+            ism_manufacturing_pmi: "ISM 제조업 PMI",
+          }[metricId] || metricId)),
         authoritativeGrowthEvidenceCount: authoritativeGrowthEvidence.length,
         authoritativeInflationEvidenceCount: authoritativeInflationEvidence.length,
         marketRiskRegime: scoreboard?.regime || null,
@@ -1395,19 +1460,50 @@ export function buildMarketRegimeFramework({
     },
     {
       id: "earnings_cycle",
-      status: earningsEvidenceCount > 0 ? "verified" : report ? "insufficient" : "accumulating",
+      status: marketEarningsReady
+        ? "verified"
+        : marketEarningsCoverage > 0
+          ? "partial"
+          : report
+            ? "insufficient"
+            : "accumulating",
       labelKo: "실적 사이클",
-      summary: earningsEvidenceCount > 0
-        ? `확인 실적·추정치·가이던스 근거 ${earningsEvidenceCount}건을 추적합니다.`
-        : "실적 결과·추정치 변화·가이던스 자료가 부족합니다.",
+      summary: marketEarningsReady
+        ? `S&P 500 ${marketEarningsCoverage}개사의 추정치 변화를 시장 전체 범위로 확인했습니다.`
+        : marketEarningsCoverage > 0
+          ? `S&P 500 목표 500개사 중 ${marketEarningsCoverage}개사 표본만 연결되어 시장 전체 판정은 보류합니다.`
+          : "S&P 500 범위의 EPS 추정치 상향·하향 자료가 부족합니다.",
       data: {
-        summary: earningsSummary,
-        companies: earningsCompanies.map((company) => ({
+        marketSummary: {
+          status: cleanText(marketEarningsCycle.status, 80),
+          targetUniverse: cleanText(marketEarningsCycle.target_universe, 80) || "S&P 500",
+          targetCompanyCount: Number(marketEarningsCycle.target_company_count || 500),
+          coverageCompanyCount: marketEarningsCoverage,
+          coveragePct: finiteNumber(marketEarningsCycle.coverage_pct),
+          positiveRevisionCount: Number(marketEarningsCycle.positive_revision_count || 0),
+          negativeRevisionCount: Number(marketEarningsCycle.negative_revision_count || 0),
+          activationRequirement: cleanText(marketEarningsCycle.activation_requirement, 500),
+        },
+        candidateContext: {
+          summary: earningsSummary,
+          companies: earningsCompanies.map((company) => ({
           ticker: company.ticker,
           upcomingEvent: company.upcomingEvent,
           estimateRevision: company.estimateRevision,
           guidanceCount: cleanList(company.guidance, 8).length,
-        })),
+          })),
+          boundary: "후보 종목 자료는 시장 전체 실적 사이클 판정에 포함하지 않습니다.",
+        },
+        observations: marketEarningsCoverage > 0 ? [{
+          labelKo: "추정치 표본 커버리지",
+          value: marketEarningsCoverage,
+          unit: `/ ${Number(marketEarningsCycle.target_company_count || 500)}개사`,
+          asOf: cleanText(marketEarningsCycle.as_of, 40),
+        }] : [],
+        missingInputs: marketEarningsReady ? [] : [
+          cleanText(marketEarningsCycle.activation_requirement, 500)
+            || "S&P 500 400개사 이상의 동일 기준일 추정치 변화",
+        ],
       },
     },
     {
@@ -1428,16 +1524,51 @@ export function buildMarketRegimeFramework({
     },
     {
       id: "volatility_positioning",
-      status: volatilityReady && positioningReady ? "verified" : scoreboard ? "insufficient" : "accumulating",
+      status: volatilityReady && positioningReady
+        ? "verified"
+        : volatilityObserved > 0
+          ? "partial"
+          : scoreboard
+            ? "insufficient"
+            : "accumulating",
       labelKo: "변동성·포지셔닝",
       summary: volatilityReady
         ? "VIX·기간구조는 확인됐지만 옵션·선물 포지셔닝 자료가 없어 부분 상태입니다."
         : "VIX 기간구조와 포지셔닝 자료를 축적 중입니다.",
-      data: volatilityFields,
+      data: {
+        ...volatilityFields,
+        observations: [
+          volatilityFields.vix && {
+            labelKo: "VIX",
+            value: volatilityFields.vix.value,
+            unit: volatilityFields.vix.unit,
+            asOf: volatilityFields.vix.asOf,
+          },
+          volatilityFields.vixTerm && {
+            labelKo: "VIX/3개월",
+            value: volatilityFields.vixTerm.value,
+            unit: volatilityFields.vixTerm.unit,
+            asOf: volatilityFields.vixTerm.asOf,
+          },
+          volatilityFields.creditSpread && {
+            labelKo: "하이일드 OAS",
+            value: volatilityFields.creditSpread.value,
+            unit: volatilityFields.creditSpread.unit,
+            asOf: volatilityFields.creditSpread.asOf,
+          },
+        ].filter(Boolean),
+        missingInputs: positioningReady ? [] : ["옵션·선물 포지셔닝 자료"],
+      },
     },
     {
       id: "index_internals",
-      status: internalsReady && indexTrend ? "verified" : marketInternals ? "insufficient" : "accumulating",
+      status: internalsReady && indexTrend
+        ? "verified"
+        : internalsReady
+          ? "partial"
+          : marketInternals
+            ? "insufficient"
+            : "accumulating",
       labelKo: "지수 추세·내부 체력",
       summary: internalsReady && indexTrend
         ? "지수 추세 차트와 구성종목 브레드스가 함께 준비됐습니다."
@@ -1449,6 +1580,33 @@ export function buildMarketRegimeFramework({
         coverage: marketInternals?.coverage || null,
         constituentBreadth: marketInternals?.constituentBreadth || null,
         sectorBreadth: marketInternals?.sectorBreadth || null,
+        observations: marketInternals?.constituentBreadth?.status === "ready" ? [
+          {
+            labelKo: "상승 종목 비율",
+            value: marketInternals.constituentBreadth.advancePct,
+            unit: "%",
+            asOf: marketInternals.constituentBreadth.asOf,
+          },
+          {
+            labelKo: "200일선 위",
+            value: marketInternals.constituentBreadth.above200dPct,
+            unit: "%",
+            asOf: marketInternals.constituentBreadth.asOf,
+          },
+          {
+            labelKo: "신고가/신저가",
+            value: `${marketInternals.constituentBreadth.newHighs ?? "-"}/${marketInternals.constituentBreadth.newLows ?? "-"}`,
+            unit: "",
+            asOf: marketInternals.constituentBreadth.asOf,
+          },
+          {
+            labelKo: "상승 거래량 비중",
+            value: marketInternals.constituentBreadth.upVolumePct,
+            unit: "%",
+            asOf: marketInternals.constituentBreadth.asOf,
+          },
+        ] : [],
+        missingInputs: indexTrend ? [] : ["지수 추세 차트"],
       },
     },
     {
@@ -1478,7 +1636,7 @@ export function buildMarketRegimeFramework({
   const stageDateValues = {
     official_calendar: [calendar.last_successful_at, calendar.collected_at],
     growth_inflation_regime: macroEvidence.map((item) => item?.asOf || item?.as_of || item?.date),
-    earnings_cycle: earningsDates,
+    earnings_cycle: [marketEarningsCycle.as_of],
     rates_liquidity: Object.values(rateFields).map((item) => item?.asOf),
     fx_commodities: cleanList(report?.koreaConnection?.metrics, 12)
       .map((item) => item?.asOf || item?.as_of),
@@ -1497,6 +1655,7 @@ export function buildMarketRegimeFramework({
     stages: datedStages,
     completeness: {
       completed: datedStages.filter((stage) => stage.status === "verified").length,
+      partial: datedStages.filter((stage) => stage.status === "partial").length,
       total: datedStages.length,
     },
   };

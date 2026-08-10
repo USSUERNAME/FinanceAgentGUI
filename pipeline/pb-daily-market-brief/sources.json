@@ -305,7 +305,9 @@
         "time_zone": "America/New_York",
         "format": "ics",
         "fallback_format": "bls_html",
-        "fallback_url_template": "https://www.bls.gov/schedule/{year}/{month}_sched_list.htm"
+        "fallback_url_template": "https://www.bls.gov/schedule/{year}/{month}_sched_list.htm",
+        "secondary_fallback_format": "dol_release_notices",
+        "secondary_fallback_url": "https://www.dol.gov/index.php/newsroom/economicdata"
       },
       {
         "id": "bea_release_calendar",

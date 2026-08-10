@@ -201,6 +201,22 @@ function candidateSpecificInvalidation(candidate) {
   return `${ticker}의 5일 SPY 상대수익이 0%p 아래로 반전하거나 공식 촉매가 확인되지 않으면 상승 지속 가설을 재검토합니다.`;
 }
 
+function refinedInvalidationCondition(candidate, explicitCondition = "") {
+  const explicit = text(explicitCondition);
+  if (!explicit) return "";
+  const ticker = tickerOf(candidate?.ticker);
+  if (ticker && explicit.toUpperCase().includes(ticker)) return explicit;
+  const move = buildCandidateMarketMove(candidate);
+  const relative5d = finite(candidate?.reaction?.spyRelative5d);
+  if (move.return1d !== null && move.return1d < 0) {
+    return `${ticker}의 1일 급락 이후에도 5일 SPY 상대수익률${relative5d === null ? "" : ` ${relative5d.toFixed(2)}%p`} 약세가 이어지고, 다음 공식 실적에서 영업마진 또는 FCF가 추가 악화되면 후보 논리를 폐기합니다.`;
+  }
+  if (move.return1d !== null && move.return1d > 0) {
+    return `${ticker}의 5일 SPY 상대수익률이 0%p 아래로 반전하거나, 다음 공식 실적에서 매출 성장·마진·FCF 중 두 항목이 둔화되면 상승 후보 논리를 폐기합니다.`;
+  }
+  return `${ticker}의 다음 공식 실적에서 매출 성장·마진·FCF 중 두 항목이 악화되고 상대수익률도 약세로 전환되면 후보 논리를 폐기합니다.`;
+}
+
 function normalizedTradeHorizon(candidate) {
   const value = text(candidate?.tradePlan?.tradeHorizon || candidate?.tradeHorizon);
   return STOCK_TRADE_HORIZONS.includes(value) ? value : "unclassified";
@@ -484,7 +500,7 @@ function buildIntegratedResearch(candidate, filing, earningsCompany) {
     scenarios: {
       bull: text(action?.confirmationConditions?.[0]),
       base: text(filing?.analysis?.thesisEffectReasonKo || filing?.analysis?.summaryKo),
-      bear: text(action?.invalidationConditions?.[0]),
+      bear: text(candidate?.counterEvidence),
     },
     nextChecks: [
       ...list(filing?.analysis?.monitoringPointsKo).map(text),
@@ -512,20 +528,25 @@ function buildMacroPath(candidate, context) {
     .map((target) => `${text(target?.companyName) || text(target?.ticker)} ${text(target?.classificationLabel)}`.trim())
     .filter(Boolean)
     .join(" · ");
+  const marketStages = list(context?.marketFramework?.stages);
+  const ratesStage = marketStages.find((stage) => stage?.id === "rates_liquidity") || null;
+  const riskStage = marketStages.find((stage) => stage?.id === "volatility_positioning") || null;
   return {
     status: rateFinding && linkedSector ? "linked" : "partial",
     steps: [
       {
-        label: "경제지표",
-        value: text(rateFinding?.title) || "공식 거시 지표 연결 대기",
+        label: "시장 가격",
+        value: text(rateFinding?.title) || "금리·변동성 시장가격 연결 대기",
         detail: text(rateFinding?.body),
-        evidenceType: rateFinding ? "공식 사실" : "미검증",
+        evidenceType: rateFinding ? "공식 시장 시계열" : "미검증",
+        asOf: text(ratesStage?.asOf || riskStage?.asOf),
       },
       {
-        label: "금리·환율·유가",
+        label: "시장 위험 레짐",
         value: text(context?.regime?.primaryDriver) || "시장 체제 연결 대기",
         detail: text(context?.regime?.evidence?.[0]),
-        evidenceType: context?.regime?.primaryDriver ? "작성자 추론" : "미검증",
+        evidenceType: context?.regime?.primaryDriver ? "참고용 가격 레짐" : "미검증",
+        asOf: text(riskStage?.asOf),
       },
       {
         label: "섹터·기업 영향",
@@ -534,6 +555,7 @@ function buildMacroPath(candidate, context) {
           : "표준 섹터 노출 확인 대기",
         detail: text(linkedSector?.reason || candidate?.exposureLabel),
         evidenceType: linkedSector ? "작성자 추론" : "미검증",
+        asOf: text(marketStages.find((stage) => stage?.id === "sector_leadership")?.asOf),
       },
       {
         label: "한국시장 연결",
@@ -553,12 +575,7 @@ function buildMacroPath(candidate, context) {
             : koreaTransmission
               ? "작성자 추론"
               : "자료 부족",
-      },
-      {
-        label: "무효화 조건",
-        value: text(candidate?.invalidationConditions?.[0]) || text(context?.regime?.invalidationCondition) || "조건 미작성",
-        detail: "조건 충족 시 후보 등급을 재검토합니다.",
-        evidenceType: candidate?.invalidationConditions?.[0] ? "검증 규칙" : "시장 공통 규칙",
+        asOf: text(marketStages.find((stage) => stage?.id === "korea_transmission")?.asOf),
       },
     ],
   };
@@ -618,12 +635,15 @@ export function evaluateStockCandidateGate(candidate = {}, context = {}) {
   const explicitCounterEvidence = text(filing?.analysis?.risksKo?.[0])
     || text(earningsCompany?.longTermAnalysis?.action?.reason);
   const counterEvidence = explicitCounterEvidence || candidateSpecificCounterEvidence(candidate);
-  const explicitInvalidationConditions = [
+  const rawExplicitInvalidationConditions = [
     ...list(
     earningsCompany?.longTermAnalysis?.action?.invalidationConditions,
     ),
     text(stockAnalysisCard?.invalidationCondition),
   ].map(text).filter(Boolean);
+  const explicitInvalidationConditions = rawExplicitInvalidationConditions.length
+    ? [refinedInvalidationCondition(candidate, rawExplicitInvalidationConditions[0])]
+    : [];
   const invalidationConditions = explicitInvalidationConditions.length
     ? explicitInvalidationConditions
     : [candidateSpecificInvalidation(candidate)];
@@ -724,6 +744,9 @@ export function buildStockGateRolloutSimulation(candidates = []) {
     && (targetPassingCount === 0 || passRetention < 0.5)
     ? "hold_activation"
     : "ready_for_review";
+  const latestAsOf = evaluated.map((candidate) => text(candidate?.asOf)).filter(Boolean).sort().at(-1) || "";
+  const reviewDate = latestAsOf ? new Date(`${latestAsOf}T00:00:00Z`) : null;
+  if (reviewDate) reviewDate.setUTCDate(reviewDate.getUTCDate() + 30);
   return {
     schemaVersion: "stock_gate_rollout_simulation.v1",
     activeGateChanged: false,
@@ -736,6 +759,13 @@ export function buildStockGateRolloutSimulation(candidates = []) {
     reason: activationDecision === "hold_activation"
       ? "목표 게이트를 즉시 켜면 통과 후보가 사라지거나 절반 미만으로 줄어 활성화를 보류합니다."
       : "목표 게이트의 후보 유지율을 검토할 수 있습니다.",
+    activationRequirements: [
+      "현재 A/B 후보 전부에 marketCap·spreadBps·ATR·freeFloat 수집",
+      "목표 게이트 적용 후 현재 통과 후보의 50% 이상 유지",
+      "자료 없음이 통과로 처리되지 않는 회귀 테스트 통과",
+    ],
+    reviewBy: reviewDate ? reviewDate.toISOString().slice(0, 10) : "",
+    reviewPolicy: "데이터 연결 즉시 재검토하고, 미연결 상태는 매 리포트 생성 시 다시 계산합니다.",
     blockerCounts,
     rows,
   };
@@ -755,6 +785,7 @@ export function buildStockResearchGatewaySnapshot(payload = {}) {
     regime: payload?.decisionChain?.regime || null,
     sectorPaths: list(payload?.decisionChain?.sectors),
     koreaConnection: payload?.report?.koreaConnection || null,
+    marketFramework: payload?.marketFramework || null,
   };
   const candidates = candidatePool.map((candidate) => evaluateStockCandidateGate(candidate, context));
   return {

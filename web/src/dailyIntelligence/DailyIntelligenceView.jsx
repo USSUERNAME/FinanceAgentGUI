@@ -323,6 +323,7 @@ function Scoreboard({ scoreboard }) {
 
 const marketFrameworkStatusLabels = {
   verified: "검증됨",
+  partial: "부분 확인",
   insufficient: "자료 부족",
   accumulating: "축적 중",
   collection_failed: "수집 실패",
@@ -362,6 +363,24 @@ function MarketFrameworkFlow({ framework }) {
                   ) : event.title}
                 </li>
               ))}
+            </ul>
+          ) : null}
+          {stage.data?.observations?.length ? (
+            <dl className="daily-intelligence-stage-observations">
+              {stage.data.observations.map((observation) => (
+                <div key={`${stage.id}-${observation.labelKo}`}>
+                  <dt>✓ {observation.labelKo}</dt>
+                  <dd>
+                    {observation.value ?? "-"}{observation.unit || ""}
+                    {observation.asOf ? <small>기준 {observation.asOf}</small> : null}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          {stage.data?.missingInputs?.length ? (
+            <ul className="daily-intelligence-stage-missing">
+              {stage.data.missingInputs.map((item) => <li key={item}>✗ {item} 없음</li>)}
             </ul>
           ) : null}
         </article>
@@ -2999,6 +3018,7 @@ function EarningsWatch({ earningsWatch }) {
         const latest = company.historicalSurprises?.[0];
         const longTerm = company.longTermAnalysis || {};
         const financial = longTerm.financialSummary || {};
+        const cagrReady = Number(financial.complete_core_years || 0) >= 3;
         const framework = longTerm.judgmentFramework || {};
         const decisionRows = [
           ["기업의 질", framework.decisions?.companyQuality],
@@ -3066,8 +3086,8 @@ function EarningsWatch({ earningsWatch }) {
                   </article>
                 </div>
                 <dl className="daily-intelligence-long-term-metrics">
-                  <div><dt>영업이익 CAGR</dt><dd>{signed(financial.operating_income_cagr_pct, 1, "%")}</dd></div>
-                  <div><dt>FCF CAGR</dt><dd>{signed(financial.fcf_cagr_pct, 1, "%")}</dd></div>
+                  <div><dt>영업이익 CAGR</dt><dd>{cagrReady ? signed(financial.operating_income_cagr_pct, 1, "%") : "3년 미만 · 표시 보류"}</dd></div>
+                  <div><dt>FCF CAGR</dt><dd>{cagrReady ? signed(financial.fcf_cagr_pct, 1, "%") : "3년 미만 · 표시 보류"}</dd></div>
                   <div><dt>FCF 전환율</dt><dd>{signed(financial.median_fcf_conversion_pct, 1, "%")}</dd></div>
                   <div><dt>희석주식수 변화</dt><dd>{signed(financial.diluted_share_count_change_pct, 1, "%")}</dd></div>
                 </dl>
@@ -6606,6 +6626,7 @@ function MarketSectorsWorkspace({
             </div>
             <span className="daily-intelligence-count">
               {marketFramework?.completeness?.completed || 0}/{marketFramework?.completeness?.total || 0}
+              {marketFramework?.completeness?.partial ? ` · 부분 ${marketFramework.completeness.partial}` : ""}
             </span>
           </div>
           <p className="daily-intelligence-panel-note">

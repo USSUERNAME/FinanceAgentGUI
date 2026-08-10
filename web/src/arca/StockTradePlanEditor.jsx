@@ -7,7 +7,7 @@ export default function StockTradePlanEditor({ candidate, performance, busy, onS
     thesisReason: saved.thesisReason || candidate.whyNow || "",
     entryCondition: saved.entryCondition || "",
     addCondition: saved.addCondition || "",
-    exitCondition: saved.exitCondition || candidate.invalidationConditions?.[0] || "",
+    exitCondition: saved.exitCondition || "",
     maxLossPct: saved.maxLossPct ?? "",
     positionSizePct: saved.positionSizePct ?? "",
   });
@@ -50,7 +50,7 @@ export default function StockTradePlanEditor({ candidate, performance, busy, onS
         <label className="is-wide"><span>○○ 때문에 매수·관찰</span><textarea value={plan.thesisReason} onChange={change("thesisReason")} /></label>
         <label className="is-wide"><span>진입 조건</span><textarea value={plan.entryCondition} onChange={change("entryCondition")} /></label>
         <label className="is-wide"><span>△△면 추가 검토</span><textarea value={plan.addCondition} onChange={change("addCondition")} /></label>
-        <label className="is-wide"><span>□□면 정리·가설 폐기</span><textarea value={plan.exitCondition} onChange={change("exitCondition")} /></label>
+        <label className="is-wide"><span>□□면 정리·가설 폐기</span><textarea placeholder="위 종목별 가설 폐기 조건을 참고해 실제 정리 조건을 입력하세요." value={plan.exitCondition} onChange={change("exitCondition")} /></label>
         <label><span>최대 손실 %</span><input type="number" min="0.1" max="100" step="0.1" value={plan.maxLossPct} onChange={change("maxLossPct")} /></label>
         <label><span>포지션 크기 %</span><input type="number" min="0.1" max="100" step="0.1" value={plan.positionSizePct} onChange={change("positionSizePct")} /></label>
         <footer>

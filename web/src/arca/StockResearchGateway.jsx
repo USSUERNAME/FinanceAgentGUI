@@ -85,6 +85,25 @@ function formatMarketPrice(value) {
   return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(number);
 }
 
+const sectorKpiLabels = {
+  segment_revenue_growth: "사업부문 매출 성장률",
+  revenue_growth_yoy: "매출 성장률",
+  gross_margin: "매출총이익률",
+  operating_margin: "영업이익률",
+  inventory_days: "재고일수",
+  capex_to_sales: "매출 대비 설비투자",
+  data_center_or_ai_mix: "데이터센터·AI 매출 비중",
+  free_cash_flow_margin: "FCF 마진",
+  forward_pe: "Forward PER",
+  ev_ebitda: "EV/EBITDA",
+  fcf_yield: "FCF 수익률",
+  pe: "PER",
+};
+
+function kpiLabel(metric) {
+  return sectorKpiLabels[metric?.id] || String(metric?.id || "").replaceAll("_", " ");
+}
+
 function CandidateMarketMove({ candidate }) {
   const move = candidate.marketMove || {};
   const returnLabel = Number.isFinite(Number(move.return1d))
@@ -133,6 +152,9 @@ function ClaimLedger({ candidate }) {
 function IntegratedResearchCard({ candidate }) {
   const research = candidate.integratedResearch;
   const summary = research.financialSummary || {};
+  const completeYears = Number(summary.complete_core_years || 0);
+  const cagrReady = completeYears >= 3;
+  const sectorKpis = research.sectorKpis || {};
   return (
     <details className="stock-gateway-integrated-card">
       <summary>
@@ -162,15 +184,28 @@ function IntegratedResearchCard({ candidate }) {
             <div><dt>주식 매력도</dt><dd>{research.attractivenessStatus || "평가 대기"}</dd></div>
             <div><dt>포트폴리오 적합성</dt><dd>{research.portfolioFitStatus || "평가 대기"}</dd></div>
             <div><dt>완성 재무연도</dt><dd>{summary.complete_core_years ?? "-"}년</dd></div>
-            <div><dt>영업이익 CAGR</dt><dd>{summary.operating_income_cagr_pct ?? "-"}%</dd></div>
-            <div><dt>FCF CAGR</dt><dd>{summary.fcf_cagr_pct ?? "-"}%</dd></div>
+            <div><dt>영업이익 CAGR</dt><dd>{cagrReady ? `${summary.operating_income_cagr_pct ?? "-"}%` : "표시 보류"}</dd></div>
+            <div><dt>FCF CAGR</dt><dd>{cagrReady ? `${summary.fcf_cagr_pct ?? "-"}%` : "표시 보류"}</dd></div>
           </dl>
+          {!cagrReady && completeYears > 0 ? <p className="stock-gateway-cagr-note">3년 미만은 낮은 기저 왜곡을 피하기 위해 CAGR을 비교하지 않습니다.</p> : null}
+        </section>
+        <section className="stock-gateway-sector-kpis">
+          <h4>섹터별 확인 지표</h4>
+          {sectorKpis.operatingKpis?.length || sectorKpis.valuationMetrics?.length ? (
+            <>
+              <p>{sectorKpis.fallbackUsed ? "일반 기업 기준" : "업종 전용 기준"} · 값은 공시·허가된 추정치 연결 전까지 자료 부족으로 유지합니다.</p>
+              <div>
+                {sectorKpis.operatingKpis?.map((metric) => <span key={`op-${metric.id}`}>{kpiLabel(metric)}</span>)}
+                {sectorKpis.valuationMetrics?.map((metric) => <span className="is-valuation" key={`val-${metric.id}`}>{kpiLabel(metric)}{metric.priority ? ` · ${metric.priority}순위` : ""}</span>)}
+              </div>
+            </>
+          ) : <p>섹터 KPI 매핑 대기</p>}
         </section>
         <section className="stock-gateway-scenarios">
           <h4>조건부 시나리오</h4>
           <div><strong>강세 확인</strong><p>{research.scenarios.bull || "확인 조건 미작성"}</p></div>
           <div><strong>기준 관찰</strong><p>{research.scenarios.base || "기준 가설 미작성"}</p></div>
-          <div><strong>약세·폐기</strong><p>{research.scenarios.bear || "무효화 조건 미작성"}</p></div>
+          <div><strong>반대 근거</strong><p>{research.scenarios.bear || "반대 근거 미작성"}</p></div>
         </section>
         <section>
           <h4>다음 확인 항목</h4>
@@ -192,7 +227,7 @@ function MacroTransmissionPath({ candidate }) {
               <span>{step.label}</span>
               <strong>{step.value}</strong>
               {step.detail ? <p>{step.detail}</p> : null}
-              <small>{step.evidenceType}</small>
+              <small>{step.evidenceType}{step.asOf ? ` · 기준 ${step.asOf}` : ""}</small>
             </article>
             {index < candidate.macroPath.steps.length - 1 ? <ArrowRight size={15} /> : null}
           </React.Fragment>
@@ -260,6 +295,11 @@ function GateRolloutSimulation({ simulation }) {
         <div><dt>거래 적합성 포함</dt><dd>{simulation.targetPassingCount}</dd></div>
       </dl>
       <p>{simulation.reason} 현재 A/B/C 등급은 바꾸지 않았습니다.</p>
+      <div className="stock-gateway-rollout-activation">
+        <strong>활성화 조건</strong>
+        <ul>{simulation.activationRequirements?.map((item) => <li key={item}>{item}</li>)}</ul>
+        <small>{simulation.reviewPolicy}{simulation.reviewBy ? ` · 재검토 기한 ${simulation.reviewBy}` : ""}</small>
+      </div>
     </section>
   );
 }
@@ -285,7 +325,7 @@ function CandidateCard({ candidate, performance, performanceBusy, onReviewPerfor
         <span>공식 근거 <strong>{candidate.primarySourceCount}</strong></span>
         <span>검증 사실 <strong>{candidate.verifiedFactCount}</strong></span>
         <span>분석 축 <strong>{Object.values(candidate.dimensions).filter(Boolean).length}/3</strong></span>
-        <span>기준일 <strong>{candidate.asOf || "없음"}</strong></span>
+        <span>리포트 생성일 <strong>{candidate.asOf || "없음"}</strong></span>
       </div>
 
       <div className="stock-gateway-checks">
@@ -314,6 +354,11 @@ function CandidateCard({ candidate, performance, performanceBusy, onReviewPerfor
       <IntegratedResearchCard candidate={candidate} />
       <StockAnalysisFrameworkCard framework={candidate.analysisFramework} />
       <MacroTransmissionPath candidate={candidate} />
+      <section className="stock-gateway-invalidation">
+        <strong>가설 폐기 조건</strong>
+        <p>{candidate.invalidationConditions?.[0] || "종목별 조건 미작성"}</p>
+        <small>{candidate.invalidationType === "analysis_rule" ? "분석 규칙" : "검증 초안"} · 가격 기준은 상단 시장 반응 카드 참조</small>
+      </section>
       <CandidatePerformance
         candidate={candidate}
         performance={performance}
