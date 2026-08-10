@@ -35,6 +35,27 @@ PUBLICATION_POLICIES = {
     "discovery_only",
 }
 URL_PATTERN = re.compile(r"https?://[^\s<>()\[\]{}\"']+")
+US_TICKER_STOPWORDS = {
+    "AI", "API", "CEO", "CFO", "CPI", "ETF", "FED", "FOMC", "GDP",
+    "IPO", "IR", "PCE", "PDF", "PMI", "SEC", "USA", "USD", "VIX",
+}
+EXPLICIT_US_TICKER_PATTERNS = (
+    re.compile(r"(?<![A-Za-z0-9])\$([A-Z][A-Z0-9.-]{0,4})\b"),
+    re.compile(r"\b(?:NASDAQ|NYSE|AMEX|NYSEARCA)\s*[:：]\s*\$?([A-Z][A-Z0-9.-]{0,4})\b", re.IGNORECASE),
+    re.compile(r"(?:티커|ticker)\s*[:：]?\s*\$?([A-Z][A-Z0-9.-]{0,4})\b", re.IGNORECASE),
+    re.compile(r"\(([A-Z][A-Z0-9.-]{0,4})\)"),
+)
+
+
+def explicit_us_tickers(text: str) -> list[str]:
+    """Extract only explicitly marked U.S. symbols from a community post."""
+    values: set[str] = set()
+    for pattern in EXPLICIT_US_TICKER_PATTERNS:
+        for match in pattern.findall(str(text or "")):
+            ticker = str(match).strip().upper().rstrip(".")
+            if ticker and ticker not in US_TICKER_STOPWORDS:
+                values.add(ticker)
+    return sorted(values)
 
 
 def bounded_failure(exc: Exception, *, limit: int = 240) -> str:
@@ -313,7 +334,7 @@ def message_item(
         published_at=published_at.astimezone(timezone.utc).isoformat(),
         title=post_title(text, channel_name),
         url=post_url,
-        tickers=[],
+        tickers=explicit_us_tickers(text),
         tags=[
             "telegram",
             "market",

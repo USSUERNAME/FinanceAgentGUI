@@ -112,6 +112,12 @@ def gui_cluster(
         1 + int(item.get("deduplication", {}).get("duplicate_count") or 0)
         for item in members
     )
+    tickers = sorted({
+        clean_text(ticker, 16).upper()
+        for item in members
+        for ticker in item.get("tickers", [])
+        if clean_text(ticker, 16)
+    })
     return {
         "event_id": clean_text(cluster.get("event_id"), 160),
         "title": clean_text(cluster.get("representative_title"), 240),
@@ -119,6 +125,7 @@ def gui_cluster(
         "verification_status": clean_text(cluster.get("verification_status"), 80),
         "latest_published_at": clean_text(cluster.get("published_to"), 80),
         "post_count": source_post_count,
+        "tickers": tickers[:12],
         "channels": channels[:8],
         "post_urls": list(dict.fromkeys(post_urls))[:4],
     }

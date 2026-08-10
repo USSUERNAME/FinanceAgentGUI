@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildPublicReportReader,
   buildCandidatePerformance,
+  buildCommunityCandidates,
   buildWorldMemorySnapshot,
   sanitizeCompanyProfiles,
   sanitizePendingCandidateScreen,
@@ -164,6 +165,7 @@ function privateTelegramRefresh() {
       verification_status: "discovery_metadata_only",
       latest_published_at: "2026-08-08T11:50:00+09:00",
       post_count: 3,
+      tickers: ["NVDA", "TTD"],
       channels: ["채널 A", "채널 B"],
       post_urls: ["https://t.me/example/1", "https://example.com/not-telegram"],
       full_text: "drop this body",
@@ -319,6 +321,7 @@ test("Telegram refresh sanitizer keeps bounded discovery metadata only", () => {
   const serialized = JSON.stringify(telegram);
   assert.equal(telegram.rawPostCount, 155);
   assert.equal(telegram.clusters[0].title, "반도체 공급망 점검");
+  assert.deepEqual(telegram.clusters[0].tickers, ["NVDA", "TTD"]);
   assert.deepEqual(telegram.clusters[0].postUrls, ["https://t.me/example/1"]);
   assert.doesNotMatch(serialized, /private-report|never publish|drop this body|drop-session|pdf_attachments|full_text/);
 });
@@ -370,6 +373,18 @@ test("candidate performance preserves first registration price and waits for unr
   assert.equal(nvda.benchmarkExcessStatus, "pending_comparable_benchmark");
 });
 
+test("community ticker signals stay C-grade and disable position actions", () => {
+  const telegram = sanitizeTelegramRefresh(privateTelegramRefresh());
+  const rows = buildCommunityCandidates(telegram, [{ ticker: "NVDA" }]);
+  const nvda = rows.find((item) => item.ticker === "NVDA");
+  const ttd = rows.find((item) => item.ticker === "TTD");
+  assert.equal(nvda.grade, "C");
+  assert.equal(nvda.pipelineStatus, "already_in_candidate_pipeline");
+  assert.equal(ttd.pipelineStatus, "awaiting_primary_source_gate");
+  assert.equal(ttd.positionActionAllowed, false);
+  assert.deepEqual(ttd.sourceUrls, ["https://t.me/example/1"]);
+});
+
 test("reader builder emits a locked placeholder without private data", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "public-report-reader-locked-"));
   const outputDir = join(root, "output");
@@ -418,6 +433,8 @@ test("reader builder combines brief, full intelligence, company candidates, Tele
   assert.equal(payload.intelligence[0].events.items[0].eventId, "event-1");
   assert.equal(payload.worldMemory.theses.length, 1);
   assert.equal(payload.telegram.clusters[0].eventId, "telegram-event-1");
+  assert.equal(payload.communityCandidates.some((item) => item.ticker === "NVDA"), true);
+  assert.equal(payload.communityCandidates.every((item) => item.grade === "C"), true);
   assert.equal(payload.companies[0].profiles[0].ticker, "NVDA");
   assert.equal(payload.companies[0].pendingCandidates[0].ticker, "TTD");
   assert.equal(payload.candidatePerformance.some((item) => item.ticker === "NVDA"), true);
@@ -490,6 +507,9 @@ test("static reader uses DOM APIs and exposes all five read-only views", async (
   assert.match(html, /data-view="stock"/);
   assert.match(source, /view === "companies" \? "stock" : view/);
   assert.match(source, /candidatePerformance/);
+  assert.match(source, /renderCommunitySignals/);
+  assert.match(source, /communityCandidates/);
+  assert.match(source, /자동 매수·비중 제안 비활성/);
   assert.match(html, /data-view="world-memory"/);
   assert.match(source, /검증 대기 후보/);
   assert.match(source, /공식 공시·IR 본문과 수치/);

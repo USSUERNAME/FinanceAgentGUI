@@ -39,6 +39,8 @@ class TelegramRefreshTests(unittest.TestCase):
                 text="데이터센터 전망 개선으로 NVIDIA가 실적 가이던스를 높였다는 관점",
             ),
         ]
+        rows[0]["tickers"] = ["NVDA"]
+        rows[1]["tickers"] = ["NVDA"]
         payload = build_refresh_payload(
             rows,
             generated_at=published_at,
@@ -56,6 +58,7 @@ class TelegramRefreshTests(unittest.TestCase):
         self.assertEqual(payload["event_cluster_count"], 1)
         self.assertEqual(payload["clusters"][0]["post_count"], 2)
         self.assertEqual(payload["clusters"][0]["channels"], ["Alpha", "Beta"])
+        self.assertEqual(payload["clusters"][0]["tickers"], ["NVDA"])
 
     def test_write_payload_uses_date_partition_and_atomic_target(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
