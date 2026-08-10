@@ -322,6 +322,29 @@ class TelegramMessageTests(unittest.TestCase):
             "channel_username": "OfficialBroker",
         }])
 
+    def test_approved_backfill_channels_and_ids_are_prioritized(self) -> None:
+        registry = {
+            "channels": [
+                {"username": "general_feed", "priority": 1},
+                {"username": "ApprovedBroker", "priority": 3},
+                {"username": "second_feed", "priority": 2},
+            ],
+        }
+        targets = [
+            {"channel_username": "@approvedbroker", "message_id": 202},
+            {"channel_username": "ApprovedBroker", "message_id": 101},
+            {"channel_username": "approvedbroker", "message_id": 202},
+        ]
+
+        message_ids = telegram_channels.approved_message_ids_by_channel(targets)
+        ordered = telegram_channels.ordered_enabled_channels(registry, message_ids)
+
+        self.assertEqual(message_ids, {"approvedbroker": [101, 202]})
+        self.assertEqual(
+            [channel["username"] for channel in ordered],
+            ["ApprovedBroker", "general_feed", "second_feed"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

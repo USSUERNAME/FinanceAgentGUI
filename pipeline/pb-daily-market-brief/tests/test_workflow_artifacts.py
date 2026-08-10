@@ -164,6 +164,15 @@ class WorkflowArtifactTests(unittest.TestCase):
             'COLLECTOR_TIMEOUT_GOOGLE_DRIVE_RESEARCH_INBOX_SECONDS: "300"',
             workflow,
         )
+        self.assertIn(
+            'COLLECTOR_TIMEOUT_TELEGRAM_CHANNELS_SECONDS: "300"',
+            workflow,
+        )
+        app_workflow = APP_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            'COLLECTOR_TIMEOUT_TELEGRAM_CHANNELS_SECONDS: "300"',
+            app_workflow,
+        )
 
     def test_korea_market_credentials_are_forwarded_to_actions(self) -> None:
         workflow = APP_WORKFLOW.read_text(encoding="utf-8")

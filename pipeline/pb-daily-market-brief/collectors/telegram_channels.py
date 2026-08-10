@@ -207,6 +207,40 @@ def load_attachment_approvals(
     return decisions, notice
 
 
+def approved_message_ids_by_channel(
+    approval_targets: Iterable[dict[str, Any]],
+) -> dict[str, list[int]]:
+    """Group approved backfill ids by channel for priority retrieval."""
+    grouped: dict[str, set[int]] = {}
+    for target in approval_targets:
+        username = str(target.get("channel_username") or "").strip().lstrip("@").casefold()
+        message_id = int(target.get("message_id") or 0)
+        if username and message_id > 0:
+            grouped.setdefault(username, set()).add(message_id)
+    return {
+        username: sorted(message_ids)
+        for username, message_ids in grouped.items()
+    }
+
+
+def ordered_enabled_channels(
+    registry: dict[str, Any],
+    approved_message_ids: dict[str, list[int]],
+) -> list[dict[str, Any]]:
+    """Visit channels with approved PDF backfills before general discovery."""
+    return sorted(
+        (item for item in registry["channels"] if item.get("enabled", True)),
+        key=lambda item: (
+            0
+            if str(item.get("username") or "").lstrip("@").casefold()
+            in approved_message_ids
+            else 1,
+            int(item.get("priority", 3)),
+            str(item.get("username", "")).casefold(),
+        ),
+    )
+
+
 def broker_attachment_metadata(
     channel: dict[str, Any],
     attachment: dict[str, Any],
@@ -364,15 +398,13 @@ async def collect_async(
     )
     if approval_notice:
         failures.append("attachment_approvals:invalid_registry")
+    approved_message_ids = approved_message_ids_by_channel(approval_targets)
     client = TelegramClient(StringSession(session_string), api_id, api_hash)
     await client.connect()
     try:
         if not await client.is_user_authorized():
             raise RuntimeError("Telegram session is not authorized")
-        for channel in sorted(
-            (item for item in registry["channels"] if item.get("enabled", True)),
-            key=lambda item: (int(item.get("priority", 3)), str(item.get("username", "")).casefold()),
-        ):
+        for channel in ordered_enabled_channels(registry, approved_message_ids):
             username = str(channel["username"]).lstrip("@")
             try:
                 seen_message_ids: set[int] = set()
@@ -386,6 +418,8 @@ async def collect_async(
                     if enforce_cutoff and message_date.astimezone(timezone.utc) < cutoff:
                         return True
                     message_id = int(message.id)
+                    if message_id in seen_message_ids:
+                        return False
                     seen_message_ids.add(message_id)
                     attachment = attachment_for_message(channel, message)
                     if attachment:
@@ -447,24 +481,19 @@ async def collect_async(
                         )
                     return False
 
+                backfill_ids = approved_message_ids.get(username.casefold(), [])
+                if backfill_ids:
+                    backfill_messages = await client.get_messages(username, ids=backfill_ids)
+                    for message in backfill_messages or []:
+                        if message:
+                            await consume_message(message, enforce_cutoff=False)
+
                 async for message in client.iter_messages(
                     username,
                     limit=int(policy["max_messages_per_channel"]),
                 ):
                     if await consume_message(message, enforce_cutoff=True):
                         break
-
-                backfill_ids = sorted({
-                    int(target["message_id"])
-                    for target in approval_targets
-                    if str(target["channel_username"]).casefold() == username.casefold()
-                    and int(target["message_id"]) not in seen_message_ids
-                })
-                if backfill_ids:
-                    backfill_messages = await client.get_messages(username, ids=backfill_ids)
-                    for message in backfill_messages or []:
-                        if message:
-                            await consume_message(message, enforce_cutoff=False)
             except Exception as exc:
                 failures.append(f"{username}:{bounded_failure(exc)}")
     finally:
