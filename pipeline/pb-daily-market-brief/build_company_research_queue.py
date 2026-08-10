@@ -15,6 +15,9 @@ SCHEMA_VERSION = "company_research_queue.v1"
 MAX_WATCHLIST_SECTORS = 5
 MAX_QUEUE_ROWS = 24
 TRANSACTION_SETTINGS_PATH = ROOT.parents[1] / "config" / "transaction-status.user.json"
+DEFAULT_RESEARCH_WATCHLIST_PATH = (
+    ROOT.parents[1] / "config" / "company-research-watchlist.defaults.json"
+)
 
 
 def root_path(value: str | None, default: Path) -> Path:
@@ -26,13 +29,11 @@ def _security_key(sector_id: str, market: str, ticker: str) -> tuple[str, str, s
     return sector_id, market.upper(), ticker.upper()
 
 
-def load_direct_company_inputs(path: Path = TRANSACTION_SETTINGS_PATH) -> list[dict[str, Any]]:
-    """Reuse the user's local watchlist and holdings as explicit research inputs."""
-    if not path.exists():
-        return []
-    payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    if not isinstance(payload, dict):
-        return []
+def load_direct_company_inputs(
+    path: Path = TRANSACTION_SETTINGS_PATH,
+    default_path: Path = DEFAULT_RESEARCH_WATCHLIST_PATH,
+) -> list[dict[str, Any]]:
+    """Merge a tracked research watchlist with local user watchlists and holdings."""
     rows: dict[str, dict[str, Any]] = {}
 
     def add(value: Any, *, source: str, company_name: Any = None) -> None:
@@ -51,6 +52,28 @@ def load_direct_company_inputs(path: Path = TRANSACTION_SETTINGS_PATH) -> list[d
             current["company_name"] = str(company_name).strip() or None
         if source not in current["sources"]:
             current["sources"].append(source)
+
+    if default_path.exists():
+        default_payload = json.loads(default_path.read_text(encoding="utf-8-sig"))
+        if default_payload.get("schema_version") != "company_research_watchlist.v1":
+            raise ValueError("Unexpected company research watchlist schema")
+        for symbol in default_payload.get("symbols", []) or []:
+            if isinstance(symbol, dict):
+                if str(symbol.get("market") or "US").upper() != "US":
+                    continue
+                add(
+                    symbol.get("ticker"),
+                    source="default_research_watchlist",
+                    company_name=symbol.get("company_name"),
+                )
+            else:
+                add(symbol, source="default_research_watchlist")
+
+    if not path.exists():
+        return sorted(rows.values(), key=lambda row: row["ticker"])
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict):
+        return sorted(rows.values(), key=lambda row: row["ticker"])
 
     for group in payload.get("watchlistGroups", []) or []:
         if not isinstance(group, dict):
