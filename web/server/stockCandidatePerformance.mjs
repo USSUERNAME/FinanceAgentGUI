@@ -62,15 +62,16 @@ export function syncCandidatePerformanceStore(store = emptyCandidatePerformanceS
     const symbol = ticker(raw?.ticker);
     const asOf = dateKey(raw?.asOf);
     const close = finite(raw?.close);
-    if (!symbol || !asOf || close === null || close <= 0) continue;
+    const hasValidPrice = close !== null && close > 0;
+    if (!symbol || !asOf) continue;
     let record = byTicker.get(symbol);
     if (!record) {
       record = {
         ticker: symbol,
         companyName: text(raw?.companyName, 180),
-        gradeAtRegistration: ["A", "B"].includes(raw?.grade) ? raw.grade : "B",
+        gradeAtRegistration: ["A", "B", "C"].includes(raw?.grade) ? raw.grade : "C",
         registeredAt: asOf,
-        registeredPrice: close,
+        registeredPrice: hasValidPrice ? close : null,
         benchmark: "SPY",
         thesisStatus: "watching",
         thesisNote: "",
@@ -84,6 +85,11 @@ export function syncCandidatePerformanceStore(store = emptyCandidatePerformanceS
       };
       next.records.push(record);
       byTicker.set(symbol, record);
+    }
+    if (!hasValidPrice) continue;
+    if (finite(record.registeredPrice) === null) {
+      record.registeredAt = asOf;
+      record.registeredPrice = close;
     }
     const observations = Array.isArray(record.observations) ? record.observations : [];
     const previous = observations.at(-1);

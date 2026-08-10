@@ -86,24 +86,29 @@ function normalizedSource(source, fallback = {}) {
 }
 
 function primarySourceCount(candidate, rawCandidate, filing, sources) {
-  const explicit = Math.max(
-    Number(candidate?.primaryEvidenceCount || 0),
-    list(rawCandidate?.evidence).filter((item) => item?.primaryConfirmed).length,
-  );
+  const canonical = Number(candidate?.primaryEvidenceCount);
+  if (Number.isFinite(canonical)) return Math.max(0, canonical);
   return Math.max(
-    explicit,
+    list(rawCandidate?.evidence).filter((item) => item?.primaryConfirmed).length,
     filing?.filing?.sourceUrl ? 1 : 0,
     sources.filter((item) => item.evidenceTier === "authoritative").length,
   );
 }
 
 function verifiedFactCount(candidate, rawCandidate, filing) {
+  const canonical = Number(candidate?.verifiedFactCount);
+  if (Number.isFinite(canonical)) return Math.max(0, canonical);
   const rawFacts = list(rawCandidate?.evidence).reduce(
     (sum, item) => sum + Math.max(0, Number(item?.factCount || 0)),
     0,
   );
   const filingFacts = list(filing?.metrics).filter((metric) => metric?.value !== null).length;
-  return Math.max(Number(candidate?.verifiedFactCount || 0), rawFacts, filingFacts);
+  return Math.max(rawFacts, filingFacts);
+}
+
+function canonicalResearchGrade(candidate) {
+  const priority = text(candidate?.researchPriority).toUpperCase();
+  return priority === "A" || priority === "B" ? priority : "C";
 }
 
 function valuationReady(candidate, earningsCompany) {
@@ -120,15 +125,80 @@ function liquidityRiskCheck(candidate) {
   const volumeRatio20d = finite(reaction.volumeRatio20d);
   const checked = close !== null && close > 0 && return1d !== null && volumeRatio20d !== null;
   const momentumRisk = checked && (Math.abs(return1d) >= 15 || volumeRatio20d >= 3);
+  const label = !checked
+    ? "가격·거래량 위험 점검 자료 부족"
+    : return1d <= -15
+      ? "1일 급락 위험"
+      : return1d >= 15
+        ? "1일 급등 과열"
+        : volumeRatio20d >= 3
+          ? "거래량 급증 주의"
+          : "가격·거래량 위험 점검 완료";
   return {
     checked,
     momentumRisk,
-    label: !checked
-      ? "가격·거래량 위험 점검 자료 부족"
-      : momentumRisk
-        ? "급등락·거래량 과열 주의"
-        : "가격·거래량 위험 점검 완료",
+    label,
   };
+}
+
+export function buildCandidateMarketMove(candidate = {}, asOf = "") {
+  const reaction = candidate?.reaction || {};
+  const close = finite(reaction.close);
+  const return1d = finite(reaction.return1d);
+  const volumeRatio20d = finite(reaction.volumeRatio20d);
+  const direction = return1d === null
+    ? "missing"
+    : return1d <= -15
+      ? "crash"
+      : return1d < 0
+        ? "down"
+        : return1d >= 15
+          ? "surge"
+          : return1d > 0
+            ? "up"
+            : "flat";
+  const directionLabel = {
+    crash: "급락",
+    down: "하락",
+    flat: "보합",
+    up: "상승",
+    surge: "급등",
+    missing: "등락 자료 부족",
+  }[direction];
+  return {
+    close,
+    return1d,
+    volumeRatio20d,
+    period: "1거래일",
+    asOf: text(reaction.asOf || reaction.priceAsOf || reaction.date || asOf),
+    direction,
+    directionLabel,
+  };
+}
+
+function candidateSpecificCounterEvidence(candidate) {
+  const ticker = tickerOf(candidate?.ticker) || "해당 종목";
+  const move = buildCandidateMarketMove(candidate);
+  if (move.return1d === null) {
+    return `${ticker}의 가격 신호가 없어 기업 고유 촉매와 시장 수급을 아직 구분할 수 없습니다.`;
+  }
+  const direction = move.return1d >= 0 ? "상승" : "하락";
+  const volume = move.volumeRatio20d === null
+    ? "거래량 비교 자료가 없고"
+    : `거래량이 20일 평균의 ${move.volumeRatio20d.toFixed(2)}배이며`;
+  return `${ticker}의 1일 ${direction} ${Math.abs(move.return1d).toFixed(2)}%는 ${volume}, 기업 고유 촉매가 아닌 시장·섹터 수급으로 설명될 가능성이 있습니다.`;
+}
+
+function candidateSpecificInvalidation(candidate) {
+  const ticker = tickerOf(candidate?.ticker) || "해당 종목";
+  const move = buildCandidateMarketMove(candidate);
+  if (move.return1d === null) {
+    return `${ticker}의 공식 기업 촉매와 비교 가능한 가격·거래량이 확보되지 않으면 후보 가설을 유지하지 않습니다.`;
+  }
+  if (move.return1d < 0) {
+    return `${ticker}가 급락분의 절반 이상을 회복하고 거래량이 20일 평균 수준으로 정상화되면 하락 지속 가설을 재검토합니다.`;
+  }
+  return `${ticker}의 5일 SPY 상대수익이 0%p 아래로 반전하거나 공식 촉매가 확인되지 않으면 상승 지속 가설을 재검토합니다.`;
 }
 
 function normalizedTradeHorizon(candidate) {
@@ -499,6 +569,8 @@ export function evaluateStockCandidateGate(candidate = {}, context = {}) {
   const rawCandidate = list(context?.rawCandidates).find((item) => tickerOf(item?.ticker) === ticker) || null;
   const filing = list(context?.companyFilings).find((item) => tickerOf(item?.ticker) === ticker) || null;
   const earningsCompany = list(context?.earningsCompanies).find((item) => tickerOf(item?.ticker) === ticker) || null;
+  const stockAnalysisCard = list(context?.stockAnalysisCards)
+    .find((item) => tickerOf(item?.ticker) === ticker) || null;
   const reportSources = list(context?.reportSources)
     .filter((source) => {
       const haystack = `${text(source?.id)} ${text(source?.title)}`.toUpperCase();
@@ -543,12 +615,18 @@ export function evaluateStockCandidateGate(candidate = {}, context = {}) {
   const valuationIsReady = valuationReady(candidate, earningsCompany);
   const dimensions = [earningsReady, valuationIsReady, catalystReady].filter(Boolean).length;
   const riskCheck = liquidityRiskCheck(candidate);
-  const counterEvidence = text(filing?.analysis?.risksKo?.[0])
-    || text(earningsCompany?.longTermAnalysis?.action?.reason)
-    || text(candidate?.firstRejection);
-  const invalidationConditions = list(
+  const explicitCounterEvidence = text(filing?.analysis?.risksKo?.[0])
+    || text(earningsCompany?.longTermAnalysis?.action?.reason);
+  const counterEvidence = explicitCounterEvidence || candidateSpecificCounterEvidence(candidate);
+  const explicitInvalidationConditions = [
+    ...list(
     earningsCompany?.longTermAnalysis?.action?.invalidationConditions,
-  ).map(text).filter(Boolean);
+    ),
+    text(stockAnalysisCard?.invalidationCondition),
+  ].map(text).filter(Boolean);
+  const invalidationConditions = explicitInvalidationConditions.length
+    ? explicitInvalidationConditions
+    : [candidateSpecificInvalidation(candidate)];
   const asOf = text(context.asOf);
   const updatedAt = text(context.updatedAt);
   const checks = [
@@ -557,19 +635,23 @@ export function evaluateStockCandidateGate(candidate = {}, context = {}) {
     { id: "verifiedFacts", passed: factCount >= 2, detail: `${factCount}개` },
     { id: "dimensions", passed: dimensions >= 2, detail: `실적 ${earningsReady ? "○" : "×"} · 밸류 ${valuationIsReady ? "○" : "×"} · 촉매 ${catalystReady ? "○" : "×"}` },
     { id: "liquidityRisk", passed: riskCheck.checked, detail: riskCheck.label },
-    { id: "counterEvidence", passed: Boolean(counterEvidence), detail: counterEvidence || "미작성" },
-    { id: "invalidation", passed: invalidationConditions.length > 0, detail: invalidationConditions[0] || "미작성" },
+    { id: "counterEvidence", passed: Boolean(explicitCounterEvidence), detail: explicitCounterEvidence || "추론만 있음 · 공식 반대 근거 필요" },
+    { id: "invalidation", passed: explicitInvalidationConditions.length > 0, detail: explicitInvalidationConditions[0] || "초안만 있음 · 검증 규칙 확정 필요" },
     { id: "dates", passed: Boolean(asOf && updatedAt), detail: asOf && updatedAt ? `${asOf} · ${updatedAt}` : "기준일 또는 갱신 시각 없음" },
   ];
   const missingRequirements = checks.filter((check) => !check.passed).map((check) => missingLabel(check.id));
   const passed = missingRequirements.length === 0;
-  const grade = passed && candidate?.researchPriority === "A" ? "A" : passed ? "B" : "C";
+  const upstreamGrade = canonicalResearchGrade(candidate);
+  const allocationAllowed = passed && (upstreamGrade === "A" || upstreamGrade === "B");
+  const grade = allocationAllowed ? upstreamGrade : "C";
 
   const result = {
     ...candidate,
     ticker,
     grade,
+    upstreamGrade,
     gatePassed: passed,
+    promotionEligible: passed && upstreamGrade === "C",
     checks,
     missingRequirements,
     dimensions: { earnings: earningsReady, valuation: valuationIsReady, catalyst: catalystReady },
@@ -578,19 +660,22 @@ export function evaluateStockCandidateGate(candidate = {}, context = {}) {
     sourceTierCounts,
     verifiedFactCount: factCount,
     liquidityRisk: riskCheck,
+    marketMove: buildCandidateMarketMove(candidate, asOf),
     counterEvidence,
+    counterEvidenceType: explicitCounterEvidence ? "authoritative_or_analysis" : "derived_draft",
     invalidationConditions,
+    invalidationType: explicitInvalidationConditions.length ? "analysis_rule" : "derived_draft",
     asOf,
     updatedAt,
     sources,
     companyFiling: filing,
     earningsCompany,
-    allocationAllowed: passed,
+    allocationAllowed,
   };
   result.claims = buildClaimLedger({ candidate: result, rawCandidate, filing, updatedAt });
   result.integratedResearch = buildIntegratedResearch(result, filing, earningsCompany);
   result.analysisFramework = buildAnalysisFramework(result, filing, earningsCompany);
-  result.tradeAllocationAllowed = passed && result.analysisFramework.tradeReadiness.ready;
+  result.tradeAllocationAllowed = allocationAllowed && result.analysisFramework.tradeReadiness.ready;
   result.macroPath = buildMacroPath(result, context);
   return result;
 }
@@ -617,7 +702,7 @@ export function buildStockGateRolloutSimulation(candidates = []) {
     return {
       ticker: candidate.ticker,
       currentGrade: candidate.grade,
-      currentPassed: candidate.gatePassed === true,
+      currentPassed: candidate.allocationAllowed === true,
       evidenceCorePassed,
       targetPassed,
       failedTargetGateIds: Object.entries(checks)
@@ -663,6 +748,7 @@ export function buildStockResearchGatewaySnapshot(payload = {}) {
     companyFilings: list(payload?.report?.companyFilings?.companies),
     earningsCompanies: list(payload?.report?.earningsWatch?.companies),
     reportSources: list(payload?.report?.sources),
+    stockAnalysisCards: list(payload?.pipeline?.stockAnalysisCards),
     asOf: text(payload?.report?.reportDate),
     updatedAt: text(payload?.report?.generatedAt),
     marketFindings: list(payload?.report?.findings),
@@ -674,8 +760,8 @@ export function buildStockResearchGatewaySnapshot(payload = {}) {
   return {
     asOf: context.asOf,
     updatedAt: context.updatedAt,
-    verifiedCandidates: candidates.filter((candidate) => candidate.gatePassed),
-    reviewCandidates: candidates.filter((candidate) => !candidate.gatePassed),
+    verifiedCandidates: candidates.filter((candidate) => candidate.allocationAllowed),
+    reviewCandidates: candidates.filter((candidate) => !candidate.allocationAllowed),
     candidates,
     gateSimulation: buildStockGateRolloutSimulation(candidates),
     sourceCandidateCount: Number(payload?.decisionChain?.ideaFunnel?.inputCount || candidatePool.length),
