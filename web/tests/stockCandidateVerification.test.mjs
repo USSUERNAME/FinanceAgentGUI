@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  STOCK_ANALYSIS_STAGE_IDS,
+  STOCK_HORIZON_REQUIREMENTS,
+  buildStockGateRolloutSimulation,
   buildStockResearchGatewaySnapshot,
   evaluateStockCandidateGate,
 } from "../src/arca/stockCandidateVerification.js";
@@ -62,11 +65,81 @@ test("candidate gate promotes only evidence-complete candidates to B or higher",
   assert.equal(result.dimensions.earnings, true);
   assert.equal(result.dimensions.catalyst, true);
   assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0].evidenceTier, "authoritative");
+  assert.equal(result.authoritativeSourceCount, 1);
   assert.ok(result.claims.some((claim) => claim.evidenceType === "공식 사실"));
   assert.ok(result.claims.some((claim) => claim.evidenceType === "작성자 추론"));
   assert.equal(result.integratedResearch.financialRows.length, 2);
   assert.equal(result.integratedResearch.scenarios.bear, "FCF와 마진이 동시에 훼손되면 가설을 폐기합니다.");
+  assert.equal(result.analysisFramework.stages.length, 8);
+  assert.equal(result.analysisFramework.completeness.total, 8);
+  assert.equal(result.analysisFramework.tradeReadiness.tradeHorizon, "unclassified");
+  assert.equal(result.analysisFramework.tradeReadiness.ready, false);
+  assert.equal(result.tradeAllocationAllowed, false);
+  assert.equal(result.allocationAllowed, true);
   assert.deepEqual(result.missingRequirements, []);
+});
+
+test("discovery and unverified sources never satisfy the authoritative gate", () => {
+  const result = evaluateStockCandidateGate({
+    ticker: "ONDS",
+    whyNow: "커뮤니티 신호",
+  }, {
+    asOf: "2026-08-10",
+    updatedAt: "2026-08-10T07:00:00Z",
+    rawCandidates: [{
+      ticker: "ONDS",
+      evidence: [{
+        title: "Secondary research note",
+        sourceUrl: "https://example.com/research-note",
+        sourceGrade: "B",
+        primaryConfirmed: false,
+        factCount: 4,
+      }, {
+        title: "Unknown link",
+        sourceUrl: "https://example.net/post",
+        primaryConfirmed: false,
+      }],
+    }],
+  });
+
+  assert.equal(result.primarySourceCount, 0);
+  assert.equal(result.authoritativeSourceCount, 0);
+  assert.equal(result.sourceTierCounts.discovery, 1);
+  assert.equal(result.sourceTierCounts.unverified, 1);
+  assert.equal(result.gatePassed, false);
+  assert.ok(result.missingRequirements.includes("SEC·DART·기업 IR 1차 출처"));
+});
+
+test("framework implementation stays aligned with the policy config", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const config = JSON.parse(await readFile(
+    new URL("../../config/stock-analysis-framework.json", import.meta.url),
+    "utf8",
+  ));
+  assert.deepEqual(STOCK_ANALYSIS_STAGE_IDS, config.stages.map((stage) => stage.id));
+  assert.deepEqual(STOCK_HORIZON_REQUIREMENTS, config.horizonRequirements);
+});
+
+test("new trust gate rollout is simulated before it can change active grades", () => {
+  const candidate = evaluateStockCandidateGate({
+    ticker: "ABNB",
+    companyName: "Airbnb",
+    researchPriority: "C",
+    whyNow: "실적 공시",
+    primaryEvidenceCount: 1,
+    verifiedFactCount: 2,
+    reaction: { close: 180, return1d: 3.2, volumeRatio20d: 1.4 },
+  }, completeContext());
+  const simulation = buildStockGateRolloutSimulation([candidate]);
+
+  assert.equal(candidate.grade, "B");
+  assert.equal(simulation.activeGateChanged, false);
+  assert.equal(simulation.currentPassingCount, 1);
+  assert.equal(simulation.evidenceCorePassingCount, 1);
+  assert.equal(simulation.targetPassingCount, 0);
+  assert.equal(simulation.blockerCounts.trade_suitability, 1);
+  assert.equal(simulation.activationDecision, "hold_activation");
 });
 
 test("community-style candidate stays C and blocks allocation when primary evidence is absent", () => {

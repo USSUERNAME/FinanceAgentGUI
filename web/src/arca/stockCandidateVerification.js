@@ -1,5 +1,25 @@
 const TICKER_PATTERN = /^[A-Z][A-Z0-9.-]{0,14}$/;
 
+export const STOCK_ANALYSIS_STAGE_IDS = [
+  "business_structure",
+  "trade_suitability",
+  "growth_quality",
+  "financial_statements",
+  "market_expectations",
+  "valuation",
+  "catalyst_risk",
+  "technical_trade_plan",
+];
+
+export const STOCK_TRADE_HORIZONS = ["day", "earnings", "position", "long_term"];
+
+export const STOCK_HORIZON_REQUIREMENTS = {
+  day: ["trade_suitability", "technical_trade_plan"],
+  earnings: ["trade_suitability", "market_expectations", "catalyst_risk", "technical_trade_plan"],
+  position: ["trade_suitability", "valuation", "catalyst_risk", "technical_trade_plan"],
+  long_term: ["business_structure", "growth_quality", "financial_statements", "valuation", "catalyst_risk"],
+};
+
 function list(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
@@ -33,16 +53,35 @@ function uniqueSources(sources) {
   });
 }
 
+function normalizedEvidenceTier(source, fallback = {}) {
+  const explicit = text(source?.evidenceTier || source?.sourceTier || fallback.evidenceTier);
+  if (["authoritative", "discovery", "unverified"].includes(explicit)) return explicit;
+  if (source?.primaryConfirmed === true || fallback.primary === true) return "authoritative";
+  const grade = text(source?.sourceGrade || fallback.sourceGrade).toUpperCase();
+  const type = text(source?.type || source?.eventType || fallback.type).toLowerCase();
+  if (["B", "C"].includes(grade) || /media|news|research|report|언론|리서치/.test(type)) {
+    return "discovery";
+  }
+  return "unverified";
+}
+
 function normalizedSource(source, fallback = {}) {
   const url = text(source?.sourceUrl || source?.url);
   if (!/^https?:\/\//i.test(url)) return null;
+  const evidenceTier = normalizedEvidenceTier(source, fallback);
   return {
     title: text(source?.title) || fallback.title || "원문",
     url,
-    type: text(source?.type || source?.eventType || fallback.type) || "공식 사실",
+    type: text(source?.type || source?.eventType || fallback.type)
+      || (evidenceTier === "authoritative"
+        ? "공식 사실"
+        : evidenceTier === "discovery"
+          ? "탐색 출처"
+          : "미검증"),
     sourceGrade: text(source?.sourceGrade || fallback.sourceGrade),
     asOf: text(source?.asOf || fallback.asOf),
-    primary: source?.primaryConfirmed === true || fallback.primary === true,
+    evidenceTier,
+    primary: evidenceTier === "authoritative",
   };
 }
 
@@ -51,7 +90,11 @@ function primarySourceCount(candidate, rawCandidate, filing, sources) {
     Number(candidate?.primaryEvidenceCount || 0),
     list(rawCandidate?.evidence).filter((item) => item?.primaryConfirmed).length,
   );
-  return Math.max(explicit, filing?.filing?.sourceUrl ? 1 : 0, sources.filter((item) => item.primary).length);
+  return Math.max(
+    explicit,
+    filing?.filing?.sourceUrl ? 1 : 0,
+    sources.filter((item) => item.evidenceTier === "authoritative").length,
+  );
 }
 
 function verifiedFactCount(candidate, rawCandidate, filing) {
@@ -88,6 +131,202 @@ function liquidityRiskCheck(candidate) {
   };
 }
 
+function normalizedTradeHorizon(candidate) {
+  const value = text(candidate?.tradePlan?.tradeHorizon || candidate?.tradeHorizon);
+  return STOCK_TRADE_HORIZONS.includes(value) ? value : "unclassified";
+}
+
+function buildFinancialWarnings(rows = []) {
+  const rowById = new Map(list(rows).map((row) => [text(row?.metricId), row]));
+  const change = (id) => finite(rowById.get(id)?.changePct);
+  const warnings = [];
+  const revenueChange = change("revenue");
+  const operatingIncomeChange = change("operating_income");
+  const netIncomeChange = change("net_income");
+  const operatingCashFlowChange = change("operating_cash_flow");
+
+  if (revenueChange > 0 && operatingIncomeChange < 0) {
+    warnings.push({
+      id: "revenue_up_operating_income_down",
+      severity: "warning",
+      metricIds: ["revenue", "operating_income"],
+      label: "매출 증가에도 영업이익이 감소했습니다.",
+    });
+  }
+  if (netIncomeChange > 0 && operatingCashFlowChange < 0) {
+    warnings.push({
+      id: "net_income_up_operating_cash_flow_down",
+      severity: "warning",
+      metricIds: ["net_income", "operating_cash_flow"],
+      label: "순이익 증가와 영업현금흐름 감소가 엇갈립니다.",
+    });
+  }
+  if (operatingIncomeChange > 0 && operatingCashFlowChange < 0) {
+    warnings.push({
+      id: "operating_income_up_operating_cash_flow_down",
+      severity: "warning",
+      metricIds: ["operating_income", "operating_cash_flow"],
+      label: "영업이익 증가가 영업현금흐름으로 이어지지 않았습니다.",
+    });
+  }
+  return warnings;
+}
+
+function stageStatus(id, status, reason, data = null) {
+  return {
+    id,
+    status,
+    completed: status === "verified",
+    reason,
+    data,
+  };
+}
+
+function buildTradeSuitability(candidate) {
+  const reaction = candidate?.reaction || {};
+  const close = finite(reaction.close);
+  const avgVolume20d = finite(reaction.avgVolume20d);
+  const avgDailyDollarVolume = close !== null && avgVolume20d !== null
+    ? close * avgVolume20d
+    : null;
+  const data = {
+    marketCap: finite(candidate?.marketCap),
+    close,
+    volume: finite(reaction.volume),
+    avgVolume20d,
+    avgDailyDollarVolume,
+    spreadBps: finite(candidate?.spreadBps),
+    atrPct: finite(candidate?.atrPct),
+    freeFloat: finite(candidate?.freeFloat),
+    volumeRatio20d: finite(reaction.volumeRatio20d),
+  };
+  const missingFields = ["marketCap", "avgDailyDollarVolume", "spreadBps", "atrPct", "freeFloat"]
+    .filter((field) => data[field] === null);
+  return {
+    status: missingFields.length ? "insufficient" : "verified",
+    reason: missingFields.length
+      ? `거래 적합성 자료 부족: ${missingFields.join(", ")}`
+      : "시총·거래대금·스프레드·ATR·유통주식 자료가 확인됐습니다.",
+    missingFields,
+    ...data,
+  };
+}
+
+function buildMarketExpectations(candidate, earningsCompany) {
+  const providerEstimate = candidate?.estimateRevision || earningsCompany?.estimateRevision || null;
+  const providerRows = list(providerEstimate?.rows);
+  return {
+    status: "insufficient",
+    reason: providerRows.length
+      ? "제공자 추정치는 있으나 전체 컨센서스의 기여자 범위·동결시각·방법론이 검증되지 않았습니다."
+      : "검증된 EPS·매출 컨센서스와 옵션 예상 변동폭 자료가 없습니다.",
+    providerEstimate,
+    providerEstimateStatus: providerRows.length ? "discovery" : "insufficient",
+    earningsConsensus: null,
+    revenueConsensus: null,
+    estimateRevision: null,
+    impliedMove: null,
+  };
+}
+
+function buildAnalysisFramework(candidate, filing, earningsCompany) {
+  const integrated = candidate.integratedResearch || {};
+  const tradeSuitability = buildTradeSuitability(candidate);
+  const marketExpectations = buildMarketExpectations(candidate, earningsCompany);
+  const tradeHorizon = normalizedTradeHorizon(candidate);
+  const tradePlan = {
+    tradeHorizon,
+    entryCondition: text(candidate?.tradePlan?.entryCondition),
+    addCondition: text(candidate?.tradePlan?.addCondition),
+    exitCondition: text(candidate?.tradePlan?.exitCondition),
+    maxLossPct: finite(candidate?.tradePlan?.maxLossPct),
+    positionSizePct: finite(candidate?.tradePlan?.positionSizePct),
+  };
+  const hasTradePlan = tradeHorizon !== "unclassified"
+    && Boolean(tradePlan.exitCondition)
+    && (tradeHorizon === "long_term" || Boolean(tradePlan.entryCondition));
+  const growthBridge = integrated.growthBridge || null;
+  const financialReady = list(integrated.financialRows).length >= 2;
+  const valuationIsReady = valuationReady(candidate, earningsCompany);
+  const catalystRiskReady = list(integrated.catalysts).length > 0
+    && Boolean(candidate.counterEvidence)
+    && list(candidate.invalidationConditions).length > 0;
+  const stages = [
+    stageStatus(
+      "business_structure",
+      integrated.businessSummary ? "verified" : "insufficient",
+      integrated.businessSummary ? "공식 공시 기반 사업 요약이 있습니다." : "사업 구조 자료가 부족합니다.",
+      {
+        businessSummary: integrated.businessSummary || "",
+        productMix: integrated.productMix || null,
+        geographicMix: integrated.geographicMix || null,
+        recurringRevenueShare: integrated.recurringRevenueShare || null,
+      },
+    ),
+    stageStatus("trade_suitability", tradeSuitability.status, tradeSuitability.reason, tradeSuitability),
+    stageStatus(
+      "growth_quality",
+      growthBridge ? "verified" : "insufficient",
+      growthBridge ? "성장을 물량·가격·믹스·M&A로 분해했습니다." : "성장 원인 분해 자료가 부족합니다.",
+      growthBridge,
+    ),
+    stageStatus(
+      "financial_statements",
+      financialReady ? "verified" : "insufficient",
+      financialReady ? "비교 가능한 재무제표 항목이 2개 이상입니다." : "비교 가능한 재무제표 항목이 부족합니다.",
+      {
+        financialRows: list(integrated.financialRows),
+        segmentRows: list(integrated.segmentRows),
+        warnings: list(integrated.financialWarnings),
+      },
+    ),
+    stageStatus("market_expectations", marketExpectations.status, marketExpectations.reason, marketExpectations),
+    stageStatus(
+      "valuation",
+      valuationIsReady ? "verified" : "insufficient",
+      valuationIsReady ? "비교 가능한 밸류에이션 근거가 있습니다." : "업종에 맞는 비교 가능한 밸류에이션 근거가 부족합니다.",
+      { screen: integrated.valuation || null, sectorKpis: integrated.sectorKpis || null },
+    ),
+    stageStatus(
+      "catalyst_risk",
+      catalystRiskReady ? "verified" : "insufficient",
+      catalystRiskReady ? "촉매·반대근거·무효화조건이 연결됐습니다." : "촉매·반대근거·무효화조건 중 일부가 부족합니다.",
+      {
+        catalysts: list(integrated.catalysts),
+        risks: list(integrated.risks),
+        counterEvidence: candidate.counterEvidence || "",
+        invalidationConditions: list(candidate.invalidationConditions),
+      },
+    ),
+    stageStatus(
+      "technical_trade_plan",
+      hasTradePlan ? "verified" : "insufficient",
+      hasTradePlan ? "선택한 매매 유형의 진입·정리 규칙이 있습니다." : "매매 유형과 진입·정리 규칙이 필요합니다.",
+      tradePlan,
+    ),
+  ];
+  const completed = stages.filter((stage) => stage.completed).length;
+  const stageById = new Map(stages.map((stage) => [stage.id, stage]));
+  const requiredStageIds = STOCK_HORIZON_REQUIREMENTS[tradeHorizon] || [];
+  const missingStageIds = requiredStageIds.filter((stageId) => !stageById.get(stageId)?.completed);
+  return {
+    schemaVersion: "stock_analysis_framework.v1",
+    stages,
+    completeness: { completed, total: 8, label: `${completed}/8` },
+    tradeReadiness: {
+      tradeHorizon,
+      ready: tradeHorizon !== "unclassified" && missingStageIds.length === 0,
+      requiredStageIds,
+      missingStageIds,
+      reason: tradeHorizon === "unclassified"
+        ? "매매 유형을 선택해야 합니다."
+        : missingStageIds.length
+          ? `필수 분석 축 부족: ${missingStageIds.join(", ")}`
+          : "선택한 매매 유형의 필수 분석 축이 준비됐습니다.",
+    },
+  };
+}
+
 function missingLabel(id) {
   return {
     ticker: "티커 식별",
@@ -117,6 +356,7 @@ function buildClaimLedger({ candidate, rawCandidate, filing, updatedAt }) {
     id: `${candidate.ticker}-filing-${text(metric?.metricId)}`,
     claim: `${text(metric?.labelKo) || text(metric?.metricId)} ${formatClaimValue(metric)}`.trim(),
     evidenceType: "공식 사실",
+    evidenceTier: "authoritative",
     sourceTitle: `${candidate.ticker} ${text(filing?.filing?.form) || "공시"}`,
     sourceUrl: filingUrl,
     publishedAt: text(filing?.filing?.filedDate),
@@ -127,6 +367,7 @@ function buildClaimLedger({ candidate, rawCandidate, filing, updatedAt }) {
     id: `${candidate.ticker}-event-${index}`,
     claim: text(evidence?.title) || `${candidate.ticker} 이벤트 근거`,
     evidenceType: evidence?.primaryConfirmed ? "공식 사실" : "언론 보도",
+    evidenceTier: evidence?.primaryConfirmed ? "authoritative" : "discovery",
     sourceTitle: text(evidence?.title) || "이벤트 원문",
     sourceUrl: text(evidence?.sourceUrl),
     publishedAt: "",
@@ -140,6 +381,7 @@ function buildClaimLedger({ candidate, rawCandidate, filing, updatedAt }) {
     id: `${candidate.ticker}-inference-${index}`,
     claim,
     evidenceType: "작성자 추론",
+    evidenceTier: "discovery",
     sourceTitle: `${candidate.ticker} ${text(filing?.filing?.form) || "공시"} 기반 분석`,
     sourceUrl: filingUrl,
     publishedAt: text(filing?.filing?.filedDate),
@@ -154,13 +396,19 @@ function buildIntegratedResearch(candidate, filing, earningsCompany) {
   const action = longTerm?.action || {};
   return {
     businessSummary: text(filing?.analysis?.summaryKo),
+    productMix: null,
+    geographicMix: null,
+    recurringRevenueShare: null,
+    growthBridge: null,
     financialRows: list(filing?.financialComparison?.rows).slice(0, 6),
     segmentRows: list(filing?.financialComparison?.segmentRows).slice(0, 8),
+    financialWarnings: buildFinancialWarnings(filing?.financialComparison?.rows),
     financialSummary: longTerm?.financialSummary || null,
     qualityStatus: text(longTerm?.companyQuality?.label || longTerm?.companyQuality?.status),
     attractivenessStatus: text(longTerm?.stockAttractiveness?.label || longTerm?.stockAttractiveness?.status),
     portfolioFitStatus: text(longTerm?.portfolioFit?.label || longTerm?.portfolioFit?.status),
     valuation: candidate?.valuationScreen || earningsCompany?.valuationScreen || null,
+    sectorKpis: candidate?.sectorKpiSet || null,
     catalysts: [text(candidate?.whyNow), ...list(action?.confirmationConditions).map(text)].filter(Boolean),
     risks: [...list(filing?.analysis?.risksKo).map(text), text(action?.reason)].filter(Boolean),
     scenarios: {
@@ -260,7 +508,11 @@ export function evaluateStockCandidateGate(candidate = {}, context = {}) {
     .filter(Boolean);
   const candidateSources = list(rawCandidate?.evidence)
     .map((source) => normalizedSource(source, {
-      type: source?.primaryConfirmed ? "공식 사실" : "언론 보도",
+      type: source?.primaryConfirmed
+        ? "공식 사실"
+        : source?.sourceGrade || source?.eventType
+          ? "언론 보도"
+          : "",
       primary: source?.primaryConfirmed === true,
       asOf: context.asOf,
     }))
@@ -274,6 +526,13 @@ export function evaluateStockCandidateGate(candidate = {}, context = {}) {
   });
   const sources = uniqueSources([...candidateSources, ...(filingSource ? [filingSource] : []), ...reportSources]);
   const primaryCount = primarySourceCount(candidate, rawCandidate, filing, sources);
+  const sourceTierCounts = sources.reduce(
+    (counts, source) => {
+      counts[source.evidenceTier] += 1;
+      return counts;
+    },
+    { authoritative: 0, discovery: 0, unverified: 0 },
+  );
   const factCount = verifiedFactCount(candidate, rawCandidate, filing);
   const earningsReady = Boolean(
     filing?.analysisStatus === "complete"
@@ -315,6 +574,8 @@ export function evaluateStockCandidateGate(candidate = {}, context = {}) {
     missingRequirements,
     dimensions: { earnings: earningsReady, valuation: valuationIsReady, catalyst: catalystReady },
     primarySourceCount: primaryCount,
+    authoritativeSourceCount: sourceTierCounts.authoritative,
+    sourceTierCounts,
     verifiedFactCount: factCount,
     liquidityRisk: riskCheck,
     counterEvidence,
@@ -328,8 +589,71 @@ export function evaluateStockCandidateGate(candidate = {}, context = {}) {
   };
   result.claims = buildClaimLedger({ candidate: result, rawCandidate, filing, updatedAt });
   result.integratedResearch = buildIntegratedResearch(result, filing, earningsCompany);
+  result.analysisFramework = buildAnalysisFramework(result, filing, earningsCompany);
+  result.tradeAllocationAllowed = passed && result.analysisFramework.tradeReadiness.ready;
   result.macroPath = buildMacroPath(result, context);
   return result;
+}
+
+export function buildStockGateRolloutSimulation(candidates = []) {
+  const evaluated = list(candidates);
+  const targetChecksFor = (candidate) => ({
+    ticker: Boolean(tickerOf(candidate?.ticker)),
+    authoritative_source: Number(candidate?.authoritativeSourceCount || 0) >= 1,
+    verified_facts: Number(candidate?.verifiedFactCount || 0) >= 2,
+    counter_evidence: Boolean(text(candidate?.counterEvidence)),
+    invalidation: list(candidate?.invalidationConditions).length > 0,
+    dates: Boolean(text(candidate?.asOf) && text(candidate?.updatedAt)),
+    trade_suitability: candidate?.analysisFramework?.stages?.find(
+      (stage) => stage.id === "trade_suitability",
+    )?.status === "verified",
+  });
+  const rows = evaluated.map((candidate) => {
+    const checks = targetChecksFor(candidate);
+    const evidenceCorePassed = Object.entries(checks)
+      .filter(([id]) => id !== "trade_suitability")
+      .every(([, passed]) => passed);
+    const targetPassed = Object.values(checks).every(Boolean);
+    return {
+      ticker: candidate.ticker,
+      currentGrade: candidate.grade,
+      currentPassed: candidate.gatePassed === true,
+      evidenceCorePassed,
+      targetPassed,
+      failedTargetGateIds: Object.entries(checks)
+        .filter(([, passed]) => !passed)
+        .map(([id]) => id),
+    };
+  });
+  const blockerCounts = rows.reduce((counts, row) => {
+    for (const id of row.failedTargetGateIds) counts[id] = Number(counts[id] || 0) + 1;
+    return counts;
+  }, {});
+  const currentPassingCount = rows.filter((row) => row.currentPassed).length;
+  const evidenceCorePassingCount = rows.filter((row) => row.evidenceCorePassed).length;
+  const targetPassingCount = rows.filter((row) => row.targetPassed).length;
+  const passRetention = currentPassingCount
+    ? targetPassingCount / currentPassingCount
+    : targetPassingCount ? 1 : 0;
+  const activationDecision = rows.length > 0
+    && (targetPassingCount === 0 || passRetention < 0.5)
+    ? "hold_activation"
+    : "ready_for_review";
+  return {
+    schemaVersion: "stock_gate_rollout_simulation.v1",
+    activeGateChanged: false,
+    candidateCount: rows.length,
+    currentPassingCount,
+    evidenceCorePassingCount,
+    targetPassingCount,
+    passRetention,
+    activationDecision,
+    reason: activationDecision === "hold_activation"
+      ? "목표 게이트를 즉시 켜면 통과 후보가 사라지거나 절반 미만으로 줄어 활성화를 보류합니다."
+      : "목표 게이트의 후보 유지율을 검토할 수 있습니다.",
+    blockerCounts,
+    rows,
+  };
 }
 
 export function buildStockResearchGatewaySnapshot(payload = {}) {
@@ -353,6 +677,7 @@ export function buildStockResearchGatewaySnapshot(payload = {}) {
     verifiedCandidates: candidates.filter((candidate) => candidate.gatePassed),
     reviewCandidates: candidates.filter((candidate) => !candidate.gatePassed),
     candidates,
+    gateSimulation: buildStockGateRolloutSimulation(candidates),
     sourceCandidateCount: Number(payload?.decisionChain?.ideaFunnel?.inputCount || candidatePool.length),
     connection: payload?.connection || null,
   };

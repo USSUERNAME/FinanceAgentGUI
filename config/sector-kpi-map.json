@@ -1,0 +1,174 @@
+{
+  "schemaVersion": "sector_kpi_map.v1",
+  "missingPolicy": {
+    "defaultStatus": "insufficient",
+    "issuerDisclosedOnly": true,
+    "prohibitSyntheticValues": true,
+    "description": "The map defines what to inspect. It never supplies a company value."
+  },
+  "default": {
+    "operatingKpis": [
+      {"id": "revenue_growth_yoy", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"]},
+      {"id": "gross_margin", "unit": "percent", "sourceTypes": ["sec_filing", "sec_xbrl"]},
+      {"id": "operating_margin", "unit": "percent", "sourceTypes": ["sec_filing", "sec_xbrl"]},
+      {"id": "free_cash_flow_margin", "unit": "percent", "sourceTypes": ["sec_filing", "sec_xbrl"]}
+    ],
+    "valuationMetrics": [
+      {"id": "fcf_yield", "unit": "percent", "priority": 1},
+      {"id": "ev_ebitda", "unit": "multiple", "priority": 2},
+      {"id": "pe", "unit": "multiple", "priority": 3}
+    ]
+  },
+  "sectors": {
+    "semiconductors_ai_compute": {
+      "operatingKpis": [
+        {"id": "segment_revenue_growth", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "gross_margin", "unit": "percent", "sourceTypes": ["sec_filing", "sec_xbrl"]},
+        {"id": "inventory_days", "unit": "days", "sourceTypes": ["sec_xbrl"]},
+        {"id": "capex_to_sales", "unit": "percent", "sourceTypes": ["sec_xbrl"]},
+        {"id": "data_center_or_ai_mix", "unit": "percent_or_amount", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true}
+      ],
+      "valuationMetrics": [
+        {"id": "forward_pe", "unit": "multiple", "priority": 1, "requires": "licensed_estimates"},
+        {"id": "ev_ebitda", "unit": "multiple", "priority": 2},
+        {"id": "fcf_yield", "unit": "percent", "priority": 3}
+      ]
+    },
+    "data_center_networking": {
+      "operatingKpis": [
+        {"id": "product_revenue_growth", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "gross_margin", "unit": "percent", "sourceTypes": ["sec_xbrl"]},
+        {"id": "cloud_customer_concentration", "unit": "percent", "sourceTypes": ["sec_filing"], "optional": true},
+        {"id": "backlog_or_rpo", "unit": "currency", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true}
+      ],
+      "valuationMetrics": [
+        {"id": "ev_sales", "unit": "multiple", "priority": 1},
+        {"id": "ev_ebitda", "unit": "multiple", "priority": 2},
+        {"id": "fcf_yield", "unit": "percent", "priority": 3}
+      ]
+    },
+    "cloud_saas_cybersecurity": {
+      "operatingKpis": [
+        {"id": "arr", "unit": "currency", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "nrr", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "rpo", "unit": "currency", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "revenue_growth_yoy", "unit": "percent", "sourceTypes": ["sec_xbrl"]},
+        {"id": "free_cash_flow_margin", "unit": "percent", "sourceTypes": ["sec_xbrl"]}
+      ],
+      "valuationMetrics": [
+        {"id": "ev_sales", "unit": "multiple", "priority": 1},
+        {"id": "ev_fcf", "unit": "multiple", "priority": 2},
+        {"id": "rule_of_40", "unit": "points", "priority": 3}
+      ]
+    },
+    "financials_capital_markets": {
+      "operatingKpis": [
+        {"id": "net_interest_margin", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "cet1_ratio", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "rotce", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "credit_cost", "unit": "basis_points", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "fee_revenue_growth", "unit": "percent", "sourceTypes": ["sec_filing", "sec_xbrl"]}
+      ],
+      "valuationMetrics": [
+        {"id": "price_to_tangible_book", "unit": "multiple", "priority": 1},
+        {"id": "price_to_book", "unit": "multiple", "priority": 2},
+        {"id": "pe", "unit": "multiple", "priority": 3}
+      ]
+    },
+    "reits_data_centers": {
+      "operatingKpis": [
+        {"id": "ffo_per_share", "unit": "currency_per_share", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "affo_per_share", "unit": "currency_per_share", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "same_store_noi_growth", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "occupancy", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "net_debt_to_ebitda", "unit": "multiple", "sourceTypes": ["sec_filing", "issuer_ir"]}
+      ],
+      "valuationMetrics": [
+        {"id": "price_to_ffo", "unit": "multiple", "priority": 1},
+        {"id": "nav_premium_discount", "unit": "percent", "priority": 2},
+        {"id": "implied_cap_rate", "unit": "percent", "priority": 3}
+      ],
+      "excludedMetrics": ["pe"]
+    },
+    "energy_oil_gas": {
+      "operatingKpis": [
+        {"id": "production_growth", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "realized_price", "unit": "currency_per_unit", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "lifting_cost", "unit": "currency_per_unit", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "reserve_replacement", "unit": "percent", "sourceTypes": ["sec_filing"], "optional": true},
+        {"id": "free_cash_flow", "unit": "currency", "sourceTypes": ["sec_xbrl"]}
+      ],
+      "valuationMetrics": [
+        {"id": "ev_ebitdax", "unit": "multiple", "priority": 1},
+        {"id": "fcf_yield", "unit": "percent", "priority": 2},
+        {"id": "nav_discount", "unit": "percent", "priority": 3}
+      ]
+    },
+    "consumer_internet_platforms": {
+      "operatingKpis": [
+        {"id": "dau_or_mau", "unit": "users", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "arpu", "unit": "currency_per_user", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "gmv", "unit": "currency", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "take_rate", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "contribution_margin", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true}
+      ],
+      "valuationMetrics": [
+        {"id": "ev_sales", "unit": "multiple", "priority": 1},
+        {"id": "ev_ebitda", "unit": "multiple", "priority": 2},
+        {"id": "fcf_yield", "unit": "percent", "priority": 3}
+      ]
+    },
+    "payments_fintech": {
+      "operatingKpis": [
+        {"id": "total_payment_volume", "unit": "currency", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "payment_volume_growth", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "take_rate", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "transaction_loss_rate", "unit": "basis_points", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true}
+      ],
+      "valuationMetrics": [
+        {"id": "pe", "unit": "multiple", "priority": 1},
+        {"id": "ev_ebitda", "unit": "multiple", "priority": 2},
+        {"id": "fcf_yield", "unit": "percent", "priority": 3}
+      ]
+    },
+    "biotech_healthcare_innovation": {
+      "operatingKpis": [
+        {"id": "cash_runway", "unit": "months", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "pipeline_stage", "unit": "enum", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "trial_or_regulatory_milestones", "unit": "event_list", "sourceTypes": ["sec_filing", "regulator"]},
+        {"id": "r_and_d_spend", "unit": "currency", "sourceTypes": ["sec_xbrl"]}
+      ],
+      "valuationMetrics": [
+        {"id": "enterprise_value_to_pipeline", "unit": "scenario", "priority": 1},
+        {"id": "cash_adjusted_enterprise_value", "unit": "currency", "priority": 2}
+      ],
+      "excludedMetrics": ["pe", "ev_ebitda"]
+    },
+    "transportation_logistics": {
+      "operatingKpis": [
+        {"id": "load_factor_or_utilization", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "yield_per_unit", "unit": "currency_per_unit", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "unit_cost", "unit": "currency_per_unit", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "fuel_cost_share", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true}
+      ],
+      "valuationMetrics": [
+        {"id": "ev_ebitdar", "unit": "multiple", "priority": 1},
+        {"id": "fcf_yield", "unit": "percent", "priority": 2},
+        {"id": "pe", "unit": "multiple", "priority": 3}
+      ]
+    },
+    "utilities_power": {
+      "operatingKpis": [
+        {"id": "rate_base_growth", "unit": "percent", "sourceTypes": ["sec_filing", "issuer_ir"], "optional": true},
+        {"id": "allowed_roe", "unit": "percent", "sourceTypes": ["regulator", "issuer_ir"], "optional": true},
+        {"id": "capex_plan", "unit": "currency", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "net_debt_to_ebitda", "unit": "multiple", "sourceTypes": ["sec_filing", "issuer_ir"]}
+      ],
+      "valuationMetrics": [
+        {"id": "dividend_yield", "unit": "percent", "priority": 1},
+        {"id": "ev_ebitda", "unit": "multiple", "priority": 2},
+        {"id": "pe", "unit": "multiple", "priority": 3}
+      ]
+    }
+  }
+}

@@ -14,6 +14,18 @@ class DailyIntelligenceTests(unittest.TestCase):
         return {
             "report_date": self.report_date,
             "data_cutoff": {"market": "2026-07-23"},
+            "official_market_calendar": {
+                "collection_status": "complete",
+                "source_count": 2,
+            },
+            "upcoming_events": [{
+                "event_id": "cpi-2026-07",
+                "date": "2026-07-24",
+                "time": "08:30 ET",
+                "title": "Consumer Price Index",
+                "source_url": "https://www.bls.gov/schedule/",
+                "primary_source_confirmed": True,
+            }],
             "market_scoreboard": {"rates": {"us10y": 4.4}},
             "day_over_day_changes": {"status": "available"},
             "korea_market": {"status": "available"},
@@ -161,6 +173,11 @@ class DailyIntelligenceTests(unittest.TestCase):
             ]
         )
         self.assertEqual(len(packet["market"]["key_drivers"]), 3)
+        self.assertEqual(
+            packet["market"]["official_calendar"]["collection_status"],
+            "complete",
+        )
+        self.assertEqual(packet["market"]["upcoming_events"][0]["event_id"], "cpi-2026-07")
         self.assertEqual(
             packet["market"]["conflicting_signals"],
             ["rates and breadth conflict"],

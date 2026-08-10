@@ -10,6 +10,7 @@ const HORIZONS = [
   { id: "1m", days: 30, label: "1개월" },
   { id: "3m", days: 90, label: "3개월" },
 ];
+const TRADE_HORIZONS = new Set(["day", "earnings", "position", "long_term"]);
 
 function text(value, max = 500) {
   const normalized = String(value || "").replace(/\s+/g, " ").trim();
@@ -73,6 +74,12 @@ export function syncCandidatePerformanceStore(store = emptyCandidatePerformanceS
         benchmark: "SPY",
         thesisStatus: "watching",
         thesisNote: "",
+        thesisReasonAtRegistration: text(raw?.thesisReason, 1000),
+        invalidationConditionsAtRegistration: (Array.isArray(raw?.invalidationConditions)
+          ? raw.invalidationConditions
+          : []).map((item) => text(item, 500)).filter(Boolean).slice(0, 6),
+        tradePlan: null,
+        reviewHistory: [],
         observations: [],
       };
       next.records.push(record);
@@ -102,6 +109,91 @@ export function syncCandidatePerformanceStore(store = emptyCandidatePerformanceS
     record.lastObservedPrice = close;
   }
   next.updatedAt = syncedAt;
+  return next;
+}
+
+function tradePlanReadiness(plan) {
+  const commonReady = Boolean(plan.tradeHorizon && plan.thesisReason && plan.exitCondition);
+  const executionReady = plan.tradeHorizon === "long_term" || Boolean(
+    plan.entryCondition && plan.maxLossPct !== null && plan.positionSizePct !== null,
+  );
+  const missingFields = [
+    plan.tradeHorizon ? "" : "tradeHorizon",
+    plan.thesisReason ? "" : "thesisReason",
+    plan.exitCondition ? "" : "exitCondition",
+    plan.tradeHorizon === "long_term" || plan.entryCondition ? "" : "entryCondition",
+    plan.tradeHorizon === "long_term" || plan.maxLossPct !== null ? "" : "maxLossPct",
+    plan.tradeHorizon === "long_term" || plan.positionSizePct !== null ? "" : "positionSizePct",
+  ].filter(Boolean);
+  return { ready: commonReady && executionReady, missingFields };
+}
+
+function normalizedTradePlan(raw = {}) {
+  const tradeHorizon = text(raw.tradeHorizon, 40);
+  if (tradeHorizon && !TRADE_HORIZONS.has(tradeHorizon)) throw new Error("unsupported trade horizon");
+  const maxLossPct = finite(raw.maxLossPct);
+  const positionSizePct = finite(raw.positionSizePct);
+  if (maxLossPct !== null && (maxLossPct <= 0 || maxLossPct > 100)) {
+    throw new Error("maxLossPct must be greater than 0 and at most 100");
+  }
+  if (positionSizePct !== null && (positionSizePct <= 0 || positionSizePct > 100)) {
+    throw new Error("positionSizePct must be greater than 0 and at most 100");
+  }
+  const plan = {
+    tradeHorizon,
+    thesisReason: text(raw.thesisReason, 1000),
+    entryCondition: text(raw.entryCondition, 1000),
+    addCondition: text(raw.addCondition, 1000),
+    exitCondition: text(raw.exitCondition, 1000),
+    maxLossPct,
+    positionSizePct,
+  };
+  return { ...plan, readiness: tradePlanReadiness(plan) };
+}
+
+export function updateCandidateTradePlanStore(
+  store = emptyCandidatePerformanceStore(),
+  symbolValue,
+  rawTradePlan = {},
+  now = new Date(),
+) {
+  const next = structuredClone(store);
+  const symbol = ticker(symbolValue);
+  const record = next.records.find((item) => ticker(item.ticker) === symbol);
+  if (!record) throw new Error("tracked candidate not found");
+  record.tradePlan = {
+    ...normalizedTradePlan(rawTradePlan),
+    updatedAt: now.toISOString(),
+  };
+  next.updatedAt = now.toISOString();
+  return next;
+}
+
+export function reviewCandidatePerformanceStore(
+  store = emptyCandidatePerformanceStore(),
+  symbolValue,
+  thesisStatus,
+  thesisNote = "",
+  now = new Date(),
+) {
+  const next = structuredClone(store);
+  const symbol = ticker(symbolValue);
+  const record = next.records.find((item) => ticker(item.ticker) === symbol);
+  if (!record) throw new Error("tracked candidate not found");
+  record.thesisStatus = ["watching", "hit", "invalidated"].includes(thesisStatus)
+    ? thesisStatus
+    : record.thesisStatus;
+  record.thesisNote = text(thesisNote, 1000);
+  record.reviewHistory = Array.isArray(record.reviewHistory) ? record.reviewHistory : [];
+  record.reviewHistory.push({
+    reviewedAt: now.toISOString(),
+    thesisStatus: record.thesisStatus,
+    thesisNote: record.thesisNote,
+    tradePlanSnapshot: record.tradePlan ? structuredClone(record.tradePlan) : null,
+    lastObservedAt: record.lastObservedAt || "",
+    lastObservedPrice: finite(record.lastObservedPrice),
+  });
+  next.updatedAt = now.toISOString();
   return next;
 }
 
@@ -179,13 +271,14 @@ export async function handleStockCandidatePerformanceEndpoint(req, res) {
     if (action === "sync") {
       store = syncCandidatePerformanceStore(store, body.candidates);
     } else if (action === "review") {
-      const symbol = ticker(body.ticker);
-      const record = store.records.find((item) => ticker(item.ticker) === symbol);
-      if (!record) throw new Error("tracked candidate not found");
-      record.thesisStatus = ["watching", "hit", "invalidated"].includes(body.thesisStatus)
-        ? body.thesisStatus : record.thesisStatus;
-      record.thesisNote = text(body.thesisNote, 1000);
-      store.updatedAt = new Date().toISOString();
+      store = reviewCandidatePerformanceStore(
+        store,
+        body.ticker,
+        body.thesisStatus,
+        body.thesisNote,
+      );
+    } else if (action === "trade_plan") {
+      store = updateCandidateTradePlanStore(store, body.ticker, body.tradePlan);
     } else {
       sendJson(res, { ok: false, error: "unknown action" }, 422);
       return;
