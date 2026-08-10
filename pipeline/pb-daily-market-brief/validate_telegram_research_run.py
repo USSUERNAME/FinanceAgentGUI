@@ -7,11 +7,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 APPROVAL_PATH = ROOT / "workspace" / "telegram_research_approvals" / "attachments.json"
 DIGEST_ROOT = ROOT / "workspace" / "broker_research_digest"
+SOURCE_STATUS_ROOT = ROOT / "workspace" / "source_status"
+
+
+def latest_telegram_source_status(
+    source_status_root: Path = SOURCE_STATUS_ROOT,
+) -> dict | None:
+    for path in sorted(source_status_root.glob("*/source_status_*.json"), reverse=True):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        for source in payload.get("sources", []):
+            if (
+                isinstance(source, dict)
+                and source.get("source_id") == "telegram_channels"
+            ):
+                return source
+    return None
 
 
 def validate_telegram_research_run(
     approval_path: Path = APPROVAL_PATH,
     digest_root: Path = DIGEST_ROOT,
+    source_status_root: Path = SOURCE_STATUS_ROOT,
 ) -> tuple[int, int]:
     if not approval_path.exists():
         print("Telegram PDF approval registry is not configured; validation skipped.")
@@ -53,6 +72,19 @@ def validate_telegram_research_run(
         f"{len(analyzed_keys)}/{len(approved_keys)} backfill-ready approval(s) structured."
     )
     if not analyzed_keys:
+        telegram_status = latest_telegram_source_status(source_status_root)
+        if telegram_status and telegram_status.get("status") == "timeout":
+            timeout_seconds = telegram_status.get("timeout_seconds")
+            timeout_label = (
+                f" after {float(timeout_seconds):g}s"
+                if isinstance(timeout_seconds, (int, float))
+                else ""
+            )
+            raise RuntimeError(
+                "Approved Telegram PDFs were not analyzed because the "
+                f"telegram_channels collector timed out{timeout_label}; retry or increase "
+                "COLLECTOR_TIMEOUT_TELEGRAM_CHANNELS_SECONDS"
+            )
         raise RuntimeError(
             "Approved Telegram PDFs were not analyzed; check approval restore, message access, and PDF processing logs"
         )
