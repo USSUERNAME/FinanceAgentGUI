@@ -321,6 +321,15 @@ button { -webkit-tap-highlight-color: transparent; }
 .pending-explanation { margin: 16px 0 0; padding: 13px 15px; border-left: 3px solid #d8ba53; color: #665a37; background: #fffbef; font-size: 12px; line-height: 1.7; }
 .pending-metric-grid { margin-top: 4px; }
 .empty-inline { margin: 16px 0 0; color: #71807b; font-size: 13px; }
+.candidate-performance-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+.candidate-performance-card { padding: 17px; border: 1px solid #d8e2de; border-radius: 15px; background: #fbfdfc; }
+.candidate-performance-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.candidate-performance-heading strong { color: #17372e; font-size: 17px; }
+.candidate-performance-metrics { display: grid; gap: 0; margin: 14px 0 10px; }
+.candidate-performance-row { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-top: 1px solid #e7eeeb; }
+.candidate-performance-row:first-child { border-top: 0; }
+.candidate-performance-row dt { color: #73817c; font-size: 11px; font-weight: 800; }
+.candidate-performance-row dd { margin: 0; color: #2d463d; font-size: 12px; font-weight: 700; text-align: right; }
 
 .loading-state, .empty-state, .error-state, .locked-state { width: min(620px, 100%); margin: 16vh auto 0; color: #66736e; text-align: center; }
 .locked-state { padding: 46px 26px; border: 1px solid #d6e1dc; border-radius: 20px; background: rgba(255, 255, 255, 0.78); }
@@ -361,6 +370,7 @@ button { -webkit-tap-highlight-color: transparent; }
   .telegram-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .company-verdict-grid { grid-template-columns: 1fr; }
   .company-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .candidate-performance-grid { grid-template-columns: 1fr; }
   .lead-narrative { font-size: 16px; }
 }
 
