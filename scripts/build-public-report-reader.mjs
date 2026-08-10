@@ -338,6 +338,7 @@ export function sanitizeTelegramRefresh(source = {}) {
       verificationStatus: text(item?.verification_status, 120),
       latestPublishedAt: text(item?.latest_published_at, 80),
       postCount: Math.max(0, Number(item?.post_count) || 0),
+      tickers: textList(item?.tickers, { limit: 12, maxLength: 16 }).map((ticker) => ticker.toUpperCase()),
       channels: textList(item?.channels, { limit: 8, maxLength: 160 }),
       postUrls: (Array.isArray(item?.post_urls) ? item.post_urls : [])
         .map(safeTelegramUrl)
@@ -706,6 +707,7 @@ function sanitizePreviousTelegram(source) {
         verification_status: item.verificationStatus,
         latest_published_at: item.latestPublishedAt,
         post_count: item.postCount,
+        tickers: item.tickers,
         channels: item.channels,
         post_urls: item.postUrls,
       })),
@@ -853,6 +855,49 @@ export function buildCandidatePerformance(companies = []) {
   }).sort((left, right) => right.latestDate.localeCompare(left.latestDate) || left.ticker.localeCompare(right.ticker)).slice(0, 100);
 }
 
+export function buildCommunityCandidates(telegram, candidatePerformance = []) {
+  const promotedTickers = new Set(
+    (Array.isArray(candidatePerformance) ? candidatePerformance : [])
+      .map((item) => text(item?.ticker, 32).toUpperCase())
+      .filter(Boolean),
+  );
+  const byTicker = new Map();
+  for (const cluster of telegram?.clusters || []) {
+    for (const rawTicker of cluster.tickers || []) {
+      const ticker = text(rawTicker, 16).toUpperCase();
+      if (!ticker) continue;
+      const current = byTicker.get(ticker) || {
+        ticker,
+        grade: "C",
+        sourceClass: "community_signal",
+        verificationStatus: "discovery_lead_only",
+        pipelineStatus: promotedTickers.has(ticker)
+          ? "already_in_candidate_pipeline"
+          : "awaiting_primary_source_gate",
+        lastMentionedAt: "",
+        mentionCount: 0,
+        titles: [],
+        channels: [],
+        sourceUrls: [],
+        positionActionAllowed: false,
+      };
+      current.lastMentionedAt = [current.lastMentionedAt, text(cluster.latestPublishedAt, 80)]
+        .filter(Boolean)
+        .sort()
+        .at(-1) || "";
+      current.mentionCount += Math.max(1, Number(cluster.postCount) || 0);
+      current.titles = [...new Set([...current.titles, prose(cluster.title, 480)].filter(Boolean))].slice(0, 4);
+      current.channels = [...new Set([...current.channels, ...(cluster.channels || [])])].slice(0, 8);
+      current.sourceUrls = [...new Set([...current.sourceUrls, ...(cluster.postUrls || [])])].slice(0, 6);
+      if (cluster.verificationStatus) current.verificationStatus = text(cluster.verificationStatus, 120);
+      byTicker.set(ticker, current);
+    }
+  }
+  return [...byTicker.values()]
+    .sort((left, right) => right.lastMentionedAt.localeCompare(left.lastMentionedAt) || right.mentionCount - left.mentionCount || left.ticker.localeCompare(right.ticker))
+    .slice(0, 50);
+}
+
 export async function buildPublicReportReader({
   inputDir,
   intelligenceDir = "",
@@ -881,6 +926,7 @@ export async function buildPublicReportReader({
   const candidatePerformance = locked ? [] : buildCandidatePerformance(companies);
   const worldMemory = locked ? null : (await readWorldMemorySnapshot(worldMemoryFile)) || previous.worldMemory;
   const telegram = locked ? null : (await readLatestTelegramSnapshot(telegramDir)) || previous.telegram;
+  const communityCandidates = locked ? [] : buildCommunityCandidates(telegram, candidatePerformance);
   if (!locked && !reports.length && !intelligence.length && !companies.length && !worldMemory && !telegram) throw new Error(`no valid private reader content found in ${inputDir}`);
   const payload = {
     schemaVersion: "public_pb_reader_bundle.v1",
@@ -890,6 +936,7 @@ export async function buildPublicReportReader({
     intelligence,
     companies,
     candidatePerformance,
+    communityCandidates,
     worldMemory,
     telegram,
   };

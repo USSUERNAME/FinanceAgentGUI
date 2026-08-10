@@ -132,6 +132,15 @@ class TelegramMessageTests(unittest.TestCase):
         self.assertEqual(item["linked_urls"], ["https://example.com/fed?utm_source=telegram"])
         self.assertEqual(item["canonical_url"], "https://t.me/test_market/101")
 
+    def test_message_extracts_only_explicit_us_ticker_markers(self) -> None:
+        item = telegram_channels.message_item(
+            self.channel(),
+            message_id=111,
+            published_at=datetime(2026, 7, 23, 1, 0, tzinfo=timezone.utc),
+            text="관심 종목 $ONDS, NASDAQ:NVDA, 티커 PLTR 검토. (CPI)는 거시지표.",
+        )
+        self.assertEqual(item["tickers"], ["NVDA", "ONDS", "PLTR"])
+
     def test_no_republication_policy_stores_only_topic_title(self) -> None:
         text = "중요 공시 요약\n" + ("상세한 원문 문장 " * 100)
         item = telegram_channels.message_item(

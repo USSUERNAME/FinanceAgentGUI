@@ -323,6 +323,9 @@ button { -webkit-tap-highlight-color: transparent; }
 .empty-inline { margin: 16px 0 0; color: #71807b; font-size: 13px; }
 .candidate-performance-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
 .candidate-performance-card { padding: 17px; border: 1px solid #d8e2de; border-radius: 15px; background: #fbfdfc; }
+.community-signal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 18px; }
+.community-signal-card { border: 1px solid rgba(202, 138, 4, 0.28); border-radius: 16px; background: rgba(254, 252, 232, 0.72); padding: 16px; }
+.ticker-tag-row span { font-weight: 800; color: #285f4d; }
 .candidate-performance-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .candidate-performance-heading strong { color: #17372e; font-size: 17px; }
 .candidate-performance-metrics { display: grid; gap: 0; margin: 14px 0 10px; }

@@ -1148,6 +1148,11 @@ function renderTelegram(telegram) {
         cluster.verificationStatus && `검증 ${valueLabel(cluster.verificationStatus)}`,
       ].filter(Boolean);
       if (metadata.length) body.append(element("p", "research-meta", metadata.join(" · ")));
+      if (cluster.tickers?.length) {
+        const tickers = element("div", "tag-row ticker-tag-row");
+        cluster.tickers.forEach((ticker) => tickers.append(element("span", "", `$${ticker}`)));
+        body.append(tickers);
+      }
       if (cluster.channels?.length) {
         const tags = element("div", "tag-row");
         cluster.channels.forEach((channel) => tags.append(element("span", "", channel)));
@@ -1320,7 +1325,58 @@ function renderPendingCompanyCandidates(bundle) {
   return node;
 }
 
-function renderCompanyCandidates(bundle, candidatePerformance = []) {
+function renderCommunitySignals(values = []) {
+  const node = section(
+    `커뮤니티 신호 / C등급 ${values.length}개`,
+    "텔레그램 게시글에 티커가 명시된 종목입니다. 공식 공시·IR과 핵심 사실이 확인되기 전에는 검증된 투자 후보로 승격하지 않습니다.",
+  );
+  const grid = element("div", "community-signal-grid");
+  values.forEach((item) => {
+    const card = element("article", "community-signal-card");
+    const heading = element("div", "candidate-performance-heading");
+    heading.append(
+      element("strong", "", `$${item.ticker}`),
+      element("span", "company-grade", item.grade || "C"),
+    );
+    card.append(heading);
+    card.append(element(
+      "p",
+      "pending-explanation",
+      item.pipelineStatus === "already_in_candidate_pipeline"
+        ? "기존 후보 게이트에도 포착된 종목입니다. 커뮤니티 언급은 보조 신호로만 유지합니다."
+        : "커뮤니티 발견 단계입니다. 1차 출처 검증과 시장·기업 분석 전에는 비중 제안을 생성하지 않습니다.",
+    ));
+    const meta = [
+      item.lastMentionedAt && `최근 언급 ${formatDateTime(item.lastMentionedAt)}`,
+      `관련 게시글 ${item.mentionCount || 0}건`,
+      "자동 매수·비중 제안 비활성",
+    ].filter(Boolean);
+    card.append(element("p", "research-meta", meta.join(" · ")));
+    if (item.titles?.length) appendTextList(card, item.titles, "compact-list");
+    if (item.channels?.length) {
+      const tags = element("div", "tag-row");
+      item.channels.forEach((channel) => tags.append(element("span", "", channel)));
+      card.append(tags);
+    }
+    if (item.sourceUrls?.length) {
+      const links = element("div", "telegram-links");
+      item.sourceUrls.forEach((url, index) => {
+        const link = element("a", "source-link", `원문 ${index + 1}`);
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noreferrer noopener";
+        links.append(link);
+      });
+      card.append(links);
+    }
+    grid.append(card);
+  });
+  if (!values.length) node.append(element("p", "empty-inline", "명시적으로 식별된 커뮤니티 티커가 없습니다."));
+  else node.append(grid);
+  return node;
+}
+
+function renderCompanyCandidates(bundle, candidatePerformance = [], communityCandidates = []) {
   const article = element("article", "report-document company-document");
   article.append(reportHeader({
     eyebrow: "LONG-TERM COMPANY REVIEW",
@@ -1443,6 +1499,7 @@ function renderCompanyCandidates(bundle, candidatePerformance = []) {
   });
   node.append(stack);
   article.append(node);
+  article.append(renderCommunitySignals(communityCandidates));
   article.append(element("footer", "report-footer", "검증된 투자 후보는 공개·공유용 장기투자 검토 자료이며 자동 주문이나 개인화된 매수 지시를 생성하지 않습니다."));
   return article;
 }
@@ -1485,10 +1542,10 @@ function searchableText(item) {
     return [item.reportDate, item.market?.regime?.label, item.market?.regime?.summary, ...(item.market?.topRisks || []), ...(item.events?.items || []).flatMap((value) => [value.title, ...(value.topicTags || [])]), ...(item.continuity?.activeEntries || []).map((value) => value.title)].join(" ").toLowerCase();
   }
   if (["companies", "stock"].includes(state.view)) {
-    return [item.reportDate, ...(item.profiles || []).flatMap((value) => [value.ticker, value.companyName, value.action?.grade, value.action?.reason, value.companyQuality?.label, value.stockAttractiveness?.label]), ...(item.pendingCandidates || []).flatMap((value) => [value.ticker, value.companyName, value.evidenceStatus, ...(value.selectionReasons || [])])].join(" ").toLowerCase();
+    return [item.reportDate, ...(item.profiles || []).flatMap((value) => [value.ticker, value.companyName, value.action?.grade, value.action?.reason, value.companyQuality?.label, value.stockAttractiveness?.label]), ...(item.pendingCandidates || []).flatMap((value) => [value.ticker, value.companyName, value.evidenceStatus, ...(value.selectionReasons || [])]), ...(state.payload?.communityCandidates || []).flatMap((value) => [value.ticker, ...(value.titles || []), ...(value.channels || [])])].join(" ").toLowerCase();
   }
   if (state.view === "telegram") {
-    return [item.generatedAt, ...(item.clusters || []).flatMap((value) => [value.title, value.eventType, ...(value.channels || [])])].join(" ").toLowerCase();
+    return [item.generatedAt, ...(item.clusters || []).flatMap((value) => [value.title, value.eventType, ...(value.tickers || []), ...(value.channels || [])])].join(" ").toLowerCase();
   }
   return [item.report?.title, item.report?.summary, item.report?.narrative, ...(item.report?.highlights || []).flatMap((value) => [value.title, value.body]), ...(item.theses || []).flatMap((value) => [value.title, value.thesis])].join(" ").toLowerCase();
 }
@@ -1505,7 +1562,7 @@ function renderActive() {
     : state.view === "intelligence"
       ? renderIntelligence(item)
       : ["companies", "stock"].includes(state.view)
-        ? renderCompanyCandidates(item, state.payload?.candidatePerformance || [])
+        ? renderCompanyCandidates(item, state.payload?.candidatePerformance || [], state.payload?.communityCandidates || [])
       : state.view === "telegram"
         ? renderTelegram(item)
         : renderWorldMemory(item);
