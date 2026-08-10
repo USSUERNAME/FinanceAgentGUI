@@ -1355,6 +1355,118 @@
   gap: 10px;
 }
 
+.daily-intelligence-market-framework {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.daily-intelligence-market-framework article {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.24));
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.daily-intelligence-market-framework article.is-verified {
+  border-color: rgba(52, 211, 153, 0.4);
+}
+
+.daily-intelligence-market-framework article.is-collection_failed {
+  border-color: rgba(248, 113, 113, 0.55);
+}
+
+.daily-intelligence-market-framework article.is-insufficient,
+.daily-intelligence-market-framework article.is-accumulating,
+.daily-intelligence-market-framework article.is-stale {
+  border-color: rgba(251, 191, 36, 0.4);
+}
+
+.daily-intelligence-market-framework header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.daily-intelligence-market-framework header > span {
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(96, 165, 250, 0.18);
+  color: #93c5fd;
+  font-weight: 800;
+}
+
+.daily-intelligence-market-framework header div {
+  min-width: 0;
+  flex: 1;
+}
+
+.daily-intelligence-market-framework header small,
+.daily-intelligence-market-framework header strong {
+  display: block;
+}
+
+.daily-intelligence-market-framework header small {
+  overflow: hidden;
+  color: var(--text-muted, #94a3b8);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.daily-intelligence-market-framework header strong {
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.daily-intelligence-market-framework header em {
+  color: var(--text-muted, #94a3b8);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.daily-intelligence-market-framework article > p {
+  margin: 12px 0 0;
+  color: var(--text-secondary, #cbd5e1);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.daily-intelligence-market-framework ul {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.daily-intelligence-market-framework li {
+  font-size: 11px;
+}
+
+.daily-intelligence-market-framework li span {
+  display: block;
+  color: var(--text-muted, #94a3b8);
+}
+
+@media (max-width: 1400px) {
+  .daily-intelligence-market-framework {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 780px) {
+  .daily-intelligence-market-framework {
+    grid-template-columns: 1fr;
+  }
+}
+
 .daily-intelligence-score-card {
   display: grid;
   gap: 3px;

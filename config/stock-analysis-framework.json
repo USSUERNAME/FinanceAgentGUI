@@ -1,0 +1,135 @@
+{
+  "schemaVersion": "stock_analysis_framework.v1",
+  "rollout": {
+    "currentGateImplementation": "web/src/arca/stockCandidateVerification.js",
+    "newGateActivation": "simulation_required",
+    "separateTabAllowed": false
+  },
+  "decisions": {
+    "researchGrade": {
+      "description": "근거의 신뢰도를 A/B/C로 판정한다.",
+      "coreGateIds": [
+        "ticker",
+        "authoritative_source",
+        "verified_facts",
+        "counter_evidence",
+        "invalidation",
+        "dates",
+        "trade_suitability"
+      ],
+      "failureGrade": "C",
+      "automaticAllocationAllowed": false
+    },
+    "completeness": {
+      "description": "등급과 분리해 8단계 중 채워진 단계 수를 표시한다.",
+      "format": "completed/8",
+      "changesResearchGrade": false
+    },
+    "tradeHorizon": {
+      "requiredForTradePlan": true,
+      "missingValue": "unclassified",
+      "allowedValues": ["day", "earnings", "position", "long_term"],
+      "changesResearchGradeWhenMissing": false
+    },
+    "missingData": {
+      "allowedStatuses": [
+        "verified",
+        "insufficient",
+        "accumulating",
+        "collection_failed",
+        "stale"
+      ],
+      "prohibitEstimatedFill": true,
+      "missingNeverPassesGate": true
+    }
+  },
+  "horizonRequirements": {
+    "day": ["trade_suitability", "technical_trade_plan"],
+    "earnings": ["trade_suitability", "market_expectations", "catalyst_risk", "technical_trade_plan"],
+    "position": ["trade_suitability", "valuation", "catalyst_risk", "technical_trade_plan"],
+    "long_term": ["business_structure", "growth_quality", "financial_statements", "valuation", "catalyst_risk"]
+  },
+  "stages": [
+    {
+      "id": "business_structure",
+      "labelKo": "사업 구조",
+      "fields": [
+        {"id": "businessSummary", "path": "integratedResearch.businessSummary", "unit": "text", "role": "display", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "productMix", "path": "integratedResearch.productMix", "unit": "percent_or_amount", "role": "display", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "geographicMix", "path": "integratedResearch.geographicMix", "unit": "percent_or_amount", "role": "display", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "recurringRevenueShare", "path": "integratedResearch.recurringRevenueShare", "unit": "percent", "role": "display", "sourceTypes": ["sec_filing", "issuer_ir"]}
+      ]
+    },
+    {
+      "id": "trade_suitability",
+      "labelKo": "거래 적합성",
+      "fields": [
+        {"id": "status", "path": "tradeSuitability.status", "unit": "status", "role": "gate", "sourceTypes": ["licensed_market_data", "exchange_data"]},
+        {"id": "marketCap", "path": "tradeSuitability.marketCap", "unit": "currency", "role": "display", "sourceTypes": ["licensed_market_data", "exchange_data"]},
+        {"id": "avgDailyDollarVolume", "path": "tradeSuitability.avgDailyDollarVolume", "unit": "currency_per_day", "role": "display", "sourceTypes": ["licensed_market_data", "exchange_data"]},
+        {"id": "spreadBps", "path": "tradeSuitability.spreadBps", "unit": "basis_points", "role": "display", "sourceTypes": ["licensed_market_data", "exchange_data"]},
+        {"id": "atrPct", "path": "tradeSuitability.atrPct", "unit": "percent", "role": "display", "sourceTypes": ["licensed_market_data", "exchange_data"]},
+        {"id": "freeFloat", "path": "tradeSuitability.freeFloat", "unit": "shares_or_percent", "role": "display", "sourceTypes": ["issuer_filing", "licensed_market_data"]}
+      ]
+    },
+    {
+      "id": "growth_quality",
+      "labelKo": "성장의 질",
+      "fields": [
+        {"id": "growthBridge", "path": "integratedResearch.growthBridge", "unit": "structured_text", "role": "display", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "organicGrowth", "path": "integratedResearch.organicGrowth", "unit": "percent", "role": "display", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "priceVolumeMix", "path": "integratedResearch.priceVolumeMix", "unit": "structured_text", "role": "display", "sourceTypes": ["sec_filing", "issuer_ir"]},
+        {"id": "acquisitionContribution", "path": "integratedResearch.acquisitionContribution", "unit": "percent_or_amount", "role": "display", "sourceTypes": ["sec_filing", "issuer_ir"]}
+      ]
+    },
+    {
+      "id": "financial_statements",
+      "labelKo": "재무 3표",
+      "fields": [
+        {"id": "financialRows", "path": "integratedResearch.financialRows", "unit": "reported_metric", "role": "display", "sourceTypes": ["sec_xbrl", "sec_filing"]},
+        {"id": "segmentRows", "path": "integratedResearch.segmentRows", "unit": "reported_metric", "role": "display", "sourceTypes": ["sec_xbrl", "sec_filing"]},
+        {"id": "warningCombinations", "path": "integratedResearch.financialWarnings", "unit": "rule_result", "role": "display", "sourceTypes": ["derived_from_authoritative"]}
+      ]
+    },
+    {
+      "id": "market_expectations",
+      "labelKo": "시장 기대",
+      "fields": [
+        {"id": "earningsConsensus", "path": "marketExpectations.earningsConsensus", "unit": "currency_per_share", "role": "horizon_gate", "horizons": ["earnings"], "sourceTypes": ["licensed_estimates"]},
+        {"id": "revenueConsensus", "path": "marketExpectations.revenueConsensus", "unit": "currency", "role": "horizon_gate", "horizons": ["earnings"], "sourceTypes": ["licensed_estimates"]},
+        {"id": "estimateRevision", "path": "marketExpectations.estimateRevision", "unit": "percent", "role": "horizon_gate", "horizons": ["earnings"], "sourceTypes": ["licensed_estimates"]},
+        {"id": "impliedMove", "path": "marketExpectations.impliedMove", "unit": "percent", "role": "display", "sourceTypes": ["licensed_options_data"]}
+      ]
+    },
+    {
+      "id": "valuation",
+      "labelKo": "밸류에이션",
+      "fields": [
+        {"id": "valuationScreen", "path": "integratedResearch.valuation", "unit": "sector_specific_multiple", "role": "horizon_gate", "horizons": ["position", "long_term"], "sourceTypes": ["reported_financials", "licensed_market_data"]},
+        {"id": "sectorKpis", "path": "integratedResearch.sectorKpis", "unit": "sector_specific", "role": "display", "sourceTypes": ["sec_filing", "issuer_ir", "licensed_market_data"]}
+      ]
+    },
+    {
+      "id": "catalyst_risk",
+      "labelKo": "촉매·위험",
+      "fields": [
+        {"id": "catalysts", "path": "integratedResearch.catalysts", "unit": "text_list", "role": "display", "sourceTypes": ["authoritative_event", "issuer_ir"]},
+        {"id": "counterEvidence", "path": "counterEvidence", "unit": "text", "role": "gate", "sourceTypes": ["authoritative", "attributed_analysis"]},
+        {"id": "invalidationConditions", "path": "invalidationConditions", "unit": "text_list", "role": "gate", "sourceTypes": ["analyst_rule"]}
+      ]
+    },
+    {
+      "id": "technical_trade_plan",
+      "labelKo": "차트·매매계획",
+      "fields": [
+        {"id": "tradeHorizon", "path": "tradePlan.tradeHorizon", "unit": "enum", "role": "horizon_gate", "horizons": ["day", "earnings", "position", "long_term"], "sourceTypes": ["user_input"]},
+        {"id": "thesisReason", "path": "tradePlan.thesisReason", "unit": "rule", "role": "horizon_gate", "horizons": ["day", "earnings", "position", "long_term"], "sourceTypes": ["user_rule"]},
+        {"id": "entryCondition", "path": "tradePlan.entryCondition", "unit": "rule", "role": "horizon_gate", "horizons": ["day", "earnings", "position"], "sourceTypes": ["user_rule", "derived_market_data"]},
+        {"id": "addCondition", "path": "tradePlan.addCondition", "unit": "rule", "role": "display", "sourceTypes": ["user_rule"]},
+        {"id": "exitCondition", "path": "tradePlan.exitCondition", "unit": "rule", "role": "horizon_gate", "horizons": ["day", "earnings", "position", "long_term"], "sourceTypes": ["user_rule"]},
+        {"id": "maxLossPct", "path": "tradePlan.maxLossPct", "unit": "percent", "role": "horizon_gate", "horizons": ["day", "earnings", "position"], "sourceTypes": ["user_rule"]},
+        {"id": "positionSizePct", "path": "tradePlan.positionSizePct", "unit": "percent_of_portfolio", "role": "horizon_gate", "horizons": ["day", "earnings", "position"], "sourceTypes": ["derived_risk_budget"]}
+      ]
+    }
+  ]
+}

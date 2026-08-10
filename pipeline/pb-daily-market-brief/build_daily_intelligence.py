@@ -296,6 +296,13 @@ def build_daily_intelligence(
         "audience": "research_reader",
         "market": {
             "data_cutoff": deepcopy(snapshot.get("data_cutoff") or {}),
+            "official_calendar": deepcopy(
+                snapshot.get("official_market_calendar") or {}
+            ),
+            "upcoming_events": _dict_rows(
+                snapshot.get("upcoming_events"),
+                limit=20,
+            ),
             "regime": deepcopy(analysis.get("market_regime") or {}),
             "key_drivers": _dict_rows(analysis.get("key_drivers"), limit=3),
             "conflicting_signals": _bounded_list(

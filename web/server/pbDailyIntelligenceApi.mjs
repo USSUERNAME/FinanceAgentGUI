@@ -7,6 +7,7 @@ import {
   researchSectorTaxonomyVersion,
   suggestResearchSectors,
 } from "./researchSectorTaxonomy.mjs";
+import { resolveSectorKpiSet } from "./sectorKpiMap.mjs";
 import { readPortfolioCanvasStoreSnapshot } from "./portfolioApi.mjs";
 import {
   addTransactionWatchlistTicker,
@@ -1226,6 +1227,144 @@ function normalizeScoreboard(intelligence = {}) {
   };
 }
 
+function marketFrameworkStatus(value, { verified = [], failed = [] } = {}) {
+  const normalized = cleanText(value, 80).toLowerCase();
+  if (failed.some((item) => normalized.includes(item))) return "collection_failed";
+  if (verified.includes(normalized)) return "verified";
+  if (["not_collected", "not_available", "pending", ""].includes(normalized)) return "accumulating";
+  return "insufficient";
+}
+
+export function buildMarketRegimeFramework({
+  intelligence = {},
+  scoreboard = null,
+  marketInternals = null,
+  sectorMetrics = null,
+  report = null,
+} = {}) {
+  const market = intelligence?.market || {};
+  const calendar = market.official_calendar || {};
+  const upcomingEvents = cleanList(market.upcoming_events, 20).map((event) => ({
+    id: cleanText(event?.event_id, 160),
+    date: cleanText(event?.date, 40),
+    time: cleanText(event?.time, 40),
+    title: cleanText(event?.title, 240),
+    sourceUrl: /^https?:\/\//i.test(String(event?.source_url || ""))
+      ? String(event.source_url)
+      : "",
+    authoritative: event?.primary_source_confirmed === true,
+  }));
+  const calendarStatus = marketFrameworkStatus(calendar.collection_status, {
+    verified: ["complete", "ready"],
+    failed: ["fail", "error"],
+  });
+  const cards = new Map(cleanList(scoreboard?.cards, 20).map((card) => [card.id, card]));
+  const rateFields = {
+    us2y: cards.get("nominal-2y") || null,
+    us10y: cards.get("nominal-10y") || null,
+    real10y: cards.get("real-10y") || null,
+    curve2s10s: cards.get("curve-2s10s") || null,
+    creditSpread: cards.get("credit") || null,
+  };
+  const rateMissing = Object.entries(rateFields)
+    .filter(([, value]) => !value)
+    .map(([key]) => key);
+  const internalsReady = marketInternals?.status === "ready"
+    && Number(marketInternals?.coverage?.required || 0) > 0
+    && Number(marketInternals?.coverage?.available || 0)
+      >= Number(marketInternals?.coverage?.required || 0);
+  const sectorLeadershipReady = cleanList(marketInternals?.sectors?.["5d"], 20).length > 0;
+  const regimeReady = Boolean(scoreboard?.regime?.label && scoreboard.regime.label !== "unknown")
+    && cleanList(scoreboard?.regime?.quantitativeEvidence, 12).length >= 2;
+  const koreaReady = ["ready", "sufficient"].includes(cleanText(report?.koreaConnection?.status, 40));
+  const stages = [
+    {
+      id: "official_calendar",
+      status: calendarStatus,
+      labelKo: "공식 일정",
+      summary: calendarStatus === "verified"
+        ? `공식 일정 ${upcomingEvents.length}건을 확인했습니다.`
+        : calendarStatus === "collection_failed"
+          ? "공식 일정 수집에 실패했습니다. 이벤트 없음으로 간주하지 않습니다."
+          : "공식 일정 자료를 축적 중입니다.",
+      data: {
+        events: upcomingEvents,
+        collectionStatus: cleanText(calendar.collection_status, 80),
+        lastSuccessfulAt: cleanText(calendar.last_successful_at || calendar.collected_at, 80),
+      },
+    },
+    {
+      id: "rates_liquidity",
+      status: rateMissing.length ? "insufficient" : "verified",
+      labelKo: "금리·유동성",
+      summary: rateMissing.length
+        ? `금리·유동성 자료 부족: ${rateMissing.join(", ")}`
+        : "2년·10년·실질금리·곡선·크레딧을 확인했습니다.",
+      data: rateFields,
+    },
+    {
+      id: "fx_commodities",
+      status: "insufficient",
+      labelKo: "달러·환율·원자재",
+      summary: "DXY·원달러·유가·가스·금의 동일 기준시각 자료가 아직 완전하지 않습니다.",
+      data: { metrics: cleanList(report?.koreaConnection?.metrics, 12) },
+    },
+    {
+      id: "index_internals",
+      status: internalsReady ? "verified" : marketInternals ? "insufficient" : "accumulating",
+      labelKo: "지수 내부 체력",
+      summary: internalsReady
+        ? "가격 커버리지와 구성종목 브레드스가 준비됐습니다."
+        : "가격 커버리지·구성종목 브레드스 중 일부가 부족합니다.",
+      data: {
+        coverage: marketInternals?.coverage || null,
+        constituentBreadth: marketInternals?.constituentBreadth || null,
+        sectorBreadth: marketInternals?.sectorBreadth || null,
+      },
+    },
+    {
+      id: "sector_leadership",
+      status: sectorLeadershipReady ? "verified" : marketInternals ? "insufficient" : "accumulating",
+      labelKo: "섹터 주도력",
+      summary: sectorLeadershipReady
+        ? "5일 섹터 상대강도와 확산을 확인했습니다."
+        : "섹터 상대강도와 확산 자료가 부족합니다.",
+      data: {
+        leadership: cleanList(marketInternals?.sectors?.["5d"], 20),
+        structuralMetricCount: Number(sectorMetrics?.availableCount || 0),
+      },
+    },
+    {
+      id: "growth_inflation_regime",
+      status: regimeReady ? "verified" : scoreboard ? "insufficient" : "accumulating",
+      labelKo: "성장×물가 레짐",
+      summary: regimeReady
+        ? scoreboard.regime.summary || scoreboard.regime.label
+        : "성장·물가 방향과 정량 근거 2개 이상이 필요합니다.",
+      data: scoreboard?.regime || null,
+    },
+    {
+      id: "korea_transmission",
+      status: koreaReady ? "verified" : report ? "insufficient" : "accumulating",
+      labelKo: "한국시장 전파",
+      summary: report?.koreaConnection?.summary || "한국시장 전파경로 자료를 축적 중입니다.",
+      data: {
+        status: cleanText(report?.koreaConnection?.status, 40),
+        metrics: cleanList(report?.koreaConnection?.metrics, 12),
+        companyTransmissions: cleanList(report?.koreaConnection?.companyTransmissions, 8),
+      },
+    },
+  ];
+  return {
+    schemaVersion: "market_regime_framework.v1",
+    stages,
+    completeness: {
+      completed: stages.filter((stage) => stage.status === "verified").length,
+      total: 7,
+    },
+  };
+}
+
 function buildDecisionGate({
   intelligence,
   scoreboard,
@@ -1461,6 +1600,8 @@ function normalizeStockCandidates(payload = {}) {
         evidenceStatus: cleanText(item.evidence_status, 80),
         reaction: {
           close: finiteNumber(reaction.close),
+          volume: finiteNumber(reaction.volume),
+          avgVolume20d: finiteNumber(reaction.avg_volume_20d),
           return1d: finiteNumber(reaction.return_1d_pct),
           return5d: finiteNumber(reaction.return_5d_pct),
           return20d: finiteNumber(reaction.return_20d_pct),
@@ -1886,6 +2027,8 @@ export function buildMarketSectorStockChain({
       return {
         ticker: candidate.ticker,
         companyName: candidate.companyName,
+        sectorIds: candidate.sectorIds,
+        sectorKpiSet: resolveSectorKpiSet(candidate.sectorIds),
         score: candidate.score,
         deepAnalysisEligible: candidate.deepAnalysisEligible,
         researchPriority: priority,
@@ -4342,6 +4485,13 @@ export async function loadPbDailyIntelligenceSnapshot({
     stockCandidates,
     brokerResearch: brokerResearchWithImpacts,
   });
+  const marketFramework = buildMarketRegimeFramework({
+    intelligence: intelligenceArtifact?.payload,
+    scoreboard,
+    marketInternals,
+    sectorMetrics: sectorMetricsArtifact ? normalizeSectorMetrics(sectorMetricsArtifact.payload) : null,
+    report,
+  });
   const sectorStockShortlists = buildSectorStockShortlists({
     sectorWatchlist,
     candidatePool: decisionChain?.ideaFunnel?.candidatePool,
@@ -4422,6 +4572,7 @@ export async function loadPbDailyIntelligenceSnapshot({
     pipeline,
     scoreboard,
     marketInternals,
+    marketFramework,
     decisionChain,
     thesisMemory,
     sectorMetrics: sectorMetricsArtifact ? normalizeSectorMetrics(sectorMetricsArtifact.payload) : null,

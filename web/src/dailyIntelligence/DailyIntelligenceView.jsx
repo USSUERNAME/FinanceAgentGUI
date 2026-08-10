@@ -321,6 +321,49 @@ function Scoreboard({ scoreboard }) {
   );
 }
 
+const marketFrameworkStatusLabels = {
+  verified: "검증됨",
+  insufficient: "자료 부족",
+  accumulating: "축적 중",
+  collection_failed: "수집 실패",
+  stale: "갱신 필요",
+};
+
+function MarketFrameworkFlow({ framework }) {
+  if (!framework?.stages?.length) {
+    return <p className="daily-intelligence-muted">시장 7단계 판단 자료를 축적 중입니다.</p>;
+  }
+  return (
+    <div className="daily-intelligence-market-framework">
+      {framework.stages.map((stage, index) => (
+        <article key={stage.id} className={`is-${stage.status}`}>
+          <header>
+            <span>{index + 1}</span>
+            <div>
+              <small>{stage.id.replaceAll("_", " ")}</small>
+              <strong>{stage.labelKo}</strong>
+            </div>
+            <em>{marketFrameworkStatusLabels[stage.status] || stage.status}</em>
+          </header>
+          <p>{stage.summary}</p>
+          {stage.id === "official_calendar" && stage.data?.events?.length ? (
+            <ul>
+              {stage.data.events.slice(0, 4).map((event) => (
+                <li key={event.id || `${event.date}-${event.title}`}>
+                  <span>{event.date} {event.time}</span>
+                  {event.sourceUrl ? (
+                    <a href={event.sourceUrl} target="_blank" rel="noreferrer">{event.title}</a>
+                  ) : event.title}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function DecisionGate({ gate }) {
   if (!gate) return null;
   const ready = gate.status === "ready";
@@ -6474,6 +6517,7 @@ function MarketSectorsWorkspace({
   decisionGate,
   scoreboard,
   marketInternals,
+  marketFramework,
   sectorMetrics,
   koreaStatus,
   busy,
@@ -6548,6 +6592,21 @@ function MarketSectorsWorkspace({
       </section>
 
       <main className="daily-intelligence-grid market-sectors-grid">
+        <section className="daily-intelligence-panel daily-intelligence-wide">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>TOP-DOWN DECISION ORDER</span>
+              <h2>시장 판단 7단계</h2>
+            </div>
+            <span className="daily-intelligence-count">
+              {marketFramework?.completeness?.completed || 0}/7
+            </span>
+          </div>
+          <p className="daily-intelligence-panel-note">
+            공식 일정부터 한국시장 전파까지 이 순서로 확인합니다. 수집 실패는 이벤트 없음으로 처리하지 않습니다.
+          </p>
+          <MarketFrameworkFlow framework={marketFramework} />
+        </section>
         <section className="daily-intelligence-panel daily-intelligence-wide">
           <div className="daily-intelligence-panel-title">
             <div>
@@ -7321,6 +7380,7 @@ export default function DailyIntelligenceView({
         decisionGate={decisionGate}
         scoreboard={scoreboard}
         marketInternals={marketInternals}
+        marketFramework={snapshot?.marketFramework}
         sectorMetrics={sectorMetrics}
         koreaStatus={koreaStatus}
         busy={busy}

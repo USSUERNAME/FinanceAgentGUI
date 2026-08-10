@@ -11,6 +11,8 @@ import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
 import ShieldCheck from "lucide-react/dist/esm/icons/shield-check.js";
 import { fetchDailyIntelligence } from "../dailyIntelligence/dailyIntelligenceApi.js";
 import { buildStockResearchGatewaySnapshot } from "./stockCandidateVerification.js";
+import StockAnalysisFrameworkCard from "./StockAnalysisFrameworkCard.jsx";
+import StockTradePlanEditor from "./StockTradePlanEditor.jsx";
 import "./stock-research-gateway.css";
 
 function formatUpdatedAt(value) {
@@ -47,6 +49,8 @@ async function syncCandidatePerformance(candidates) {
           && Number.isFinite(Number(candidate.reaction?.spyRelative1d))
           ? Number(candidate.reaction.return1d) - Number(candidate.reaction.spyRelative1d)
           : null,
+        thesisReason: candidate.whyNow,
+        invalidationConditions: candidate.invalidationConditions,
       })),
     }),
   });
@@ -203,7 +207,38 @@ function CandidatePerformance({ candidate, performance, busy, onReview }) {
   );
 }
 
-function CandidateCard({ candidate, performance, performanceBusy, onReviewPerformance }) {
+async function saveCandidateTradePlan(ticker, tradePlan) {
+  const response = await fetch("/api/stock-candidate-performance", {
+    method: "PATCH",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "trade_plan", ticker, tradePlan }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  return payload;
+}
+
+function GateRolloutSimulation({ simulation }) {
+  if (!simulation?.candidateCount) return null;
+  const holding = simulation.activationDecision === "hold_activation";
+  return (
+    <section className={`stock-gateway-rollout ${holding ? "is-hold" : "is-review"}`}>
+      <div>
+        <span>NEW GATE DRY RUN</span>
+        <strong>{holding ? "새 게이트 활성화 보류" : "새 게이트 검토 가능"}</strong>
+      </div>
+      <dl>
+        <div><dt>현재 통과</dt><dd>{simulation.currentPassingCount}</dd></div>
+        <div><dt>근거 핵심 통과</dt><dd>{simulation.evidenceCorePassingCount}</dd></div>
+        <div><dt>거래 적합성 포함</dt><dd>{simulation.targetPassingCount}</dd></div>
+      </dl>
+      <p>{simulation.reason} 현재 A/B/C 등급은 바꾸지 않았습니다.</p>
+    </section>
+  );
+}
+
+function CandidateCard({ candidate, performance, performanceBusy, onReviewPerformance, onSaveTradePlan }) {
   const visibleChecks = candidate.checks.filter((check) => check.id !== "dates");
   return (
     <article className={`stock-gateway-candidate is-grade-${candidate.grade.toLowerCase()}`}>
@@ -256,12 +291,19 @@ function CandidateCard({ candidate, performance, performanceBusy, onReviewPerfor
 
       <ClaimLedger candidate={candidate} />
       <IntegratedResearchCard candidate={candidate} />
+      <StockAnalysisFrameworkCard framework={candidate.analysisFramework} />
       <MacroTransmissionPath candidate={candidate} />
       <CandidatePerformance
         candidate={candidate}
         performance={performance}
         busy={performanceBusy}
         onReview={onReviewPerformance}
+      />
+      <StockTradePlanEditor
+        candidate={candidate}
+        performance={performance}
+        busy={performanceBusy}
+        onSave={onSaveTradePlan}
       />
 
       <footer>
@@ -315,6 +357,15 @@ export default function StockResearchGateway({ activeMode, onModeChange }) {
     setPerformanceBusyTicker(ticker);
     try {
       applyPerformancePayload(await reviewCandidatePerformance(ticker, thesisStatus));
+    } finally {
+      setPerformanceBusyTicker("");
+    }
+  }, [applyPerformancePayload]);
+
+  const saveTradePlan = React.useCallback(async (ticker, tradePlan) => {
+    setPerformanceBusyTicker(ticker);
+    try {
+      applyPerformancePayload(await saveCandidateTradePlan(ticker, tradePlan));
     } finally {
       setPerformanceBusyTicker("");
     }
@@ -379,6 +430,7 @@ export default function StockResearchGateway({ activeMode, onModeChange }) {
                 <div><span>탐색 입력</span><strong>{snapshot?.sourceCandidateCount || 0}</strong><small>시장·이벤트 스크린</small></div>
                 <div><span>마지막 갱신</span><strong>{snapshot?.asOf || "-"}</strong><small>{formatUpdatedAt(snapshot?.updatedAt)}</small></div>
               </div>
+              <GateRolloutSimulation simulation={snapshot?.gateSimulation} />
 
               <div className="stock-gateway-section-heading">
                 <div><h2>검증된 투자 후보</h2><p>공식 원문, 핵심 사실, 분석 축, 위험·반대 근거, 무효화 조건과 기준일을 모두 확인했습니다.</p></div>
@@ -392,6 +444,7 @@ export default function StockResearchGateway({ activeMode, onModeChange }) {
                       performance={performanceByTicker[candidate.ticker]}
                       performanceBusy={performanceBusyTicker === candidate.ticker}
                       onReviewPerformance={reviewPerformance}
+                      onSaveTradePlan={saveTradePlan}
                       key={candidate.ticker}
                     />
                   ))}
@@ -414,6 +467,7 @@ export default function StockResearchGateway({ activeMode, onModeChange }) {
                         performance={performanceByTicker[candidate.ticker]}
                         performanceBusy={performanceBusyTicker === candidate.ticker}
                         onReviewPerformance={reviewPerformance}
+                        onSaveTradePlan={saveTradePlan}
                         key={candidate.ticker}
                       />
                     ))}

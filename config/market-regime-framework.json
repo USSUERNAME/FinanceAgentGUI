@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "market_regime_framework.v1",
+  "decisionOrder": [
+    "official_calendar",
+    "rates_liquidity",
+    "fx_commodities",
+    "index_internals",
+    "sector_leadership",
+    "growth_inflation_regime",
+    "korea_transmission"
+  ],
+  "missingData": {
+    "allowedStatuses": ["verified", "insufficient", "accumulating", "collection_failed", "stale"],
+    "prohibitEstimatedFill": true
+  },
+  "stages": [
+    {"id": "official_calendar", "labelKo": "공식 일정", "role": "display", "fields": ["events", "consensusStatus", "sourceUrl", "lastSuccessfulAt"], "sourceTypes": ["BLS", "BEA", "Federal Reserve", "US Treasury"]},
+    {"id": "rates_liquidity", "labelKo": "금리·유동성", "role": "context", "fields": ["us2y", "us10y", "real10y", "curve2s10s", "financialConditions"], "sourceTypes": ["FRED", "Federal Reserve", "US Treasury"]},
+    {"id": "fx_commodities", "labelKo": "달러·환율·원자재", "role": "context", "fields": ["dxy", "usdKrw", "oil", "naturalGas", "gold"], "sourceTypes": ["FRED", "ECOS", "EIA", "licensed_market_data"]},
+    {"id": "index_internals", "labelKo": "지수 내부 체력", "role": "context", "fields": ["breadth", "aboveMovingAverage", "newHighLow", "volumeParticipation", "creditSpread"], "sourceTypes": ["exchange_data", "FRED", "licensed_market_data"]},
+    {"id": "sector_leadership", "labelKo": "섹터 주도력", "role": "context", "fields": ["relativeStrength", "breadth", "persistence", "reunderwriteStatus"], "sourceTypes": ["licensed_market_data", "derived_from_authoritative"]},
+    {"id": "growth_inflation_regime", "labelKo": "성장×물가 레짐", "role": "context", "fields": ["growthDirection", "inflationDirection", "quadrant", "primaryDriver", "confirmationCondition", "invalidationCondition"], "sourceTypes": ["BLS", "BEA", "Federal Reserve", "derived_from_authoritative"]},
+    {"id": "korea_transmission", "labelKo": "한국시장 전파", "role": "context", "fields": ["usdKrw", "kospi", "kosdaq", "foreignFlows", "companyTransmissions", "marketConfirmationStatus"], "sourceTypes": ["KRX", "ECOS", "Korea Investment Open API", "issuer_ir"]}
+  ]
+}
