@@ -1,0 +1,60 @@
+.institutional-portfolio-canvas {
+  background:
+    radial-gradient(circle at 10% 0%, rgb(14 116 144 / 9%), transparent 32rem),
+    #eef2f6;
+}
+
+.institutional-portfolio-shell {
+  container-type: inline-size;
+  display: grid;
+  gap: 18px;
+  width: min(1480px, 100%);
+  margin: 0 auto;
+  padding: 32px;
+}
+
+.institutional-portfolio-page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  color: #172033;
+}
+
+.institutional-portfolio-page-header span {
+  color: #607086;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.institutional-portfolio-page-header h1 {
+  margin: 7px 0 5px;
+  font-size: clamp(27px, 3vw, 40px);
+  letter-spacing: -0.04em;
+}
+
+.institutional-portfolio-page-header p {
+  margin: 0;
+  color: #6f7f92;
+  font-size: 13px;
+}
+
+.institutional-portfolio-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #607086;
+  font-size: 12px;
+}
+
+@container (max-width: 720px) {
+  .institutional-portfolio-shell {
+    padding: 18px;
+  }
+
+  .institutional-portfolio-page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

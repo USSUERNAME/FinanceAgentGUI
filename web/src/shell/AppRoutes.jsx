@@ -14,6 +14,9 @@ const SettingsView = React.lazy(() => import("../settings/SettingsView.jsx"));
 const DailyIntelligenceView = React.lazy(() =>
   import("../dailyIntelligence/DailyIntelligenceView.jsx")
 );
+const InstitutionalPortfolioView = React.lazy(() =>
+  import("../institutionalPortfolio/InstitutionalPortfolioView.jsx")
+);
 const ReportsView = React.lazy(() => import("../reports/ReportsView.jsx"));
 const NewsFeedView = React.lazy(() => import("../news/NewsFeedView.jsx"));
 const TransactionStatusView = React.lazy(() => import("../transactions/TransactionStatusView.jsx"));
@@ -184,11 +187,29 @@ function ReportsRoute({ model }) {
 }
 
 function DailyIntelligenceRoute({ mode = "reader", model = {} }) {
-  const label = mode === "operations" ? "Research Operations" : "Daily Intelligence";
+  const label = mode === "operations"
+    ? "Research Operations"
+    : mode === "market-sectors"
+      ? "시장·섹터"
+      : mode === "company-research"
+        ? "기업 리서치"
+        : mode === "thesis-journal"
+          ? "투자 가설·복기"
+          : "Daily Intelligence";
   return (
     <section className="workspace-canvas daily-intelligence-canvas" aria-label={label}>
       <React.Suspense fallback={<RouteLoading label={`${label} 불러오는 중`} />}>
         <DailyIntelligenceView mode={mode} {...model} />
+      </React.Suspense>
+    </section>
+  );
+}
+
+function InstitutionalPortfolioRoute() {
+  return (
+    <section className="workspace-canvas institutional-portfolio-canvas" aria-label="기관 포트폴리오">
+      <React.Suspense fallback={<RouteLoading label="기관 포트폴리오 불러오는 중" />}>
+        <InstitutionalPortfolioView />
       </React.Suspense>
     </section>
   );
@@ -300,6 +321,31 @@ export function AppRoutes({ activeView, models }) {
   if (activeView === "daily-intelligence") {
     return <DailyIntelligenceRoute model={models.dailyIntelligence()} />;
   }
+  if (activeView === "market-sectors") {
+    return (
+      <DailyIntelligenceRoute
+        mode="market-sectors"
+        model={models.marketSectors()}
+      />
+    );
+  }
+  if (activeView === "company-research") {
+    return (
+      <DailyIntelligenceRoute
+        mode="company-research"
+        model={models.companyResearch()}
+      />
+    );
+  }
+  if (activeView === "thesis-journal") {
+    return (
+      <DailyIntelligenceRoute
+        mode="thesis-journal"
+        model={models.thesisJournal()}
+      />
+    );
+  }
+  if (activeView === "institutional-portfolio") return <InstitutionalPortfolioRoute />;
   if (activeView === "research-operations") {
     return (
       <DailyIntelligenceRoute

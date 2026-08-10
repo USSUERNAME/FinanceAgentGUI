@@ -18,6 +18,39 @@ export async function fetchDailyIntelligence(
   return payload;
 }
 
+export async function fetchInstitutionalHoldingsRadar(fetchImpl = globalThis.fetch) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("대가 포트폴리오 레이더 요청에는 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/institutional-holdings", {
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function refreshInstitutionalHoldingsRadar(fetchImpl = globalThis.fetch) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("SEC 13F 수집 요청에는 fetch가 필요합니다.");
+  }
+  const response = await fetchImpl("/api/institutional-holdings", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "refresh" }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.ok) {
+    const error = new Error(payload?.error || `HTTP ${response.status}`);
+    error.connection = payload?.connection || null;
+    throw error;
+  }
+  return payload;
+}
+
 export async function syncDailyIntelligenceTheses(fetchImpl = globalThis.fetch) {
   if (typeof fetchImpl !== "function") {
     throw new Error("투자 가설 동기화 요청에 fetch가 필요합니다.");

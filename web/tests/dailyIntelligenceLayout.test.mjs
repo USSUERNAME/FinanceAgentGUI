@@ -14,6 +14,10 @@ const routesSource = readFileSync(
   new URL("../src/shell/AppRoutes.jsx", import.meta.url),
   "utf8",
 );
+const appSource = readFileSync(
+  new URL("../src/App.jsx", import.meta.url),
+  "utf8",
+);
 const cssSource = readFileSync(
   new URL("../src/dailyIntelligence/daily-intelligence.css", import.meta.url),
   "utf8",
@@ -22,17 +26,22 @@ const operationsStart = viewSource.indexOf("if (operationsMode)");
 const readerStart = viewSource.indexOf("PB DAILY MARKET INTELLIGENCE", operationsStart);
 const operationsView = viewSource.slice(operationsStart, readerStart);
 const readerView = viewSource.slice(readerStart);
+const marketWorkspaceStart = viewSource.indexOf("function MarketSectorsWorkspace");
+const companyWorkspaceStart = viewSource.indexOf("function CompanyResearchWorkspace");
+const marketWorkspaceEnd = companyWorkspaceStart;
+const marketWorkspace = viewSource.slice(marketWorkspaceStart, marketWorkspaceEnd);
+const journalWorkspaceStart = viewSource.indexOf("function ThesisJournalWorkspace");
+const companyWorkspaceEnd = journalWorkspaceStart;
+const companyWorkspace = viewSource.slice(companyWorkspaceStart, companyWorkspaceEnd);
+const journalWorkspaceEnd = viewSource.indexOf("export default function DailyIntelligenceView", journalWorkspaceStart);
+const journalWorkspace = viewSource.slice(journalWorkspaceStart, journalWorkspaceEnd);
 
 test("Daily Intelligence leads with decisions and links to a separate operations surface", () => {
   const readingPath = [
     "<DecisionGate",
-    "<DecisionCoach",
     "<h2>30초 결론</h2>",
     "<MarketSectorStockChain",
-    "<StockDecisionComparison",
-    "<InvestmentThesisMemory",
     "<h2>내 종목과 오늘의 리포트</h2>",
-    "<h2>결론을 지지하는 시장 근거</h2>",
     "<h2>검증된 핵심 사건</h2>",
     "<h2>오늘 확인할 조건</h2>",
     "Research Operations",
@@ -60,7 +69,8 @@ test("Daily Intelligence leads with decisions and links to a separate operations
   assert.match(viewSource, /종목 비교 의사결정판/);
   assert.match(viewSource, /상위 후보 5개 중 2~3개/);
   assert.match(viewSource, /첫 기각 조건/);
-  assert.match(viewSource, /candidatePool=\{decisionChain\?\.ideaFunnel\?\.candidatePool \|\| \[\]\}/);
+  assert.match(companyWorkspace, /const candidatePool = decisionChain\?\.ideaFunnel\?\.candidatePool \|\| \[\];/);
+  assert.match(companyWorkspace, /candidatePool=\{candidatePool\}/);
   assert.match(viewSource, /shortlistTrackable: false/);
   assert.match(
     viewSource,
@@ -111,4 +121,78 @@ test("sidebar and routes expose Research Operations as an independent screen", (
   );
   assert.match(routesSource, /activeView === "research-operations"/);
   assert.match(routesSource, /mode="operations"/);
+});
+
+test("institutional ownership stays outside the Daily Intelligence reading path", () => {
+  assert.doesNotMatch(readerView, /<InstitutionalPortfolioRadar/);
+  assert.match(
+    navigationSource,
+    /label: "기관 포트폴리오", icon: Building2, view: "institutional-portfolio"/,
+  );
+  assert.match(routesSource, /activeView === "institutional-portfolio"/);
+  assert.match(routesSource, /<InstitutionalPortfolioView/);
+});
+
+test("market and sector detail panels live on an independent screen", () => {
+  [
+    "<h2>시장 판단 스코어보드</h2>",
+    "<h2>섹터와 스타일 리더십</h2>",
+    "<h2>미래 주도 섹터 선행지표</h2>",
+    "<h2>시장 내부 구조</h2>",
+    "<h2>한국시장 연결</h2>",
+  ].forEach((heading) => assert.match(marketWorkspace, new RegExp(heading)));
+  assert.doesNotMatch(readerView, /MARKET SCOREBOARD|SECTOR & STYLE LEADERSHIP|KOREA TRANSMISSION/);
+  assert.match(
+    navigationSource,
+    /label: "시장·섹터", icon: ChartNoAxesCombined, view: "market-sectors"/,
+  );
+  assert.match(routesSource, /activeView === "market-sectors"/);
+  assert.match(routesSource, /mode="market-sectors"/);
+});
+
+test("company research detail panels live on an independent screen", () => {
+  assert.match(companyWorkspace, /<StockDecisionComparison/);
+  assert.match(companyWorkspace, /<h2>미국 개별주 분석 후보<\/h2>/);
+  assert.match(companyWorkspace, /<h2>실적·가이던스·추정치 변화<\/h2>/);
+  assert.match(companyWorkspace, /onAddWatchlist=\{onAddWatchlist\}/);
+  assert.doesNotMatch(
+    readerView,
+    /<StockDecisionComparison|US EQUITY CANDIDATES|EARNINGS INTELLIGENCE/,
+  );
+  assert.match(
+    navigationSource,
+    /label: "기업 리서치", icon: Search, view: "company-research"/,
+  );
+  assert.match(routesSource, /activeView === "company-research"/);
+  assert.match(routesSource, /mode="company-research"/);
+});
+
+test("thesis journal owns decision coaching and calibration history", () => {
+  assert.match(journalWorkspace, /<ThesisOutcomeAlerts calibration=\{calibration\}/);
+  assert.match(journalWorkspace, /<DecisionCoach memory=\{thesisMemory\}/);
+  assert.match(journalWorkspace, /<InvestmentThesisMemory/);
+  assert.match(journalWorkspace, /onReviewMonthlyGoal=\{onReviewMonthlyGoal\}/);
+  assert.doesNotMatch(readerView, /<DecisionCoach|<InvestmentThesisMemory/);
+  assert.match(readerView, /<ThesisOutcomeAlerts[\s\S]*compact/);
+  assert.match(
+    navigationSource,
+    /label: "투자 가설·복기", icon: BrainCircuit, view: "thesis-journal"/,
+  );
+  assert.match(routesSource, /activeView === "thesis-journal"/);
+  assert.match(routesSource, /mode="thesis-journal"/);
+});
+
+test("Daily Intelligence is a compact decision home with specialist navigation", () => {
+  assert.match(readerView, /<DailyWorkspaceShortcuts/);
+  assert.match(readerView, /candidateCount=\{decisionChain\?\.ideaFunnel\?\.candidatePool\?\.length \|\| 0\}/);
+  assert.match(readerView, /thesisAlertCount=\{thesisMemory\?\.weeklyCalibration\?\.alerts\?\.length \|\| 0\}/);
+  assert.match(readerView, /daily-intelligence-supporting-details daily-intelligence-wide/);
+  assert.match(readerView, /데이터 상태·원자료 확인/);
+  assert.doesNotMatch(readerView, /<section className="daily-intelligence-panel">[\s\S]*?<span>DATA QUALITY<\/span>[\s\S]*?<\/section>[\s\S]*?<section className="daily-intelligence-panel">[\s\S]*?<span>PRIMARY SOURCES<\/span>/);
+  assert.match(appSource, /onOpenMarketSectors: \(\) => setActiveView\("market-sectors"\)/);
+  assert.match(appSource, /onOpenCompanyResearch: \(\) => setActiveView\("company-research"\)/);
+  assert.match(appSource, /onOpenThesisJournal: \(\) => setActiveView\("thesis-journal"\)/);
+  assert.match(appSource, /onOpenInstitutionalPortfolio: \(\) => setActiveView\("institutional-portfolio"\)/);
+  assert.match(cssSource, /\.daily-intelligence-workspace-shortcuts-grid/);
+  assert.match(cssSource, /\.daily-intelligence-supporting-details/);
 });

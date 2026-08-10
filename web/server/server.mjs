@@ -10,6 +10,7 @@ import { handleBinanceMarketDataEndpoint } from "./binanceMarketDataApi.mjs";
 import { handleEconomicCalendarEndpoint } from "./economicCalendarApi.mjs";
 import { handleEarningsEndpoint } from "./earningsApi.mjs";
 import { handleInvestSimulatorEndpoint } from "./investSimulatorApi.mjs";
+import { handleInstitutionalHoldingsEndpoint } from "./institutionalHoldingsApi.mjs";
 import { handleMemoryEndpoint, startSharedMemoryMaintenanceScheduler } from "./memoryApi.mjs";
 import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mjs";
 import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
@@ -406,6 +407,11 @@ const server = createServer(async (req, res) => {
 
   if (req.url?.startsWith("/api/invest-simulator/exchange")) {
     await handleInvestSimulatorEndpoint("exchange", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/institutional-holdings")) {
+    await handleInstitutionalHoldingsEndpoint(req, res);
     return;
   }
 

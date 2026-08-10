@@ -12,8 +12,16 @@ const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8
 test("Daily Intelligence screens have stable direct-entry hashes", () => {
   assert.equal(viewFromHash("#daily-intelligence"), "daily-intelligence");
   assert.equal(viewFromHash("#research-operations"), "research-operations");
+  assert.equal(viewFromHash("#institutional-portfolio"), "institutional-portfolio");
+  assert.equal(viewFromHash("#market-sectors"), "market-sectors");
+  assert.equal(viewFromHash("#company-research"), "company-research");
+  assert.equal(viewFromHash("#thesis-journal"), "thesis-journal");
   assert.equal(hashForView("daily-intelligence"), "#daily-intelligence");
   assert.equal(hashForView("research-operations"), "#research-operations");
+  assert.equal(hashForView("institutional-portfolio"), "#institutional-portfolio");
+  assert.equal(hashForView("market-sectors"), "#market-sectors");
+  assert.equal(hashForView("company-research"), "#company-research");
+  assert.equal(hashForView("thesis-journal"), "#thesis-journal");
 });
 
 test("Research Operations section anchors stay on the operations screen", () => {

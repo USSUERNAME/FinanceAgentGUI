@@ -1866,6 +1866,19 @@ function App() {
   const routeModels = {
     dailyIntelligence: () => ({
       onOpenOperations: () => setActiveView("research-operations"),
+      onOpenMarketSectors: () => setActiveView("market-sectors"),
+      onOpenCompanyResearch: () => setActiveView("company-research"),
+      onOpenThesisJournal: () => setActiveView("thesis-journal"),
+      onOpenInstitutionalPortfolio: () => setActiveView("institutional-portfolio"),
+    }),
+    marketSectors: () => ({
+      onOpenDailyIntelligence: () => setActiveView("daily-intelligence"),
+    }),
+    companyResearch: () => ({
+      onOpenDailyIntelligence: () => setActiveView("daily-intelligence"),
+    }),
+    thesisJournal: () => ({
+      onOpenDailyIntelligence: () => setActiveView("daily-intelligence"),
     }),
     researchOperations: () => ({
       onOpenDailyIntelligence: () => setActiveView("daily-intelligence"),

@@ -3,6 +3,7 @@ import { handleEarningsEndpoint } from "./earningsApi.mjs";
 import { ensureAstopObserverStatus } from "./astopObserver.mjs";
 import { handleBinanceMarketDataEndpoint } from "./binanceMarketDataApi.mjs";
 import { handleInvestSimulatorEndpoint } from "./investSimulatorApi.mjs";
+import { handleInstitutionalHoldingsEndpoint } from "./institutionalHoldingsApi.mjs";
 import { recoverPendingLlmObservations } from "./llmProcessObserver.mjs";
 import { handleMagazineEndpoint, startMagazineScheduler } from "./magazineApi.mjs";
 import { handleMarketSymbolCatalogEndpoint } from "./marketSymbolCatalog.mjs";
@@ -326,6 +327,10 @@ export function codexApiPlugin() {
 
       server.middlewares.use("/api/invest-simulator/exchange", async (req, res) => {
         await handleInvestSimulatorEndpoint("exchange", req, res);
+      });
+
+      server.middlewares.use("/api/institutional-holdings", async (req, res) => {
+        await handleInstitutionalHoldingsEndpoint(req, res);
       });
 
       server.middlewares.use("/api/reports", async (req, res) => {

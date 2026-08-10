@@ -1,6 +1,9 @@
 import React from "react";
 import BookOpenText from "lucide-react/dist/esm/icons/book-open-text.js";
+import BrainCircuit from "lucide-react/dist/esm/icons/brain-circuit.js";
+import Building2 from "lucide-react/dist/esm/icons/building-2.js";
 import CalendarDays from "lucide-react/dist/esm/icons/calendar-days.js";
+import ChartNoAxesCombined from "lucide-react/dist/esm/icons/chart-no-axes-combined.js";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.js";
 import Database from "lucide-react/dist/esm/icons/database.js";
@@ -12,6 +15,7 @@ import Newspaper from "lucide-react/dist/esm/icons/newspaper.js";
 import PieChart from "lucide-react/dist/esm/icons/chart-pie.js";
 import ReceiptText from "lucide-react/dist/esm/icons/receipt-text.js";
 import Settings from "lucide-react/dist/esm/icons/settings.js";
+import Search from "lucide-react/dist/esm/icons/search.js";
 import ShieldCheck from "lucide-react/dist/esm/icons/shield-check.js";
 import TrendingUp from "lucide-react/dist/esm/icons/trending-up.js";
 import { newsFeedSidebarHealthState } from "../news/newsFeedStatus.js";
@@ -29,6 +33,10 @@ const leftSidebarSections = [
       { label: "Economic Calendar", icon: Landmark, view: "economic-calendar" },
       { label: "채팅", icon: MessageSquare, view: "chat" },
       { label: "Daily Intelligence", icon: TrendingUp, view: "daily-intelligence" },
+      { label: "시장·섹터", icon: ChartNoAxesCombined, view: "market-sectors" },
+      { label: "기업 리서치", icon: Search, view: "company-research" },
+      { label: "투자 가설·복기", icon: BrainCircuit, view: "thesis-journal" },
+      { label: "기관 포트폴리오", icon: Building2, view: "institutional-portfolio" },
       { label: "Research Operations", icon: ShieldCheck, view: "research-operations" },
       { label: "보고서", icon: FileText, view: "reports" },
       { label: "포트폴리오", icon: PieChart, view: "portfolio" },

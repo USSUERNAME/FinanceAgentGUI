@@ -8,6 +8,7 @@ import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.js";
 import CircleDashed from "lucide-react/dist/esm/icons/circle-dashed.js";
 import Database from "lucide-react/dist/esm/icons/database.js";
 import FileText from "lucide-react/dist/esm/icons/file-text.js";
+import Landmark from "lucide-react/dist/esm/icons/landmark.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
 import Mail from "lucide-react/dist/esm/icons/mail.js";
 import Radio from "lucide-react/dist/esm/icons/radio.js";
@@ -182,6 +183,76 @@ function MetricCard({ label, value, detail, tone = "neutral", icon: Icon }) {
         <small>{detail}</small>
       </div>
     </article>
+  );
+}
+
+function DailyWorkspaceShortcuts({
+  candidateCount,
+  thesisAlertCount,
+  onOpenMarketSectors,
+  onOpenCompanyResearch,
+  onOpenThesisJournal,
+  onOpenInstitutionalPortfolio,
+}) {
+  const items = [
+    {
+      eyebrow: "MARKET DESK",
+      label: "시장·섹터",
+      detail: "체제·리더십·한국시장 연결",
+      meta: "시장 판단 근거 보기",
+      icon: Landmark,
+      onClick: onOpenMarketSectors,
+    },
+    {
+      eyebrow: "COMPANY DESK",
+      label: "기업 리서치",
+      detail: "후보 비교·실적·추정치 변화",
+      meta: `분석 후보 ${candidateCount || 0}개`,
+      icon: FileText,
+      onClick: onOpenCompanyResearch,
+    },
+    {
+      eyebrow: "DECISION JOURNAL",
+      label: "투자 가설·복기",
+      detail: "가설 원장·반증·판단 습관",
+      meta: `최근 변화 ${thesisAlertCount || 0}건`,
+      icon: Database,
+      onClick: onOpenThesisJournal,
+    },
+    {
+      eyebrow: "OWNERSHIP RADAR",
+      label: "기관 포트폴리오",
+      detail: "13F 분기 보유와 섹터 흐름",
+      meta: "기관별 누적 변화 보기",
+      icon: BriefcaseBusiness,
+      onClick: onOpenInstitutionalPortfolio,
+    },
+  ];
+
+  return (
+    <nav className="daily-intelligence-workspace-shortcuts" aria-label="전문 분석 화면 바로가기">
+      <div className="daily-intelligence-workspace-shortcuts-heading">
+        <div>
+          <span>ANALYSIS DESKS</span>
+          <strong>필요한 분석으로 바로 이동</strong>
+        </div>
+        <small>Daily는 결론, 전문 화면은 근거와 복기</small>
+      </div>
+      <div className="daily-intelligence-workspace-shortcuts-grid">
+        {items.map(({ eyebrow, label, detail, meta, icon: Icon, onClick }) => (
+          <button type="button" key={label} onClick={onClick}>
+            <span className="daily-intelligence-workspace-shortcut-icon"><Icon size={18} /></span>
+            <span className="daily-intelligence-workspace-shortcut-copy">
+              <small>{eyebrow}</small>
+              <strong>{label}</strong>
+              <span>{detail}</span>
+              <em>{meta}</em>
+            </span>
+            <ChevronRight size={17} />
+          </button>
+        ))}
+      </div>
+    </nav>
   );
 }
 
@@ -6189,12 +6260,422 @@ function ResearchIntelligenceShortcuts({ telegramSources, brokerResearch, gmailR
   );
 }
 
+function MarketSectorsWorkspace({
+  report,
+  decisionGate,
+  scoreboard,
+  marketInternals,
+  sectorMetrics,
+  koreaStatus,
+  busy,
+  onReload,
+  onOpenDailyIntelligence,
+}) {
+  return (
+    <div className="daily-intelligence-shell market-sectors-shell">
+      <header className="daily-intelligence-header">
+        <div>
+          <span className="daily-intelligence-eyebrow">MARKET &amp; SECTOR INTELLIGENCE</span>
+          <h1>시장·섹터</h1>
+          <p>{report.title} · 시장 구조와 한국시장 전달 경로</p>
+        </div>
+        <div className="daily-intelligence-header-actions">
+          <button
+            type="button"
+            className="daily-intelligence-refresh"
+            onClick={onOpenDailyIntelligence}
+          >
+            <ChevronLeft size={16} />
+            Daily Intelligence
+          </button>
+          <button
+            type="button"
+            className="daily-intelligence-refresh"
+            onClick={onReload}
+            disabled={busy}
+          >
+            <RefreshCw size={16} className={busy ? "is-spinning" : ""} />
+            새로고침
+          </button>
+        </div>
+      </header>
+
+      <section className="daily-intelligence-metrics" aria-label="시장·섹터 상태">
+        <MetricCard
+          label="시장 체제"
+          value={
+            decisionGate?.status === "blocked"
+              ? "판단 보류"
+              : statusLabels[scoreboard?.regime?.label] || scoreboard?.regime?.label || "확인 필요"
+          }
+          detail={
+            Number.isFinite(scoreboard?.regime?.confidence)
+              ? `판단 신뢰도 ${Math.round(scoreboard.regime.confidence * 100)}%`
+              : "정량 근거 확인 필요"
+          }
+          tone={decisionGate?.status === "blocked" ? "warning" : "positive"}
+          icon={Sparkles}
+        />
+        <MetricCard
+          label="핵심 가격 커버리지"
+          value={`${marketInternals?.coverage?.available || 0}/${marketInternals?.coverage?.required || 0}`}
+          detail="시장 내부 구조 판단에 사용되는 가격 근거"
+          tone={
+            Number(marketInternals?.coverage?.required || 0) > 0
+            && Number(marketInternals?.coverage?.available || 0)
+              >= Number(marketInternals?.coverage?.required || 0)
+              ? "positive"
+              : "warning"
+          }
+          icon={Database}
+        />
+        <MetricCard
+          label="한국시장 연결"
+          value={statusLabels[koreaStatus] || koreaStatus || "확인 필요"}
+          detail={`${report.koreaConnection.companyTransmissions?.length || 0}개 미국 기업 전달 경로`}
+          tone={koreaStatus === "ready" || koreaStatus === "sufficient" ? "positive" : "warning"}
+          icon={Landmark}
+        />
+      </section>
+
+      <main className="daily-intelligence-grid market-sectors-grid">
+        <section className="daily-intelligence-panel daily-intelligence-wide">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>MARKET SCOREBOARD</span>
+              <h2>시장 판단 스코어보드</h2>
+            </div>
+            <StatusPill
+              status={
+                decisionGate?.status === "blocked"
+                  ? "판단 보류"
+                  : scoreboard?.regime?.label || "unknown"
+              }
+            />
+          </div>
+          <Scoreboard scoreboard={scoreboard} />
+        </section>
+
+        <section className="daily-intelligence-panel daily-intelligence-wide">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>SECTOR &amp; STYLE LEADERSHIP</span>
+              <h2>섹터와 스타일 리더십</h2>
+            </div>
+          </div>
+          <SectorLeadership marketInternals={marketInternals} />
+        </section>
+
+        <section className="daily-intelligence-panel daily-intelligence-wide">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>STRUCTURAL SECTOR RADAR</span>
+              <h2>미래 주도 섹터 선행지표</h2>
+            </div>
+            <span className="daily-intelligence-count">{sectorMetrics?.availableCount || 0}</span>
+          </div>
+          <SectorMetrics sectorMetrics={sectorMetrics} />
+        </section>
+
+        <section className="daily-intelligence-panel">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>MARKET STRUCTURE</span>
+              <h2>시장 내부 구조</h2>
+            </div>
+          </div>
+          <div className="daily-intelligence-finding-list">
+            {report.findings.map((finding) => (
+              <article key={`${finding.title}-${finding.body}`}>
+                <h3>{finding.title}</h3>
+                <MarkdownText text={finding.body} />
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="daily-intelligence-panel">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>KOREA TRANSMISSION</span>
+              <h2>한국시장 연결</h2>
+            </div>
+            <StatusPill status={koreaStatus} />
+          </div>
+          <MarkdownText text={report.koreaConnection.summary} />
+          {report.koreaConnection.companyTransmissions?.length ? (
+            <div className="daily-intelligence-korea-transmissions">
+              {report.koreaConnection.companyTransmissions.map((transmission) => (
+                <article key={`${transmission.sourceTicker}-${transmission.sectorNameKo}`}>
+                  <header>
+                    <div>
+                      <span>{transmission.sourceTicker} → 한국</span>
+                      <strong>{transmission.sectorNameKo || "산업 연결"}</strong>
+                    </div>
+                    <em className={transmission.marketConfirmationStatus === "ready" ? "is-ready" : "is-blocked"}>
+                      {transmission.marketConfirmationStatus === "ready" ? "시장 확인" : "시장 확인 대기"}
+                    </em>
+                  </header>
+                  {transmission.sourceSignalLabel ? (
+                    <p><b>미국 기업 신호</b> {transmission.sourceSignalLabel}</p>
+                  ) : null}
+                  <ul>
+                    {(transmission.targets || []).map((target) => (
+                      <li key={`${transmission.sourceTicker}-${target.ticker}`}>
+                        <div>
+                          <strong>{target.ticker} · {target.companyName}</strong>
+                          <span className={`is-${target.classification || "watch_candidate"}`}>
+                            {target.classificationLabel || "관찰 후보"}
+                          </span>
+                        </div>
+                        <p>{target.reason}</p>
+                        {target.nextRequiredEvidence?.length ? (
+                          <small>다음 근거: {target.nextRequiredEvidence.join(" · ")}</small>
+                        ) : null}
+                        {target.sourceUrls?.[0] ? (
+                          <a href={target.sourceUrls[0]} target="_blank" rel="noreferrer">
+                            공식 근거 열기 <ArrowUpRight size={12} />
+                          </a>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </article>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function CompanyResearchWorkspace({
+  report,
+  decisionChain,
+  thesisMemory,
+  stockCandidates,
+  brokerResearch,
+  brokerResearchHistory,
+  thesisMemoryBusy,
+  thesisMemoryError,
+  watchlistQuickAddBusy,
+  watchlistQuickAddError,
+  busy,
+  onReload,
+  onOpenDailyIntelligence,
+  onTrackStock,
+  onAddWatchlist,
+}) {
+  const brokerResearchDate = (
+    brokerResearchHistory?.selectedDate || brokerResearch?.reportDate || report.reportDate
+  );
+  const candidatePool = decisionChain?.ideaFunnel?.candidatePool || [];
+  const screenedCandidates = stockCandidates?.candidates || [];
+  const earningsCompanies = report.earningsWatch?.companies || [];
+
+  return (
+    <div className="daily-intelligence-shell company-research-shell">
+      <header className="daily-intelligence-header">
+        <div>
+          <span className="daily-intelligence-eyebrow">COMPANY RESEARCH</span>
+          <h1>기업 리서치</h1>
+          <p>{report.title} · 후보 비교, 실적 변화, 후속 조사 연결</p>
+        </div>
+        <div className="daily-intelligence-header-actions">
+          <button
+            type="button"
+            className="daily-intelligence-refresh"
+            onClick={onOpenDailyIntelligence}
+          >
+            <ChevronLeft size={16} />
+            Daily Intelligence
+          </button>
+          <button
+            type="button"
+            className="daily-intelligence-refresh"
+            onClick={onReload}
+            disabled={busy}
+          >
+            <RefreshCw size={16} className={busy ? "is-spinning" : ""} />
+            새로고침
+          </button>
+        </div>
+      </header>
+
+      <section className="daily-intelligence-metrics" aria-label="기업 리서치 현황">
+        <MetricCard
+          label="오늘의 비교 후보"
+          value={`${candidatePool.length}개`}
+          detail="시장→섹터→종목 연결 보드에서 선별"
+          tone={candidatePool.length ? "positive" : "neutral"}
+          icon={CircleDashed}
+        />
+        <MetricCard
+          label="정량 스크린 통과"
+          value={`${screenedCandidates.length}개`}
+          detail="미국 개별주 분석 후보"
+          tone={screenedCandidates.length ? "positive" : "neutral"}
+          icon={CheckCircle2}
+        />
+        <MetricCard
+          label="실적 추적"
+          value={`${earningsCompanies.length}개`}
+          detail="실적·가이던스·추정치 변화"
+          tone={earningsCompanies.length ? "positive" : "neutral"}
+          icon={FileText}
+        />
+      </section>
+
+      <main className="daily-intelligence-grid company-research-grid">
+        <StockDecisionComparison
+          shortlists={brokerResearch?.consensus?.sectorStockShortlists}
+          candidatePool={candidatePool}
+          thesisMemory={thesisMemory}
+          brokerResearchDate={brokerResearchDate}
+          busy={thesisMemoryBusy || watchlistQuickAddBusy}
+          error={thesisMemoryError || watchlistQuickAddError}
+          onTrackStock={onTrackStock}
+          onAddWatchlist={onAddWatchlist}
+        />
+
+        <section className="daily-intelligence-panel daily-intelligence-wide">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>US EQUITY CANDIDATES</span>
+              <h2>미국 개별주 분석 후보</h2>
+            </div>
+            <span className="daily-intelligence-count">{screenedCandidates.length}</span>
+          </div>
+          <StockCandidates stockCandidates={stockCandidates} />
+        </section>
+
+        <section className="daily-intelligence-panel daily-intelligence-wide">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>EARNINGS INTELLIGENCE</span>
+              <h2>실적·가이던스·추정치 변화</h2>
+            </div>
+            <span className="daily-intelligence-count">{earningsCompanies.length}</span>
+          </div>
+          <p className="daily-intelligence-panel-note">
+            전망치는 제3자 전망치, 가이던스는 회사 주장, 실제치는 공식 원문 확인 값으로 구분합니다.
+          </p>
+          <EarningsWatch earningsWatch={report.earningsWatch} />
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function ThesisJournalWorkspace({
+  report,
+  thesisMemory,
+  busy,
+  thesisMemoryBusy,
+  thesisMemoryError,
+  onReload,
+  onOpenDailyIntelligence,
+  onSync,
+  onReviewProposal,
+  onRecordPortfolioResponse,
+  onReviewPortfolioRuleSuggestion,
+  onReviewPortfolioActiveRule,
+  onReviewMonthlyGoal,
+}) {
+  const calibration = thesisMemory?.weeklyCalibration;
+  const responseCalibration = thesisMemory?.portfolioResponseCalibration;
+  const activeRecords = thesisMemory?.activeRecords || [];
+  const changedTheses = calibration?.alerts || [];
+  const activeGoals = responseCalibration?.monthlyReview?.goals?.activeGoals || [];
+
+  return (
+    <div className="daily-intelligence-shell thesis-journal-shell">
+      <header className="daily-intelligence-header">
+        <div>
+          <span className="daily-intelligence-eyebrow">THESIS &amp; DECISION JOURNAL</span>
+          <h1>투자 가설·판단 복기</h1>
+          <p>{report.title} · 가설의 생성부터 반증, 판단 습관 교정까지 추적</p>
+        </div>
+        <div className="daily-intelligence-header-actions">
+          <button
+            type="button"
+            className="daily-intelligence-refresh"
+            onClick={onOpenDailyIntelligence}
+          >
+            <ChevronLeft size={16} />
+            Daily Intelligence
+          </button>
+          <button
+            type="button"
+            className="daily-intelligence-refresh"
+            onClick={onReload}
+            disabled={busy}
+          >
+            <RefreshCw size={16} className={busy ? "is-spinning" : ""} />
+            새로고침
+          </button>
+        </div>
+      </header>
+
+      <section className="daily-intelligence-metrics" aria-label="투자 가설과 판단 복기 현황">
+        <MetricCard
+          label="활성 투자 가설"
+          value={`${activeRecords.length}개`}
+          detail={`누적 ${thesisMemory?.recordCount || 0}개`}
+          tone={activeRecords.length ? "positive" : "neutral"}
+          icon={Database}
+        />
+        <MetricCard
+          label="최근 판정 변화"
+          value={`${changedTheses.length}건`}
+          detail="가설 확인·반증 변화"
+          tone={changedTheses.length ? "warning" : "positive"}
+          icon={AlertTriangle}
+        />
+        <MetricCard
+          label="진행 중 개선 목표"
+          value={`${activeGoals.length}개`}
+          detail="월간 판단 습관 교정"
+          tone={activeGoals.length ? "positive" : "neutral"}
+          icon={CheckCircle2}
+        />
+      </section>
+
+      <main className="daily-intelligence-grid thesis-journal-grid">
+        <ThesisOutcomeAlerts calibration={calibration} />
+
+        <DecisionCoach memory={thesisMemory} />
+
+        <InvestmentThesisMemory
+          memory={thesisMemory}
+          busy={thesisMemoryBusy}
+          error={thesisMemoryError}
+          onSync={onSync}
+          onReviewProposal={onReviewProposal}
+          onRecordPortfolioResponse={onRecordPortfolioResponse}
+          onReviewPortfolioRuleSuggestion={onReviewPortfolioRuleSuggestion}
+          onReviewPortfolioActiveRule={onReviewPortfolioActiveRule}
+          onReviewMonthlyGoal={onReviewMonthlyGoal}
+        />
+      </main>
+    </div>
+  );
+}
+
 export default function DailyIntelligenceView({
   mode = "reader",
   onOpenOperations,
   onOpenDailyIntelligence,
+  onOpenMarketSectors,
+  onOpenCompanyResearch,
+  onOpenThesisJournal,
+  onOpenInstitutionalPortfolio,
 }) {
   const operationsMode = mode === "operations";
+  const marketSectorsMode = mode === "market-sectors";
+  const companyResearchMode = mode === "company-research";
+  const thesisJournalMode = mode === "thesis-journal";
   const {
     snapshot,
     busy,
@@ -6609,6 +7090,64 @@ export default function DailyIntelligenceView({
     );
   }
 
+  if (marketSectorsMode) {
+    return (
+      <MarketSectorsWorkspace
+        report={report}
+        decisionGate={decisionGate}
+        scoreboard={scoreboard}
+        marketInternals={marketInternals}
+        sectorMetrics={sectorMetrics}
+        koreaStatus={koreaStatus}
+        busy={busy}
+        onReload={reload}
+        onOpenDailyIntelligence={onOpenDailyIntelligence}
+      />
+    );
+  }
+
+  if (companyResearchMode) {
+    return (
+      <CompanyResearchWorkspace
+        report={report}
+        decisionChain={decisionChain}
+        thesisMemory={thesisMemory}
+        stockCandidates={stockCandidates}
+        brokerResearch={brokerResearch}
+        brokerResearchHistory={brokerResearchHistory}
+        thesisMemoryBusy={thesisMemoryBusy}
+        thesisMemoryError={thesisMemoryError}
+        watchlistQuickAddBusy={watchlistQuickAddBusy}
+        watchlistQuickAddError={watchlistQuickAddError}
+        busy={busy}
+        onReload={reload}
+        onOpenDailyIntelligence={onOpenDailyIntelligence}
+        onTrackStock={trackStockThesis}
+        onAddWatchlist={quickAddWatchlistTicker}
+      />
+    );
+  }
+
+  if (thesisJournalMode) {
+    return (
+      <ThesisJournalWorkspace
+        report={report}
+        thesisMemory={thesisMemory}
+        busy={busy}
+        thesisMemoryBusy={thesisMemoryBusy}
+        thesisMemoryError={thesisMemoryError}
+        onReload={reload}
+        onOpenDailyIntelligence={onOpenDailyIntelligence}
+        onSync={syncThesisMemory}
+        onReviewProposal={reviewRiskThesisProposal}
+        onRecordPortfolioResponse={recordRiskPortfolioResponse}
+        onReviewPortfolioRuleSuggestion={reviewPortfolioResponseRuleSuggestion}
+        onReviewPortfolioActiveRule={reviewPortfolioResponseActiveRule}
+        onReviewMonthlyGoal={reviewMonthlyDecisionGoalProposal}
+      />
+    );
+  }
+
   return (
     <div className="daily-intelligence-shell">
       <header className="daily-intelligence-header">
@@ -6661,6 +7200,15 @@ export default function DailyIntelligenceView({
         />
       </section>
 
+      <DailyWorkspaceShortcuts
+        candidateCount={decisionChain?.ideaFunnel?.candidatePool?.length || 0}
+        thesisAlertCount={thesisMemory?.weeklyCalibration?.alerts?.length || 0}
+        onOpenMarketSectors={onOpenMarketSectors}
+        onOpenCompanyResearch={onOpenCompanyResearch}
+        onOpenThesisJournal={onOpenThesisJournal}
+        onOpenInstitutionalPortfolio={onOpenInstitutionalPortfolio}
+      />
+
       <main className="daily-intelligence-grid">
         <DecisionGate gate={decisionGate} />
 
@@ -6668,8 +7216,6 @@ export default function DailyIntelligenceView({
           calibration={thesisMemory?.weeklyCalibration}
           compact
         />
-
-        <DecisionCoach memory={thesisMemory} />
 
         <section className="daily-intelligence-panel daily-intelligence-summary">
           <div className="daily-intelligence-panel-title">
@@ -6695,31 +7241,6 @@ export default function DailyIntelligenceView({
 
         <MarketSectorStockChain chain={decisionChain} />
 
-        <StockDecisionComparison
-          shortlists={brokerResearch?.consensus?.sectorStockShortlists}
-          candidatePool={decisionChain?.ideaFunnel?.candidatePool || []}
-          thesisMemory={thesisMemory}
-          brokerResearchDate={
-            brokerResearchHistory?.selectedDate || brokerResearch?.reportDate || report.reportDate
-          }
-          busy={thesisMemoryBusy || watchlistQuickAddBusy}
-          error={thesisMemoryError || watchlistQuickAddError}
-          onTrackStock={trackStockThesis}
-          onAddWatchlist={quickAddWatchlistTicker}
-        />
-
-        <InvestmentThesisMemory
-          memory={thesisMemory}
-          busy={thesisMemoryBusy}
-          error={thesisMemoryError}
-          onSync={syncThesisMemory}
-          onReviewProposal={reviewRiskThesisProposal}
-          onRecordPortfolioResponse={recordRiskPortfolioResponse}
-          onReviewPortfolioRuleSuggestion={reviewPortfolioResponseRuleSuggestion}
-          onReviewPortfolioActiveRule={reviewPortfolioResponseActiveRule}
-          onReviewMonthlyGoal={reviewMonthlyDecisionGoalProposal}
-        />
-
         <section className="daily-intelligence-panel daily-intelligence-wide">
           <div className="daily-intelligence-panel-title">
             <div>
@@ -6744,23 +7265,6 @@ export default function DailyIntelligenceView({
             onUpdateFollowUp={updatePortfolioRiskFollowUp}
             onOpenOperations={onOpenOperations}
           />
-        </section>
-
-        <section className="daily-intelligence-panel daily-intelligence-wide">
-          <div className="daily-intelligence-panel-title">
-            <div>
-              <span>MARKET SCOREBOARD</span>
-              <h2>결론을 지지하는 시장 근거</h2>
-            </div>
-            <StatusPill
-              status={
-                decisionGate?.status === "blocked"
-                  ? "판단 보류"
-                  : scoreboard?.regime?.label || "unknown"
-              }
-            />
-          </div>
-          <Scoreboard scoreboard={scoreboard} />
         </section>
 
         <section className="daily-intelligence-panel">
@@ -6802,148 +7306,46 @@ export default function DailyIntelligenceView({
           </ul>
         </section>
 
-        <section className="daily-intelligence-panel daily-intelligence-wide">
-          <div className="daily-intelligence-panel-title">
-            <div>
-              <span>SECTOR & STYLE LEADERSHIP</span>
-              <h2>섹터와 스타일 리더십</h2>
-            </div>
-          </div>
-          <SectorLeadership marketInternals={marketInternals} />
-        </section>
-
-        <section className="daily-intelligence-panel daily-intelligence-wide">
-          <div className="daily-intelligence-panel-title">
-            <div>
-              <span>STRUCTURAL SECTOR RADAR</span>
-              <h2>미래 주도 섹터 선행지표</h2>
-            </div>
-            <span className="daily-intelligence-count">{sectorMetrics?.availableCount || 0}</span>
-          </div>
-          <SectorMetrics sectorMetrics={sectorMetrics} />
-        </section>
-
-        <section className="daily-intelligence-panel daily-intelligence-wide">
-          <div className="daily-intelligence-panel-title">
-            <div>
-              <span>US EQUITY CANDIDATES</span>
-              <h2>미국 개별주 분석 후보</h2>
-            </div>
-            <span className="daily-intelligence-count">{stockCandidates?.candidates?.length || 0}</span>
-          </div>
-          <StockCandidates stockCandidates={stockCandidates} />
-        </section>
-
-        <section className="daily-intelligence-panel daily-intelligence-wide">
-          <div className="daily-intelligence-panel-title">
-            <div>
-              <span>EARNINGS INTELLIGENCE</span>
-              <h2>실적·가이던스·추정치 변화</h2>
-            </div>
-            <span className="daily-intelligence-count">
-              {report.earningsWatch?.companies?.length || 0}
+        <details className="daily-intelligence-supporting-details daily-intelligence-wide">
+          <summary>
+            <span>
+              <small>DATA QUALITY &amp; PRIMARY SOURCES</small>
+              <strong>데이터 상태·원자료 확인</strong>
+              <em>판단 근거의 경고와 공식 출처를 필요할 때 펼쳐봅니다.</em>
             </span>
-          </div>
-          <p className="daily-intelligence-panel-note">
-            전망치는 제3자 전망치, 가이던스는 회사 주장, 실제치는 공식 원문 확인 값으로 구분합니다.
-          </p>
-          <EarningsWatch earningsWatch={report.earningsWatch} />
-        </section>
+            <span className="daily-intelligence-supporting-counts">
+              경고 {report.dataStatus.warnings.length} · 출처 {report.sources?.length || 0}
+              <ChevronRight size={17} />
+            </span>
+          </summary>
+          <div className="daily-intelligence-supporting-grid">
+            <section>
+              <div className="daily-intelligence-panel-title">
+                <div>
+                  <span>DATA QUALITY</span>
+                  <h2>데이터 상태</h2>
+                </div>
+              </div>
+              {report.dataStatus.warnings.length ? (
+                <ul className="daily-intelligence-warning-list">
+                  {report.dataStatus.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                </ul>
+              ) : (
+                <p className="daily-intelligence-muted">중요 데이터 경고가 없습니다.</p>
+              )}
+            </section>
 
-        <section className="daily-intelligence-panel">
-          <div className="daily-intelligence-panel-title">
-            <div>
-              <span>MARKET STRUCTURE</span>
-              <h2>시장 내부 구조</h2>
-            </div>
+            <section>
+              <div className="daily-intelligence-panel-title">
+                <div>
+                  <span>PRIMARY SOURCES</span>
+                  <h2>원자료</h2>
+                </div>
+              </div>
+              <SourceLinks sources={report.sources} />
+            </section>
           </div>
-          <div className="daily-intelligence-finding-list">
-            {report.findings.map((finding) => (
-              <article key={`${finding.title}-${finding.body}`}>
-                <h3>{finding.title}</h3>
-                <MarkdownText text={finding.body} />
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="daily-intelligence-panel">
-          <div className="daily-intelligence-panel-title">
-            <div>
-              <span>KOREA TRANSMISSION</span>
-              <h2>한국시장 연결</h2>
-            </div>
-            <StatusPill status={koreaStatus} />
-          </div>
-          <MarkdownText text={report.koreaConnection.summary} />
-          {report.koreaConnection.companyTransmissions?.length ? (
-            <div className="daily-intelligence-korea-transmissions">
-              {report.koreaConnection.companyTransmissions.map((transmission) => (
-                <article key={`${transmission.sourceTicker}-${transmission.sectorNameKo}`}>
-                  <header>
-                    <div>
-                      <span>{transmission.sourceTicker} → 한국</span>
-                      <strong>{transmission.sectorNameKo || "산업 연결"}</strong>
-                    </div>
-                    <em className={transmission.marketConfirmationStatus === "ready" ? "is-ready" : "is-blocked"}>
-                      {transmission.marketConfirmationStatus === "ready" ? "시장 확인" : "시장 확인 대기"}
-                    </em>
-                  </header>
-                  {transmission.sourceSignalLabel ? (
-                    <p><b>미국 기업 신호</b> {transmission.sourceSignalLabel}</p>
-                  ) : null}
-                  <ul>
-                    {(transmission.targets || []).map((target) => (
-                      <li key={`${transmission.sourceTicker}-${target.ticker}`}>
-                        <div>
-                          <strong>{target.ticker} · {target.companyName}</strong>
-                          <span className={`is-${target.classification || "watch_candidate"}`}>
-                            {target.classificationLabel || "관찰 후보"}
-                          </span>
-                        </div>
-                        <p>{target.reason}</p>
-                        {target.nextRequiredEvidence?.length ? (
-                          <small>다음 근거: {target.nextRequiredEvidence.join(" · ")}</small>
-                        ) : null}
-                        {target.sourceUrls?.[0] ? (
-                          <a href={target.sourceUrls[0]} target="_blank" rel="noreferrer">
-                            공식 근거 열기 <ArrowUpRight size={12} />
-                          </a>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                </article>
-              ))}
-            </div>
-          ) : null}
-        </section>
-
-        <section className="daily-intelligence-panel">
-          <div className="daily-intelligence-panel-title">
-            <div>
-              <span>DATA QUALITY</span>
-              <h2>데이터 상태</h2>
-            </div>
-          </div>
-          {report.dataStatus.warnings.length ? (
-            <ul className="daily-intelligence-warning-list">
-              {report.dataStatus.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-            </ul>
-          ) : (
-            <p className="daily-intelligence-muted">중요 데이터 경고가 없습니다.</p>
-          )}
-        </section>
-
-        <section className="daily-intelligence-panel">
-          <div className="daily-intelligence-panel-title">
-            <div>
-              <span>PRIMARY SOURCES</span>
-              <h2>원자료</h2>
-            </div>
-          </div>
-          <SourceLinks sources={report.sources} />
-        </section>
+        </details>
 
         <section className="daily-intelligence-operations-link daily-intelligence-wide">
           <div>
