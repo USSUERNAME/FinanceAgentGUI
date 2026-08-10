@@ -34,6 +34,25 @@ test("candidate performance keeps the first registration price and measures reac
   assert.equal(record.horizons[1].status, "pending");
 });
 
+test("review candidates keep grade C and can save a plan before price coverage arrives", () => {
+  const store = syncCandidatePerformanceStore(emptyCandidatePerformanceStore(), [{
+    ticker: "ONDS",
+    companyName: "Ondas",
+    grade: "C",
+    asOf: "2026-08-10",
+    close: null,
+  }], new Date("2026-08-10T10:00:00Z"));
+  const planned = updateCandidateTradePlanStore(store, "ONDS", {
+    tradeHorizon: "long_term",
+    thesisReason: "공식 근거가 보강될 때만 검토",
+    exitCondition: "공식 근거가 반박되면 제외",
+  }, new Date("2026-08-10T11:00:00Z"));
+
+  assert.equal(planned.records[0].gradeAtRegistration, "C");
+  assert.equal(planned.records[0].registeredPrice, null);
+  assert.equal(planned.records[0].tradePlan.tradeHorizon, "long_term");
+});
+
 test("trade plan is stored with thesis rules and snapshotted into review history", () => {
   let store = syncCandidatePerformanceStore(emptyCandidatePerformanceStore(), [{
     ticker: "ABNB",

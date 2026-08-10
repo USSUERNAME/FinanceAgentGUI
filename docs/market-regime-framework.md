@@ -1,4 +1,4 @@
-# 시장 레짐 7단계 표준
+# 시장 판단 9단계 표준
 
 ## 목적
 
@@ -12,12 +12,16 @@
 | 순서 | ID | 핵심 항목 | 권위 출처 예시 |
 |---:|---|---|---|
 | 1 | `official_calendar` | 경제·정책 일정, 기준일, 마지막 정상 수집 | BLS, BEA, Fed, 미 재무부 |
-| 2 | `rates_liquidity` | 미국 2년·10년·실질금리, 2s10s, 금융여건 | FRED, Fed, 미 재무부 |
-| 3 | `fx_commodities` | DXY, 원달러, 유가, 가스, 금 | FRED, ECOS, EIA |
-| 4 | `index_internals` | 브레드스, 이동평균 상회, 신고가·신저가, 거래량, 크레딧 | 거래소, FRED |
-| 5 | `sector_leadership` | 섹터 상대강도·확산·지속성 | 시장 데이터와 공식 재무 근거 |
-| 6 | `growth_inflation_regime` | 성장×물가 2×2, 주동인, 확인·무효화 조건 | BLS, BEA, Fed |
-| 7 | `korea_transmission` | 원달러, KOSPI/KOSDAQ, 수급, 미국기업→한국기업 연결 | KRX, ECOS, 기업 IR |
+| 2 | `growth_inflation_regime` | 성장×물가 2×2, 주동인, 확인·무효화 조건 | BLS, BEA, Fed |
+| 3 | `earnings_cycle` | 실적 결과, 추정치 변화, 가이던스, 다음 발표 | SEC, 기업 IR, 허가된 추정치 |
+| 4 | `rates_liquidity` | 미국 2년·10년·실질금리, 2s10s, 금융여건 | FRED, Fed, 미 재무부 |
+| 5 | `fx_commodities` | DXY, 원달러, 유가, 가스, 금 | FRED, ECOS, EIA |
+| 6 | `volatility_positioning` | VIX 기간구조, 크레딧, 옵션·선물 포지셔닝 | Cboe, CFTC, FRED |
+| 7 | `index_internals` | 지수 추세 차트, 브레드스, 이동평균, 신고가·신저가, 거래량 | 거래소, FRED |
+| 8 | `sector_leadership` | 섹터 상대강도·확산·지속성 | 시장 데이터와 공식 재무 근거 |
+| 9 | `korea_transmission` | 원달러, KOSPI/KOSDAQ, 수급, 미국기업→한국기업 연결 | KRX, ECOS, 기업 IR |
+
+각 단계는 자체 `asOf`, `dataDates`, `dateAlignment`를 표시한다. 서로 다른 날짜의 자료를 함께 쓰면 `mixed_dates`로 경고하고, 최신 날짜 하나로 덮어쓰지 않는다.
 
 수집 실패 시 `이벤트 없음`으로 표시하지 않는다. `수집 실패`, 마지막 정상 시각, 사용한 대체 공식
 출처를 보여준다. 누락 데이터 상태는 종목 표준과 같은 `verified`, `insufficient`, `accumulating`,

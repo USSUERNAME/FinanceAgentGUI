@@ -331,7 +331,7 @@ const marketFrameworkStatusLabels = {
 
 function MarketFrameworkFlow({ framework }) {
   if (!framework?.stages?.length) {
-    return <p className="daily-intelligence-muted">시장 7단계 판단 자료를 축적 중입니다.</p>;
+    return <p className="daily-intelligence-muted">시장 판단 단계 자료를 축적 중입니다.</p>;
   }
   return (
     <div className="daily-intelligence-market-framework">
@@ -346,6 +346,12 @@ function MarketFrameworkFlow({ framework }) {
             <em>{marketFrameworkStatusLabels[stage.status] || stage.status}</em>
           </header>
           <p>{stage.summary}</p>
+          <div className={`daily-intelligence-stage-date is-${stage.dateAlignment || "not_available"}`}>
+            <span>기준 {stage.asOf || "미기록"}</span>
+            {stage.dateAlignment === "mixed_dates" ? (
+              <em>날짜 불일치 · {stage.dataDates.join(" / ")}</em>
+            ) : null}
+          </div>
           {stage.id === "official_calendar" && stage.data?.events?.length ? (
             <ul>
               {stage.data.events.slice(0, 4).map((event) => (
@@ -6596,10 +6602,10 @@ function MarketSectorsWorkspace({
           <div className="daily-intelligence-panel-title">
             <div>
               <span>TOP-DOWN DECISION ORDER</span>
-              <h2>시장 판단 7단계</h2>
+              <h2>시장 판단 {marketFramework?.completeness?.total || 0}단계</h2>
             </div>
             <span className="daily-intelligence-count">
-              {marketFramework?.completeness?.completed || 0}/7
+              {marketFramework?.completeness?.completed || 0}/{marketFramework?.completeness?.total || 0}
             </span>
           </div>
           <p className="daily-intelligence-panel-note">

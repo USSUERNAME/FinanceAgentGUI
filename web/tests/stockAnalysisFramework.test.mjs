@@ -56,11 +56,13 @@ test("market framework fixes the top-down order and never fills failed data", ()
   const framework = readJson("config/market-regime-framework.json");
   const expectedOrder = [
     "official_calendar",
+    "growth_inflation_regime",
+    "earnings_cycle",
     "rates_liquidity",
     "fx_commodities",
+    "volatility_positioning",
     "index_internals",
     "sector_leadership",
-    "growth_inflation_regime",
     "korea_transmission",
   ];
 

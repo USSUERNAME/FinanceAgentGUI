@@ -4,6 +4,7 @@ import copy
 import unittest
 
 from screen_us_equity_candidates import (
+    carried_candidate_evidence,
     screen_us_equity_candidates,
     validate_market_input,
 )
@@ -126,6 +127,27 @@ class UsEquityCandidateScreenTests(unittest.TestCase):
         self.assertEqual(row["score_breakdown"]["official_material"], 10)
         self.assertTrue(row["deep_analysis_eligible"])
         self.assertEqual(payload["deep_analysis_count"], 1)
+
+    def test_same_day_regeneration_can_carry_verified_evidence_forward(self) -> None:
+        first = screen_us_equity_candidates(
+            "2026-07-23",
+            universe(),
+            [sec_event()],
+            market_input(),
+        )
+        records = carried_candidate_evidence(first, "2026-07-23")
+        regenerated = screen_us_equity_candidates(
+            "2026-07-23",
+            universe(),
+            records,
+            market_input(),
+        )
+        self.assertEqual(len(records), 1)
+        self.assertTrue(regenerated["candidates"][0]["deep_analysis_eligible"])
+        self.assertEqual(
+            regenerated["candidates"][0]["event_evidence"][0]["verified_facts"][0]["field"],
+            "sec_item",
+        )
 
     def test_metadata_only_primary_filing_stays_out_of_deep_analysis(self) -> None:
         payload = screen_us_equity_candidates(

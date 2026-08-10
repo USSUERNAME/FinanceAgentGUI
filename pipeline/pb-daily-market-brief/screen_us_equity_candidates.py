@@ -191,6 +191,45 @@ def event_evidence(inbox: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return result
 
 
+def carried_candidate_evidence(screen: dict[str, Any], report_date: str) -> list[dict[str, Any]]:
+    """Rehydrate already-verified evidence when regenerating the same dated screen."""
+    if screen.get("schema_version") != SCHEMA_VERSION or screen.get("report_date") != report_date:
+        raise ValueError("Carry-forward candidate screen schema or report date does not match")
+    records: list[dict[str, Any]] = []
+    for candidate in screen.get("candidates", []):
+        ticker = normalize_ticker(candidate.get("ticker"))
+        if not ticker:
+            continue
+        for event in candidate.get("event_evidence", []):
+            facts = event.get("verified_facts") or []
+            source_url = str(event.get("source_url") or "")
+            if (
+                event.get("primary_source_confirmed") is not True
+                or not facts
+                or not source_url.startswith("https://")
+            ):
+                continue
+            event_type = str(event.get("event_type") or "")
+            form_tag = {
+                "sec_8k": "8-K",
+                "sec_10q": "10-Q",
+                "sec_10k": "10-K",
+            }.get(event_type)
+            records.append({
+                "id": event.get("record_id"),
+                "title": event.get("title"),
+                "url": source_url,
+                "tickers": [ticker],
+                "tags": [form_tag] if form_tag else [event_type],
+                "source_grade": event.get("source_grade"),
+                "primary_source_confirmed": True,
+                "evidence_scope": event.get("evidence_scope"),
+                "evidence_label": "verified_primary_body_excerpt",
+                "verified_facts": facts,
+            })
+    return records
+
+
 def _threshold_score(value: float | None, thresholds: list[tuple[float, int]]) -> int:
     absolute = abs(float(value)) if value is not None else 0.0
     for threshold, score in thresholds:
@@ -499,6 +538,7 @@ def main() -> None:
     parser.add_argument("--inbox-file")
     parser.add_argument("--market-input")
     parser.add_argument("--additional-inbox-file")
+    parser.add_argument("--carry-forward-screen-file")
     parser.add_argument("--output-file")
     args = parser.parse_args()
     universe_path = root_path(
@@ -532,6 +572,12 @@ def main() -> None:
             if not isinstance(additional_records, list):
                 raise SystemExit("Additional candidate evidence records must be an array")
             inbox_records.extend(additional_records)
+    if args.carry_forward_screen_file:
+        carry_path = root_path(args.carry_forward_screen_file, ROOT / args.carry_forward_screen_file)
+        if not carry_path.exists():
+            raise SystemExit(f"Carry-forward candidate screen does not exist: {carry_path}")
+        carry_screen = json.loads(carry_path.read_text(encoding="utf-8"))
+        inbox_records.extend(carried_candidate_evidence(carry_screen, args.date))
     payload = screen_us_equity_candidates(
         args.date,
         json.loads(universe_path.read_text(encoding="utf-8")),

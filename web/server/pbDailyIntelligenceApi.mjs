@@ -1126,6 +1126,17 @@ function normalizePipeline(intelligence = {}) {
     verifiedPrimaryFactCount: Number(eventState.verified_primary_fact_count || 0),
     synthesisStatus: cleanText(eventState.synthesis_status, 80) || "not_available",
     fallbackReason: cleanText(eventState.fallback_reason, 160),
+    stockAnalysisCards: cleanList(intelligence?.market?.stock_analysis_cards, 8)
+      .map((item) => ({
+        ticker: cleanText(item?.ticker, 20).toUpperCase(),
+        selectionReason: cleanText(item?.selection_reason, 800),
+        marketReactionInterpretation: cleanText(item?.market_reaction_interpretation, 1200),
+        sectorReadThrough: cleanText(item?.sector_read_through, 1000),
+        confirmationCondition: cleanText(item?.confirmation_condition, 800),
+        invalidationCondition: cleanText(item?.invalidation_condition, 800),
+        evidenceStatus: cleanText(item?.evidence_status, 80),
+      }))
+      .filter((item) => item.ticker),
     reviewQueue: items
       .filter((item) => item?.verification?.publication_eligible_as_fact !== true)
       .map(normalizeReviewItem)
@@ -1235,6 +1246,40 @@ function marketFrameworkStatus(value, { verified = [], failed = [] } = {}) {
   return "insufficient";
 }
 
+function authoritativeMacroEvidence(item = {}) {
+  const sourceType = cleanText(
+    item?.sourceType || item?.source_type || item?.provider || item?.source,
+    120,
+  );
+  return item?.primarySourceConfirmed === true
+    || item?.primary_source_confirmed === true
+    || /\b(BLS|BEA|Federal Reserve|Fed|US Treasury)\b/i.test(sourceType);
+}
+
+function macroEvidenceAxis(item = {}) {
+  const axis = cleanText(item?.axis || item?.dimension || item?.metricType, 80).toLowerCase();
+  if (/growth|employment|labor|output|gdp|retail/.test(axis)) return "growth";
+  if (/inflation|price|cpi|pce|ppi/.test(axis)) return "inflation";
+  return "";
+}
+
+function marketStageDates(values = []) {
+  return [...new Set(cleanList(values, 50)
+    .map((value) => cleanText(value, 80).slice(0, 10))
+    .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)))]
+    .sort();
+}
+
+function withMarketStageDates(stage, values = []) {
+  const dataDates = marketStageDates(values);
+  return {
+    ...stage,
+    asOf: dataDates.at(-1) || "",
+    dataDates,
+    dateAlignment: dataDates.length > 1 ? "mixed_dates" : dataDates.length ? "aligned" : "not_available",
+  };
+}
+
 export function buildMarketRegimeFramework({
   intelligence = {},
   scoreboard = null,
@@ -1274,8 +1319,45 @@ export function buildMarketRegimeFramework({
     && Number(marketInternals?.coverage?.available || 0)
       >= Number(marketInternals?.coverage?.required || 0);
   const sectorLeadershipReady = cleanList(marketInternals?.sectors?.["5d"], 20).length > 0;
-  const regimeReady = Boolean(scoreboard?.regime?.label && scoreboard.regime.label !== "unknown")
-    && cleanList(scoreboard?.regime?.quantitativeEvidence, 12).length >= 2;
+  const earningsSummary = report?.earningsWatch?.summary || {};
+  const earningsCompanies = cleanList(report?.earningsWatch?.companies, 30);
+  const earningsEvidenceCount = Number(earningsSummary.confirmedEventCount || 0)
+    + Number(earningsSummary.estimateRevisionCount || 0)
+    + Number(earningsSummary.guidanceCount || 0)
+    + Number(earningsSummary.verifiedResultCount || 0);
+  const earningsDates = earningsCompanies.flatMap((company) => [
+    company?.estimateRevision?.freezeAsOf,
+    ...cleanList(company?.historicalSurprises, 8).map((item) => item?.reportedDate),
+  ]);
+  const volatilityFields = {
+    vix: cards.get("vix") || null,
+    vixTerm: cards.get("vix-term") || null,
+    creditSpread: cards.get("credit") || null,
+    positioning: null,
+  };
+  const volatilityReady = Boolean(volatilityFields.vix && volatilityFields.vixTerm);
+  const positioningReady = Boolean(volatilityFields.positioning);
+  const indexTrend = null;
+  const macroRegime = market.growth_inflation_regime || market.macro_regime || {};
+  const macroEvidence = cleanList(macroRegime.evidence || macroRegime.quantitative_evidence, 20)
+    .map((item) => (typeof item === "string" ? { observation: cleanText(item, 500) } : item));
+  const authoritativeGrowthEvidence = macroEvidence.filter(
+    (item) => authoritativeMacroEvidence(item) && macroEvidenceAxis(item) === "growth",
+  );
+  const authoritativeInflationEvidence = macroEvidence.filter(
+    (item) => authoritativeMacroEvidence(item) && macroEvidenceAxis(item) === "inflation",
+  );
+  const growthDirection = cleanText(
+    macroRegime.growthDirection || macroRegime.growth_direction,
+    40,
+  );
+  const inflationDirection = cleanText(
+    macroRegime.inflationDirection || macroRegime.inflation_direction,
+    40,
+  );
+  const regimeReady = Boolean(growthDirection && inflationDirection)
+    && authoritativeGrowthEvidence.length >= 1
+    && authoritativeInflationEvidence.length >= 1;
   const koreaReady = ["ready", "sufficient"].includes(cleanText(report?.koreaConnection?.status, 40));
   const stages = [
     {
@@ -1291,6 +1373,41 @@ export function buildMarketRegimeFramework({
         events: upcomingEvents,
         collectionStatus: cleanText(calendar.collection_status, 80),
         lastSuccessfulAt: cleanText(calendar.last_successful_at || calendar.collected_at, 80),
+      },
+    },
+    {
+      id: "growth_inflation_regime",
+      status: regimeReady ? "verified" : scoreboard ? "insufficient" : "accumulating",
+      labelKo: "성장×물가 레짐",
+      summary: regimeReady
+        ? macroRegime.summary || `${growthDirection} 성장 · ${inflationDirection} 물가`
+        : "공식 성장축·물가축 근거가 각각 없어 경제 레짐 판정을 보류합니다. 시장 가격 기반 위험선호 레짐은 참고용입니다.",
+      data: {
+        growthDirection: growthDirection || "unknown",
+        inflationDirection: inflationDirection || "unknown",
+        quadrant: cleanText(macroRegime.quadrant, 80) || "unknown",
+        evidence: macroEvidence,
+        authoritativeGrowthEvidenceCount: authoritativeGrowthEvidence.length,
+        authoritativeInflationEvidenceCount: authoritativeInflationEvidence.length,
+        marketRiskRegime: scoreboard?.regime || null,
+        evidenceBoundary: "RSP/SPY·금리·VIX 같은 가격 자료만으로 성장×물가 경제 레짐을 확정하지 않습니다.",
+      },
+    },
+    {
+      id: "earnings_cycle",
+      status: earningsEvidenceCount > 0 ? "verified" : report ? "insufficient" : "accumulating",
+      labelKo: "실적 사이클",
+      summary: earningsEvidenceCount > 0
+        ? `확인 실적·추정치·가이던스 근거 ${earningsEvidenceCount}건을 추적합니다.`
+        : "실적 결과·추정치 변화·가이던스 자료가 부족합니다.",
+      data: {
+        summary: earningsSummary,
+        companies: earningsCompanies.map((company) => ({
+          ticker: company.ticker,
+          upcomingEvent: company.upcomingEvent,
+          estimateRevision: company.estimateRevision,
+          guidanceCount: cleanList(company.guidance, 8).length,
+        })),
       },
     },
     {
@@ -1310,13 +1427,25 @@ export function buildMarketRegimeFramework({
       data: { metrics: cleanList(report?.koreaConnection?.metrics, 12) },
     },
     {
+      id: "volatility_positioning",
+      status: volatilityReady && positioningReady ? "verified" : scoreboard ? "insufficient" : "accumulating",
+      labelKo: "변동성·포지셔닝",
+      summary: volatilityReady
+        ? "VIX·기간구조는 확인됐지만 옵션·선물 포지셔닝 자료가 없어 부분 상태입니다."
+        : "VIX 기간구조와 포지셔닝 자료를 축적 중입니다.",
+      data: volatilityFields,
+    },
+    {
       id: "index_internals",
-      status: internalsReady ? "verified" : marketInternals ? "insufficient" : "accumulating",
-      labelKo: "지수 내부 체력",
-      summary: internalsReady
-        ? "가격 커버리지와 구성종목 브레드스가 준비됐습니다."
-        : "가격 커버리지·구성종목 브레드스 중 일부가 부족합니다.",
+      status: internalsReady && indexTrend ? "verified" : marketInternals ? "insufficient" : "accumulating",
+      labelKo: "지수 추세·내부 체력",
+      summary: internalsReady && indexTrend
+        ? "지수 추세 차트와 구성종목 브레드스가 함께 준비됐습니다."
+        : internalsReady
+          ? "구성종목 브레드스는 준비됐지만 지수 추세 차트가 부족합니다."
+          : "지수 추세·가격 커버리지·구성종목 브레드스 중 일부가 부족합니다.",
       data: {
+        indexTrend,
         coverage: marketInternals?.coverage || null,
         constituentBreadth: marketInternals?.constituentBreadth || null,
         sectorBreadth: marketInternals?.sectorBreadth || null,
@@ -1335,15 +1464,6 @@ export function buildMarketRegimeFramework({
       },
     },
     {
-      id: "growth_inflation_regime",
-      status: regimeReady ? "verified" : scoreboard ? "insufficient" : "accumulating",
-      labelKo: "성장×물가 레짐",
-      summary: regimeReady
-        ? scoreboard.regime.summary || scoreboard.regime.label
-        : "성장·물가 방향과 정량 근거 2개 이상이 필요합니다.",
-      data: scoreboard?.regime || null,
-    },
-    {
       id: "korea_transmission",
       status: koreaReady ? "verified" : report ? "insufficient" : "accumulating",
       labelKo: "한국시장 전파",
@@ -1355,12 +1475,29 @@ export function buildMarketRegimeFramework({
       },
     },
   ];
+  const stageDateValues = {
+    official_calendar: [calendar.last_successful_at, calendar.collected_at],
+    growth_inflation_regime: macroEvidence.map((item) => item?.asOf || item?.as_of || item?.date),
+    earnings_cycle: earningsDates,
+    rates_liquidity: Object.values(rateFields).map((item) => item?.asOf),
+    fx_commodities: cleanList(report?.koreaConnection?.metrics, 12)
+      .map((item) => item?.asOf || item?.as_of),
+    volatility_positioning: Object.values(volatilityFields).map((item) => item?.asOf),
+    index_internals: [marketInternals?.provider?.asOf, marketInternals?.constituentBreadth?.asOf],
+    sector_leadership: [marketInternals?.provider?.asOf],
+    korea_transmission: cleanList(report?.koreaConnection?.metrics, 12)
+      .map((item) => item?.asOf || item?.as_of),
+  };
+  const datedStages = stages.map((stage) => withMarketStageDates(
+    stage,
+    stageDateValues[stage.id] || [],
+  ));
   return {
     schemaVersion: "market_regime_framework.v1",
-    stages,
+    stages: datedStages,
     completeness: {
-      completed: stages.filter((stage) => stage.status === "verified").length,
-      total: 7,
+      completed: datedStages.filter((stage) => stage.status === "verified").length,
+      total: datedStages.length,
     },
   };
 }

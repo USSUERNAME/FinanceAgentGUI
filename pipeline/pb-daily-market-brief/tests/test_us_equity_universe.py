@@ -5,6 +5,7 @@ import unittest
 
 from build_us_equity_universe import (
     build_us_equity_universe,
+    sector_membership_rows,
     validate_membership_input,
 )
 
@@ -86,6 +87,24 @@ def membership_input(sp_count: int = 2, nasdaq_count: int = 2) -> dict:
         "report_date": "2026-07-23",
         "sources": sources,
         "members": members,
+    }
+
+
+def sector_holdings() -> dict:
+    return {
+        "schema_version": "us_sector_holdings_proxy.v1",
+        "report_date": "2026-07-23",
+        "sectors": [{
+            "sector_ticker": "XLK",
+            "source_grade": "A",
+            "primary_source_confirmed": True,
+            "as_of": "2026-07-22",
+            "members": [{
+                "ticker": "MCHP",
+                "company_name": "MICROCHIP TECHNOLOGY INC",
+                "weight_pct": 0.5,
+            }],
+        }],
     }
 
 
@@ -171,6 +190,41 @@ class UsEquityUniverseTests(unittest.TestCase):
         self.assertTrue(payload["full_index_scan_ready"])
         self.assertEqual(payload["collection_status"], "complete")
         self.assertEqual(payload["membership_counts"], {"nasdaq100": 90, "sp500": 450})
+
+    def test_sector_holdings_fill_sector_ids_and_specific_master_mapping_wins_first(self) -> None:
+        sector_master = master()
+        sector_master["sectors"][0]["representative_companies"].append({
+            "market": "US",
+            "ticker": "MCHP",
+            "name": "Microchip Technology",
+            "instrument_type": "EQUITY",
+        })
+        payload = build_us_equity_universe(
+            "2026-07-23",
+            {"targets": []},
+            sector_master,
+            [],
+            membership_input(),
+            sector_holdings(),
+        )
+        mchp = next(row for row in payload["securities"] if row["ticker"] == "MCHP")
+
+        self.assertIn("semiconductors_ai_compute", mchp["sector_ids"])
+        self.assertIn("technology_hardware_services", mchp["sector_ids"])
+        self.assertEqual(mchp["sector_proxy_tickers"], ["XLK"])
+        self.assertIn("verified_sector_fund_membership", mchp["selection_reasons"])
+
+    def test_previous_sector_snapshot_is_valid_fallback(self) -> None:
+        payload = sector_holdings()
+        payload["report_date"] = "2026-07-22"
+        rows = sector_membership_rows(payload, "2026-07-23")
+        self.assertEqual(rows[0]["ticker"], "MCHP")
+
+    def test_future_sector_snapshot_is_rejected(self) -> None:
+        payload = sector_holdings()
+        payload["report_date"] = "2026-07-24"
+        with self.assertRaisesRegex(ValueError, "after the report"):
+            sector_membership_rows(payload, "2026-07-23")
 
     def test_stale_membership_cannot_make_full_scan_ready(self) -> None:
         source = membership_input(sp_count=450, nasdaq_count=90)

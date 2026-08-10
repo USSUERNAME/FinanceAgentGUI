@@ -79,6 +79,32 @@ function formatFinancialValue(value, unit) {
   return `${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(number)}${unit ? ` ${unit}` : ""}`;
 }
 
+function formatMarketPrice(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "가격 자료 없음";
+  return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(number);
+}
+
+function CandidateMarketMove({ candidate }) {
+  const move = candidate.marketMove || {};
+  const returnLabel = Number.isFinite(Number(move.return1d))
+    ? `${Number(move.return1d) >= 0 ? "+" : ""}${Number(move.return1d).toFixed(2)}%`
+    : "등락 자료 없음";
+  const volumeLabel = Number.isFinite(Number(move.volumeRatio20d))
+    ? `20일 평균 대비 ${Number(move.volumeRatio20d).toFixed(2)}배`
+    : "거래량 자료 없음";
+  return (
+    <div className={`stock-gateway-market-move is-${move.direction || "missing"}`}>
+      <div>
+        <span>{move.period || "1거래일"} {move.directionLabel || "등락"}</span>
+        <strong>{returnLabel}</strong>
+      </div>
+      <small>종가 {formatMarketPrice(move.close)} · {volumeLabel}</small>
+      <em>기준 {move.asOf || candidate.asOf || "미기록"}</em>
+    </div>
+  );
+}
+
 function ClaimLedger({ candidate }) {
   if (!candidate.claims.length) return null;
   return (
@@ -249,9 +275,11 @@ function CandidateCard({ candidate, performance, performanceBusy, onReviewPerfor
           <p>{candidate.whyNow || "후보 선정 근거 확인 대기"}</p>
         </div>
         {candidate.liquidityRisk.momentumRisk ? (
-          <span className="stock-gateway-risk"><AlertTriangle size={14} /> 급등락 주의</span>
+          <span className="stock-gateway-risk"><AlertTriangle size={14} /> {candidate.liquidityRisk.label}</span>
         ) : null}
       </header>
+
+      <CandidateMarketMove candidate={candidate} />
 
       <div className="stock-gateway-evidence-summary">
         <span>공식 근거 <strong>{candidate.primarySourceCount}</strong></span>
@@ -268,13 +296,6 @@ function CandidateCard({ candidate, performance, performanceBusy, onReviewPerfor
           </div>
         ))}
       </div>
-
-      {candidate.counterEvidence ? (
-        <p className="stock-gateway-counter"><strong>반대 근거</strong>{candidate.counterEvidence}</p>
-      ) : null}
-      {candidate.invalidationConditions[0] ? (
-        <p className="stock-gateway-invalidation"><strong>무효화 조건</strong>{candidate.invalidationConditions[0]}</p>
-      ) : null}
 
       {candidate.sources.length ? (
         <div className="stock-gateway-sources" aria-label={`${candidate.ticker} 1차 출처`}>
@@ -342,7 +363,7 @@ export default function StockResearchGateway({ activeMode, onModeChange }) {
       const nextSnapshot = buildStockResearchGatewaySnapshot(payload);
       setSnapshot(nextSnapshot);
       try {
-        applyPerformancePayload(await syncCandidatePerformance(nextSnapshot.verifiedCandidates));
+        applyPerformancePayload(await syncCandidatePerformance(nextSnapshot.candidates));
       } catch {
         // Performance tracking is supplementary; candidate verification remains usable.
       }

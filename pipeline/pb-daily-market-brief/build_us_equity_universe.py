@@ -24,6 +24,20 @@ ALLOWED_RIGHTS_LABELS = {
 MINIMUM_COMPLETE_COUNTS = {"sp500": 450, "nasdaq100": 90}
 TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
 
+SECTOR_RESEARCH_ID_BY_ETF = {
+    "XLC": "media_gaming_entertainment",
+    "XLY": "consumer_discretionary_retail",
+    "XLP": "consumer_staples_food_beverage",
+    "XLE": "energy_oil_gas",
+    "XLF": "financials_capital_markets",
+    "XLV": "healthcare_services_medtech",
+    "XLI": "industrials_machinery",
+    "XLB": "metals_critical_materials",
+    "XLRE": "real_estate_general",
+    "XLK": "technology_hardware_services",
+    "XLU": "utilities_power",
+}
+
 
 def root_path(value: str | None, default: Path) -> Path:
     path = Path(value) if value else default
@@ -122,6 +136,69 @@ def membership_rows(
     return rows, source_status
 
 
+def sector_membership_rows(
+    payload: dict[str, Any] | None,
+    report_date: str,
+) -> list[dict[str, Any]]:
+    """Translate official sector-fund holdings into auditable broad-sector IDs."""
+    if payload is None:
+        return []
+    if payload.get("schema_version") != "us_sector_holdings_proxy.v1":
+        raise ValueError("Unexpected U.S. sector holdings schema")
+    report_day = date.fromisoformat(report_date)
+    holdings_day = date.fromisoformat(str(payload.get("report_date") or ""))
+    if holdings_day > report_day:
+        raise ValueError("U.S. sector holdings cannot be dated after the report")
+    rows: list[dict[str, Any]] = []
+    for sector in payload.get("sectors", []):
+        sector_ticker = normalize_ticker(sector.get("sector_ticker"))
+        sector_id = SECTOR_RESEARCH_ID_BY_ETF.get(sector_ticker)
+        if not sector_id:
+            continue
+        if sector.get("primary_source_confirmed") is not True:
+            continue
+        if sector.get("source_grade") not in {"A", "B"}:
+            continue
+        as_of = date.fromisoformat(str(sector.get("as_of") or ""))
+        if as_of > report_day:
+            raise ValueError("Sector holdings cannot be dated after the report")
+        for member in sector.get("members", []):
+            ticker = normalize_ticker(member.get("ticker"))
+            if not ticker:
+                continue
+            rows.append({
+                "ticker": ticker,
+                "company_name": member.get("company_name"),
+                "sector_ids": [sector_id],
+                "sector_proxy_tickers": [sector_ticker],
+                "selection_reasons": ["verified_sector_fund_membership"],
+                "source_ids": [f"state_street_{sector_ticker.lower()}_daily_holdings"],
+            })
+    return rows
+
+
+def latest_valid_sector_holdings(report_date: str) -> dict[str, Any] | None:
+    """Return the newest non-empty official sector snapshot on or before the report date."""
+    report_day = date.fromisoformat(report_date)
+    holdings_root = ROOT / "workspace" / "us_sector_holdings"
+    if not holdings_root.exists():
+        return None
+    for artifact in sorted(holdings_root.glob("*/sector_holdings.json"), reverse=True):
+        try:
+            payload = json.loads(artifact.read_text(encoding="utf-8"))
+            artifact_day = date.fromisoformat(str(payload.get("report_date") or ""))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        if artifact_day > report_day:
+            continue
+        if payload.get("schema_version") != "us_sector_holdings_proxy.v1":
+            continue
+        if not payload.get("sectors"):
+            continue
+        return payload
+    return None
+
+
 def configured_rows(
     targets: dict[str, Any],
     master: dict[str, Any],
@@ -182,6 +259,7 @@ def merge_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "selection_reasons",
         "source_ids",
         "event_source_urls",
+        "sector_proxy_tickers",
     }
     for row in rows:
         ticker = row["ticker"]
@@ -222,10 +300,12 @@ def build_us_equity_universe(
     master: dict[str, Any],
     inbox: list[dict[str, Any]],
     membership_input: dict[str, Any] | None = None,
+    sector_holdings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     index_rows, source_status = membership_rows(membership_input, report_date)
     securities = merge_rows([
         *index_rows,
+        *sector_membership_rows(sector_holdings, report_date),
         *configured_rows(targets, master, inbox),
     ])
     membership_counts = {
@@ -314,6 +394,7 @@ def main() -> None:
     parser.add_argument("--date", required=True)
     parser.add_argument("--inbox-file")
     parser.add_argument("--membership-input")
+    parser.add_argument("--sector-holdings-file")
     parser.add_argument("--output-file")
     args = parser.parse_args()
     inbox_path = root_path(
@@ -330,12 +411,21 @@ def main() -> None:
         json.loads(membership_path.read_text(encoding="utf-8"))
         if membership_path.exists() else None
     )
+    if args.sector_holdings_file:
+        sector_holdings_path = root_path(args.sector_holdings_file, ROOT)
+        sector_holdings = (
+            json.loads(sector_holdings_path.read_text(encoding="utf-8"))
+            if sector_holdings_path.exists() else None
+        )
+    else:
+        sector_holdings = latest_valid_sector_holdings(args.date)
     payload = build_us_equity_universe(
         args.date,
         json.loads((ROOT / "targets.json").read_text(encoding="utf-8")),
         load_sector_master(),
         json.loads(inbox_path.read_text(encoding="utf-8")),
         membership_input,
+        sector_holdings,
     )
     output = root_path(
         args.output_file,

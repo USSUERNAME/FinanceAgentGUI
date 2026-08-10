@@ -304,6 +304,10 @@ def build_daily_intelligence(
                 limit=20,
             ),
             "regime": deepcopy(analysis.get("market_regime") or {}),
+            "stock_analysis_cards": _dict_rows(
+                analysis.get("stock_analysis_cards"),
+                limit=8,
+            ),
             "key_drivers": _dict_rows(analysis.get("key_drivers"), limit=3),
             "conflicting_signals": _bounded_list(
                 analysis.get("conflicting_signals"),

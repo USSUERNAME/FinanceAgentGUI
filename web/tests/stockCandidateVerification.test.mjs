@@ -3,10 +3,27 @@ import assert from "node:assert/strict";
 import {
   STOCK_ANALYSIS_STAGE_IDS,
   STOCK_HORIZON_REQUIREMENTS,
+  buildCandidateMarketMove,
   buildStockGateRolloutSimulation,
   buildStockResearchGatewaySnapshot,
   evaluateStockCandidateGate,
 } from "../src/arca/stockCandidateVerification.js";
+
+test("candidate market move distinguishes a crash from a rally and keeps its period", () => {
+  const crash = buildCandidateMarketMove({
+    reaction: { close: 13.79, return1d: -22.1, volumeRatio20d: 2.4 },
+  }, "2026-08-07");
+  const rally = buildCandidateMarketMove({
+    reaction: { close: 17.45, return1d: 17.45, volumeRatio20d: 3.2 },
+  }, "2026-08-07");
+
+  assert.equal(crash.direction, "crash");
+  assert.equal(crash.directionLabel, "급락");
+  assert.equal(crash.period, "1거래일");
+  assert.equal(crash.asOf, "2026-08-07");
+  assert.equal(rally.direction, "surge");
+  assert.equal(rally.directionLabel, "급등");
+});
 
 function completeContext() {
   return {
@@ -47,7 +64,7 @@ function completeContext() {
   };
 }
 
-test("candidate gate promotes only evidence-complete candidates to B or higher", () => {
+test("candidate gate never promotes a canonical C grade on its own", () => {
   const result = evaluateStockCandidateGate({
     ticker: "ABNB",
     companyName: "Airbnb",
@@ -60,8 +77,10 @@ test("candidate gate promotes only evidence-complete candidates to B or higher",
   }, completeContext());
 
   assert.equal(result.gatePassed, true);
-  assert.equal(result.grade, "B");
-  assert.equal(result.allocationAllowed, true);
+  assert.equal(result.grade, "C");
+  assert.equal(result.upstreamGrade, "C");
+  assert.equal(result.promotionEligible, true);
+  assert.equal(result.allocationAllowed, false);
   assert.equal(result.dimensions.earnings, true);
   assert.equal(result.dimensions.catalyst, true);
   assert.equal(result.sources.length, 1);
@@ -76,7 +95,7 @@ test("candidate gate promotes only evidence-complete candidates to B or higher",
   assert.equal(result.analysisFramework.tradeReadiness.tradeHorizon, "unclassified");
   assert.equal(result.analysisFramework.tradeReadiness.ready, false);
   assert.equal(result.tradeAllocationAllowed, false);
-  assert.equal(result.allocationAllowed, true);
+  assert.equal(result.allocationAllowed, false);
   assert.deepEqual(result.missingRequirements, []);
 });
 
@@ -133,9 +152,9 @@ test("new trust gate rollout is simulated before it can change active grades", (
   }, completeContext());
   const simulation = buildStockGateRolloutSimulation([candidate]);
 
-  assert.equal(candidate.grade, "B");
+  assert.equal(candidate.grade, "C");
   assert.equal(simulation.activeGateChanged, false);
-  assert.equal(simulation.currentPassingCount, 1);
+  assert.equal(simulation.currentPassingCount, 0);
   assert.equal(simulation.evidenceCorePassingCount, 1);
   assert.equal(simulation.targetPassingCount, 0);
   assert.equal(simulation.blockerCounts.trade_suitability, 1);
@@ -159,9 +178,28 @@ test("community-style candidate stays C and blocks allocation when primary evide
   assert.equal(result.allocationAllowed, false);
   assert.equal(result.liquidityRisk.momentumRisk, true);
   assert.equal(result.claims.length, 0);
+  assert.equal(result.counterEvidenceType, "derived_draft");
+  assert.equal(result.invalidationType, "derived_draft");
+  assert.match(result.counterEvidence, /ONDS/);
+  assert.match(result.invalidationConditions[0], /ONDS/);
   assert.equal(result.macroPath.status, "partial");
   assert.ok(result.missingRequirements.includes("SEC·DART·기업 IR 1차 출처"));
   assert.ok(result.missingRequirements.includes("투자 가설 무효화 조건"));
+});
+
+test("candidate-specific draft rules do not satisfy trust gates", () => {
+  const context = { asOf: "2026-08-10", updatedAt: "2026-08-10T07:00:00Z" };
+  const ttd = evaluateStockCandidateGate({
+    ticker: "TTD", reaction: { close: 14, return1d: -22, volumeRatio20d: 4.6 },
+  }, context);
+  const abnb = evaluateStockCandidateGate({
+    ticker: "ABNB", reaction: { close: 180, return1d: 17.4, volumeRatio20d: 3.7 },
+  }, context);
+
+  assert.notEqual(ttd.counterEvidence, abnb.counterEvidence);
+  assert.notEqual(ttd.invalidationConditions[0], abnb.invalidationConditions[0]);
+  assert.equal(ttd.checks.find((item) => item.id === "counterEvidence").passed, false);
+  assert.equal(ttd.checks.find((item) => item.id === "invalidation").passed, false);
 });
 
 test("macro path names evidence-gated Korean direct and industry targets", () => {
@@ -192,11 +230,11 @@ test("macro path names evidence-gated Korean direct and industry targets", () =>
   assert.equal(koreaStep.evidenceType, "1차 자료 직접 연결");
 });
 
-test("gateway snapshot separates verified and review candidates", () => {
+test("gateway snapshot uses the canonical priority when separating candidates", () => {
   const baseCandidate = {
     ticker: "ABNB",
     companyName: "Airbnb",
-    researchPriority: "C",
+    researchPriority: "B",
     whyNow: "실적 공시",
     primaryEvidenceCount: 1,
     verifiedFactCount: 2,
