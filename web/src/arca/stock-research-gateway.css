@@ -71,6 +71,18 @@
   line-height: 1.55;
 }
 
+.stock-gateway-rollout-activation {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.stock-gateway-rollout-activation strong { color: #7c4a09; font-size: 11px; }
+.stock-gateway-rollout-activation ul { display: grid; gap: 4px; margin: 0; padding-left: 17px; color: #596678; font-size: 10px; }
+.stock-gateway-rollout-activation small { color: #7b8797; font-size: 9px; }
+
 .stock-gateway-trade-plan {
   margin-top: 14px;
   border: 1px solid #d8e1da;
@@ -452,6 +464,8 @@
 .stock-gateway-invalidation { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; margin: 0; padding: 9px 16px; border-top: 1px solid #edf0ed; color: #59655d; font-size: 10px; line-height: 1.45; }
 .stock-gateway-counter strong { color: #9a5a24; }
 .stock-gateway-invalidation strong { color: #9a3e3e; }
+.stock-gateway-invalidation p { margin: 0; }
+.stock-gateway-invalidation small { grid-column: 2; color: #879189; }
 
 .stock-gateway-sources { display: grid; gap: 5px; padding: 12px 16px; border-top: 1px solid #edf0ed; }
 .stock-gateway-sources a { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 6px; color: #2f6540; font-size: 10px; text-decoration: none; }
@@ -499,6 +513,10 @@
 .stock-gateway-judgment-grid > div { padding: 7px; border-radius: 7px; background: #eef4ef; }
 .stock-gateway-judgment-grid dt { color: #778078; font-size: 8px; }
 .stock-gateway-judgment-grid dd { margin: 3px 0 0; color: #2e4d39; font-size: 9px; font-weight: 780; }
+.stock-gateway-cagr-note { margin-top: 7px !important; color: #96600c !important; }
+.stock-gateway-sector-kpis > div { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.stock-gateway-sector-kpis span { padding: 4px 7px; border-radius: 999px; background: #e8f2eb; color: #376347; font-size: 8px; font-weight: 760; }
+.stock-gateway-sector-kpis span.is-valuation { background: #e8eef7; color: #3e5f88; }
 .stock-gateway-scenarios div { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 6px; padding: 5px 0; border-top: 1px solid #edf0ed; }
 .stock-gateway-scenarios strong { color: #56685b; font-size: 8px; }
 

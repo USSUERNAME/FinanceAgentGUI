@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import re
@@ -10,6 +11,7 @@ from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from collectors.common import ROOT, canonicalize_url, load_dotenv
@@ -59,6 +61,135 @@ def fred_metric(series_id: str, label: str, api_key: str, report_date: date) -> 
         "source_grade": "A",
         "evidence_label": "fact_provider_standardized",
     }
+
+
+def fred_macro_indicator(
+    series_id: str,
+    label: str,
+    axis: str,
+    agency: str,
+    api_key: str,
+    report_date: date,
+    *,
+    values: list[tuple[date, float]] | None = None,
+) -> dict[str, Any]:
+    rows = values if values is not None else observations(
+        series_id,
+        api_key,
+        (report_date - timedelta(days=500)).isoformat(),
+    )
+    if len(rows) < 2:
+        raise RuntimeError(f"FRED returned insufficient observations for {series_id}")
+    latest_date, latest_value = rows[-1]
+    previous_value = rows[-2][1]
+    unit = "index"
+    change = latest_value - previous_value
+    direction = "stable"
+    comparison = "전월 대비"
+    display_value = latest_value
+    if axis == "inflation":
+        if len(rows) < 14 or rows[-13][1] == 0 or rows[-14][1] == 0:
+            raise RuntimeError(f"FRED returned insufficient YoY history for {series_id}")
+        current_yoy = (latest_value / rows[-13][1] - 1) * 100
+        previous_yoy = (previous_value / rows[-14][1] - 1) * 100
+        display_value = current_yoy
+        change = current_yoy - previous_yoy
+        unit = "% YoY"
+        comparison = "전월 발표 YoY 대비"
+        direction = "heating" if change >= 0.05 else "cooling" if change <= -0.05 else "stable"
+    elif series_id == "PAYEMS":
+        display_value = change
+        unit = "천 명"
+        comparison = "전월 고용 증감"
+        direction = "expanding" if change >= 0 else "contracting"
+    return {
+        "metric_id": series_id.lower(),
+        "label": label,
+        "axis": axis,
+        "value": round(display_value, 3),
+        "raw_value": latest_value,
+        "unit": unit,
+        "change": round(change, 3),
+        "comparison": comparison,
+        "direction": direction,
+        "as_of": latest_date.isoformat(),
+        "provider": f"{agency} via FRED",
+        "source_url": f"https://fred.stlouisfed.org/series/{series_id}",
+        "source_grade": "A",
+        "primary_source_confirmed": True,
+        "evidence_boundary": "공식 기관 시계열을 FRED API로 전달받은 관측치",
+    }
+
+
+def fetch_text_url(url: str) -> str:
+    request = Request(url, headers={"User-Agent": "curl/8.0 FinanceAgentGUI/1.0"})
+    with urlopen(request, timeout=30) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
+def parse_ism_manufacturing_indicator(
+    text: str,
+    report_date: str,
+    source_url: str,
+) -> dict[str, Any]:
+    plain = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", text))).strip()
+    heading = re.search(
+        r"Manufacturing\s+PMI(?:[^0-9]{0,20})at\s+([0-9]+(?:\.[0-9]+)?)%",
+        plain,
+        flags=re.IGNORECASE,
+    )
+    report_period = re.search(r"([A-Za-z]+\s+\d{4})\s+ISM.*?Manufacturing\s+PMI", plain)
+    comparison = re.search(
+        r"([0-9]+(?:\.[0-9]+)?)\s+percentage\s+points?\s+(above|below)\s+the\s+"
+        r"[A-Za-z]+\s+figure",
+        plain,
+        flags=re.IGNORECASE,
+    )
+    if not heading or not report_period:
+        raise RuntimeError("ISM Manufacturing PMI observation was not found")
+    value = float(heading.group(1))
+    change = None
+    if comparison:
+        magnitude = float(comparison.group(1))
+        change = magnitude if comparison.group(2).lower() == "above" else -magnitude
+    period_date = datetime.strptime(report_period.group(1), "%B %Y").date().replace(day=1)
+    if period_date > date.fromisoformat(report_date):
+        raise RuntimeError("ISM observation is after the report date")
+    direction = "contracting" if value < 50 else (
+        "accelerating" if change is not None and change > 0
+        else "slowing" if change is not None and change < 0
+        else "expanding"
+    )
+    return {
+        "metric_id": "ism_manufacturing_pmi",
+        "label": "ISM 제조업 PMI",
+        "axis": "growth",
+        "value": value,
+        "unit": "index",
+        "change": change,
+        "comparison": "전월 대비",
+        "direction": direction,
+        "as_of": period_date.isoformat(),
+        "provider": "ISM",
+        "source_url": source_url,
+        "source_grade": "A",
+        "primary_source_confirmed": True,
+        "evidence_boundary": "ISM 공식 월간 보고서의 헤드라인 지수만 사용",
+    }
+
+
+def collect_ism_manufacturing_indicator(
+    report_date: str,
+    fetcher=fetch_text_url,
+) -> dict[str, Any]:
+    report_day = date.fromisoformat(report_date)
+    previous_month = report_day.replace(day=1) - timedelta(days=1)
+    month_slug = previous_month.strftime("%B").lower()
+    source_url = (
+        "https://www.ismworld.org/supply-management-news-and-reports/"
+        f"reports/ism-pmi-reports/pmi/{month_slug}/"
+    )
+    return parse_ism_manufacturing_indicator(fetcher(source_url), report_date, source_url)
 
 
 def signal(label: str, value: float | None, positive_below: float, negative_above: float) -> dict[str, Any]:
@@ -218,6 +349,7 @@ def build_scoreboard(
 
     fred_key = os.getenv("FRED_API_KEY", "").strip()
     fred: dict[str, dict[str, Any]] = {}
+    macro_indicators: list[dict[str, Any]] = []
     if fred_key:
         for series_id, label in (
             ("VIXCLS", "CBOE VIX"),
@@ -230,6 +362,21 @@ def build_scoreboard(
                 fred[series_id] = fred_metric(series_id, label, fred_key, date.fromisoformat(report_date))
             except Exception as exc:
                 warnings.append(f"{series_id} unavailable ({type(exc).__name__})")
+        for series_id, label, axis, agency in (
+            ("CPIAUCSL", "소비자물가 CPI", "inflation", "BLS"),
+            ("PCEPI", "개인소비지출 물가 PCE", "inflation", "BEA"),
+            ("PAYEMS", "비농업 고용 월간 변화", "growth", "BLS"),
+        ):
+            try:
+                macro_indicators.append(fred_macro_indicator(
+                    series_id, label, axis, agency, fred_key, date.fromisoformat(report_date),
+                ))
+            except Exception as exc:
+                warnings.append(f"{series_id} macro indicator unavailable ({type(exc).__name__})")
+        try:
+            macro_indicators.append(collect_ism_manufacturing_indicator(report_date))
+        except Exception as exc:
+            warnings.append(f"ISM manufacturing PMI unavailable ({type(exc).__name__})")
     else:
         warnings.append("FRED scoreboard unavailable (FRED_API_KEY missing)")
 
@@ -254,7 +401,18 @@ def build_scoreboard(
         "real_10y": real,
         "real_yield_change_5d_pct_point": real["change_5_sessions"] if real else None,
     }
-    scoreboard = {"breadth": breadth, "volatility": volatility, "credit": credit, "rates": rates}
+    scoreboard = {
+        "breadth": breadth,
+        "volatility": volatility,
+        "credit": credit,
+        "rates": rates,
+        "macro_indicators": {
+            "status": "complete" if len(macro_indicators) == 4 else "partial" if macro_indicators else "not_collected",
+            "required_metric_ids": ["cpiaucsl", "pcepi", "payems", "ism_manufacturing_pmi"],
+            "available_count": len(macro_indicators),
+            "observations": macro_indicators,
+        },
+    }
     scoreboard["rule_based_signal"] = rule_based_signal(scoreboard, etf_payload)
     return scoreboard, warnings
 

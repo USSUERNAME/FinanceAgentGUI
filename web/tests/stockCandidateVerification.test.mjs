@@ -60,6 +60,22 @@ function completeContext() {
         },
       },
     }],
+    marketFindings: [{
+      title: "미국 10년물 금리와 VIX 시장가격",
+      body: "금리와 변동성 가격의 최근 방향을 확인합니다.",
+    }],
+    regime: {
+      primaryDriver: "금리와 변동성 방향 엇갈림",
+      evidence: ["가격 기반 참고 레짐"],
+    },
+    marketFramework: {
+      stages: [
+        { id: "rates_liquidity", asOf: "2026-08-07" },
+        { id: "volatility_positioning", asOf: "2026-08-06" },
+        { id: "sector_leadership", asOf: "2026-08-07" },
+        { id: "korea_transmission", asOf: "2026-08-08" },
+      ],
+    },
     reportSources: [],
   };
 }
@@ -89,7 +105,8 @@ test("candidate gate never promotes a canonical C grade on its own", () => {
   assert.ok(result.claims.some((claim) => claim.evidenceType === "공식 사실"));
   assert.ok(result.claims.some((claim) => claim.evidenceType === "작성자 추론"));
   assert.equal(result.integratedResearch.financialRows.length, 2);
-  assert.equal(result.integratedResearch.scenarios.bear, "FCF와 마진이 동시에 훼손되면 가설을 폐기합니다.");
+  assert.equal(result.integratedResearch.scenarios.bear, result.counterEvidence);
+  assert.match(result.invalidationConditions[0], /ABNB/);
   assert.equal(result.analysisFramework.stages.length, 8);
   assert.equal(result.analysisFramework.completeness.total, 8);
   assert.equal(result.analysisFramework.tradeReadiness.tradeHorizon, "unclassified");
@@ -159,6 +176,8 @@ test("new trust gate rollout is simulated before it can change active grades", (
   assert.equal(simulation.targetPassingCount, 0);
   assert.equal(simulation.blockerCounts.trade_suitability, 1);
   assert.equal(simulation.activationDecision, "hold_activation");
+  assert.equal(simulation.activationRequirements.length, 3);
+  assert.equal(simulation.reviewBy, "2026-09-09");
 });
 
 test("community-style candidate stays C and blocks allocation when primary evidence is absent", () => {
@@ -200,6 +219,44 @@ test("candidate-specific draft rules do not satisfy trust gates", () => {
   assert.notEqual(ttd.invalidationConditions[0], abnb.invalidationConditions[0]);
   assert.equal(ttd.checks.find((item) => item.id === "counterEvidence").passed, false);
   assert.equal(ttd.checks.find((item) => item.id === "invalidation").passed, false);
+});
+
+test("generic explicit invalidation is refined into a ticker-specific rule", () => {
+  const context = completeContext();
+  const abnb = evaluateStockCandidateGate({
+    ticker: "ABNB", reaction: { close: 180, return1d: 17.4, volumeRatio20d: 3.7 },
+  }, context);
+  const ttdContext = {
+    ...context,
+    rawCandidates: [],
+    companyFilings: [],
+    earningsCompanies: [{
+      ticker: "TTD",
+      longTermAnalysis: {
+        action: { invalidationConditions: ["FCF와 마진이 동시에 훼손되면 가설을 폐기합니다."] },
+      },
+    }],
+  };
+  const ttd = evaluateStockCandidateGate({
+    ticker: "TTD", reaction: { close: 14, return1d: -22, volumeRatio20d: 4.6 },
+  }, ttdContext);
+
+  assert.match(abnb.invalidationConditions[0], /ABNB/);
+  assert.match(ttd.invalidationConditions[0], /TTD/);
+  assert.notEqual(abnb.invalidationConditions[0], ttd.invalidationConditions[0]);
+  assert.equal(abnb.invalidationType, "analysis_rule");
+  assert.equal(ttd.invalidationType, "analysis_rule");
+});
+
+test("macro path labels prices separately from economic indicators and keeps mixed regime referential", () => {
+  const result = evaluateStockCandidateGate({ ticker: "ABNB" }, completeContext());
+
+  assert.equal(result.macroPath.steps[0].label, "시장 가격");
+  assert.equal(result.macroPath.steps[0].evidenceType, "공식 시장 시계열");
+  assert.equal(result.macroPath.steps[0].asOf, "2026-08-07");
+  assert.equal(result.macroPath.steps[1].label, "시장 위험 레짐");
+  assert.equal(result.macroPath.steps[1].evidenceType, "참고용 가격 레짐");
+  assert.equal(result.macroPath.steps[1].asOf, "2026-08-06");
 });
 
 test("macro path names evidence-gated Korean direct and industry targets", () => {

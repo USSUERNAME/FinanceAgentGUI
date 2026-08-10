@@ -2,6 +2,7 @@ import unittest
 
 from build_daily_intelligence import (
     SCHEMA_VERSION,
+    _market_earnings_cycle,
     build_daily_intelligence,
     validate_daily_intelligence,
 )
@@ -187,6 +188,28 @@ class DailyIntelligenceTests(unittest.TestCase):
             ["Korea flow input unavailable"],
         )
         self.assertFalse(packet["policy"]["automatic_publication"])
+
+    def test_market_earnings_cycle_does_not_promote_focus_sample_to_market_wide(self) -> None:
+        snapshot = self.snapshot()
+        snapshot["sector_fundamentals"] = {
+            "report_date": self.report_date,
+            "estimate_observations": [{
+                "ticker": "NVDA",
+                "rows": [{"revision_pct": 2.1, "revision_breadth": 0.5}],
+            }, {
+                "ticker": "TSM",
+                "rows": [{"revision_pct": -1.0, "revision_breadth": -0.2}],
+            }],
+        }
+
+        cycle = _market_earnings_cycle(snapshot)
+
+        self.assertEqual(cycle["status"], "partial_sample")
+        self.assertEqual(cycle["target_universe"], "S&P 500")
+        self.assertEqual(cycle["coverage_company_count"], 2)
+        self.assertFalse(cycle["market_wide"])
+        self.assertEqual(cycle["positive_revision_count"], 1)
+        self.assertEqual(cycle["negative_revision_count"], 1)
 
     def test_matched_primary_without_extracted_fact_is_not_confirmed(self) -> None:
         snapshot = self.snapshot()

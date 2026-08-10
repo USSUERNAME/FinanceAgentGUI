@@ -5,23 +5,37 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html
+import io
 import json
 import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from collectors.common import ROOT, canonicalize_url, load_source_config
 
 SCHEMA_VERSION = "official_market_calendar.v1"
+REQUEST_HEADERS = {
+    # DOL's Akamai policy currently permits a transparent command-line client
+    # while rejecting browser impersonation and the old custom bot UA.
+    "User-Agent": "curl/8.0 FinanceAgentGUI/1.0",
+    "Accept": "text/html,application/xhtml+xml,application/pdf,text/calendar;q=0.9,*/*;q=0.8",
+}
 
 
 def fetch_text(url: str) -> str:
-    request = Request(url, headers={"User-Agent": "pb-daily-market-brief/1.0"})
+    request = Request(url, headers=REQUEST_HEADERS)
     with urlopen(request, timeout=30) as response:
         return response.read().decode("utf-8-sig")
+
+
+def fetch_bytes(url: str) -> bytes:
+    request = Request(url, headers=REQUEST_HEADERS)
+    with urlopen(request, timeout=30) as response:
+        return response.read()
 
 
 def unfold_ics(text: str) -> list[str]:
@@ -263,6 +277,102 @@ def parse_bls_schedule(text: str, source: dict[str, Any], source_url: str) -> li
     return events
 
 
+DOL_RELEASE_NOTICE_PATTERNS = (
+    (
+        "Consumer Price Index",
+        re.compile(
+            r"The\s+Consumer\s+Price\s+Index(?:\s+news\s+release)?\s+for\s+"
+            r"(?P<period>[A-Za-z]+\s+\d{4})\s+is\s+scheduled\s+to\s+be\s+"
+            r"(?:released|published)\s+on\s+(?:[A-Za-z]+,\s+)?"
+            r"(?P<date>[A-Za-z]+\s+\d{1,2},\s+\d{4}),?\s+at\s+"
+            r"(?P<time>\d{1,2}:\d{2}\s+[ap]\.m\.)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "Producer Price Index",
+        re.compile(
+            r"The\s+Producer\s+Price\s+Index(?:\s+news\s+release)?\s+for\s+"
+            r"(?P<period>[A-Za-z]+\s+\d{4})\s+is\s+scheduled\s+to\s+be\s+"
+            r"(?:released|published)\s+on\s+(?:[A-Za-z]+,\s+)?"
+            r"(?P<date>[A-Za-z]+\s+\d{1,2},\s+\d{4}),?\s+at\s+"
+            r"(?P<time>\d{1,2}:\d{2}\s+[ap]\.m\.)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "Employment Situation",
+        re.compile(
+            r"The\s+Employment\s+Situation(?:\s+news\s+release)?\s+for\s+"
+            r"(?P<period>[A-Za-z]+\s+\d{4})\s+is\s+scheduled\s+to\s+be\s+"
+            r"published\s+on\s+(?:[A-Za-z]+,\s+)?"
+            r"(?P<date>[A-Za-z]+\s+\d{1,2},\s+\d{4}),?\s+at\s+"
+            r"(?P<time>\d{1,2}:\d{2}\s+[ap]\.m\.)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+)
+
+
+def discover_dol_release_urls(text: str, page_url: str) -> list[str]:
+    links = re.findall(
+        r'href=["\']([^"\']*?/economicdata/(?:cpi|ppi|empsit)_\d{8}\.pdf)["\']',
+        text,
+        flags=re.IGNORECASE,
+    )
+    return list(dict.fromkeys(urljoin(page_url, html.unescape(link)) for link in links))
+
+
+def parse_dol_release_notice(
+    payload: bytes,
+    source: dict[str, Any],
+    source_url: str,
+) -> list[dict[str, Any]]:
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:  # pragma: no cover - dependency is part of requirements.txt
+        raise RuntimeError("Install pypdf to parse official DOL release notices") from exc
+
+    document = PdfReader(io.BytesIO(payload))
+    text_content = "\n".join(page.extract_text() or "" for page in document.pages)
+    return parse_dol_release_notice_text(text_content, source, source_url)
+
+
+def parse_dol_release_notice_text(
+    text_content: str,
+    source: dict[str, Any],
+    source_url: str,
+) -> list[dict[str, Any]]:
+    normalized_text = re.sub(r"\s+", " ", text_content)
+    events: list[dict[str, Any]] = []
+    for title_prefix, pattern in DOL_RELEASE_NOTICE_PATTERNS:
+        match = pattern.search(normalized_text)
+        if not match:
+            continue
+        event_day = datetime.strptime(match.group("date"), "%B %d, %Y").date()
+        normalized_time = match.group("time").replace(".", "").upper()
+        title = f"{title_prefix} for {match.group('period')}"
+        stable_input = f"{source['id']}|{event_day.isoformat()}|{title.casefold()}"
+        events.append({
+            "event_id": f"{source['id']}-{hashlib.sha256(stable_input.encode('utf-8')).hexdigest()[:12]}",
+            "date": event_day.isoformat(),
+            "time": f"{normalized_time} ET",
+            "time_zone": source["time_zone"],
+            "category": "macro",
+            "title": title,
+            "source": source["publisher"],
+            "source_url": canonicalize_url(source_url),
+            "source_grade": "A",
+            "primary_source_confirmed": True,
+            "date_confidence": "confirmed_primary",
+            "schedule_origin": "dynamic_official_release_notice_fallback",
+            "consensus": None,
+            "previous": None,
+            **event_policy(title),
+        })
+    return events
+
+
 def fallback_month_urls(
     source: dict[str, Any],
     start: date,
@@ -290,6 +400,7 @@ def collect_official_calendar(
     report_date: str,
     config: dict[str, Any],
     fetcher: Callable[[str], str] = fetch_text,
+    binary_fetcher: Callable[[str], bytes] = fetch_bytes,
 ) -> dict[str, Any]:
     settings = config.get("official_market_calendar") or {}
     start = date.fromisoformat(report_date)
@@ -317,7 +428,7 @@ def collect_official_calendar(
             "source_grade": "A",
         }
         try:
-            fallback_used = False
+            fallback_used = ""
             primary_error_type = None
             try:
                 if source.get("format", "ics") == "bea_html":
@@ -333,10 +444,25 @@ def collect_official_calendar(
                     raise
                 normalized_events = []
                 for fallback_url in fallback_month_urls(source, start, end):
-                    normalized_events.extend(
-                        parse_bls_schedule(fetcher(fallback_url), source, fallback_url)
-                    )
-                fallback_used = True
+                    try:
+                        normalized_events.extend(
+                            parse_bls_schedule(fetcher(fallback_url), source, fallback_url)
+                        )
+                    except Exception:
+                        continue
+                if normalized_events:
+                    fallback_used = "html"
+                elif source.get("secondary_fallback_format") == "dol_release_notices":
+                    notice_page_url = str(source.get("secondary_fallback_url") or "")
+                    notice_urls = discover_dol_release_urls(fetcher(notice_page_url), notice_page_url)
+                    for notice_url in notice_urls:
+                        normalized_events.extend(
+                            parse_dol_release_notice(binary_fetcher(notice_url), source, notice_url)
+                        )
+                    if normalized_events:
+                        fallback_used = "official_release_notices"
+                if not normalized_events:
+                    raise primary_exc
             accepted = 0
             for normalized in normalized_events:
                 event_day = date.fromisoformat(normalized["date"])
@@ -348,7 +474,9 @@ def collect_official_calendar(
                 accepted += 1
             sources.append({
                 **source_status,
-                "status": "complete_fallback_html" if fallback_used else "complete",
+                "status": (
+                    f"complete_fallback_{fallback_used}" if fallback_used else "complete"
+                ),
                 "accepted_event_count": accepted,
                 **({"primary_error_type": primary_error_type} if fallback_used else {}),
             })
@@ -357,12 +485,16 @@ def collect_official_calendar(
             sources.append({**source_status, "status": "failed", "accepted_event_count": 0})
 
     unique_events = {item["event_id"]: item for item in events}
+    collection_status = "failed_fallback_manual" if errors and not unique_events else (
+        "partial" if errors else "complete"
+    )
+    collected_at = datetime.now(timezone.utc).isoformat()
     return {
         "schema_version": SCHEMA_VERSION,
         "report_date": report_date,
-        "collection_status": "failed_fallback_manual" if errors and not unique_events else (
-            "partial" if errors else "complete"
-        ),
+        "collection_status": collection_status,
+        "collected_at": collected_at,
+        "last_successful_at": collected_at if collection_status in {"complete", "partial"} else None,
         "sources": sources,
         "events": sorted(unique_events.values(), key=lambda item: (item["date"], item.get("time") or "")),
         "errors": errors,
@@ -370,11 +502,32 @@ def collect_official_calendar(
     }
 
 
+def carry_forward_last_successful_at(
+    payload: dict[str, Any],
+    previous_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Keep the last known good collection time across a failed refresh."""
+    result = dict(payload)
+    if not result.get("last_successful_at") and previous_payload:
+        result["last_successful_at"] = previous_payload.get("last_successful_at")
+    return result
+
+
 def write_calendar(payload: dict[str, Any]) -> Path:
     output_dir = ROOT / "workspace" / "market_calendar" / payload["report_date"]
     output_dir.mkdir(parents=True, exist_ok=True)
     output = output_dir / "official_market_calendar.json"
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    previous_payload = None
+    if output.exists():
+        try:
+            previous_payload = json.loads(output.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous_payload = None
+    persisted_payload = carry_forward_last_successful_at(payload, previous_payload)
+    output.write_text(
+        json.dumps(persisted_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     return output
 
 

@@ -53,12 +53,98 @@ test("market framework preserves the macro-first nine-step decision order", () =
   assert.equal(framework.stages[0].data.events[0].authoritative, true);
   assert.equal(framework.stages.find((stage) => stage.id === "rates_liquidity").status, "verified");
   assert.equal(framework.stages.find((stage) => stage.id === "fx_commodities").status, "insufficient");
-  assert.equal(framework.stages.find((stage) => stage.id === "volatility_positioning").status, "insufficient");
-  assert.equal(framework.stages.find((stage) => stage.id === "index_internals").status, "insufficient");
+  assert.equal(framework.stages.find((stage) => stage.id === "volatility_positioning").status, "partial");
+  assert.equal(framework.stages.find((stage) => stage.id === "index_internals").status, "partial");
   const macroRegime = framework.stages.find((stage) => stage.id === "growth_inflation_regime");
   assert.equal(macroRegime.status, "insufficient");
   assert.equal(macroRegime.data.marketRiskRegime.label, "mixed");
   assert.match(macroRegime.data.evidenceBoundary, /가격 자료만으로/);
+});
+
+test("available internals and volatility remain visible as partial when one gate input is missing", () => {
+  const framework = buildMarketRegimeFramework({
+    scoreboard: {
+      cards: [
+        { id: "vix", value: 15.15, asOf: "2026-08-06" },
+        { id: "vix-term", value: 0.81, unit: "x", asOf: "2026-08-06" },
+        { id: "credit", value: 2.71, unit: "%", asOf: "2026-08-06" },
+      ],
+    },
+    marketInternals: {
+      status: "ready",
+      coverage: { available: 19, required: 19 },
+      constituentBreadth: {
+        status: "ready",
+        asOf: "2026-08-07",
+        advancePct: 63.22,
+        above200dPct: 72.4,
+        newHighs: 19,
+        newLows: 1,
+        upVolumePct: 68.84,
+      },
+      sectorBreadth: { status: "ready", readyCount: 11, requiredCount: 11 },
+    },
+  });
+  const volatility = framework.stages.find((stage) => stage.id === "volatility_positioning");
+  const internals = framework.stages.find((stage) => stage.id === "index_internals");
+
+  assert.equal(volatility.status, "partial");
+  assert.equal(volatility.data.observations.length, 3);
+  assert.deepEqual(volatility.data.missingInputs, ["옵션·선물 포지셔닝 자료"]);
+  assert.equal(internals.status, "partial");
+  assert.equal(internals.data.observations[1].value, 72.4);
+  assert.deepEqual(internals.data.missingInputs, ["지수 추세 차트"]);
+  assert.equal(framework.completeness.partial, 2);
+});
+
+test("official CPI PCE employment and ISM drive macro regime while earnings sample stays partial", () => {
+  const framework = buildMarketRegimeFramework({
+    intelligence: {
+      market: {
+        earnings_cycle: {
+          status: "partial_sample",
+          target_universe: "S&P 500",
+          target_company_count: 500,
+          coverage_company_count: 10,
+          coverage_pct: 2,
+          positive_revision_count: 6,
+          negative_revision_count: 4,
+          as_of: "2026-08-10",
+          activation_requirement: "최소 400개사 연결",
+        },
+      },
+    },
+    scoreboard: {
+      cards: [],
+      macroIndicators: {
+        requiredMetricIds: ["cpiaucsl", "pcepi", "payems", "ism_manufacturing_pmi"],
+        observations: [
+          { metricId: "cpiaucsl", label: "CPI", axis: "inflation", value: 2.8, unit: "% YoY", direction: "cooling", asOf: "2026-06-01", provider: "BLS via FRED", primarySourceConfirmed: true },
+          { metricId: "pcepi", label: "PCE", axis: "inflation", value: 2.6, unit: "% YoY", direction: "cooling", asOf: "2026-06-01", provider: "BEA via FRED", primarySourceConfirmed: true },
+          { metricId: "payems", label: "비농업 고용", axis: "growth", value: 159500, unit: "천 명", direction: "expanding", asOf: "2026-07-01", provider: "BLS via FRED", primarySourceConfirmed: true },
+          { metricId: "ism_manufacturing_pmi", label: "ISM 제조업 PMI", axis: "growth", value: 55.6, unit: "index", direction: "accelerating", asOf: "2026-07-01", provider: "ISM", primarySourceConfirmed: true },
+        ],
+      },
+    },
+    report: {
+      earningsWatch: {
+        summary: { companyCount: 3 },
+        companies: [{ ticker: "ABNB" }, { ticker: "MCHP" }, { ticker: "TTD" }],
+      },
+    },
+  });
+
+  const macro = framework.stages.find((stage) => stage.id === "growth_inflation_regime");
+  const earnings = framework.stages.find((stage) => stage.id === "earnings_cycle");
+  assert.equal(macro.status, "verified");
+  assert.equal(macro.data.growthDirection, "expanding");
+  assert.equal(macro.data.inflationDirection, "cooling");
+  assert.equal(macro.data.observations.length, 4);
+  assert.deepEqual(macro.data.missingInputs, []);
+  assert.equal(earnings.status, "partial");
+  assert.equal(earnings.data.marketSummary.coverageCompanyCount, 10);
+  assert.equal(earnings.data.candidateContext.companies.length, 3);
+  assert.match(earnings.data.candidateContext.boundary, /시장 전체/);
 });
 
 test("each stage exposes its own date and warns when inputs are misaligned", () => {

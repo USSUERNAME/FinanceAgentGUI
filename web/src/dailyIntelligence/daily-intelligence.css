@@ -1377,6 +1377,11 @@
   border-color: rgba(52, 211, 153, 0.4);
 }
 
+.daily-intelligence-market-framework article.is-partial {
+  border-color: rgba(96, 165, 250, 0.52);
+  background: linear-gradient(145deg, rgba(30, 64, 175, 0.12), rgba(15, 23, 42, 0.38));
+}
+
 .daily-intelligence-market-framework article.is-collection_failed {
   border-color: rgba(248, 113, 113, 0.55);
 }
@@ -1457,6 +1462,25 @@
   display: block;
   color: var(--text-muted, #94a3b8);
 }
+
+.daily-intelligence-stage-observations {
+  display: grid;
+  gap: 6px;
+  margin: 11px 0 0;
+}
+
+.daily-intelligence-stage-observations > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.daily-intelligence-stage-observations dt { color: #86efac; }
+.daily-intelligence-stage-observations dd { margin: 0; color: #e2e8f0; font-weight: 750; text-align: right; }
+.daily-intelligence-stage-observations dd small { display: block; color: #94a3b8; font-size: 9px; font-weight: 500; }
+.daily-intelligence-market-framework .daily-intelligence-stage-missing { color: #fbbf24; }
 
 @media (max-width: 1400px) {
   .daily-intelligence-market-framework {

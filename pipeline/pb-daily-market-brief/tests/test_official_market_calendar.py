@@ -5,9 +5,11 @@ import unittest
 from build_daily_snapshot import upcoming_events
 from collect_official_market_calendar import (
     collect_official_calendar,
+    discover_dol_release_urls,
     normalize_event,
     parse_bea_schedule,
     parse_bls_schedule,
+    parse_dol_release_notice_text,
     parse_ics_events,
 )
 
@@ -66,6 +68,16 @@ SAMPLE_BLS_HTML = """
     <td>Employment Situation for July 2026</td>
   </tr>
 </table>
+"""
+
+SAMPLE_DOL_RELEASE_PAGE = """
+<a href="/newsroom/economicdata/cpi_07142026.pdf">Consumer Price Index</a>
+<a href="https://www.dol.gov/newsroom/economicdata/ppi_07152026.pdf">Producer Price Index</a>
+"""
+
+SAMPLE_DOL_CPI_NOTICE = """
+The Consumer Price Index news release for July 2026 is scheduled to be published on
+Wednesday, August 12, 2026, at 8:30 a.m. (ET).
 """
 
 
@@ -148,6 +160,22 @@ class OfficialMarketCalendarTests(unittest.TestCase):
         self.assertEqual(events[0]["time"], "08:30 AM ET")
         self.assertEqual(events[0]["schedule_origin"], "dynamic_official_calendar_fallback")
 
+    def test_dol_release_notice_fallback_keeps_bls_primary_lineage(self) -> None:
+        source = calendar_config()["official_market_calendar"]["sources"][0]
+        page_url = "https://www.dol.gov/index.php/newsroom/economicdata"
+        urls = discover_dol_release_urls(SAMPLE_DOL_RELEASE_PAGE, page_url)
+        self.assertEqual(len(urls), 2)
+        events = parse_dol_release_notice_text(SAMPLE_DOL_CPI_NOTICE, source, urls[0])
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["date"], "2026-08-12")
+        self.assertEqual(events[0]["time"], "8:30 AM ET")
+        self.assertEqual(events[0]["title"], "Consumer Price Index for July 2026")
+        self.assertTrue(events[0]["primary_source_confirmed"])
+        self.assertEqual(
+            events[0]["schedule_origin"],
+            "dynamic_official_release_notice_fallback",
+        )
+
     def test_collection_uses_bls_html_when_ics_is_blocked(self) -> None:
         config = calendar_config()
         source = config["official_market_calendar"]["sources"][0]
@@ -178,6 +206,21 @@ class OfficialMarketCalendarTests(unittest.TestCase):
             "source_id": "bls_release_calendar",
             "error_type": "TimeoutError",
         }])
+
+    def test_failed_refresh_keeps_previous_last_successful_at(self) -> None:
+        from collect_official_market_calendar import carry_forward_last_successful_at
+
+        payload = {
+            "collection_status": "failed_fallback_manual",
+            "last_successful_at": None,
+        }
+        previous = {"last_successful_at": "2026-08-10T01:23:45+00:00"}
+        result = carry_forward_last_successful_at(payload, previous)
+        self.assertEqual(
+            result["last_successful_at"],
+            "2026-08-10T01:23:45+00:00",
+        )
+        self.assertIsNone(payload["last_successful_at"])
 
     def test_snapshot_merge_prefers_official_event_and_keeps_unique_manual_event(self) -> None:
         official_payload = collect_official_calendar(

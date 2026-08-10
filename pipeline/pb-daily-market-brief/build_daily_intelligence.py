@@ -70,6 +70,54 @@ def _earnings_section(payload: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _market_earnings_cycle(snapshot: dict[str, Any]) -> dict[str, Any]:
+    fundamentals = snapshot.get("sector_fundamentals") or {}
+    observations = _dict_rows(fundamentals.get("estimate_observations"), limit=1000)
+    usable = [row for row in observations if row.get("rows")]
+    tickers = sorted({str(row.get("ticker") or "").upper() for row in usable if row.get("ticker")})
+    revision_rows = [
+        estimate
+        for company in usable
+        for estimate in _dict_rows(company.get("rows"), limit=10)
+        if isinstance(estimate.get("revision_pct"), (int, float))
+        or isinstance(estimate.get("revision_breadth"), (int, float))
+    ]
+    revision_signals = [
+        row.get("revision_pct")
+        if isinstance(row.get("revision_pct"), (int, float))
+        else row.get("revision_breadth")
+        for row in revision_rows
+    ]
+    up_count = sum(1 for value in revision_signals if isinstance(value, (int, float)) and value > 0)
+    down_count = sum(1 for value in revision_signals if isinstance(value, (int, float)) and value < 0)
+    target_count = 500
+    coverage_count = len(tickers)
+    market_wide = coverage_count >= 400
+    return {
+        "schema_version": "market_earnings_cycle.v1",
+        "status": "ready_market_wide" if market_wide else "partial_sample" if coverage_count else "not_available",
+        "target_universe": "S&P 500",
+        "target_company_count": target_count,
+        "minimum_market_wide_coverage": 400,
+        "coverage_company_count": coverage_count,
+        "coverage_pct": round(coverage_count / target_count * 100, 2),
+        "market_wide": market_wide,
+        "sample_scope": "focus_sector_sample" if coverage_count and not market_wide else "market_wide",
+        "revision_observation_count": len(revision_rows),
+        "positive_revision_count": up_count,
+        "negative_revision_count": down_count,
+        "evidence_tickers": tickers[:30],
+        "as_of": fundamentals.get("report_date") or snapshot.get("report_date"),
+        "source_provider": "Alpha Vantage EARNINGS_ESTIMATES",
+        "source_grade": "B",
+        "primary_source_confirmed": False,
+        "activation_requirement": (
+            "S&P 500 구성종목 중 최소 400개사의 30일 EPS 추정치 변화가 동일 기준일로 연결되어야 "
+            "시장 전체 실적 사이클로 판정합니다."
+        ),
+    }
+
+
 def _event_order(
     clusters: list[dict[str, Any]],
     synthesis: dict[str, Any],
@@ -315,6 +363,7 @@ def build_daily_intelligence(
             ),
             "top_risks": _bounded_list(analysis.get("top_risks"), limit=5),
             "scoreboard": deepcopy(snapshot.get("market_scoreboard") or {}),
+            "earnings_cycle": _market_earnings_cycle(snapshot),
             "day_over_day_changes": deepcopy(
                 snapshot.get("day_over_day_changes") or {}
             ),
