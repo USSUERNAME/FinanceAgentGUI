@@ -46,6 +46,66 @@ def _ticker_map(payload: dict[str, Any], field: str) -> dict[str, dict[str, Any]
     }
 
 
+def _transmission_sources(
+    queue: dict[str, Any],
+    long_term_profiles: dict[str, Any],
+    sectors: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge queue candidates with already-verified profile coverage.
+
+    Profile-only tickers are admitted only when the sector master explicitly lists
+    the U.S. security. This prevents free-form sector inference from creating a
+    Korean beneficiary claim while preserving durable watchlist coverage.
+    """
+    sector_by_us_ticker: dict[str, str] = {}
+    for sector_id, sector in sectors.items():
+        for company in sector.get("representative_companies", []):
+            if not isinstance(company, dict) or str(company.get("market") or "").upper() != "US":
+                continue
+            ticker = str(company.get("ticker") or "").upper()
+            if ticker:
+                sector_by_us_ticker[ticker] = sector_id
+
+    sources: dict[str, dict[str, Any]] = {}
+    for source in queue.get("candidates", []):
+        if not isinstance(source, dict) or str(source.get("market") or "").upper() != "US":
+            continue
+        ticker = str(source.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        sector_id = str(source.get("sector_id") or "")
+        if sector_id not in sectors:
+            sector_id = sector_by_us_ticker.get(ticker, "")
+        if sector_id:
+            sources[ticker] = {
+                **source,
+                "ticker": ticker,
+                "sector_id": sector_id,
+                "transmission_source_origin": "company_research_queue",
+            }
+
+    for profile in long_term_profiles.get("profiles", []):
+        if not isinstance(profile, dict):
+            continue
+        ticker = str(profile.get("ticker") or "").upper()
+        if not ticker or ticker in sources:
+            continue
+        sector_id = str(profile.get("sector_id") or "")
+        if sector_id not in sectors:
+            sector_id = sector_by_us_ticker.get(ticker, "")
+        if not sector_id:
+            continue
+        sources[ticker] = {
+            "market": "US",
+            "ticker": ticker,
+            "company_name": profile.get("company_name") or ticker,
+            "sector_id": sector_id,
+            "candidate_origin": profile.get("candidate_origin") or "long_term_profile",
+            "transmission_source_origin": "company_long_term_profile",
+        }
+    return list(sources.values())
+
+
 def _classify_target(
     target: dict[str, Any], source_ticker: str, pathway_ids: set[str],
 ) -> tuple[str, str]:
@@ -164,9 +224,7 @@ def build_company_korea_transmission(
     )
     market_ready = market_gate.get("status") in acceptable_market_statuses
     transmissions = []
-    for source in queue.get("candidates", []):
-        if not isinstance(source, dict) or str(source.get("market") or "").upper() != "US":
-            continue
+    for source in _transmission_sources(queue, long_term_profiles, sectors):
         ticker = str(source.get("ticker") or "").upper()
         sector = sectors.get(str(source.get("sector_id") or "")) or {}
         pathways = source.get("beneficiary_pathways") or sector.get("beneficiary_pathways") or []
@@ -188,6 +246,7 @@ def build_company_korea_transmission(
             "source_company_name": source.get("company_name") or profile.get("company_name"),
             "sector_id": source.get("sector_id"),
             "sector_name_ko": source.get("sector_name_ko") or sector.get("name_ko"),
+            "source_origin": source.get("transmission_source_origin"),
             "source_signal": {
                 "status": quality.get("status") or "not_available",
                 "label": quality.get("label") or "기업 판단 대기",

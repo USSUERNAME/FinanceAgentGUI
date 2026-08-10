@@ -91,6 +91,34 @@ test("community-style candidate stays C and blocks allocation when primary evide
   assert.ok(result.missingRequirements.includes("투자 가설 무효화 조건"));
 });
 
+test("macro path names evidence-gated Korean direct and industry targets", () => {
+  const context = completeContext();
+  context.koreaConnection = {
+    companyTransmissions: [{
+      sourceTicker: "NVDA",
+      sectorNameKo: "반도체·AI 컴퓨트",
+      targets: [{
+        ticker: "000660",
+        companyName: "SK하이닉스",
+        classification: "direct",
+        classificationLabel: "직접 연결",
+        reason: "공식 공동개발·공급 관계와 HBM 사업 노출을 확인했습니다.",
+      }, {
+        ticker: "005930",
+        companyName: "삼성전자",
+        classification: "industry",
+        classificationLabel: "산업 연결",
+        reason: "HBM 사업 노출은 확인했지만 직접 공급 관계는 확인되지 않았습니다.",
+      }],
+    }],
+  };
+  const result = evaluateStockCandidateGate({ ticker: "NVDA" }, context);
+  const koreaStep = result.macroPath.steps.find((step) => step.label === "한국시장 연결");
+  assert.match(koreaStep.value, /SK하이닉스 직접 연결/);
+  assert.match(koreaStep.value, /삼성전자 산업 연결/);
+  assert.equal(koreaStep.evidenceType, "1차 자료 직접 연결");
+});
+
 test("gateway snapshot separates verified and review candidates", () => {
   const baseCandidate = {
     ticker: "ABNB",

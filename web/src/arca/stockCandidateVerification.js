@@ -186,6 +186,14 @@ function buildMacroPath(candidate, context) {
   const koreaTransmission = list(context?.koreaConnection?.companyTransmissions).find(
     (item) => tickerOf(item?.sourceTicker) === tickerOf(candidate?.ticker),
   );
+  const koreaTargets = list(koreaTransmission?.targets).filter(
+    (target) => ["direct", "industry", "watch_candidate"].includes(text(target?.classification)),
+  );
+  const directKoreaTarget = koreaTargets.find((target) => text(target?.classification) === "direct");
+  const koreaTargetSummary = koreaTargets
+    .map((target) => `${text(target?.companyName) || text(target?.ticker)} ${text(target?.classificationLabel)}`.trim())
+    .filter(Boolean)
+    .join(" · ");
   return {
     status: rateFinding && linkedSector ? "linked" : "partial",
     steps: [
@@ -211,13 +219,22 @@ function buildMacroPath(candidate, context) {
       },
       {
         label: "한국시장 연결",
-        value: koreaTransmission
+        value: koreaTargetSummary
+          || (koreaTransmission
           ? `${text(koreaTransmission.sectorNameKo)} 전파경로`
-          : "미국 기업→한국시장 직접 연결 미작성",
-        detail: koreaTransmission
-          ? text(koreaTransmission.sourceSignalLabel)
-          : text(context?.koreaConnection?.summary),
-        evidenceType: koreaTransmission ? "작성자 추론" : "자료 부족",
+          : "미국 기업→한국시장 직접 연결 미작성"),
+        detail: koreaTargets.length
+          ? koreaTargets.map((target) => text(target?.reason)).filter(Boolean).join(" ")
+          : koreaTransmission
+            ? text(koreaTransmission.sourceSignalLabel)
+            : text(context?.koreaConnection?.summary),
+        evidenceType: directKoreaTarget
+          ? "1차 자료 직접 연결"
+          : koreaTargets.length
+            ? "1차 자료 산업 경로"
+            : koreaTransmission
+              ? "작성자 추론"
+              : "자료 부족",
       },
       {
         label: "무효화 조건",
