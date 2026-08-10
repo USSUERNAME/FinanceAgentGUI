@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   buildPublicReportReader,
+  buildCandidatePerformance,
   buildWorldMemorySnapshot,
   sanitizeCompanyProfiles,
   sanitizePendingCandidateScreen,
@@ -349,6 +350,26 @@ test("pending candidate sanitizer keeps bounded market context without raw evide
   assert.doesNotMatch(serialized, /drop market raw|drop candidate raw|drop-candidate-token|full_text|api_token/);
 });
 
+test("candidate performance preserves first registration price and waits for unreached horizons", () => {
+  const older = sanitizeCompanyProfiles(privateCompanyProfiles());
+  const newer = sanitizeCompanyProfiles({
+    ...privateCompanyProfiles(),
+    report_date: "2026-08-16",
+    profiles: privateCompanyProfiles().profiles.map((item) => ({
+      ...item,
+      valuation_scenarios: { ...item.valuation_scenarios, current_price: 198 },
+    })),
+  });
+  const rows = buildCandidatePerformance([newer, older]);
+  const nvda = rows.find((item) => item.ticker === "NVDA");
+  assert.equal(nvda.firstSeenDate, "2026-08-08");
+  assert.equal(nvda.firstPrice, 180);
+  assert.equal(nvda.latestPrice, 198);
+  assert.equal(nvda.return1wPct, 10);
+  assert.equal(nvda.return1mPct, null);
+  assert.equal(nvda.benchmarkExcessStatus, "pending_comparable_benchmark");
+});
+
 test("reader builder emits a locked placeholder without private data", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "public-report-reader-locked-"));
   const outputDir = join(root, "output");
@@ -399,6 +420,7 @@ test("reader builder combines brief, full intelligence, company candidates, Tele
   assert.equal(payload.telegram.clusters[0].eventId, "telegram-event-1");
   assert.equal(payload.companies[0].profiles[0].ticker, "NVDA");
   assert.equal(payload.companies[0].pendingCandidates[0].ticker, "TTD");
+  assert.equal(payload.candidatePerformance.some((item) => item.ticker === "NVDA"), true);
   assert.doesNotMatch(serialized, /PDF 원문|never-publish-this|drop-oauth|drop thesis|private_token|private-report|never publish|drop this body|drop-session/);
 });
 
@@ -440,7 +462,9 @@ test("static reader uses DOM APIs and exposes all five read-only views", async (
   assert.match(html, /data-view="brief"/);
   assert.match(html, /data-view="intelligence"/);
   assert.match(html, /data-view="telegram"/);
-  assert.match(html, /data-view="companies"/);
+  assert.match(html, /data-view="stock"/);
+  assert.match(source, /view === "companies" \? "stock" : view/);
+  assert.match(source, /candidatePerformance/);
   assert.match(html, /data-view="world-memory"/);
   assert.match(source, /검증 대기 후보/);
   assert.match(source, /공식 공시·IR 본문과 수치/);

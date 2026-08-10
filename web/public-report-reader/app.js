@@ -441,9 +441,15 @@ const FIELD_VALUES = {
 const VIEW_META = {
   brief: { title: "리포트 보관함", eyebrow: "ARCHIVE", placeholder: "날짜·제목·종목 검색" },
   intelligence: { title: "전체 인텔리전스", eyebrow: "FULL DAILY", placeholder: "날짜·사건·지표 검색" },
-  companies: { title: "개별주식 후보", eyebrow: "LONG-TERM REVIEW", placeholder: "날짜·기업·종목 검색" },
+  companies: { title: "검증된 투자 후보", eyebrow: "EVIDENCE-GATED STOCKS", placeholder: "날짜·기업·티커 검색" },
   telegram: { title: "텔레그램 모니터", eyebrow: "3-HOUR REFRESH", placeholder: "사건·채널 검색" },
   "world-memory": { title: "월드 메모리", eyebrow: "CONTINUITY", placeholder: "현재 스냅샷" },
+};
+
+VIEW_META.stock = {
+  title: "검증된 투자 후보",
+  eyebrow: "EVIDENCE-GATED STOCKS",
+  placeholder: "날짜·기업·티커 검색",
 };
 
 const state = {
@@ -1214,6 +1220,42 @@ function signedPercent(value) {
   return `${number > 0 ? "+" : ""}${compactNumber(number, 2)}%`;
 }
 
+function renderCandidatePerformance(values = []) {
+  const node = section(
+    `후보 사후 성과 ${values.length}개`,
+    "후보 최초 등록가를 기준으로 1주·1개월·3개월 성과를 추적합니다. 관찰 기간이 부족한 구간은 대기로 남깁니다.",
+  );
+  const grid = element("div", "candidate-performance-grid");
+  values.slice(0, 20).forEach((item) => {
+    const card = element("article", "candidate-performance-card");
+    const heading = element("div", "candidate-performance-heading");
+    heading.append(
+      element("strong", "", item.ticker || item.companyName || "후보"),
+      element("span", "company-grade", item.grade || "C"),
+    );
+    card.append(heading);
+    if (item.companyName && item.companyName !== item.ticker) card.append(element("p", "research-meta", item.companyName));
+    const metrics = element("dl", "candidate-performance-metrics");
+    [
+      ["최초 등록", `${item.firstSeenDate || "-"} · ${compactNumber(item.firstPrice, 2)}`],
+      ["최근 관찰", `${item.latestDate || "-"} · ${compactNumber(item.latestPrice, 2)}`],
+      ["1주", item.return1wPct == null ? "관찰 대기" : signedPercent(item.return1wPct)],
+      ["1개월", item.return1mPct == null ? "관찰 대기" : signedPercent(item.return1mPct)],
+      ["3개월", item.return3mPct == null ? "관찰 대기" : signedPercent(item.return3mPct)],
+      ["최신 누적", item.latestReturnPct == null ? "관찰 대기" : signedPercent(item.latestReturnPct)],
+    ].forEach(([label, value]) => {
+      const row = element("div", "candidate-performance-row");
+      row.append(element("dt", "", label), element("dd", "", value));
+      metrics.append(row);
+    });
+    card.append(metrics, element("small", "research-meta", `관찰 ${item.observationCount || 0}회 · 벤치마크 초과수익 계산 대기`));
+    grid.append(card);
+  });
+  if (!values.length) node.append(element("p", "empty-inline", "아직 사후 성과 관찰값이 없습니다."));
+  else node.append(grid);
+  return node;
+}
+
 function renderPendingCompanyCandidates(bundle) {
   const pending = bundle.pendingCandidates || [];
   const node = section(
@@ -1278,11 +1320,11 @@ function renderPendingCompanyCandidates(bundle) {
   return node;
 }
 
-function renderCompanyCandidates(bundle) {
+function renderCompanyCandidates(bundle, candidatePerformance = []) {
   const article = element("article", "report-document company-document");
   article.append(reportHeader({
     eyebrow: "LONG-TERM COMPANY REVIEW",
-    title: `${bundle.reportDate} 개별주식 후보`,
+    title: `${bundle.reportDate} 검증된 투자 후보`,
     date: bundle.reportDate,
     meta: [`분석 후보 ${bundle.profileCount || 0}개`, "공식 근거 우선", "조건부 판단"],
   }));
@@ -1291,6 +1333,7 @@ function renderCompanyCandidates(bundle) {
     "company-disclaimer",
     "후보 점수는 매수 신호가 아닙니다. 기업의 질, 현재 주식의 매력, 포트폴리오 적합성을 분리하고 근거가 부족하면 평가를 보류합니다.",
   ));
+  article.append(renderCandidatePerformance(candidatePerformance));
   article.append(renderPendingCompanyCandidates(bundle));
   const node = section(`분석 카드 ${bundle.profiles?.length || 0}개`, "공식 공시와 정규화된 장기 재무를 기준으로 작성했습니다.");
   const stack = element("div", "research-stack");
@@ -1352,18 +1395,18 @@ function renderCompanyCandidates(bundle) {
     if (profile.valuationScenarios?.status === "supported_screening_model") {
       body.append(element("h4", "", "약세·기준·강세 가치평가"));
       body.append(element("p", "research-meta", [
-        `${profile.valuationScenarios.priceAsOf || "기준일 확인 필요"} 가격 ${formatNumber(profile.valuationScenarios.currentPrice)}`,
+        `${profile.valuationScenarios.priceAsOf || "기준일 확인 필요"} 가격 ${compactNumber(profile.valuationScenarios.currentPrice, 2)}`,
         `${profile.valuationScenarios.horizonYears || 5}년`,
-        `요구수익률 ${formatNumber(profile.valuationScenarios.requiredReturnPct)}%`,
+        `요구수익률 ${compactNumber(profile.valuationScenarios.requiredReturnPct, 2)}%`,
       ].join(" · ")));
       const scenarioGrid = element("div", "company-scenario-grid");
       (profile.valuationScenarios.scenarios || []).forEach((row) => {
         const card = element("div", "company-scenario-card");
         card.append(
           element("strong", "", valueLabel(row.scenario)),
-          element("span", "", `현재가치 ${formatNumber(row.present_value_per_share)}`),
-          element("small", "", `매출 ${formatNumber(row.revenue_growth_pct)}% · FCF마진 ${formatNumber(row.fcf_margin_pct)}% · 종착 P/FCF ${formatNumber(row.terminal_price_to_fcf)}배`),
-          element("small", "", `현재가 대비 ${formatNumber(row.upside_downside_pct)}%`),
+          element("span", "", `현재가치 ${compactNumber(row.present_value_per_share, 2)}`),
+          element("small", "", `매출 ${compactNumber(row.revenue_growth_pct, 2)}% · FCF마진 ${compactNumber(row.fcf_margin_pct, 2)}% · 종착 P/FCF ${compactNumber(row.terminal_price_to_fcf, 2)}배`),
+          element("small", "", `현재가 대비 ${compactNumber(row.upside_downside_pct, 2)}%`),
         );
         scenarioGrid.append(card);
       });
@@ -1371,7 +1414,7 @@ function renderCompanyCandidates(bundle) {
       body.append(element(
         "p",
         "research-summary",
-        `현재 가격이 요구하는 FCF 성장률 ${formatNumber(profile.valuationScenarios.impliedFcfGrowthPct)}% · 기준 시나리오 ${formatNumber(profile.valuationScenarios.baseCaseFcfGrowthPct)}%`,
+        `현재 가격이 요구하는 FCF 성장률 ${compactNumber(profile.valuationScenarios.impliedFcfGrowthPct, 2)}% · 기준 시나리오 ${compactNumber(profile.valuationScenarios.baseCaseFcfGrowthPct, 2)}%`,
       ));
       appendTextList(body, profile.valuationScenarios.assumptionLimits, "compact-list");
     }
@@ -1400,14 +1443,14 @@ function renderCompanyCandidates(bundle) {
   });
   node.append(stack);
   article.append(node);
-  article.append(element("footer", "report-footer", "개별주식 후보는 공개·공유용 장기투자 검토 자료이며 자동 주문이나 개인화된 매수 지시를 생성하지 않습니다."));
+  article.append(element("footer", "report-footer", "검증된 투자 후보는 공개·공유용 장기투자 검토 자료이며 자동 주문이나 개인화된 매수 지시를 생성하지 않습니다."));
   return article;
 }
 
 function currentItems() {
   if (state.view === "brief") return state.payload?.reports || [];
   if (state.view === "intelligence") return state.payload?.intelligence || [];
-  if (state.view === "companies") return state.payload?.companies || [];
+  if (["companies", "stock"].includes(state.view)) return state.payload?.companies || [];
   if (state.view === "telegram") return state.payload?.telegram ? [state.payload.telegram] : [];
   return state.payload?.worldMemory ? [state.payload.worldMemory] : [];
 }
@@ -1417,14 +1460,16 @@ function itemId(item) {
 }
 
 function itemTitle(item) {
+  if (state.view === "stock") return `${item.reportDate} 검증된 투자 후보`;
   if (state.view === "brief") return item.title;
   if (state.view === "intelligence") return `${item.reportDate} 전체 인텔리전스`;
-  if (state.view === "companies") return `${item.reportDate} 개별주식 후보`;
+  if (state.view === "companies") return `${item.reportDate} 검증된 투자 후보`;
   if (state.view === "telegram") return "최신 텔레그램 모니터";
   return item.report?.title || "현재 월드 메모리";
 }
 
 function itemSummary(item) {
+  if (state.view === "stock") return `검증 분석 ${item.profileCount || 0}개 · 검증 대기 ${item.pendingCount || 0}개`;
   if (state.view === "brief") return item.executiveSummary?.[0] || "요약 없음";
   if (state.view === "intelligence") return item.market?.regime?.summary || `${item.events?.selectedCount || 0}개 이벤트`;
   if (state.view === "companies") return `${item.profileCount || 0}개 심층분석 · ${item.pendingCount || 0}개 검증 대기`;
@@ -1439,7 +1484,7 @@ function searchableText(item) {
   if (state.view === "intelligence") {
     return [item.reportDate, item.market?.regime?.label, item.market?.regime?.summary, ...(item.market?.topRisks || []), ...(item.events?.items || []).flatMap((value) => [value.title, ...(value.topicTags || [])]), ...(item.continuity?.activeEntries || []).map((value) => value.title)].join(" ").toLowerCase();
   }
-  if (state.view === "companies") {
+  if (["companies", "stock"].includes(state.view)) {
     return [item.reportDate, ...(item.profiles || []).flatMap((value) => [value.ticker, value.companyName, value.action?.grade, value.action?.reason, value.companyQuality?.label, value.stockAttractiveness?.label]), ...(item.pendingCandidates || []).flatMap((value) => [value.ticker, value.companyName, value.evidenceStatus, ...(value.selectionReasons || [])])].join(" ").toLowerCase();
   }
   if (state.view === "telegram") {
@@ -1459,8 +1504,8 @@ function renderActive() {
     ? renderBrief(item)
     : state.view === "intelligence"
       ? renderIntelligence(item)
-      : state.view === "companies"
-        ? renderCompanyCandidates(item)
+      : ["companies", "stock"].includes(state.view)
+        ? renderCompanyCandidates(item, state.payload?.candidatePerformance || [])
       : state.view === "telegram"
         ? renderTelegram(item)
         : renderWorldMemory(item);
@@ -1497,14 +1542,18 @@ function activate(id, { updateLocation = true } = {}) {
 }
 
 function setView(view, requestedId = "") {
-  state.view = VIEW_META[view] ? view : "brief";
+  const normalizedView = view === "companies" ? "stock" : view;
+  state.view = VIEW_META[normalizedView] ? normalizedView : "brief";
   const meta = VIEW_META[state.view];
   libraryTitleNode.textContent = meta.title;
   libraryEyebrowNode.textContent = meta.eyebrow;
   searchNode.value = "";
   searchNode.placeholder = meta.placeholder;
   searchNode.disabled = state.view === "world-memory";
-  [...viewTabsNode.querySelectorAll("button")].forEach((button) => button.classList.toggle("is-active", button.dataset.view === state.view));
+  [...viewTabsNode.querySelectorAll("button")].forEach((button) => button.classList.toggle(
+    "is-active",
+    button.dataset.view === state.view || (state.view === "stock" && button.dataset.view === "companies"),
+  ));
   state.reports = currentItems();
   state.filtered = [...state.reports];
   state.activeId = state.filtered.some((item) => itemId(item) === requestedId) ? requestedId : itemId(state.filtered[0] || {});

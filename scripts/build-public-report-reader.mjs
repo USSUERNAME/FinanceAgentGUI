@@ -748,6 +748,96 @@ function mergeByDate(previous, current) {
     .slice(0, MAX_REPORTS);
 }
 
+function finitePositive(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function percentageReturn(start, end) {
+  const first = finitePositive(start);
+  const last = finitePositive(end);
+  return first && last ? Number((((last / first) - 1) * 100).toFixed(4)) : null;
+}
+
+function elapsedDays(start, end) {
+  const first = Date.parse(`${start}T00:00:00Z`);
+  const last = Date.parse(`${end}T00:00:00Z`);
+  return Number.isFinite(first) && Number.isFinite(last) ? Math.round((last - first) / 86_400_000) : 0;
+}
+
+export function buildCandidatePerformance(companies = []) {
+  const observationsByTicker = new Map();
+  const chronological = [...(Array.isArray(companies) ? companies : [])]
+    .filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(String(item?.reportDate || "")))
+    .sort((left, right) => left.reportDate.localeCompare(right.reportDate));
+
+  for (const bundle of chronological) {
+    const rows = [
+      ...(bundle.pendingCandidates || []).map((item) => ({
+        ticker: item.ticker,
+        companyName: item.companyName,
+        grade: "C",
+        price: item.marketReaction?.close,
+        evidenceStatus: item.evidenceStatus,
+        source: "candidate_screen",
+      })),
+      ...(bundle.profiles || []).map((item) => ({
+        ticker: item.ticker,
+        companyName: item.companyName,
+        grade: item.action?.grade || "B",
+        price: item.valuationScenarios?.currentPrice,
+        evidenceStatus: item.officialBusinessEvidence?.status,
+        source: "company_profile",
+      })),
+    ];
+    for (const row of rows) {
+      const ticker = text(row.ticker, 32).toUpperCase();
+      const price = finitePositive(row.price);
+      if (!ticker || !price) continue;
+      const existing = observationsByTicker.get(ticker) || new Map();
+      const current = existing.get(bundle.reportDate);
+      if (!current || row.source === "company_profile") {
+        existing.set(bundle.reportDate, {
+          date: bundle.reportDate,
+          price,
+          companyName: prose(row.companyName, 240) || ticker,
+          grade: text(row.grade, 80) || "C",
+          evidenceStatus: text(row.evidenceStatus, 120),
+          source: row.source,
+        });
+      }
+      observationsByTicker.set(ticker, existing);
+    }
+  }
+
+  return [...observationsByTicker.entries()].map(([ticker, dated]) => {
+    const observations = [...dated.values()].sort((left, right) => left.date.localeCompare(right.date));
+    const first = observations[0];
+    const latest = observations.at(-1);
+    const horizon = (days) => observations.find((item) => elapsedDays(first.date, item.date) >= days) || null;
+    const oneWeek = horizon(7);
+    const oneMonth = horizon(30);
+    const threeMonths = horizon(90);
+    return {
+      ticker,
+      companyName: latest.companyName,
+      grade: latest.grade,
+      evidenceStatus: latest.evidenceStatus,
+      firstSeenDate: first.date,
+      firstPrice: first.price,
+      latestDate: latest.date,
+      latestPrice: latest.price,
+      observationCount: observations.length,
+      return1wPct: oneWeek ? percentageReturn(first.price, oneWeek.price) : null,
+      return1mPct: oneMonth ? percentageReturn(first.price, oneMonth.price) : null,
+      return3mPct: threeMonths ? percentageReturn(first.price, threeMonths.price) : null,
+      latestReturnPct: percentageReturn(first.price, latest.price),
+      benchmarkExcessStatus: "pending_comparable_benchmark",
+      thesisStatus: "watching",
+    };
+  }).sort((left, right) => right.latestDate.localeCompare(left.latestDate) || left.ticker.localeCompare(right.ticker)).slice(0, 100);
+}
+
 export async function buildPublicReportReader({
   inputDir,
   intelligenceDir = "",
@@ -773,6 +863,7 @@ export async function buildPublicReportReader({
   const reports = locked ? [] : mergeByDate(previous.reports, currentReports);
   const intelligence = locked ? [] : mergeByDate(previous.intelligence, currentIntelligence);
   const companies = locked ? [] : mergeByDate(previous.companies, currentCompanies);
+  const candidatePerformance = locked ? [] : buildCandidatePerformance(companies);
   const worldMemory = locked ? null : (await readWorldMemorySnapshot(worldMemoryFile)) || previous.worldMemory;
   const telegram = locked ? null : (await readLatestTelegramSnapshot(telegramDir)) || previous.telegram;
   if (!locked && !reports.length && !intelligence.length && !companies.length && !worldMemory && !telegram) throw new Error(`no valid private reader content found in ${inputDir}`);
@@ -783,6 +874,7 @@ export async function buildPublicReportReader({
     reports,
     intelligence,
     companies,
+    candidatePerformance,
     worldMemory,
     telegram,
   };
