@@ -743,6 +743,97 @@ def _earnings_watch(daily_intelligence: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _company_filings(daily_intelligence: dict[str, Any]) -> dict[str, Any]:
+    source = daily_intelligence.get("company_filings") or {}
+    companies: list[dict[str, Any]] = []
+    for company in source.get("companies") or []:
+        if not isinstance(company, dict):
+            continue
+        filing = company.get("latest_financial_filing") or {}
+        analysis = company.get("analysis") or {}
+        metrics = []
+        for row in company.get("reported_metrics") or []:
+            if not isinstance(row, dict):
+                continue
+            metrics.append({
+                "metric_id": row.get("metric_id"),
+                "label_ko": _clean_text(row.get("label_ko")),
+                "value": row.get("value"),
+                "unit": row.get("unit"),
+                "period_start": row.get("period_start"),
+                "period_end": row.get("period_end"),
+                "filed_date": row.get("filed_date"),
+                "form": row.get("form"),
+                "evidence_label": row.get("evidence_label"),
+                "source_url": _valid_url(row.get("source_url")),
+                "prior_year_comparison": dict(row.get("prior_year_comparison") or {}),
+            })
+        companies.append({
+            "filing_key": str(company.get("filing_key") or ""),
+            "ticker": str(company.get("ticker") or ""),
+            "company_name": _clean_text(company.get("company_name")),
+            "selection_reason": _clean_text(company.get("selection_reason")),
+            "analysis_status": company.get("analysis_status"),
+            "latest_financial_filing": {
+                "form": filing.get("form"),
+                "filed_date": filing.get("filed_date"),
+                "fiscal_year": filing.get("fiscal_year"),
+                "fiscal_period": filing.get("fiscal_period"),
+                "period_end": filing.get("period_end"),
+                "accession_number": filing.get("accession_number"),
+                "source_url": _valid_url(filing.get("source_url")),
+            },
+            "reported_metrics": metrics[:13],
+            "financial_comparison": dict(company.get("financial_comparison") or {}),
+            "industry_context": dict(company.get("industry_context") or {}),
+            "recent_news_evidence": [dict(value) for value in (company.get("recent_news_evidence") or [])[:6]],
+            "long_term_financial_summary": dict(company.get("long_term_financial_summary") or {}),
+            "annual_baseline": {
+                "form": (company.get("annual_business_baseline") or {}).get("form"),
+                "filing_date": (company.get("annual_business_baseline") or {}).get("filing_date"),
+                "source_url": _valid_url((company.get("annual_business_baseline") or {}).get("source_url")),
+            },
+            "analysis": {
+                "summary_ko": _clean_text(analysis.get("summary_ko")),
+                "financial_takeaways_ko": [
+                    _clean_text(value) for value in analysis.get("financial_takeaways_ko") or []
+                    if _clean_text(value)
+                ][:4],
+                "business_takeaways_ko": [
+                    _clean_text(value) for value in analysis.get("business_takeaways_ko") or []
+                    if _clean_text(value)
+                ][:4],
+                "risks_ko": [
+                    _clean_text(value) for value in analysis.get("risks_ko") or []
+                    if _clean_text(value)
+                ][:4],
+                "thesis_effect": analysis.get("thesis_effect"),
+                "thesis_effect_reason_ko": _clean_text(analysis.get("thesis_effect_reason_ko")),
+                "monitoring_points_ko": [
+                    _clean_text(value) for value in analysis.get("monitoring_points_ko") or []
+                    if _clean_text(value)
+                ][:4],
+                "financial_change_reasons_ko": [
+                    _clean_text(value) for value in analysis.get("financial_change_reasons_ko") or []
+                    if _clean_text(value)
+                ][:4],
+                "industry_analysis_ko": dict(analysis.get("industry_analysis_ko") or {}),
+                "recent_news_ko": [dict(value) for value in (analysis.get("recent_news_ko") or [])[:6]],
+            },
+            "review_gate": dict(company.get("review_gate") or {}),
+        })
+        if len(companies) >= MAX_EARNINGS_WATCH:
+            break
+    return {
+        "report_date": source.get("report_date") or daily_intelligence.get("report_date"),
+        "status": source.get("status") or "not_available",
+        "company_count": len(companies),
+        "companies": companies,
+        "notice": _clean_text(source.get("notice")),
+        "policy": dict(source.get("policy") or {}),
+    }
+
+
 def build_v2_reader_report(
     daily_intelligence: dict[str, Any],
     *,
@@ -763,6 +854,7 @@ def build_v2_reader_report(
         report_date=report_date,
     )
     earnings_watch = _earnings_watch(daily_intelligence)
+    company_filings = _company_filings(daily_intelligence)
     executive_summary, findings = _market_summary(market)
     if events:
         executive_summary.append(
@@ -794,6 +886,15 @@ def build_v2_reader_report(
         sources.extend(event["sources"])
     for company in earnings_watch["companies"]:
         sources.extend(company["sources"])
+    for company in company_filings["companies"]:
+        filing = company.get("latest_financial_filing") or {}
+        if filing.get("source_url"):
+            sources.append(_source(
+                source_id=f"sec-filing:{company.get('filing_key')}",
+                title=f"{company.get('ticker')} {filing.get('form')} SEC filing",
+                url=str(filing.get("source_url")),
+                as_of=filing.get("filed_date"),
+            ))
     for metric in korea.get("metrics") or []:
         if metric.get("source_url"):
             sources.append(
@@ -838,6 +939,7 @@ def build_v2_reader_report(
         "verified_events": events,
         "analyst_research": analyst_research,
         "earnings_watch": earnings_watch,
+        "company_filings": company_filings,
         "korea_connection": korea,
         "next_checks": _next_checks(market, korea),
         "data_status": {
@@ -868,6 +970,12 @@ def validate_v2_reader_report(report: dict[str, Any]) -> None:
     if not 1 <= len(report.get("executive_summary") or []) <= 3:
         raise ValueError("V2 reader report requires one to three summary items")
     events = report.get("verified_events") or []
+    for company in (report.get("company_filings") or {}).get("companies") or []:
+        gate = company.get("review_gate") or {}
+        if gate.get("automatic_position_action"):
+            raise ValueError("Reader company filing cannot authorize a position action")
+        if gate.get("thesis_change_requires_approval") is not True:
+            raise ValueError("Reader company filing thesis changes require approval")
     if len(events) > MAX_VERIFIED_EVENTS:
         raise ValueError("V2 reader event limit exceeded")
     for event in events:

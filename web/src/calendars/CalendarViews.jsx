@@ -3,6 +3,8 @@ import "./calendars.css";
 import Filter from "lucide-react/dist/esm/icons/filter.js";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.js";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
+import AlertTriangle from "lucide-react/dist/esm/icons/triangle-alert.js";
+import ExternalLink from "lucide-react/dist/esm/icons/external-link.js";
 
 const calendarWeekdays = [
   { key: "mon", label: "월" },
@@ -1223,7 +1225,9 @@ export function EconomicCalendarView({ onContextChange }) {
       .then(async (response) => {
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.ok) {
-          throw new Error(payload.error || "Economic Calendar 데이터를 불러오지 못했습니다.");
+          const loadError = new Error(payload.error || "Economic Calendar 데이터를 불러오지 못했습니다.");
+          loadError.payload = payload;
+          throw loadError;
         }
         return payload;
       })
@@ -1238,6 +1242,11 @@ export function EconomicCalendarView({ onContextChange }) {
           rowCount: payload.rowCount ?? nextEvents.length,
           cache: payload.persistentCache || null,
           translationMemory: payload.translationMemory || null,
+          collectionStatus: payload.collectionStatus || "ready",
+          collectionFailure: payload.collectionFailure || null,
+          officialFallbackSources: Array.isArray(payload.officialFallbackSources) ? payload.officialFallbackSources : [],
+          lastSuccessfulAt: payload.lastSuccessfulAt || payload.updatedAt || "",
+          warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
         });
         setTranslationMemory(payload.translationMemory || null);
         setLoadState({ status: "ready", error: "" });
@@ -1245,6 +1254,23 @@ export function EconomicCalendarView({ onContextChange }) {
       .catch((error) => {
         if (!active) return;
         setEvents([]);
+        const errorPayload = error?.payload || {};
+        setMeta({
+          source: errorPayload.source || "yfinance",
+          timezone: errorPayload.timezone || "Asia/Seoul",
+          updatedAt: "",
+          rowCount: 0,
+          cache: errorPayload.persistentCache || null,
+          translationMemory: null,
+          collectionStatus: errorPayload.collectionStatus || "failed",
+          collectionFailure: errorPayload.collectionFailure || {
+            code: errorPayload.errorCode || "ECONOMIC_CALENDAR_FETCH_FAILED",
+            message: error.message || "Economic Calendar 수집 실패",
+          },
+          officialFallbackSources: Array.isArray(errorPayload.officialFallbackSources) ? errorPayload.officialFallbackSources : [],
+          lastSuccessfulAt: errorPayload.lastSuccessfulAt || errorPayload.persistentCache?.updatedAt || "",
+          warnings: [],
+        });
         setLoadState({
           status: "error",
           error: error.message || "Economic Calendar 데이터를 불러오지 못했습니다.",
@@ -1381,6 +1407,9 @@ export function EconomicCalendarView({ onContextChange }) {
       : loadState.status === "error"
         ? loadState.error
         : "";
+  const collectionFailed = meta?.collectionStatus === "failed" || meta?.collectionStatus === "fallback_cache";
+  const usingFallbackCache = meta?.collectionStatus === "fallback_cache";
+  const officialFallbackSources = Array.isArray(meta?.officialFallbackSources) ? meta.officialFallbackSources : [];
 
   return (
     <div className="calendar-shell economic-calendar-shell">
@@ -1422,6 +1451,28 @@ export function EconomicCalendarView({ onContextChange }) {
             {isLoadingEconomicCalendar ? <LoaderCircle size={15} strokeWidth={2.2} className="is-spinning" /> : null}
             <span>{statusMessage}</span>
           </div>
+        ) : null}
+
+        {collectionFailed ? (
+          <section className={`economic-calendar-collection-alert ${usingFallbackCache ? "is-fallback" : "is-failed"}`} role="status">
+            <AlertTriangle size={19} strokeWidth={2.1} />
+            <div>
+              <strong>{usingFallbackCache ? "최신 수집 실패 · 저장된 일정 표시 중" : "경제 캘린더 수집 실패"}</strong>
+              <span>
+                {meta?.collectionFailure?.message || loadState.error || "일정 제공자 응답을 확인하지 못했습니다."}
+                {meta?.lastSuccessfulAt ? ` · 마지막 정상 수집 ${meta.lastSuccessfulAt}` : " · 정상 수집 이력 없음"}
+              </span>
+              {officialFallbackSources.length ? (
+                <nav aria-label="경제 캘린더 공식 대체 출처">
+                  {officialFallbackSources.map((source) => (
+                    <a href={source.url} target="_blank" rel="noreferrer" key={source.id || source.url}>
+                      {source.title}<small>{source.scope}</small><ExternalLink size={12} />
+                    </a>
+                  ))}
+                </nav>
+              ) : null}
+            </div>
+          </section>
         ) : null}
 
         <div className="economic-week-strip" aria-label="월요일부터 토요일까지 경제 캘린더">
@@ -1558,8 +1609,8 @@ export function EconomicCalendarView({ onContextChange }) {
                 </tbody>
               </table>
             </div>
-          ) : loadState.status === "error" ? (
-            <div className="economic-detail-empty is-error">{loadState.error}</div>
+          ) : loadState.status === "error" || meta?.collectionStatus === "failed" ? (
+            <div className="economic-detail-empty is-error">일정 없음이 아니라 수집 실패 상태입니다. 위 공식 대체 출처를 확인하세요.</div>
           ) : loadState.status === "loading" ? (
             <div className="economic-detail-empty">경제지표 캐시를 불러오는 중입니다.</div>
           ) : countryFilterActive && selectedDateEventsBeforeFilter ? (

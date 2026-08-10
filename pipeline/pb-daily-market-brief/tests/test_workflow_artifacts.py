@@ -45,6 +45,7 @@ class WorkflowArtifactTests(unittest.TestCase):
         self.assertIn("workspace/briefs/", workflow)
         self.assertIn("workspace/charts/", workflow)
         self.assertIn("workspace/company_long_term_profiles/", workflow)
+        self.assertIn("workspace/company_filing_summaries/", workflow)
         self.assertIn("workspace/candidate_official_evidence/", workflow)
         self.assertIn("workspace/company_primary_narratives/", workflow)
 

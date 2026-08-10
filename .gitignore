@@ -49,6 +49,7 @@ Thumbs.db
 /data/*-cache.json
 /data/*-settings.json
 /data/*-translation-memory.json
+/data/stock-candidate-performance.json
 /scratch_*.json
 
 # Python runtime artifacts

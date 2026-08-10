@@ -626,6 +626,66 @@
   color: #9c2f35;
 }
 
+.economic-calendar-collection-alert {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 13px 14px;
+  border: 1px solid #efc6c1;
+  border-radius: 8px;
+  background: #fff8f7;
+  color: #9a413b;
+}
+
+.economic-calendar-collection-alert.is-fallback {
+  border-color: #ead39d;
+  background: #fffaf0;
+  color: #855b13;
+}
+
+.economic-calendar-collection-alert > svg {
+  margin-top: 1px;
+}
+
+.economic-calendar-collection-alert > div {
+  display: grid;
+  gap: 4px;
+}
+
+.economic-calendar-collection-alert strong {
+  font-size: 13px;
+}
+
+.economic-calendar-collection-alert span {
+  color: #735d59;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.economic-calendar-collection-alert nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.economic-calendar-collection-alert a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 760;
+  text-decoration: none;
+}
+
+.economic-calendar-collection-alert a small {
+  opacity: .68;
+}
+
 .economic-week-strip {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));

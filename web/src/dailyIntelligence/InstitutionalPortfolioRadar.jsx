@@ -63,6 +63,20 @@ const moveLabels = {
   exited: "청산",
 };
 
+const ownershipDirectionLabels = {
+  initial_disclosure: "신규 공시",
+  updated_position: "변경 공시",
+  increased: "지분 증가",
+  decreased: "지분 감소",
+  unchanged: "수량 동일",
+  below_threshold: "5% 이하",
+};
+
+function ownershipFormLabel(form = "") {
+  if (form.includes("13D")) return form.endsWith("/A") ? "13D 변경" : "13D 적극적 지분";
+  return form.endsWith("/A") ? "13G 변경" : "13G 주요 지분";
+}
+
 function formatMoney(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
@@ -80,6 +94,11 @@ function formatSignedPct(value, digits = 1) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
   return `${number > 0 ? "+" : ""}${number.toFixed(digits)}%`;
+}
+
+function formatShares(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? `${Math.round(number).toLocaleString("en-US")}주` : "수량 미확인";
 }
 
 function researchCandidatesForSector(stockCandidates, sectorTicker) {
@@ -160,7 +179,9 @@ export function InstitutionalPortfolioRadar({
           <p>공시된 보유 수량 변화와 섹터 분포를 아이디어 탐색 근거로만 사용합니다.</p>
         </div>
         <div className="institutional-radar-actions">
-          {!connection.configured
+          {connection.filingWindowActive
+            ? <em>공시 집중기간 · 3시간 자동 확인</em>
+            : !connection.configured
             ? <em>SEC 연결 정보 필요</em>
             : connection.stale
               ? <em>캐시 갱신 필요</em>
@@ -182,7 +203,7 @@ export function InstitutionalPortfolioRadar({
         <article>
           <span>수집 운용사</span>
           <strong>{radar.summary.readyManagerCount}/{radar.summary.trackedManagerCount}</strong>
-          <small>SEC 13F-HR 원문 기준</small>
+          <small>SEC 13F 및 정정공시 기준</small>
         </article>
         <article>
           <span>최신 기준 분기</span>
@@ -198,6 +219,11 @@ export function InstitutionalPortfolioRadar({
           <span>분기 이력</span>
           <strong>{radar.summary.quarterDepth}개 분기</strong>
           <small>주식 수 변화 우선 비교</small>
+        </article>
+        <article>
+          <span>분기 중 지분 신호</span>
+          <strong>{radar.summary.recentOwnershipSignalCount || 0}건</strong>
+          <small>최근 240일 13D·13G</small>
         </article>
       </div>
 
@@ -284,6 +310,43 @@ export function InstitutionalPortfolioRadar({
         </aside>
       </div>
 
+      {radar.activitySignals?.length ? (
+        <div className="institutional-radar-activity-board">
+          <div className="institutional-radar-section-title">
+            <div>
+              <span>BETWEEN-QUARTER SIGNALS</span>
+              <h3>분기 사이 대형 지분 변화</h3>
+            </div>
+            <small>13D·13G · 전체 리밸런싱과 구분</small>
+          </div>
+          <div className="institutional-radar-activity-list">
+            {radar.activitySignals.slice(0, 8).map((signal) => (
+              <article className={`is-${signal.direction}`} key={signal.accessionNumber}>
+                <header>
+                  <span>{ownershipFormLabel(signal.form)}</span>
+                  <em>{ownershipDirectionLabels[signal.direction] || "방향 확인 필요"}</em>
+                </header>
+                <div>
+                  <strong>{signal.ticker ? `${signal.ticker} · ` : ""}{signal.issuerName}</strong>
+                  <small>{signal.managerName} · 공시 {signal.filingDate}</small>
+                </div>
+                <p>
+                  {formatShares(signal.beneficialShares)}
+                  {signal.classPercent > 0 ? ` · 지분 ${formatPct(signal.classPercent)}` : ""}
+                  {Number.isFinite(signal.deltaSharesPct) ? ` · 이전 공시 대비 ${formatSignedPct(signal.deltaSharesPct)}` : ""}
+                </p>
+                <a href={signal.sourceUrl} target="_blank" rel="noreferrer">
+                  SEC 원문 <ArrowUpRight size={12} />
+                </a>
+              </article>
+            ))}
+          </div>
+          <p className="institutional-radar-activity-note">
+            신규 13D·13G는 신규 매수와 같은 뜻이 아닙니다. 같은 운용사·종목의 이전 공시가 있을 때만 증가·감소로 판정합니다.
+          </p>
+        </div>
+      ) : null}
+
       <div className="institutional-radar-managers">
         <div className="institutional-radar-section-title">
           <div>
@@ -310,6 +373,7 @@ export function InstitutionalPortfolioRadar({
                 <>
                   <div className="institutional-radar-manager-meta">
                     <span>{manager.latest.reportDate}</span>
+                    {manager.latest.amendmentCount ? <span>정정 {manager.latest.amendmentCount}건 반영</span> : null}
                     <span>{formatMoney(manager.latest.totalValue)}</span>
                     <span>{manager.latest.holdingCount}종목</span>
                   </div>

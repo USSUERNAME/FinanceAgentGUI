@@ -215,6 +215,7 @@ def build_daily_intelligence(
     analysis_payload: dict[str, Any],
     continuity_review: dict[str, Any],
     earnings_intelligence: dict[str, Any] | None = None,
+    company_filing_summaries: dict[str, Any] | None = None,
     company_korea_transmission: dict[str, Any] | None = None,
     cross_source_events: dict[str, Any] | None = None,
     generated_at: str | None = None,
@@ -331,6 +332,7 @@ def build_daily_intelligence(
             ),
         },
         "earnings": _earnings_section(earnings_intelligence),
+        "company_filings": deepcopy(company_filing_summaries or {}),
         "cross_source_summary": {
             "event_count": int((cross_source_events or {}).get("event_count") or 0),
             "events_with_primary_sources": int(
@@ -402,6 +404,13 @@ def validate_daily_intelligence(packet: dict[str, Any]) -> None:
         for row in company.get("guidance") or []:
             if row.get("evidence_label") != "issuer_management_claim":
                 raise ValueError("Reader guidance row changed evidence posture")
+    company_filings = packet.get("company_filings") or {}
+    for company in company_filings.get("companies") or []:
+        gate = company.get("review_gate") or {}
+        if gate.get("automatic_position_action"):
+            raise ValueError("Company filing analysis cannot authorize a position action")
+        if gate.get("thesis_change_requires_approval") is not True:
+            raise ValueError("Company filing thesis changes must require approval")
     policy = packet.get("policy") or {}
     if (
         policy.get("automatic_publication")
@@ -439,6 +448,13 @@ def main() -> None:
         / args.date
         / "earnings_intelligence.json"
     )
+    company_filings_path = (
+        ROOT
+        / "workspace"
+        / "company_filing_summaries"
+        / args.date
+        / "company_filing_summaries.json"
+    )
     cross_source_path = (
         ROOT
         / "workspace"
@@ -459,6 +475,7 @@ def main() -> None:
         analysis_payload=load_json(analysis_path),
         continuity_review=load_json(continuity_path, required=False),
         earnings_intelligence=load_json(earnings_path, required=False),
+        company_filing_summaries=load_json(company_filings_path, required=False),
         company_korea_transmission=load_json(company_korea_path, required=False),
         cross_source_events=load_json(cross_source_path, required=False),
         max_events=args.max_events,

@@ -16,6 +16,7 @@ import { handlePbGmailResearchApprovalsEndpoint } from "./pbGmailResearchApprova
 import { handlePbGmailSenderReviewsEndpoint } from "./pbGmailSenderReviews.mjs";
 import { handlePbTelegramResearchApprovalsEndpoint } from "./pbTelegramResearchApprovals.mjs";
 import { handleResearchSectorTaxonomyEndpoint } from "./researchSectorTaxonomy.mjs";
+import { handleStockCandidatePerformanceEndpoint } from "./stockCandidatePerformance.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
 import { handleTossInvestEndpoint } from "./tossInvestApi.mjs";
@@ -295,6 +296,10 @@ export function codexApiPlugin() {
 
       server.middlewares.use("/api/economic-calendar/translations", async (req, res) => {
         await handleEconomicCalendarEndpoint("translations", req, res);
+      });
+
+      server.middlewares.use("/api/stock-candidate-performance", async (req, res) => {
+        await handleStockCandidatePerformanceEndpoint(req, res);
       });
 
       server.middlewares.use("/api/portfolio/canvases", async (req, res) => {

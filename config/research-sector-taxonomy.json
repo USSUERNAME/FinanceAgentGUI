@@ -304,119 +304,231 @@
       "nameKo": "정보기술·하드웨어",
       "nameEn": "Information Technology and Hardware",
       "kind": "sector",
-      "aliases": ["IT", "정보기술", "IT하드웨어", "technology hardware", "information technology"]
+      "aliases": [
+        "IT",
+        "정보기술",
+        "IT하드웨어",
+        "technology hardware",
+        "information technology"
+      ]
     },
     {
       "id": "communications_network_equipment",
       "nameKo": "통신서비스·네트워크 장비",
       "nameEn": "Communications Services and Network Equipment",
       "kind": "sector",
-      "aliases": ["통신", "통신서비스", "통신장비", "telecom", "telecommunications", "network equipment"]
+      "aliases": [
+        "통신",
+        "통신서비스",
+        "통신장비",
+        "telecom",
+        "telecommunications",
+        "network equipment"
+      ]
     },
     {
       "id": "industrials_machinery",
       "nameKo": "산업재·기계",
       "nameEn": "Industrials and Machinery",
       "kind": "sector",
-      "aliases": ["산업재", "기계", "기계장비", "industrials", "machinery"]
+      "aliases": [
+        "산업재",
+        "기계",
+        "기계장비",
+        "industrials",
+        "machinery"
+      ]
     },
     {
       "id": "chemicals_specialty_materials",
       "nameKo": "화학·특수소재",
       "nameEn": "Chemicals and Specialty Materials",
       "kind": "sector",
-      "aliases": ["화학", "석유화학", "특수소재", "chemicals", "specialty materials"]
+      "aliases": [
+        "화학",
+        "석유화학",
+        "특수소재",
+        "chemicals",
+        "specialty materials"
+      ]
     },
     {
       "id": "consumer_staples_food_beverage",
       "nameKo": "필수소비재·음식료",
       "nameEn": "Consumer Staples, Food and Beverage",
       "kind": "sector",
-      "aliases": ["필수소비재", "음식료", "식품", "consumer staples", "food beverage", "food and beverage"]
+      "aliases": [
+        "필수소비재",
+        "음식료",
+        "식품",
+        "consumer staples",
+        "food beverage",
+        "food and beverage"
+      ]
     },
     {
       "id": "consumer_discretionary_retail",
       "nameKo": "경기소비재·유통",
       "nameEn": "Consumer Discretionary and Retail",
       "kind": "sector",
-      "aliases": ["경기소비재", "유통", "소매", "consumer discretionary", "retail"]
+      "aliases": [
+        "경기소비재",
+        "유통",
+        "소매",
+        "consumer discretionary",
+        "retail"
+      ]
     },
     {
       "id": "travel_leisure",
       "nameKo": "여행·레저",
       "nameEn": "Travel and Leisure",
       "kind": "sector",
-      "aliases": ["여행", "레저", "호텔", "카지노", "travel", "leisure", "hotels", "casinos"]
+      "aliases": [
+        "여행",
+        "레저",
+        "호텔",
+        "카지노",
+        "travel",
+        "leisure",
+        "hotels",
+        "casinos"
+      ]
     },
     {
       "id": "healthcare_services_medtech",
       "nameKo": "의료서비스·의료기기",
       "nameEn": "Healthcare Services and Medical Technology",
       "kind": "sector",
-      "aliases": ["의료서비스", "의료기기", "메드테크", "healthcare services", "medical devices", "medtech"]
+      "aliases": [
+        "의료서비스",
+        "의료기기",
+        "메드테크",
+        "healthcare services",
+        "medical devices",
+        "medtech"
+      ]
     },
     {
       "id": "payments_fintech",
       "nameKo": "결제·핀테크",
       "nameEn": "Payments and Fintech",
       "kind": "sector",
-      "aliases": ["결제", "핀테크", "payments", "fintech"]
+      "aliases": [
+        "결제",
+        "핀테크",
+        "payments",
+        "fintech"
+      ]
     },
     {
       "id": "utilities_power",
       "nameKo": "유틸리티·발전",
       "nameEn": "Utilities and Power Generation",
       "kind": "sector",
-      "aliases": ["유틸리티", "발전", "전력공급", "utilities", "power generation"]
+      "aliases": [
+        "유틸리티",
+        "발전",
+        "전력공급",
+        "utilities",
+        "power generation"
+      ]
     },
     {
       "id": "real_estate_general",
       "nameKo": "부동산·일반 리츠",
       "nameEn": "Real Estate and Diversified REITs",
       "kind": "sector",
-      "aliases": ["부동산", "일반리츠", "real estate", "diversified reits"]
+      "aliases": [
+        "부동산",
+        "일반리츠",
+        "real estate",
+        "diversified reits"
+      ]
     },
     {
       "id": "carbon_decarbonization",
       "nameKo": "탄소시장·탈탄소",
       "nameEn": "Carbon Markets and Decarbonization",
       "kind": "theme",
-      "aliases": ["탄소", "탄소배출권", "탈탄소", "carbon market", "carbon markets", "decarbonization"]
+      "aliases": [
+        "탄소",
+        "탄소배출권",
+        "탈탄소",
+        "carbon market",
+        "carbon markets",
+        "decarbonization"
+      ]
     },
     {
       "id": "market_strategy_asset_allocation",
       "nameKo": "시장전략·자산배분",
       "nameEn": "Market Strategy and Asset Allocation",
       "kind": "cross_market",
-      "aliases": ["아침시장", "시장전략", "포트폴리오", "종목추천", "market strategy", "asset allocation", "portfolio strategy"]
+      "aliases": [
+        "아침시장",
+        "시장전략",
+        "포트폴리오",
+        "종목추천",
+        "market strategy",
+        "asset allocation",
+        "portfolio strategy"
+      ]
     },
     {
       "id": "etf_index_strategy",
       "nameKo": "ETF·인덱스 전략",
       "nameEn": "ETF and Index Strategy",
       "kind": "cross_market",
-      "aliases": ["ETF", "지수", "인덱스", "index", "index strategy"]
+      "aliases": [
+        "ETF",
+        "지수",
+        "인덱스",
+        "index",
+        "index strategy"
+      ]
     },
     {
       "id": "macro_rates_fx",
       "nameKo": "매크로·금리·FX",
       "nameEn": "Macro, Rates and FX",
       "kind": "cross_market",
-      "aliases": ["거시", "매크로", "금리", "환율", "FX", "macro", "rates"]
+      "aliases": [
+        "거시",
+        "매크로",
+        "금리",
+        "환율",
+        "FX",
+        "macro",
+        "rates"
+      ]
     },
     {
       "id": "fixed_income_credit",
       "nameKo": "채권·크레딧",
       "nameEn": "Fixed Income and Credit",
       "kind": "cross_market",
-      "aliases": ["채권", "크레딧", "CDS", "유가,CDS", "fixed income", "credit"]
+      "aliases": [
+        "채권",
+        "크레딧",
+        "CDS",
+        "유가,CDS",
+        "fixed income",
+        "credit"
+      ]
     },
     {
       "id": "alternatives_private_markets",
       "nameKo": "대체투자·사모시장",
       "nameEn": "Alternatives and Private Markets",
       "kind": "cross_market",
-      "aliases": ["대체투자", "사모시장", "사모펀드", "alternative investments", "private markets"]
+      "aliases": [
+        "대체투자",
+        "사모시장",
+        "사모펀드",
+        "alternative investments",
+        "private markets"
+      ]
     }
   ],
   "aliasMappings": [
@@ -426,6 +538,107 @@
       "secondarySectorIds": [
         "media_gaming_entertainment"
       ]
+    },
+    {
+      "alias": "인터넷게임",
+      "primarySectorId": "consumer_internet_platforms",
+      "secondarySectorIds": [
+        "semiconductors_ai_compute"
+      ]
+    },
+    {
+      "alias": "AI",
+      "primarySectorId": "semiconductors_ai_compute",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "반도체 소재/부품",
+      "primarySectorId": "semiconductors_ai_compute",
+      "secondarySectorIds": [
+        "metals_critical_materials"
+      ]
+    },
+    {
+      "alias": "식음료 유통",
+      "primarySectorId": "consumer_discretionary_retail",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "에너지 등 다수",
+      "primarySectorId": "energy_oil_gas",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "온라인 푸드 플랫폼",
+      "primarySectorId": "consumer_internet_platforms",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "材料",
+      "primarySectorId": "metals_critical_materials",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "Battery Supply Chain",
+      "primarySectorId": "batteries_energy_storage",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "Data Centers",
+      "primarySectorId": "reits_data_centers",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "Digital Assets / Crypto",
+      "primarySectorId": "technology_hardware_services",
+      "secondarySectorIds": [
+        "financials_capital_markets"
+      ]
+    },
+    {
+      "alias": "Equity Market",
+      "primarySectorId": "technology_hardware_services",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "Infrastructure / Power",
+      "primarySectorId": "construction_infrastructure",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "Metals & Mining",
+      "primarySectorId": "metals_critical_materials",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "Nuclear SMR / Utilities / Energy Infrastructure",
+      "primarySectorId": "nuclear_generation",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "Petrochemicals",
+      "primarySectorId": "chemicals_specialty_materials",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "Automobile & Components",
+      "primarySectorId": "electric_vehicles_autonomy",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "전자패키지 기판",
+      "primarySectorId": "technology_hardware_services",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "Refining",
+      "primarySectorId": "financials_capital_markets",
+      "secondarySectorIds": []
+    },
+    {
+      "alias": "Sector Rotation",
+      "primarySectorId": "financials_capital_markets",
+      "secondarySectorIds": []
     }
   ]
 }

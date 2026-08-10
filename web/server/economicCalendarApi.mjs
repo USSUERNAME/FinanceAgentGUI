@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCodexOptions, readJsonBody, runAntigravityGenerate, sendJson } from "./codexProbe.mjs";
 import {
@@ -18,6 +18,26 @@ const DATA_DIR = join(GUIBUILD_ROOT, "data");
 const ECONOMIC_STORE_PATH = join(DATA_DIR, "economic-calendar-cache.json");
 const ECONOMIC_SETTINGS_PATH = join(DATA_DIR, "economic-calendar-settings.json");
 const ECONOMIC_TRANSLATION_MEMORY_PATH = join(DATA_DIR, "economic-calendar-translation-memory.json");
+const ECONOMIC_OFFICIAL_FALLBACK_SOURCES = [
+  {
+    id: "bls-release-calendar",
+    title: "미국 노동통계국(BLS) 발표 일정",
+    url: "https://www.bls.gov/schedule/",
+    scope: "CPI·PPI·고용",
+  },
+  {
+    id: "federal-reserve-calendar",
+    title: "미국 연방준비제도 일정",
+    url: "https://www.federalreserve.gov/newsevents/calendar.htm",
+    scope: "FOMC·연준 연설",
+  },
+  {
+    id: "bea-release-calendar",
+    title: "미국 경제분석국(BEA) 발표 일정",
+    url: "https://www.bea.gov/news/schedule",
+    scope: "GDP·PCE·국민계정",
+  },
+];
 const DEFAULT_DAYS = 6;
 const DEFAULT_LIMIT = 100;
 const MAX_DAYS = 45;
@@ -32,11 +52,21 @@ const ECONOMIC_UNTRANSLATED_COPY_LATIN_WORDS = 2;
 const FINALIZED_CACHE_AFTER_HOURS = 24;
 const FINALIZED_CACHE_AFTER_MS = FINALIZED_CACHE_AFTER_HOURS * 60 * 60 * 1000;
 const ANTIGRAVITY_PROVIDER_ID = "antigravity-cli";
+const configuredRuntimePython = String(process.env.PB_DAILY_INTELLIGENCE_PYTHON || "").trim();
+const runtimeCaBundle = configuredRuntimePython
+  ? join(dirname(configuredRuntimePython), "Lib", "site-packages", "pip", "_vendor", "certifi", "cacert.pem")
+  : "";
+const safeRuntimeCaBundle = runtimeCaBundle && existsSync(runtimeCaBundle) ? runtimeCaBundle : "";
 const PYTHON_UTF8_ENV = {
   ...process.env,
   PYTHONIOENCODING: "utf-8",
   PYTHONUTF8: "1",
   PYTHONUNBUFFERED: "1",
+  ...(safeRuntimeCaBundle ? {
+    CURL_CA_BUNDLE: safeRuntimeCaBundle,
+    REQUESTS_CA_BUNDLE: safeRuntimeCaBundle,
+    SSL_CERT_FILE: safeRuntimeCaBundle,
+  } : {}),
 };
 
 const cache = new Map();
@@ -1075,6 +1105,11 @@ function filterEconomicEvents(events, startDate, endDate) {
 
 function economicStoreResponse({ store, startDate, endDate, fetchPayload = null, warning = "", responseEvents = null }) {
   const events = filterEconomicEvents(responseEvents || store.events, startDate, endDate);
+  const collectionStatus = warning
+    ? "fallback_cache"
+    : fetchPayload?.ok
+      ? "ready"
+      : "cache";
   return {
     ok: true,
     source: "yfinance",
@@ -1090,6 +1125,13 @@ function economicStoreResponse({ store, startDate, endDate, fetchPayload = null,
       ...(Array.isArray(fetchPayload?.warnings) ? fetchPayload.warnings : []),
       ...(warning ? [warning] : []),
     ],
+    collectionStatus,
+    lastSuccessfulAt: store.updatedAt || "",
+    collectionFailure: warning ? {
+      code: fetchPayload?.errorCode || "YFINANCE_FETCH_FAILED",
+      message: warning,
+    } : null,
+    officialFallbackSources: ECONOMIC_OFFICIAL_FALLBACK_SOURCES,
     persistentCache: {
       path: "data/economic-calendar-cache.json",
       updatedAt: store.updatedAt || "",
@@ -1753,6 +1795,13 @@ export async function handleEconomicCalendarEndpoint(endpoint, req, res) {
     res,
     decorateEconomicCalendarResponse({
       ...payload,
+      collectionStatus: "failed",
+      lastSuccessfulAt: storedBeforeFetch.updatedAt || "",
+      collectionFailure: {
+        code: payload.errorCode || "YFINANCE_FETCH_FAILED",
+        message: payload.error || "yfinance refresh failed",
+      },
+      officialFallbackSources: ECONOMIC_OFFICIAL_FALLBACK_SOURCES,
       source: "yfinance",
       timezone: "Asia/Seoul",
       startDate,

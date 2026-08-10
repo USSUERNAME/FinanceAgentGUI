@@ -384,6 +384,7 @@ jobs:
             pipeline/pb-daily-market-brief/workspace/company_operating_inputs/
             pipeline/pb-daily-market-brief/workspace/company_tearsheets/
             pipeline/pb-daily-market-brief/workspace/company_long_term_profiles/
+            pipeline/pb-daily-market-brief/workspace/company_filing_summaries/
             pipeline/pb-daily-market-brief/workspace/company_earnings_events/
             pipeline/pb-daily-market-brief/workspace/company_earnings_event_inputs/
             pipeline/pb-daily-market-brief/workspace/company_earnings_reaction_context/
