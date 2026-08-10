@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 from build_company_research_queue import (
     build_company_research_queue,
+    load_direct_company_inputs,
     validate_company_research_queue,
 )
 from collect_sector_fundamentals import load_fundamental_registry
@@ -68,6 +72,25 @@ def fundamentals() -> dict:
 
 
 class CompanyResearchQueueTests(unittest.TestCase):
+    def test_tracked_default_watchlist_survives_without_local_user_settings(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            default_path = root / "defaults.json"
+            default_path.write_text(json.dumps({
+                "schema_version": "company_research_watchlist.v1",
+                "symbols": [{
+                    "ticker": "NVDA",
+                    "company_name": "NVIDIA",
+                    "market": "US",
+                }],
+            }), encoding="utf-8")
+            rows = load_direct_company_inputs(
+                root / "missing-user-settings.json",
+                default_path,
+            )
+        self.assertEqual(rows[0]["ticker"], "NVDA")
+        self.assertEqual(rows[0]["sources"], ["default_research_watchlist"])
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.master = load_sector_master()

@@ -1,0 +1,14 @@
+{
+  "schema_version": "company_research_watchlist.v1",
+  "symbols": [
+    {
+      "ticker": "NVDA",
+      "company_name": "NVIDIA",
+      "market": "US"
+    }
+  ],
+  "policy": {
+    "research_input_only": true,
+    "automatic_position_actions_allowed": false
+  }
+}
