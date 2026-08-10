@@ -280,6 +280,7 @@ jobs:
             workspace/company_operating_inputs/
             workspace/company_tearsheets/
             workspace/company_long_term_profiles/
+            workspace/company_filing_summaries/
             workspace/company_earnings_events/
             workspace/company_earnings_event_inputs/
             workspace/company_earnings_reaction_context/

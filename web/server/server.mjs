@@ -22,6 +22,7 @@ import { handlePbGmailResearchApprovalsEndpoint } from "./pbGmailResearchApprova
 import { handlePbGmailSenderReviewsEndpoint } from "./pbGmailSenderReviews.mjs";
 import { handlePbTelegramResearchApprovalsEndpoint } from "./pbTelegramResearchApprovals.mjs";
 import { handleResearchSectorTaxonomyEndpoint } from "./researchSectorTaxonomy.mjs";
+import { handleStockCandidatePerformanceEndpoint } from "./stockCandidatePerformance.mjs";
 import { handlePortfolioEndpoint } from "./portfolioApi.mjs";
 import { handleReportsEndpoint } from "./reportsApi.mjs";
 import { handleTossInvestEndpoint } from "./tossInvestApi.mjs";
@@ -367,6 +368,11 @@ const server = createServer(async (req, res) => {
 
   if (req.url?.startsWith("/api/economic-calendar/translations")) {
     await handleEconomicCalendarEndpoint("translations", req, res);
+    return;
+  }
+
+  if (req.url?.startsWith("/api/stock-candidate-performance")) {
+    await handleStockCandidatePerformanceEndpoint(req, res);
     return;
   }
 

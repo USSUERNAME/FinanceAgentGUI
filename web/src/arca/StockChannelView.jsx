@@ -21,6 +21,7 @@ import Star from "lucide-react/dist/esm/icons/star.js";
 import User from "lucide-react/dist/esm/icons/user.js";
 import X from "lucide-react/dist/esm/icons/x.js";
 import { formatCount } from "../utils/formatters.js";
+import StockResearchGateway from "./StockResearchGateway.jsx";
 import {
   createArcaEmoticonCommentPayload,
   MAX_COMBOCON_ITEMS,
@@ -1555,6 +1556,7 @@ export default function StockChannelView({
   notificationUrl,
 }) {
   const [notificationDialogOpen, setNotificationDialogOpen] = React.useState(false);
+  const [stockWorkspaceMode, setStockWorkspaceMode] = React.useState("verified");
   const notificationTriggerRef = React.useRef(null);
   const notificationCloseButtonRef = React.useRef(null);
 
@@ -1640,7 +1642,11 @@ export default function StockChannelView({
       aria-label="아카라이브 주식채널 인덱스"
       ref={canvasRef}
     >
-      <div className="board-index-shell">
+      <StockResearchGateway
+        activeMode={stockWorkspaceMode}
+        onModeChange={setStockWorkspaceMode}
+      />
+      {stockWorkspaceMode === "community" ? <div className="board-index-shell">
         <section className="stock-board" aria-labelledby="stock-board-title">
           <header className="stock-board-header">
             <div>
@@ -1796,7 +1802,7 @@ export default function StockChannelView({
             </a>
           </div>
         </section>
-      </div>
+      </div> : null}
       {notificationDialogOpen ? (
         <ArcaNotificationDialog
           actionBusy={notificationActionBusy}

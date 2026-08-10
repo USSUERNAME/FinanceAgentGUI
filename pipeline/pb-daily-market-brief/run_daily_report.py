@@ -328,6 +328,10 @@ def main() -> None:
     run("build_company_operating_bridge.py", "--date", report_date)
     run("build_company_tearsheets.py", "--date", report_date)
     run("build_company_long_term_profiles.py", "--date", report_date)
+    filing_summary_args = ["analyze_company_filings.py", "--date", report_date]
+    if offline_validation:
+        filing_summary_args.append("--dry-run")
+    run(*filing_summary_args)
     run("collect_korea_company_exposure.py", "--date", report_date)
     run("build_company_korea_transmission.py", "--date", report_date)
     pause_between_alpha_vantage_stages()

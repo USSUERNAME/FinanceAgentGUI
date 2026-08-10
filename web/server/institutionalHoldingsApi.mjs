@@ -14,11 +14,17 @@ const CACHE_PATH = join(
   "institutional-holdings-radar.json",
 );
 const DOTENV_PATH = join(APP_ROOT, ".env");
-const SCHEMA_VERSION = "institutional_holdings_radar.v1";
+const SCHEMA_VERSION = "institutional_holdings_radar.v2";
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const FILING_WINDOW_CACHE_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+const FILING_WINDOW_START_DAY = 35;
+const FILING_WINDOW_END_DAY = 50;
 const MAX_QUARTERS = 8;
+const MAX_OWNERSHIP_SIGNALS = 12;
+const OWNERSHIP_SIGNAL_LOOKBACK_DAYS = 240;
 const SEC_ORIGIN = "https://www.sec.gov";
 const SEC_DATA_ORIGIN = "https://data.sec.gov";
+const SEC_SEARCH_ORIGIN = "https://efts.sec.gov";
 
 export const DEFAULT_13F_MANAGERS = Object.freeze([
   { id: "berkshire", name: "Berkshire Hathaway", principal: "Warren Buffett", cik: "0001067983" },
@@ -90,6 +96,23 @@ function asArray(value) {
   return value && typeof value === "object" ? [value] : [];
 }
 
+function daysBetween(later, earlier) {
+  return Math.floor((later.getTime() - earlier.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+export function is13fFilingWindow(now = new Date()) {
+  const current = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(current.getTime())) return false;
+  const quarterStartMonth = Math.floor(current.getUTCMonth() / 3) * 3;
+  const previousQuarterEnd = new Date(Date.UTC(current.getUTCFullYear(), quarterStartMonth, 0));
+  const ageDays = daysBetween(current, previousQuarterEnd);
+  return ageDays >= FILING_WINDOW_START_DAY && ageDays <= FILING_WINDOW_END_DAY;
+}
+
+export function institutionalCacheMaxAgeMs(now = new Date()) {
+  return is13fFilingWindow(now) ? FILING_WINDOW_CACHE_MAX_AGE_MS : CACHE_MAX_AGE_MS;
+}
+
 function normalizeIssuerName(value) {
   return cleanText(value, 200)
     .toUpperCase()
@@ -141,15 +164,44 @@ export function selectRecent13fFilings(submissions = {}, limit = MAX_QUARTERS) {
     reportDate: cleanText(recent.reportDate?.[index], 20),
     filingDate: cleanText(recent.filingDate?.[index], 20),
     primaryDocument: cleanText(recent.primaryDocument?.[index], 200),
-  })).filter((row) => row.form === "13F-HR" && row.accessionNumber && row.reportDate);
+  })).filter((row) => (
+    ["13F-HR", "13F-HR/A"].includes(row.form)
+    && row.accessionNumber
+    && row.reportDate
+  ));
 
-  const byReportDate = new Map();
-  for (const row of rows.sort((left, right) => right.filingDate.localeCompare(left.filingDate))) {
-    if (!byReportDate.has(row.reportDate)) byReportDate.set(row.reportDate, row);
-  }
-  return [...byReportDate.values()]
-    .sort((left, right) => right.reportDate.localeCompare(left.reportDate))
+  const reportDates = [...new Set(rows.map((row) => row.reportDate))]
+    .sort((left, right) => right.localeCompare(left))
     .slice(0, Math.max(1, Number(limit) || MAX_QUARTERS));
+  const selectedDates = new Set(reportDates);
+  return rows
+    .filter((row) => selectedDates.has(row.reportDate))
+    .sort((left, right) => (
+      right.reportDate.localeCompare(left.reportDate)
+      || left.filingDate.localeCompare(right.filingDate)
+    ));
+}
+
+export function selectRecentOwnershipFilings(
+  submissions = {},
+  { now = new Date(), limit = MAX_OWNERSHIP_SIGNALS } = {},
+) {
+  const recent = submissions?.filings?.recent || {};
+  const forms = asArray(recent.form);
+  const current = now instanceof Date ? now : new Date(now);
+  const cutoff = new Date(current.getTime() - OWNERSHIP_SIGNAL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  return forms.map((form, index) => ({
+    form: cleanText(form, 30).toUpperCase(),
+    accessionNumber: cleanText(recent.accessionNumber?.[index], 40),
+    filingDate: cleanText(recent.filingDate?.[index], 20),
+    primaryDocument: cleanText(recent.primaryDocument?.[index], 220),
+  })).filter((row) => {
+    if (!/^(?:SC|SCHEDULE)\s+13[DG](?:\/A)?$/.test(row.form)) return false;
+    if (!row.accessionNumber || !row.filingDate || !row.primaryDocument) return false;
+    const filingDate = new Date(`${row.filingDate}T00:00:00.000Z`);
+    return !Number.isNaN(filingDate.getTime()) && filingDate >= cutoff;
+  }).sort((left, right) => right.filingDate.localeCompare(left.filingDate))
+    .slice(0, Math.max(1, Number(limit) || MAX_OWNERSHIP_SIGNALS));
 }
 
 export function parse13fInformationTable(xmlText = "") {
@@ -174,6 +226,92 @@ export function parse13fInformationTable(xmlText = "") {
       votingNone: finiteNumber(voting?.None),
     };
   }).filter((row) => row.issuer && row.cusip && row.value >= 0);
+}
+
+function nestedValuesForKey(value, targetKey, values = []) {
+  if (!value || typeof value !== "object") return values;
+  for (const [key, nested] of Object.entries(value)) {
+    if (key === targetKey) {
+      if (Array.isArray(nested)) values.push(...nested);
+      else if (nested !== undefined && nested !== null) values.push(nested);
+    }
+    if (nested && typeof nested === "object") nestedValuesForKey(nested, targetKey, values);
+  }
+  return values;
+}
+
+function firstNestedText(value, targetKey, maxLength = 300) {
+  return cleanText(nestedValuesForKey(value, targetKey)[0], maxLength);
+}
+
+export function parse13fCoverPageMeta(xmlText = "", form = "") {
+  const normalizedForm = cleanText(form, 20).toUpperCase();
+  if (!String(xmlText || "").trim()) {
+    return {
+      isAmendment: normalizedForm === "13F-HR/A",
+      amendmentType: normalizedForm === "13F-HR/A" ? "UNKNOWN" : "",
+    };
+  }
+  const parsed = xmlParser.parse(String(xmlText || ""));
+  const amendmentText = firstNestedText(parsed, "amendmentType", 80).toUpperCase();
+  const amendmentType = amendmentText.includes("NEW HOLDINGS")
+    ? "NEW HOLDINGS"
+    : amendmentText.includes("RESTATEMENT")
+      ? "RESTATEMENT"
+      : normalizedForm === "13F-HR/A"
+        ? "UNKNOWN"
+        : "";
+  const isAmendmentText = firstNestedText(parsed, "isAmendment", 20).toLowerCase();
+  return {
+    isAmendment: normalizedForm === "13F-HR/A" || ["true", "1", "y", "yes"].includes(isAmendmentText),
+    amendmentType,
+  };
+}
+
+function holdingMergeKey(holding) {
+  return [
+    cleanText(holding?.cusip, 30).toUpperCase(),
+    cleanText(holding?.titleOfClass, 100).toUpperCase(),
+    cleanText(holding?.putCall, 20).toUpperCase() || "LONG",
+    cleanText(holding?.shareType, 20).toUpperCase(),
+  ].join(":");
+}
+
+export function apply13fAmendment(baseHoldings = [], amendmentHoldings = [], amendmentType = "") {
+  if (cleanText(amendmentType, 80).toUpperCase() !== "NEW HOLDINGS") {
+    return amendmentHoldings.slice();
+  }
+  const merged = new Map(baseHoldings.map((holding) => [holdingMergeKey(holding), holding]));
+  for (const holding of amendmentHoldings) merged.set(holdingMergeKey(holding), holding);
+  return [...merged.values()];
+}
+
+export function parseBeneficialOwnershipDocument(xmlText = "") {
+  const parsed = xmlParser.parse(String(xmlText || ""));
+  const submission = parsed?.edgarSubmission || parsed;
+  const filerRows = asArray(submission?.headerData?.filerInfo?.filer);
+  const reportingRows = nestedValuesForKey(parsed, "coverPageHeaderReportingPersonDetails")
+    .flatMap((value) => asArray(value));
+  const beneficialShares = Math.max(
+    0,
+    ...reportingRows.map((row) => finiteNumber(row?.reportingPersonBeneficiallyOwnedAggregateNumberOfShares)),
+    ...nestedValuesForKey(parsed, "aggregateAmountOwned").map(finiteNumber),
+  );
+  const classPercent = Math.max(
+    0,
+    ...reportingRows.map((row) => finiteNumber(row?.classPercent)),
+    ...nestedValuesForKey(parsed, "percentOfClass").map(finiteNumber),
+  );
+  return {
+    filerCiks: filerRows.map((row) => cleanText(row?.filerCredentials?.cik, 20)).filter(Boolean),
+    issuerCik: firstNestedText(parsed, "issuerCik", 20),
+    issuerName: firstNestedText(parsed, "issuerName", 200),
+    cusip: firstNestedText(parsed, "issuerCusipNumber", 30).toUpperCase(),
+    securityClass: firstNestedText(parsed, "securitiesClassTitle", 120),
+    eventDate: firstNestedText(parsed, "eventDateRequiresFilingThisStatement", 30),
+    beneficialShares,
+    classPercent,
+  };
 }
 
 async function readSectorMembership(env = process.env) {
@@ -279,6 +417,9 @@ export function normalizeSnapshot({ manager, filing, holdings, classifySector })
   return {
     reportDate: filing.reportDate,
     filingDate: filing.filingDate,
+    form: filing.form || "13F-HR",
+    amendmentType: filing.amendmentType || "",
+    amendmentCount: Number(filing.amendmentCount || 0),
     accessionNumber: filing.accessionNumber,
     sourceUrl: filingSourceUrl(manager.cik, filing.accessionNumber),
     totalValue,
@@ -344,6 +485,7 @@ function compareManagerSnapshots(current, previous) {
 
 export function buildInstitutionalHoldingsRadar({
   managerHistories = [],
+  ownershipSignals = [],
   sectorMembershipAsOf = "",
   generatedAt = new Date().toISOString(),
 } = {}) {
@@ -360,6 +502,9 @@ export function buildInstitutionalHoldingsRadar({
       latest: latest ? {
         reportDate: latest.reportDate,
         filingDate: latest.filingDate,
+        form: latest.form,
+        amendmentType: latest.amendmentType,
+        amendmentCount: latest.amendmentCount,
         sourceUrl: latest.sourceUrl,
         totalValue: latest.totalValue,
         holdingCount: latest.holdingCount,
@@ -372,9 +517,13 @@ export function buildInstitutionalHoldingsRadar({
       previousReportDate: previous?.reportDate || "",
       moves: moves.slice(0, 8),
       allMoves: moves,
+      ownershipSignals: ownershipSignals.filter((signal) => signal.managerId === history.manager.id),
       history: filings.map((filing) => ({
         reportDate: filing.reportDate,
         filingDate: filing.filingDate,
+        form: filing.form,
+        amendmentType: filing.amendmentType,
+        amendmentCount: filing.amendmentCount,
         sourceUrl: filing.sourceUrl,
         totalValue: filing.totalValue,
         holdingCount: filing.holdingCount,
@@ -486,9 +635,10 @@ export function buildInstitutionalHoldingsRadar({
     generatedAt,
     source: {
       provider: "SEC EDGAR",
-      form: "13F-HR",
+      form: "13F-HR · 13F-HR/A · Schedule 13D/13G",
       officialDatasetUrl: "https://www.sec.gov/data-research/sec-markets-data/form-13f-data-sets",
       faqUrl: "https://www.sec.gov/rules-regulations/staff-guidance/division-investment-management-frequently-asked-questions/frequently-asked-questions-about-form-13f",
+      beneficialOwnershipUrl: "https://www.sec.gov/rules-regulations/staff-guidance/corporation-finance-interpretations/exchange-act-sections-13d-13g-regulation-13d-g-beneficial-ownership-reporting",
       sectorMembershipAsOf,
     },
     summary: {
@@ -498,15 +648,19 @@ export function buildInstitutionalHoldingsRadar({
       earliestReportDate: reportDates[0] || "",
       averageClassificationCoveragePct: averageCoverage,
       quarterDepth: Math.max(0, ...managers.map((manager) => manager.history.length)),
+      recentOwnershipSignalCount: ownershipSignals.length,
     },
     sectorConsensus,
     candidates,
+    activitySignals: ownershipSignals,
     managers: publicManagers,
     limitations: [
       "13F는 분기 말 이후 최대 45일가량 늦게 공개될 수 있습니다.",
       "공매도·현금·비대상 해외증권과 전체 파생 포지션을 보여주지 않습니다.",
       "보통주 섹터 흐름에 집중하기 위해 신고된 put/call 및 원금(PRN) 단위 항목을 집계에서 제외합니다.",
-      "정정 공시(13F-HR/A)는 아직 원 공시 이력에 병합하지 않습니다.",
+      "13F-HR/A는 재작성 공시면 기존 분기를 대체하고 신규 보유 추가 공시면 원 공시에 병합합니다.",
+      "13D·13G는 보통 5% 안팎 이상의 대형 지분 사건만 보여주며 전체 리밸런싱 내역은 아닙니다.",
+      "13D·13G 증감 방향은 같은 운용사·종목의 비교 가능한 이전 공시가 있을 때만 표시합니다.",
       "섹터 분류는 SPDR 공식 구성 종목과 제한된 발행사명 보조 규칙에만 근거하며 미분류 종목은 추론하지 않습니다.",
       "확대·축소는 주식 수 변화를 우선 사용하지만 합병·분할·주식 종류 변경의 영향이 남을 수 있습니다.",
       "이 결과는 아이디어 우선순위이며 매수·매도 추천이 아닙니다.",
@@ -528,11 +682,101 @@ async function secFetch(url, { userAgent, fetchImpl, pauseMs = 120, responseType
   return responseType === "json" ? response.json() : response.text();
 }
 
+function rawPrimaryDocumentName(primaryDocument = "") {
+  return cleanText(primaryDocument, 220).split("/").filter(Boolean).at(-1) || "primary_doc.xml";
+}
+
+function ownershipSignalSourceUrl(issuerCik, accessionNumber) {
+  if (!issuerCik || !accessionNumber) return "";
+  return filingSourceUrl(issuerCik, accessionNumber);
+}
+
+async function resolveOwnershipSignal({ filing, manager, userAgent, fetchImpl, pauseMs }) {
+  const query = encodeURIComponent(`"${filing.accessionNumber}"`);
+  const search = await secFetch(
+    `${SEC_SEARCH_ORIGIN}/LATEST/search-index?q=${query}&dateRange=all`,
+    { userAgent, fetchImpl, pauseMs },
+  );
+  const hit = asArray(search?.hits?.hits).find((row) => (
+    cleanText(row?._source?.adsh, 40) === filing.accessionNumber
+  ));
+  const source = hit?._source || {};
+  const ciks = asArray(source.ciks).map((cik) => String(cik).padStart(10, "0"));
+  if (ciks.length > 1 && ciks[0] === manager.cik) {
+    const error = new Error("tracked manager is the subject issuer, not the reporting owner");
+    error.code = "OWNERSHIP_FILER_MISMATCH";
+    throw error;
+  }
+  const issuerCik = ciks.find((cik) => cik !== manager.cik) || ciks[0] || "";
+  if (!issuerCik) throw new Error("SEC ownership filing issuer CIK was not resolved");
+  const archiveRoot = `${SEC_ORIGIN}/Archives/edgar/data/${String(Number(issuerCik))}/${filing.accessionNumber.replaceAll("-", "")}`;
+  const primaryDocument = rawPrimaryDocumentName(filing.primaryDocument);
+  const xml = await secFetch(`${archiveRoot}/${primaryDocument}`, {
+    userAgent,
+    fetchImpl,
+    pauseMs,
+    responseType: "text",
+  });
+  const parsed = parseBeneficialOwnershipDocument(xml);
+  if (parsed.filerCiks.length && !parsed.filerCiks.includes(manager.cik)) {
+    const error = new Error("tracked manager is not a reporting owner in the filing");
+    error.code = "OWNERSHIP_FILER_MISMATCH";
+    throw error;
+  }
+  const issuerName = parsed.issuerName || cleanText(asArray(source.display_names)[0], 200);
+  const tickerMatch = cleanText(asArray(source.display_names)[0], 200).match(/\(([^()]+)\)\s+\(CIK/i);
+  return {
+    managerId: manager.id,
+    managerName: manager.name,
+    principal: manager.principal,
+    form: filing.form,
+    isAmendment: filing.form.endsWith("/A"),
+    filingDate: filing.filingDate,
+    eventDate: parsed.eventDate,
+    issuerCik: parsed.issuerCik || issuerCik,
+    issuerName,
+    ticker: cleanText(tickerMatch?.[1], 20).toUpperCase(),
+    cusip: parsed.cusip,
+    securityClass: parsed.securityClass,
+    beneficialShares: parsed.beneficialShares,
+    classPercent: parsed.classPercent,
+    accessionNumber: filing.accessionNumber,
+    sourceUrl: ownershipSignalSourceUrl(parsed.issuerCik || issuerCik, filing.accessionNumber),
+    direction: filing.form.endsWith("/A") ? "updated_position" : "initial_disclosure",
+    deltaShares: null,
+    deltaSharesPct: null,
+  };
+}
+
+function annotateOwnershipDirections(signals = []) {
+  const priorByPosition = new Map();
+  for (const signal of signals.slice().sort((left, right) => left.filingDate.localeCompare(right.filingDate))) {
+    const positionKey = `${signal.managerId}:${signal.issuerCik || signal.cusip || normalizeIssuerName(signal.issuerName)}`;
+    const prior = priorByPosition.get(positionKey);
+    if (prior && signal.beneficialShares && prior.beneficialShares) {
+      signal.deltaShares = signal.beneficialShares - prior.beneficialShares;
+      signal.deltaSharesPct = prior.beneficialShares
+        ? (signal.deltaShares / prior.beneficialShares) * 100
+        : null;
+      signal.direction = signal.deltaShares > 0
+        ? "increased"
+        : signal.deltaShares < 0
+          ? "decreased"
+          : "unchanged";
+      if (signal.classPercent > 0 && signal.classPercent <= 5 && prior.classPercent > 5) {
+        signal.direction = "below_threshold";
+      }
+    }
+    priorByPosition.set(positionKey, signal);
+  }
+  return signals.sort((left, right) => right.filingDate.localeCompare(left.filingDate));
+}
+
 async function collectManagerHistory({ manager, userAgent, fetchImpl, classifySector, pauseMs }) {
   const submissionsUrl = `${SEC_DATA_ORIGIN}/submissions/CIK${manager.cik}.json`;
   const submissions = await secFetch(submissionsUrl, { userAgent, fetchImpl, pauseMs });
   const filings = selectRecent13fFilings(submissions, MAX_QUARTERS);
-  const snapshots = [];
+  const filingRecords = [];
   for (const filing of filings) {
     const cikNumber = String(Number(manager.cik));
     const accessionCompact = filing.accessionNumber.replaceAll("-", "");
@@ -553,9 +797,62 @@ async function collectManagerHistory({ manager, userAgent, fetchImpl, classifySe
     });
     const holdings = parse13fInformationTable(xml);
     if (!holdings.length) continue;
-    snapshots.push(normalizeSnapshot({ manager, filing, holdings, classifySector }));
+    let amendmentMeta = { isAmendment: false, amendmentType: "" };
+    if (filing.form === "13F-HR/A") {
+      const primaryDocument = rawPrimaryDocumentName(filing.primaryDocument);
+      const coverPage = await secFetch(`${archiveRoot}/${primaryDocument}`, {
+        userAgent,
+        fetchImpl,
+        pauseMs,
+        responseType: "text",
+      }).catch(() => "");
+      amendmentMeta = parse13fCoverPageMeta(coverPage, filing.form);
+    }
+    filingRecords.push({ filing, holdings, amendmentMeta });
   }
-  return { manager, filings: snapshots };
+  const byReportDate = new Map();
+  for (const record of filingRecords) {
+    const rows = byReportDate.get(record.filing.reportDate) || [];
+    rows.push(record);
+    byReportDate.set(record.filing.reportDate, rows);
+  }
+  const snapshots = [];
+  for (const [reportDate, records] of byReportDate) {
+    let effectiveHoldings = [];
+    let effectiveFiling = null;
+    let amendmentCount = 0;
+    for (const record of records.sort((left, right) => left.filing.filingDate.localeCompare(right.filing.filingDate))) {
+      if (record.filing.form === "13F-HR" || !effectiveFiling) {
+        effectiveHoldings = record.holdings;
+      } else {
+        effectiveHoldings = apply13fAmendment(
+          effectiveHoldings,
+          record.holdings,
+          record.amendmentMeta.amendmentType,
+        );
+        amendmentCount += 1;
+      }
+      effectiveFiling = {
+        ...record.filing,
+        reportDate,
+        amendmentType: record.amendmentMeta.amendmentType,
+        amendmentCount,
+      };
+    }
+    if (effectiveFiling && effectiveHoldings.length) {
+      snapshots.push(normalizeSnapshot({
+        manager,
+        filing: effectiveFiling,
+        holdings: effectiveHoldings,
+        classifySector,
+      }));
+    }
+  }
+  return {
+    manager,
+    filings: snapshots,
+    ownershipFilings: selectRecentOwnershipFilings(submissions, { limit: 6 }),
+  };
 }
 
 export async function collectInstitutionalHoldingsRadar({
@@ -598,8 +895,48 @@ export async function collectInstitutionalHoldingsRadar({
     error.name = "SecCollectionEmptyError";
     throw error;
   }
+  const ownershipCandidates = managerHistories.flatMap((history) => (
+    asArray(history.ownershipFilings).map((filing) => ({ filing, manager: history.manager }))
+  )).sort((left, right) => right.filing.filingDate.localeCompare(left.filing.filingDate))
+    .slice(0, MAX_OWNERSHIP_SIGNALS * 4);
+  const ownershipSignals = [];
+  for (const candidate of ownershipCandidates) {
+    if (ownershipSignals.length >= MAX_OWNERSHIP_SIGNALS) break;
+    try {
+      ownershipSignals.push(await resolveOwnershipSignal({
+        ...candidate,
+        userAgent,
+        fetchImpl,
+        pauseMs,
+      }));
+    } catch (error) {
+      if (error?.code === "OWNERSHIP_FILER_MISMATCH") continue;
+      ownershipSignals.push({
+        managerId: candidate.manager.id,
+        managerName: candidate.manager.name,
+        principal: candidate.manager.principal,
+        form: candidate.filing.form,
+        isAmendment: candidate.filing.form.endsWith("/A"),
+        filingDate: candidate.filing.filingDate,
+        eventDate: "",
+        issuerCik: "",
+        issuerName: "대상 기업 원문 확인 필요",
+        ticker: "",
+        cusip: "",
+        securityClass: "",
+        beneficialShares: 0,
+        classPercent: 0,
+        accessionNumber: candidate.filing.accessionNumber,
+        sourceUrl: `${SEC_ORIGIN}/edgar/browse/?CIK=${candidate.manager.cik}&owner=include&action=getcompany`,
+        direction: candidate.filing.form.endsWith("/A") ? "updated_position" : "initial_disclosure",
+        deltaShares: null,
+        deltaSharesPct: null,
+      });
+    }
+  }
   return buildInstitutionalHoldingsRadar({
     managerHistories,
+    ownershipSignals: annotateOwnershipDirections(ownershipSignals),
     sectorMembershipAsOf: sectorMembership.asOf,
     generatedAt,
   });
@@ -631,19 +968,25 @@ export async function loadInstitutionalHoldingsRadar({
   managers = DEFAULT_13F_MANAGERS,
   pauseMs = 120,
 } = {}) {
+  const now = new Date();
   const userAgent = await configuredSecUserAgent(env);
   const configured = validSecUserAgent(userAgent);
   const cached = await readCache();
+  const refreshIntervalMs = institutionalCacheMaxAgeMs(now);
+  const filingWindowActive = is13fFilingWindow(now);
   const cacheAgeMs = cached?.generatedAt
-    ? Math.max(0, Date.now() - new Date(cached.generatedAt).getTime())
+    ? Math.max(0, now.getTime() - new Date(cached.generatedAt).getTime())
     : null;
-  if (!forceRefresh) {
+  const stale = cacheAgeMs === null ? false : cacheAgeMs > refreshIntervalMs;
+  if (!forceRefresh && ((cached && !stale) || !configured)) {
     return {
       connection: {
         configured,
         available: Boolean(cached),
-        stale: cacheAgeMs === null ? false : cacheAgeMs > CACHE_MAX_AGE_MS,
+        stale,
         cacheAgeMs,
+        refreshIntervalMs,
+        filingWindowActive,
         reason: cached ? "" : configured ? "not_collected" : "user_agent_required",
       },
       radar: cached,
@@ -656,6 +999,8 @@ export async function loadInstitutionalHoldingsRadar({
         available: Boolean(cached),
         stale: Boolean(cached),
         cacheAgeMs,
+        refreshIntervalMs,
+        filingWindowActive,
         reason: "user_agent_required",
       },
       radar: cached,
@@ -675,6 +1020,8 @@ export async function loadInstitutionalHoldingsRadar({
         available: true,
         stale: false,
         cacheAgeMs: 0,
+        refreshIntervalMs,
+        filingWindowActive,
         reason: "",
       },
       radar,
@@ -686,6 +1033,8 @@ export async function loadInstitutionalHoldingsRadar({
         available: Boolean(cached),
         stale: Boolean(cached),
         cacheAgeMs,
+        refreshIntervalMs,
+        filingWindowActive,
         reason: cached ? "refresh_failed_using_cache" : "refresh_failed",
         errorType: error?.name || "CollectionError",
       },

@@ -2,10 +2,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  apply13fAmendment,
   buildInstitutionalHoldingsRadar,
+  institutionalCacheMaxAgeMs,
+  is13fFilingWindow,
   normalizeSnapshot,
+  parse13fCoverPageMeta,
   parse13fInformationTable,
+  parseBeneficialOwnershipDocument,
   selectRecent13fFilings,
+  selectRecentOwnershipFilings,
 } from "../server/institutionalHoldingsApi.mjs";
 
 test("13F XML parser keeps common shares and option rows distinguishable", () => {
@@ -72,7 +78,7 @@ test("radar excludes principal-amount rows from common-equity sector weights", (
   assert.match(radar.limitations.join(" "), /원금\(PRN\)/);
 });
 
-test("recent filing selector keeps one original 13F filing per report quarter", () => {
+test("recent filing selector keeps original and amendment filings for selected report quarters", () => {
   const selected = selectRecent13fFilings({
     filings: {
       recent: {
@@ -85,7 +91,76 @@ test("recent filing selector keeps one original 13F filing per report quarter", 
     },
   }, 2);
 
-  assert.deepEqual(selected.map((row) => row.accessionNumber), ["a-original", "b-original"]);
+  assert.deepEqual(selected.map((row) => row.accessionNumber), ["a-original", "a-amend", "b-original"]);
+});
+
+test("13F amendment metadata and new-holdings merge preserve the original quarter", () => {
+  const meta = parse13fCoverPageMeta(`
+    <edgarSubmission><formData><coverPage>
+      <isAmendment>true</isAmendment>
+      <amendmentInfo><amendmentType>NEW HOLDINGS</amendmentType></amendmentInfo>
+    </coverPage></formData></edgarSubmission>
+  `, "13F-HR/A");
+  const original = [{ cusip: "111", titleOfClass: "COM", putCall: "", shareType: "SH", shares: 10 }];
+  const added = [{ cusip: "222", titleOfClass: "COM", putCall: "", shareType: "SH", shares: 20 }];
+
+  assert.deepEqual(meta, { isAmendment: true, amendmentType: "NEW HOLDINGS" });
+  assert.deepEqual(apply13fAmendment(original, added, meta.amendmentType), [...original, ...added]);
+  assert.deepEqual(apply13fAmendment(original, added, "RESTATEMENT"), added);
+});
+
+test("beneficial ownership parser extracts issuer, shares, percent, and event date", () => {
+  const parsed = parseBeneficialOwnershipDocument(`
+    <edgarSubmission><formData><coverPageHeader>
+      <securitiesClassTitle>Common Stock</securitiesClassTitle>
+      <eventDateRequiresFilingThisStatement>06/30/2026</eventDateRequiresFilingThisStatement>
+      <issuerInfo><issuerCik>0001978954</issuerCik><issuerName>BBB Foods Inc</issuerName>
+        <issuerCusips><issuerCusipNumber>G0896C103</issuerCusipNumber></issuerCusips>
+      </issuerInfo>
+    </coverPageHeader><coverPageHeaderReportingPersonDetails>
+      <reportingPersonBeneficiallyOwnedAggregateNumberOfShares>2901733</reportingPersonBeneficiallyOwnedAggregateNumberOfShares>
+      <classPercent>3.7</classPercent>
+    </coverPageHeaderReportingPersonDetails></formData></edgarSubmission>
+  `);
+
+  assert.equal(parsed.issuerName, "BBB Foods Inc");
+  assert.equal(parsed.issuerCik, "0001978954");
+  assert.equal(parsed.beneficialShares, 2901733);
+  assert.equal(parsed.classPercent, 3.7);
+  assert.equal(parsed.eventDate, "06/30/2026");
+});
+
+test("beneficial ownership parser supports Schedule 13D cover-page field names", () => {
+  const parsed = parseBeneficialOwnershipDocument(`
+    <edgarSubmission><headerData><filerInfo><filer><filerCredentials><cik>0001336528</cik></filerCredentials></filer></filerInfo></headerData>
+      <formData><coverPageHeader><issuerInfo><issuerCik>0001981792</issuerCik><issuerName>Howard Hughes Holdings Inc.</issuerName></issuerInfo></coverPageHeader>
+        <reportingPersonInfo><aggregateAmountOwned>27852064</aggregateAmountOwned><percentOfClass>46.7</percentOfClass></reportingPersonInfo>
+      </formData></edgarSubmission>
+  `);
+
+  assert.deepEqual(parsed.filerCiks, ["0001336528"]);
+  assert.equal(parsed.beneficialShares, 27852064);
+  assert.equal(parsed.classPercent, 46.7);
+});
+
+test("ownership selector keeps recent Schedule 13D and 13G filings only", () => {
+  const selected = selectRecentOwnershipFilings({
+    filings: { recent: {
+      form: ["SCHEDULE 13G", "SCHEDULE 13D/A", "13F-HR", "SCHEDULE 13G"],
+      accessionNumber: ["a", "b", "c", "old"],
+      filingDate: ["2026-07-29", "2026-06-08", "2026-05-15", "2025-01-01"],
+      primaryDocument: ["primary_doc.xml", "primary_doc.xml", "primary.xml", "primary_doc.xml"],
+    } },
+  }, { now: new Date("2026-08-10T00:00:00.000Z") });
+
+  assert.deepEqual(selected.map((row) => row.accessionNumber), ["a", "b"]);
+});
+
+test("13F filing window switches cache freshness from daily to three-hour checks", () => {
+  assert.equal(is13fFilingWindow(new Date("2026-08-10T00:00:00.000Z")), true);
+  assert.equal(institutionalCacheMaxAgeMs(new Date("2026-08-10T00:00:00.000Z")), 3 * 60 * 60 * 1000);
+  assert.equal(is13fFilingWindow(new Date("2026-07-10T00:00:00.000Z")), false);
+  assert.equal(institutionalCacheMaxAgeMs(new Date("2026-07-10T00:00:00.000Z")), 24 * 60 * 60 * 1000);
 });
 
 function filing({ reportDate, shares, managerIndex }) {

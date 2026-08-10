@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 
 from collectors.common import ROOT, load_dotenv
 from company_long_term_metrics import LONG_TERM_METRIC_IDS, build_long_term_metrics
+from collect_company_segment_facts import collect_company_segments_from_sec
 from collect_company_market_context import _number, root_path
 from collect_sector_fundamentals import load_fundamental_registry
 
@@ -69,6 +70,27 @@ METRIC_CONCEPTS = {
     "diluted_shares": [
         ("us-gaap", "WeightedAverageNumberOfDilutedSharesOutstanding"),
         ("ifrs-full", "AdjustedWeightedAverageShares"),
+    ],
+    "assets": [
+        ("us-gaap", "Assets"),
+        ("ifrs-full", "Assets"),
+    ],
+    "liabilities": [
+        ("us-gaap", "Liabilities"),
+        ("ifrs-full", "Liabilities"),
+    ],
+    "current_assets": [
+        ("us-gaap", "AssetsCurrent"),
+        ("ifrs-full", "CurrentAssets"),
+    ],
+    "current_liabilities": [
+        ("us-gaap", "LiabilitiesCurrent"),
+        ("ifrs-full", "CurrentLiabilities"),
+    ],
+    "stockholders_equity": [
+        ("us-gaap", "StockholdersEquity"),
+        ("us-gaap", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"),
+        ("ifrs-full", "Equity"),
     ],
 }
 
@@ -149,6 +171,69 @@ def _all_metric_records(payload: dict[str, Any], metric_id: str, report_day: dat
     return records
 
 
+def _previous_year_day(value: str) -> str | None:
+    try:
+        parsed = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    try:
+        return parsed.replace(year=parsed.year - 1).isoformat()
+    except ValueError:
+        return parsed.replace(year=parsed.year - 1, day=28).isoformat()
+
+
+def _prior_comparison(
+    rows: list[dict[str, Any]], selected: dict[str, Any], cik: str,
+) -> dict[str, Any]:
+    """Find the exact prior-year period using the same taxonomy, concept and unit."""
+    prior_end = _previous_year_day(str(selected.get("period_end") or ""))
+    prior_start = _previous_year_day(str(selected.get("period_start") or "")) if selected.get("period_start") else None
+    if not prior_end:
+        return {
+            "status": "not_available",
+            "reason": "The reported period end cannot be normalized to a prior-year date.",
+        }
+    matches = [
+        row for row in rows
+        if row.get("taxonomy") == selected.get("taxonomy")
+        and row.get("concept") == selected.get("concept")
+        and row.get("unit") == selected.get("unit")
+        and str(row.get("period_end") or "") == prior_end
+        and (
+            (prior_start is None and not row.get("period_start"))
+            or str(row.get("period_start") or "") == prior_start
+        )
+    ]
+    if not matches:
+        return {
+            "status": "not_available",
+            "reason": "No same-concept, same-unit fact exists for the exact prior-year period.",
+            "expected_period_start": prior_start,
+            "expected_period_end": prior_end,
+        }
+    matches.sort(key=lambda row: str(row.get("filed_date") or ""), reverse=True)
+    prior = matches[0]
+    current_value = _number(selected.get("value"))
+    prior_value = _number(prior.get("value"))
+    change_pct = None
+    if current_value is not None and prior_value is not None and prior_value > 0:
+        change_pct = round(((current_value / prior_value) - 1) * 100, 4)
+    return {
+        "status": "available_exact_period_and_unit",
+        "value": prior_value,
+        "unit": str(prior.get("unit") or ""),
+        "period_start": str(prior.get("period_start") or ""),
+        "period_end": str(prior.get("period_end") or ""),
+        "filed_date": str(prior.get("filed_date") or ""),
+        "form": str(prior.get("form") or ""),
+        "accession_number": str(prior.get("accession_number") or ""),
+        "source_url": _filing_index_url(cik, str(prior.get("accession_number") or "")),
+        "change_pct": change_pct,
+        "evidence_label": "derived_calculation_from_exact_period_reported_facts",
+        "formula": "(current_value / prior_year_same_period_value - 1) * 100",
+    }
+
+
 def latest_reported_metric(payload: dict[str, Any], metric_id: str, report_day: date, cik: str) -> dict[str, Any] | None:
     rows = _all_metric_records(payload, metric_id, report_day)
     if not rows:
@@ -162,6 +247,7 @@ def latest_reported_metric(payload: dict[str, Any], metric_id: str, report_day: 
     selected = rows[0]
     return {
         **selected,
+        "prior_year_comparison": _prior_comparison(rows, selected, cik),
         "source_url": _filing_index_url(cik, str(selected["accession_number"])),
         "evidence_label": "fact_source_reported",
         "confidence": "high",
@@ -324,6 +410,7 @@ def collect_company_primary_facts(
     guidance_errors: list[dict[str, Any]] | None = None,
     ticker_cik_fetcher: Callable[[str], dict[str, str]] = sec_company_tickers,
     research_queue: dict[str, Any] | None = None,
+    segment_fetcher: Callable[[dict[str, Any], str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     candidate_map: dict[str, dict[str, Any]] = {}
     for candidate in valuation_expectations.get("companies", []):
@@ -345,6 +432,7 @@ def collect_company_primary_facts(
     errors: list[dict[str, Any]] = []
     request_count = 0
     ticker_cik_requests = 0
+    segment_request_count = 0
     collected_at = datetime.now(timezone.utc).isoformat()
     if user_agent:
         missing_tickers = [
@@ -396,7 +484,7 @@ def collect_company_primary_facts(
                 source_urls.extend(
                     url for url in sorted({str(row["source_url"]) for row in guidance_rows}) if url not in source_urls
                 )
-                companies.append({
+                company_row = {
                     "candidate_id": candidate.get("candidate_id"),
                     "sector_id": candidate.get("sector_id"),
                     "ticker": candidate.get("ticker"),
@@ -418,17 +506,42 @@ def collect_company_primary_facts(
                         "source_url": SEC_API_DOCS_URL,
                         "retrieved_at": collected_at,
                         "freshness_status": "latest_filed_fact_available_by_metric",
-                        "notes": "Standard taxonomy facts only; company extension facts and non-XBRL guidance are not inferred.",
+                        "notes": "Standard taxonomy facts plus exact-period dimensioned segment facts from linked inline XBRL filings.",
                     },
                     "security_readiness": "primary_reported_baseline_not_decision_grade",
                     "data_gaps": [
                         "Reported metrics may cover different durations; exact start/end dates control comparability.",
                         "Company guidance is absent unless a body-verified company source was supplied.",
-                        "Custom XBRL extension KPIs, segment detail, adjustments, and transcript commentary are not collected.",
                         *(["Five comparable annual core periods are not yet available."] if long_term["quality_gate"]["status"] != "ready" else []),
                     ],
                     "posture": "reported_fact_baseline_not_investment_recommendation",
-                })
+                }
+                if segment_fetcher:
+                    try:
+                        company_row["segment_financials"] = segment_fetcher(company_row, user_agent)
+                        segment_request_count += 2
+                        if company_row["segment_financials"].get("status") == "not_disclosed_for_exact_period":
+                            company_row["data_gaps"].append(
+                                "No exact-period reportable-segment or product-line XBRL facts were disclosed in the filing."
+                            )
+                    except Exception as exc:
+                        company_row["segment_financials"] = {
+                            "status": "collection_failed",
+                            "rows": [],
+                            "row_count": 0,
+                            "error": str(exc),
+                        }
+                        errors.append({
+                            "candidate_id": candidate.get("candidate_id"),
+                            "ticker": candidate.get("ticker"),
+                            "status": "segment_collection_failed",
+                            "error": str(exc),
+                        })
+                else:
+                    company_row["segment_financials"] = {
+                        "status": "not_requested", "rows": [], "row_count": 0,
+                    }
+                companies.append(company_row)
             except Exception as exc:
                 errors.append({
                     "candidate_id": candidate.get("candidate_id"),
@@ -453,6 +566,7 @@ def collect_company_primary_facts(
         "company_count": len(companies),
         "request_count": request_count,
         "ticker_cik_request_count": ticker_cik_requests,
+        "segment_request_count": segment_request_count,
         "max_companies": max_companies,
         "companies": companies,
         "skipped": skipped,
@@ -463,6 +577,9 @@ def collect_company_primary_facts(
             "source_url": SEC_API_DOCS_URL,
             "accepted_forms": sorted(ACCEPTED_FORMS),
             "standard_taxonomies_only": ["us-gaap", "ifrs-full"],
+            "dimensioned_inline_xbrl_segment_axes": [
+                "StatementBusinessSegmentsAxis", "ProductOrServiceAxis",
+            ],
             "annual_duration_days": [300, 390],
             "long_term_history_years": 5,
             "fcf_definition": "operating_cash_flow_minus_absolute_capital_expenditures",
@@ -496,6 +613,13 @@ def validate_company_primary_facts(payload: dict[str, Any]) -> None:
             comparison = guidance.get("estimate_comparison") or {}
             if comparison.get("status") == "available_exact_period_and_unit" and comparison.get("evidence_label") != "derived_calculation":
                 raise ValueError("Guidance comparison must be labeled as a derived calculation")
+        for segment in (company.get("segment_financials") or {}).get("rows", []):
+            if segment.get("evidence_label") != "fact_source_reported_dimensioned":
+                raise ValueError("Segment metrics must remain dimensioned source-reported facts")
+            if not str(segment.get("source_url") or "").startswith("https://www.sec.gov/Archives/"):
+                raise ValueError("Segment metrics require a direct EDGAR filing URL")
+            if not segment.get("segment_id") or not segment.get("current_period_end"):
+                raise ValueError("Segment metrics require a member and exact period")
 
 
 def main() -> None:
@@ -530,6 +654,7 @@ def main() -> None:
         research_queue=(
             json.loads(queue_path.read_text(encoding="utf-8")) if queue_path.exists() else {}
         ),
+        segment_fetcher=collect_company_segments_from_sec,
     )
     output = root_path(
         args.output_file,

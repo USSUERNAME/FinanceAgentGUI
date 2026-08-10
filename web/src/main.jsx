@@ -1,6 +1,7 @@
 import React, { Component, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
+import { shouldDisplayRuntimeError } from "./runtimeErrorPolicy.js";
 import "./styles.css";
 
 class AppErrorBoundary extends Component {
@@ -56,8 +57,13 @@ function showGlobalRuntimeError(error) {
   overlay.querySelector("pre").textContent = message;
 }
 
-window.addEventListener("error", (event) => showGlobalRuntimeError(event.error || event.message));
-window.addEventListener("unhandledrejection", (event) => showGlobalRuntimeError(event.reason));
+window.addEventListener("error", (event) => {
+  const error = event.error || event.message;
+  if (shouldDisplayRuntimeError(error, event.filename)) showGlobalRuntimeError(error);
+});
+window.addEventListener("unhandledrejection", (event) => {
+  if (shouldDisplayRuntimeError(event.reason)) showGlobalRuntimeError(event.reason);
+});
 
 const app = (
   <AppErrorBoundary>

@@ -149,6 +149,26 @@ class CompanyPrimaryFactsTests(unittest.TestCase):
         self.assertIn(ACCESSION, metric["source_url"])
         self.assertEqual(metric["evidence_label"], "fact_source_reported")
 
+    def test_latest_metric_calculates_only_exact_prior_year_period(self) -> None:
+        payload = companyfacts_payload()
+        payload["facts"]["us-gaap"]["RevenueFromContractWithCustomerExcludingAssessedTax"]["units"]["USD"].append({
+            "start": "2025-02-01",
+            "end": "2025-04-30",
+            "val": 40000000000,
+            "accn": "0001045810-25-000021",
+            "fy": 2026,
+            "fp": "Q1",
+            "form": "10-Q",
+            "filed": "2025-05-20",
+        })
+        metric = latest_reported_metric(
+            payload, "revenue", date.fromisoformat("2026-07-20"), "0001045810",
+        )
+        prior = metric["prior_year_comparison"]
+        self.assertEqual(prior["status"], "available_exact_period_and_unit")
+        self.assertEqual(prior["value"], 40000000000)
+        self.assertEqual(prior["change_pct"], 10.0)
+
     def test_annual_metrics_and_long_term_financials_are_calculated(self) -> None:
         facts = annual_companyfacts_payload()
         rows = annual_reported_metrics(

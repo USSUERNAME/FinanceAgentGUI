@@ -946,6 +946,380 @@
   margin: 0;
 }
 
+.company-filing-summary-list {
+  display: grid;
+  gap: 14px;
+}
+
+.company-filing-summary-list > article {
+  padding: 16px;
+  border: 1px solid #dce4ee;
+  border-radius: 14px;
+  background: #fbfcfe;
+}
+
+.company-filing-summary-list > article > header,
+.company-filing-summary-list > article > footer > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.company-filing-summary-list h3 {
+  margin: 3px 0 0;
+  color: #1f2d42;
+  font-size: 16px;
+}
+
+.company-filing-summary-list header span,
+.company-filing-summary-list footer span {
+  color: #718096;
+  font-size: 11px;
+}
+
+.company-filing-summary-list header em {
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #eef2f7;
+  color: #56667c;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.company-filing-summary-list header em.is-supports {
+  background: #e8f7ef;
+  color: #18734f;
+}
+
+.company-filing-summary-list header em.is-challenges {
+  background: #fdecec;
+  color: #a74444;
+}
+
+.company-filing-summary-list header em.is-mixed {
+  background: #fff3dc;
+  color: #96600c;
+}
+
+.company-filing-summary-copy {
+  margin: 12px 0;
+  color: #33445c !important;
+}
+
+.company-filing-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.company-filing-metrics > div {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #f1f5f9;
+}
+
+.company-filing-metrics dt,
+.company-filing-metrics small {
+  color: #748196;
+  font-size: 10px;
+}
+
+.company-filing-metrics dd {
+  margin: 0;
+  color: #23324a;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.company-filing-takeaways {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.company-filing-takeaways section {
+  padding: 10px;
+  border-left: 3px solid #7895bf;
+  background: #f7f9fc;
+}
+
+.company-filing-takeaways ul {
+  margin: 5px 0 0;
+  padding-left: 17px;
+}
+
+.company-filing-detail-sections {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.company-filing-detail-block {
+  padding: 14px;
+  border: 1px solid #dfe7f1;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.company-filing-detail-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 11px;
+}
+
+.company-filing-detail-heading > span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 7px;
+  background: #244d85;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.company-filing-detail-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.company-filing-detail-heading strong {
+  color: #1e2d43;
+  font-size: 14px;
+}
+
+.company-filing-detail-heading small,
+.company-filing-detail-empty,
+.company-filing-segment-note,
+.company-filing-industry-grid p {
+  color: #748196;
+  font-size: 11px;
+}
+
+.company-filing-table-wrap {
+  overflow-x: auto;
+}
+
+.company-filing-comparison-table {
+  width: 100%;
+  min-width: 650px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.company-filing-comparison-table th,
+.company-filing-comparison-table td {
+  padding: 8px 9px;
+  border-bottom: 1px solid #e6ebf2;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.company-filing-comparison-table thead th {
+  background: #f4f7fb;
+  color: #65748a;
+  font-weight: 750;
+}
+
+.company-filing-comparison-table th:first-child,
+.company-filing-comparison-table td:first-child {
+  text-align: left;
+}
+
+.company-filing-comparison-table tbody th {
+  color: #27384f;
+}
+
+.company-filing-comparison-table .is-positive {
+  color: #18734f;
+  font-weight: 750;
+}
+
+.company-filing-comparison-table .is-negative {
+  color: #b04444;
+  font-weight: 750;
+}
+
+.company-filing-ratio-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.company-filing-ratio-list > div {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: #f5f8fc;
+}
+
+.company-filing-ratio-list dt,
+.company-filing-ratio-list small {
+  color: #748196;
+  font-size: 10px;
+}
+
+.company-filing-ratio-list dd {
+  margin: 0;
+  color: #23324a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.company-filing-unavailable-ratios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.company-filing-unavailable-ratios span {
+  padding: 4px 7px;
+  border: 1px dashed #bac5d4;
+  border-radius: 999px;
+  color: #748196;
+  font-size: 10px;
+}
+
+.company-filing-change-reasons,
+.company-filing-industry-grid ul {
+  margin: 10px 0 0;
+  padding-left: 17px;
+}
+
+.company-filing-segment-note {
+  margin: 10px 0 0;
+}
+
+.company-filing-segment-table-wrap {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.company-filing-segment-table-wrap > strong {
+  color: #2b3b52;
+  font-size: 12px;
+}
+
+.company-filing-segment-table {
+  min-width: 780px;
+}
+
+.company-filing-segment-table td:first-child {
+  text-align: left;
+  color: #65748a;
+}
+
+.company-filing-segment-table a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #2f6fca;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.company-filing-industry-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.company-filing-industry-grid section {
+  padding: 10px;
+  border-left: 3px solid #7895bf;
+  background: #f7f9fc;
+}
+
+.company-filing-industry-grid p {
+  margin: 6px 0 0;
+}
+
+.company-filing-news-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.company-filing-news-list li {
+  position: relative;
+  padding: 10px 11px;
+  border-left: 3px solid #9aacc3;
+  background: #f7f9fc;
+}
+
+.company-filing-news-list li > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #748196;
+  font-size: 10px;
+}
+
+.company-filing-news-list em {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #e7eef8;
+  color: #315f9b;
+  font-style: normal;
+}
+
+.company-filing-news-list p {
+  margin: 6px 0 0;
+  color: #33445c;
+}
+
+.company-filing-news-list a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 5px;
+  color: #2f6fca;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.company-filing-summary-list footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.company-filing-summary-list footer p {
+  margin: 3px 0;
+}
+
+.company-filing-summary-list footer > div {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.company-filing-summary-list footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: #2f6fca;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .daily-intelligence-status,
 .daily-intelligence-count {
   border-radius: 999px;
@@ -8412,6 +8786,18 @@
   .daily-intelligence-sector-assessment-grid,
   .daily-intelligence-broker-evaluation {
     grid-template-columns: 1fr;
+  }
+
+  .company-filing-metrics,
+  .company-filing-takeaways,
+  .company-filing-ratio-list,
+  .company-filing-industry-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .company-filing-summary-list > article > header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .daily-intelligence-workspace-shortcuts-heading,

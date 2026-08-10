@@ -76,6 +76,17 @@ export default function InstitutionalPortfolioView() {
     void reloadRadar();
   }, [loadDailyContext, reloadRadar]);
 
+  React.useEffect(() => {
+    const refreshIntervalMs = Math.max(
+      15 * 60 * 1000,
+      Number(radarPayload?.connection?.refreshIntervalMs || 24 * 60 * 60 * 1000),
+    );
+    const timer = window.setInterval(() => {
+      void reloadRadar();
+    }, refreshIntervalMs);
+    return () => window.clearInterval(timer);
+  }, [radarPayload?.connection?.refreshIntervalMs, reloadRadar]);
+
   const report = dailyContext?.report;
   const brokerResearch = dailyContext?.brokerResearch;
   const brokerResearchHistory = dailyContext?.brokerResearchHistory;

@@ -3070,6 +3070,215 @@ function EarningsWatch({ earningsWatch }) {
   );
 }
 
+function formatFilingMetric(value, unit) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  if (unit === "shares") {
+    return `${new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 2 }).format(number)}주`;
+  }
+  if (unit === "USD") {
+    return `$${new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 2 }).format(number)}`;
+  }
+  return `${new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 2 }).format(number)} ${unit || ""}`.trim();
+}
+
+function formatFilingChange(value, suffix = "%") {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "비교 불가";
+  return `${number > 0 ? "+" : ""}${number.toFixed(1)}${suffix}`;
+}
+
+function FilingBulletSection({ title, items, emptyText }) {
+  return (
+    <section>
+      <strong>{title}</strong>
+      {items?.length ? <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul> : <p>{emptyText}</p>}
+    </section>
+  );
+}
+
+function CompanyFilingSummaries({ companyFilings }) {
+  const companies = companyFilings?.companies || [];
+  if (!companies.length) {
+    return (
+      <p className="daily-intelligence-muted">
+        미국 주목기업이 선정되면 최신 SEC 10-Q·10-K 수치와 사업·위험 기준선을 자동 요약합니다.
+      </p>
+    );
+  }
+  const thesisLabels = {
+    supports: "가설 지지 후보",
+    challenges: "가설 반증 후보",
+    mixed: "혼재",
+    insufficient_evidence: "판단 보류",
+  };
+  return (
+    <div className="company-filing-summary-list">
+      {companies.map((company) => (
+        <article key={company.filingKey || `${company.ticker}-${company.filing?.filedDate}`}>
+          <header>
+            <div>
+              <span>{company.filing?.form || "SEC"} · 제출 {company.filing?.filedDate || "날짜 미확인"}</span>
+              <h3>{company.ticker} · {company.companyName}</h3>
+            </div>
+            <em className={`is-${company.analysis?.thesisEffect || "insufficient_evidence"}`}>
+              {thesisLabels[company.analysis?.thesisEffect] || "판단 보류"}
+            </em>
+          </header>
+          <p className="company-filing-summary-copy">{company.analysis?.summaryKo}</p>
+          {company.metrics?.length ? (
+            <dl className="company-filing-metrics">
+              {company.metrics.slice(0, 6).map((metric) => (
+                <div key={`${metric.metricId}-${metric.periodStart}-${metric.periodEnd}`}>
+                  <dt>{metric.labelKo || metric.metricId}</dt>
+                  <dd>{formatFilingMetric(metric.value, metric.unit)}</dd>
+                  <small>{metric.periodStart ? `${metric.periodStart}~` : ""}{metric.periodEnd}</small>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          <div className="company-filing-takeaways">
+            {company.analysis?.financialTakeawaysKo?.length ? (
+              <section><strong>재무 핵심</strong><ul>{company.analysis.financialTakeawaysKo.map((item) => <li key={item}>{item}</li>)}</ul></section>
+            ) : null}
+            {company.analysis?.businessTakeawaysKo?.length ? (
+              <section><strong>사업 해석</strong><ul>{company.analysis.businessTakeawaysKo.map((item) => <li key={item}>{item}</li>)}</ul></section>
+            ) : null}
+            {company.analysis?.risksKo?.length ? (
+              <section><strong>주요 위험</strong><ul>{company.analysis.risksKo.map((item) => <li key={item}>{item}</li>)}</ul></section>
+            ) : null}
+          </div>
+          <div className="company-filing-detail-sections">
+            <section className="company-filing-detail-block">
+              <div className="company-filing-detail-heading">
+                <span>1</span>
+                <div>
+                  <strong>주요 재무지표</strong>
+                  <small>{company.financialComparison?.calculationBasisKo || "SEC 공시 기준"}</small>
+                </div>
+              </div>
+              {company.financialComparison?.rows?.length ? (
+                <div className="company-filing-table-wrap">
+                  <table className="company-filing-comparison-table">
+                    <thead><tr><th>지표</th><th>최신 기간</th><th>최신값</th><th>전년 동기</th><th>증감률</th></tr></thead>
+                    <tbody>
+                      {company.financialComparison.rows.map((row) => (
+                        <tr key={row.metricId}>
+                          <th>{row.labelKo}</th>
+                          <td>{row.periodStart ? `${row.periodStart}~` : ""}{row.periodEnd}</td>
+                          <td>{formatFilingMetric(row.value, row.unit)}</td>
+                          <td>{row.priorValue == null ? "근거 없음" : formatFilingMetric(row.priorValue, row.unit)}</td>
+                          <td className={Number(row.changePct) > 0 ? "is-positive" : Number(row.changePct) < 0 ? "is-negative" : ""}>
+                            {formatFilingChange(row.changePct)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : <p className="company-filing-detail-empty">동일 기간 비교 공시값을 수집하는 중입니다.</p>}
+              {company.financialComparison?.ratios?.length ? (
+                <dl className="company-filing-ratio-list">
+                  {company.financialComparison.ratios.map((ratio) => (
+                    <div key={ratio.metricId}>
+                      <dt>{ratio.labelKo}</dt>
+                      <dd>{Number(ratio.value).toFixed(1)}%</dd>
+                      <small>{ratio.priorValue == null ? "전년 비교 없음" : `전년 ${Number(ratio.priorValue).toFixed(1)}% · ${formatFilingChange(ratio.changePctPoint, "%p")}`}</small>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+              {company.financialComparison?.unavailableRatios?.length ? (
+                <div className="company-filing-unavailable-ratios">
+                  {company.financialComparison.unavailableRatios.map((ratio) => (
+                    <span key={ratio.metricId} title={ratio.reasonKo}>{ratio.labelKo} 산출 보류</span>
+                  ))}
+                </div>
+              ) : null}
+              {company.analysis?.financialChangeReasonsKo?.length ? (
+                <ul className="company-filing-change-reasons">
+                  {company.analysis.financialChangeReasonsKo.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              ) : null}
+              {company.financialComparison?.segmentRows?.length ? (
+                <div className="company-filing-segment-table-wrap">
+                  <strong>사업부문별 매출·영업이익</strong>
+                  <div className="company-filing-table-wrap">
+                    <table className="company-filing-comparison-table company-filing-segment-table">
+                      <thead><tr><th>구분</th><th>사업부문·제품군</th><th>지표</th><th>최신값</th><th>전년 동기</th><th>증감률</th><th>근거</th></tr></thead>
+                      <tbody>
+                        {company.financialComparison.segmentRows.map((row) => (
+                          <tr key={`${row.breakdownType}-${row.segmentId}-${row.metricId}`}>
+                            <td>{row.breakdownType === "reportable_segment" ? "보고부문" : "제품군"}</td>
+                            <th>{row.segmentLabel}</th>
+                            <td>{row.metricId === "operating_income" ? "영업이익" : "매출"}</td>
+                            <td>{formatFilingMetric(row.currentValue, row.unit)}</td>
+                            <td>{row.priorValue == null ? "근거 없음" : formatFilingMetric(row.priorValue, row.unit)}</td>
+                            <td>{formatFilingChange(row.changePct)}</td>
+                            <td>{row.sourceUrl ? <a href={row.sourceUrl} target="_blank" rel="noreferrer">SEC <ArrowUpRight size={11} /></a> : "SEC XBRL"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+              <p className="company-filing-segment-note">
+                <b>사업부문별</b> {company.financialComparison?.segmentNoteKo || "회사별 확장 공시 표 검증 후 표시합니다."}
+              </p>
+            </section>
+
+            <section className="company-filing-detail-block">
+              <div className="company-filing-detail-heading">
+                <span>2</span>
+                <div><strong>산업 동향</strong><small>공시 기준선과 검증된 근거만 반영</small></div>
+              </div>
+              <div className="company-filing-industry-grid">
+                <FilingBulletSection title="시장 영향·수급" items={company.analysis?.industryAnalysisKo?.marketDynamicsKo} emptyText="검증된 산업 수급 근거가 아직 없습니다." />
+                <FilingBulletSection title="경쟁사 대비 포지셔닝" items={company.analysis?.industryAnalysisKo?.competitivePositioningKo} emptyText="동일 기준 경쟁사 비교가 아직 없습니다." />
+                <FilingBulletSection title="향후 1~2년 성장동력" items={[...(company.analysis?.industryAnalysisKo?.growthDriversKo || []), ...(company.analysis?.industryAnalysisKo?.outlook12yKo || [])]} emptyText="회사 공시로 확인할 성장동력과 전망이 부족합니다." />
+              </div>
+            </section>
+
+            <section className="company-filing-detail-block">
+              <div className="company-filing-detail-heading">
+                <span>3</span>
+                <div><strong>최근 3개월 뉴스 요약</strong><small>전략·투자·리스크 중심 · 기준일 {company.analysisAsOfDate || company.filing?.filedDate || "미확인"}</small></div>
+              </div>
+              {company.analysis?.recentNewsKo?.length ? (
+                <ol className="company-filing-news-list">
+                  {company.analysis.recentNewsKo.map((item) => (
+                    <li key={`${item.sourceId}-${item.date}`}>
+                      <div><time>{item.date}</time><em>{item.category}</em><span>{item.publisher || item.sourceGrade || "확인 출처"}</span></div>
+                      <p>{item.summaryKo}</p>
+                      {item.sourceUrl ? <a href={item.sourceUrl} target="_blank" rel="noreferrer">출처 보기 <ArrowUpRight size={12} /></a> : null}
+                    </li>
+                  ))}
+                </ol>
+              ) : <p className="company-filing-detail-empty">최근 3개월 내 기업과 직접 연결된 검증 뉴스가 없습니다.</p>}
+            </section>
+          </div>
+          <footer>
+            <p><b>가설 영향</b> {company.analysis?.thesisEffectReasonKo || "분석 근거 보강 대기"}</p>
+            {company.analysis?.monitoringPointsKo?.length ? (
+              <p><b>다음 확인</b> {company.analysis.monitoringPointsKo.join(" · ")}</p>
+            ) : null}
+            <div>
+              <span>{company.analysisStatus === "complete" ? "AI 문서 해석 완료" : "공식 수치만 반영"}</span>
+              <span>가설 변경은 승인 후 반영</span>
+              {company.filing?.sourceUrl ? (
+                <a href={company.filing.sourceUrl} target="_blank" rel="noreferrer">
+                  SEC 원문 <ArrowUpRight size={12} />
+                </a>
+              ) : null}
+            </div>
+          </footer>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function OperationsPanel({
   jobStatus,
   jobBusy,
@@ -6473,6 +6682,7 @@ function CompanyResearchWorkspace({
   const candidatePool = decisionChain?.ideaFunnel?.candidatePool || [];
   const screenedCandidates = stockCandidates?.candidates || [];
   const earningsCompanies = report.earningsWatch?.companies || [];
+  const filingCompanies = report.companyFilings?.companies || [];
 
   return (
     <div className="daily-intelligence-shell company-research-shell">
@@ -6520,9 +6730,9 @@ function CompanyResearchWorkspace({
         />
         <MetricCard
           label="실적 추적"
-          value={`${earningsCompanies.length}개`}
-          detail="실적·가이던스·추정치 변화"
-          tone={earningsCompanies.length ? "positive" : "neutral"}
+          value={`${filingCompanies.length}개`}
+          detail="SEC 10-Q·10-K 자동 요약"
+          tone={filingCompanies.length ? "positive" : "neutral"}
           icon={FileText}
         />
       </section>
@@ -6538,6 +6748,20 @@ function CompanyResearchWorkspace({
           onTrackStock={onTrackStock}
           onAddWatchlist={onAddWatchlist}
         />
+
+        <section className="daily-intelligence-panel daily-intelligence-wide">
+          <div className="daily-intelligence-panel-title">
+            <div>
+              <span>SEC FILING INTELLIGENCE</span>
+              <h2>미국 주목기업 재무·사업보고서 요약</h2>
+            </div>
+            <span className="daily-intelligence-count">{filingCompanies.length}</span>
+          </div>
+          <p className="daily-intelligence-panel-note">
+            SEC XBRL 수치는 자동 반영하고, AI 문서 해석은 공식 공시 범위 안에서만 제공합니다. 투자 가설 변경은 승인 전까지 보류됩니다.
+          </p>
+          <CompanyFilingSummaries companyFilings={report.companyFilings} />
+        </section>
 
         <section className="daily-intelligence-panel daily-intelligence-wide">
           <div className="daily-intelligence-panel-title">

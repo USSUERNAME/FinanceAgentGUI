@@ -78,7 +78,7 @@
 
 .institutional-radar-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
 }
 
@@ -114,6 +114,7 @@
 .institutional-radar-consensus,
 .institutional-radar-linkage,
 .institutional-radar-managers,
+.institutional-radar-activity-board,
 .institutional-radar-candidate-board {
   display: grid;
   gap: 12px;
@@ -121,6 +122,84 @@
   border: 1px solid rgb(148 163 184 / 13%);
   border-radius: 17px;
   background: rgb(7 18 31 / 58%);
+}
+
+.institutional-radar-activity-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.institutional-radar-activity-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 12px;
+  padding: 13px;
+  border: 1px solid rgb(148 163 184 / 13%);
+  border-radius: 13px;
+  background: rgb(15 31 49 / 72%);
+}
+
+.institutional-radar-activity-list article.is-increased {
+  border-color: rgb(52 211 153 / 34%);
+}
+
+.institutional-radar-activity-list article.is-decreased,
+.institutional-radar-activity-list article.is-below_threshold {
+  border-color: rgb(251 113 133 / 34%);
+}
+
+.institutional-radar-activity-list header,
+.institutional-radar-activity-list article > div,
+.institutional-radar-activity-list article > p {
+  grid-column: 1;
+}
+
+.institutional-radar-activity-list header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.institutional-radar-activity-list header span {
+  color: #7dd3fc;
+  font-size: 0.69rem;
+  font-weight: 800;
+}
+
+.institutional-radar-activity-list header em {
+  color: #cbd5e1;
+  font-size: 0.68rem;
+  font-style: normal;
+}
+
+.institutional-radar-activity-list article > div {
+  display: grid;
+  gap: 2px;
+}
+
+.institutional-radar-activity-list small,
+.institutional-radar-activity-list p,
+.institutional-radar-activity-note {
+  color: #91a3b8;
+  font-size: 0.72rem;
+}
+
+.institutional-radar-activity-list a {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #7dd3fc;
+  font-size: 0.7rem;
+  text-decoration: none;
+}
+
+.institutional-radar-activity-note {
+  line-height: 1.5;
 }
 
 .institutional-radar-section-title h3 {
@@ -422,6 +501,7 @@
   .institutional-radar-metrics,
   .institutional-radar-sector-list,
   .institutional-radar-manager-grid,
+  .institutional-radar-activity-list,
   .institutional-radar-candidate-board > div:last-child {
     grid-template-columns: 1fr;
   }

@@ -885,6 +885,157 @@ function normalizeEarningsWatch(value = {}) {
   };
 }
 
+function normalizeCompanyFilings(value = {}) {
+  const companies = cleanList(value.companies, 12).map((company) => {
+    const filing = company?.latest_financial_filing || {};
+    const analysis = company?.analysis || {};
+    const financial = company?.financial_comparison || {};
+    const newsEvidence = new Map(cleanList(company?.recent_news_evidence, 6).map((item) => [
+      cleanText(item?.source_id, 160),
+      {
+        sourceId: cleanText(item?.source_id, 160),
+        title: cleanText(item?.title, 300),
+        publisher: cleanText(item?.publisher, 140),
+        sourceUrl: /^https:\/\//i.test(String(item?.source_url || "")) ? String(item.source_url) : "",
+        sourceGrade: cleanText(item?.source_grade, 20),
+        evidenceLabel: cleanText(item?.evidence_label, 80),
+      },
+    ]));
+    return {
+      filingKey: cleanText(company?.filing_key, 160),
+      analysisAsOfDate: cleanText(value?.report_date, 40),
+      ticker: cleanText(company?.ticker, 20),
+      companyName: cleanText(company?.company_name, 180),
+      selectionReason: cleanText(company?.selection_reason, 400),
+      analysisStatus: cleanText(company?.analysis_status, 60) || "facts_only",
+      filing: {
+        form: cleanText(filing.form, 20),
+        filedDate: cleanText(filing.filed_date, 40),
+        fiscalYear: Number.isFinite(Number(filing.fiscal_year)) ? Number(filing.fiscal_year) : null,
+        fiscalPeriod: cleanText(filing.fiscal_period, 20),
+        periodEnd: cleanText(filing.period_end, 40),
+        accessionNumber: cleanText(filing.accession_number, 80),
+        sourceUrl: /^https:\/\/www\.sec\.gov\//i.test(String(filing.source_url || ""))
+          ? String(filing.source_url)
+          : "",
+      },
+      metrics: cleanList(company?.reported_metrics, 8).map((metric) => ({
+        metricId: cleanText(metric?.metric_id, 80),
+        labelKo: cleanText(metric?.label_ko, 100),
+        value: Number.isFinite(Number(metric?.value)) ? Number(metric.value) : null,
+        unit: cleanText(metric?.unit, 40),
+        periodStart: cleanText(metric?.period_start, 40),
+        periodEnd: cleanText(metric?.period_end, 40),
+        form: cleanText(metric?.form, 20),
+        evidenceLabel: cleanText(metric?.evidence_label, 80),
+        priorYearComparison: {
+          status: cleanText(metric?.prior_year_comparison?.status, 80),
+          value: Number.isFinite(Number(metric?.prior_year_comparison?.value))
+            ? Number(metric.prior_year_comparison.value) : null,
+          periodStart: cleanText(metric?.prior_year_comparison?.period_start, 40),
+          periodEnd: cleanText(metric?.prior_year_comparison?.period_end, 40),
+          changePct: Number.isFinite(Number(metric?.prior_year_comparison?.change_pct))
+            ? Number(metric.prior_year_comparison.change_pct) : null,
+        },
+      })),
+      financialComparison: {
+        rows: cleanList(financial?.rows, 8).map((row) => ({
+          metricId: cleanText(row?.metric_id, 80),
+          labelKo: cleanText(row?.label_ko, 100),
+          value: Number.isFinite(Number(row?.value)) ? Number(row.value) : null,
+          unit: cleanText(row?.unit, 40),
+          periodStart: cleanText(row?.period_start, 40),
+          periodEnd: cleanText(row?.period_end, 40),
+          priorValue: Number.isFinite(Number(row?.prior_value)) ? Number(row.prior_value) : null,
+          priorPeriodStart: cleanText(row?.prior_period_start, 40),
+          priorPeriodEnd: cleanText(row?.prior_period_end, 40),
+          changePct: Number.isFinite(Number(row?.change_pct)) ? Number(row.change_pct) : null,
+          comparisonStatus: cleanText(row?.comparison_status, 80),
+        })),
+        ratios: cleanList(financial?.ratios, 8).map((row) => ({
+          metricId: cleanText(row?.metric_id, 80),
+          labelKo: cleanText(row?.label_ko, 100),
+          value: Number.isFinite(Number(row?.value)) ? Number(row.value) : null,
+          unit: cleanText(row?.unit, 40),
+          periodEnd: cleanText(row?.period_end, 40),
+          priorValue: Number.isFinite(Number(row?.prior_value)) ? Number(row.prior_value) : null,
+          changePctPoint: Number.isFinite(Number(row?.change_pct_point)) ? Number(row.change_pct_point) : null,
+        })),
+        unavailableRatios: cleanList(financial?.unavailable_ratios, 6).map((row) => ({
+          metricId: cleanText(row?.metric_id, 80),
+          labelKo: cleanText(row?.label_ko, 100),
+          reasonKo: cleanText(row?.reason_ko, 400),
+        })),
+        segmentRows: cleanList(financial?.segment_rows, 24).map((row) => ({
+          segmentId: cleanText(row?.segment_id, 180),
+          segmentLabel: cleanText(row?.segment_label, 180),
+          axis: cleanText(row?.axis, 180),
+          breakdownType: cleanText(row?.breakdown_type, 60),
+          metricId: cleanText(row?.metric_id, 80),
+          unit: cleanText(row?.unit, 40),
+          currentValue: Number.isFinite(Number(row?.current_value)) ? Number(row.current_value) : null,
+          priorValue: Number.isFinite(Number(row?.prior_value)) ? Number(row.prior_value) : null,
+          changePct: Number.isFinite(Number(row?.change_pct)) ? Number(row.change_pct) : null,
+          currentPeriodStart: cleanText(row?.current_period_start, 40),
+          currentPeriodEnd: cleanText(row?.current_period_end, 40),
+          priorPeriodStart: cleanText(row?.prior_period_start, 40),
+          priorPeriodEnd: cleanText(row?.prior_period_end, 40),
+          sourceUrl: /^https:\/\/www\.sec\.gov\//i.test(String(row?.source_url || ""))
+            ? String(row.source_url) : "",
+          evidenceLabel: cleanText(row?.evidence_label, 100),
+        })).filter((row) => row.segmentId && row.metricId && row.currentValue != null),
+        segmentStatus: cleanText(financial?.segment_status, 60),
+        segmentNoteKo: cleanText(financial?.segment_note_ko, 500),
+        calculationBasisKo: cleanText(financial?.calculation_basis_ko, 500),
+      },
+      analysis: {
+        summaryKo: cleanText(analysis.summary_ko, 1000),
+        financialTakeawaysKo: cleanList(analysis.financial_takeaways_ko, 4)
+          .map((item) => cleanText(item, 500)).filter(Boolean),
+        businessTakeawaysKo: cleanList(analysis.business_takeaways_ko, 4)
+          .map((item) => cleanText(item, 500)).filter(Boolean),
+        risksKo: cleanList(analysis.risks_ko, 4)
+          .map((item) => cleanText(item, 500)).filter(Boolean),
+        thesisEffect: cleanText(analysis.thesis_effect, 60) || "insufficient_evidence",
+        thesisEffectReasonKo: cleanText(analysis.thesis_effect_reason_ko, 700),
+        monitoringPointsKo: cleanList(analysis.monitoring_points_ko, 4)
+          .map((item) => cleanText(item, 500)).filter(Boolean),
+        financialChangeReasonsKo: cleanList(analysis.financial_change_reasons_ko, 4)
+          .map((item) => cleanText(item, 500)).filter(Boolean),
+        industryAnalysisKo: {
+          marketDynamicsKo: cleanList(analysis?.industry_analysis_ko?.market_dynamics_ko, 4)
+            .map((item) => cleanText(item, 500)).filter(Boolean),
+          competitivePositioningKo: cleanList(analysis?.industry_analysis_ko?.competitive_positioning_ko, 4)
+            .map((item) => cleanText(item, 500)).filter(Boolean),
+          growthDriversKo: cleanList(analysis?.industry_analysis_ko?.growth_drivers_ko, 4)
+            .map((item) => cleanText(item, 500)).filter(Boolean),
+          outlook12yKo: cleanList(analysis?.industry_analysis_ko?.outlook_1_2y_ko, 4)
+            .map((item) => cleanText(item, 500)).filter(Boolean),
+        },
+        recentNewsKo: cleanList(analysis?.recent_news_ko, 6).map((item) => ({
+          sourceId: cleanText(item?.source_id, 160),
+          date: cleanText(item?.date, 40),
+          category: cleanText(item?.category, 40),
+          summaryKo: cleanText(item?.summary_ko, 700),
+          ...(newsEvidence.get(cleanText(item?.source_id, 160)) || {}),
+        })).filter((item) => item.sourceId && item.summaryKo),
+      },
+      reviewGate: {
+        factsAutoPublished: company?.review_gate?.facts_auto_published === true,
+        interpretationAutoPublished: company?.review_gate?.interpretation_auto_published === true,
+        thesisChangeRequiresApproval: company?.review_gate?.thesis_change_requires_approval !== false,
+        automaticPositionAction: company?.review_gate?.automatic_position_action === true,
+      },
+    };
+  }).filter((company) => company.ticker && company.filing.sourceUrl);
+  return {
+    status: cleanText(value.status, 80) || "not_available",
+    notice: cleanText(value.notice, 500),
+    companyCount: companies.length,
+    companies,
+  };
+}
+
 function normalizeReaderReport(reader = {}) {
   const findings = cleanList(reader.market_findings, 12)
     .map(normalizeFinding)
@@ -905,6 +1056,7 @@ function normalizeReaderReport(reader = {}) {
       .filter(Boolean),
     verifiedEvents: events,
     earningsWatch: normalizeEarningsWatch(reader.earnings_watch),
+    companyFilings: normalizeCompanyFilings(reader.company_filings),
     koreaConnection: {
       status: cleanText(reader.korea_connection?.status, 40) || "unknown",
       summary: cleanText(reader.korea_connection?.summary, 1200),
@@ -1314,6 +1466,7 @@ function normalizeStockCandidates(payload = {}) {
           return20d: finiteNumber(reaction.return_20d_pct),
           volumeRatio20d: finiteNumber(reaction.volume_ratio_20d),
           spyRelative1d: finiteNumber(reaction.spy_relative_1d_pct),
+          spyRelative5d: finiteNumber(reaction.spy_relative_5d_pct),
           sectorRelative1d: finiteNumber(reaction.sector_relative_1d_pct),
         },
         evidence: evidence.map((row) => ({

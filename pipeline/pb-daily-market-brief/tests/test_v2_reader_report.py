@@ -388,6 +388,56 @@ class V2ReaderReportTests(unittest.TestCase):
         self.assertIn("인과관계로 단정하지 않음", rendered)
         self.assertIn("동일 기간 갱신 전망치 대기", rendered)
 
+    def test_company_filings_keep_sec_facts_and_review_gate(self) -> None:
+        packet = self.intelligence()
+        packet["company_filings"] = {
+            "status": "complete",
+            "companies": [{
+                "filing_key": "NVDA:0001045810-26-000100",
+                "ticker": "NVDA",
+                "company_name": "NVIDIA",
+                "analysis_status": "complete",
+                "latest_financial_filing": {
+                    "form": "10-Q",
+                    "filed_date": "2026-08-20",
+                    "fiscal_year": 2026,
+                    "fiscal_period": "Q2",
+                    "period_end": "2026-07-31",
+                    "accession_number": "0001045810-26-000100",
+                    "source_url": "https://www.sec.gov/Archives/edgar/data/1045810/filing-index.html",
+                },
+                "reported_metrics": [{
+                    "metric_id": "revenue", "label_ko": "매출",
+                    "value": 50_000_000_000, "unit": "USD",
+                    "period_start": "2026-05-01", "period_end": "2026-07-31",
+                    "filed_date": "2026-08-20", "form": "10-Q",
+                    "evidence_label": "fact_source_reported",
+                    "source_url": "https://www.sec.gov/Archives/edgar/data/1045810/filing-index.html",
+                }],
+                "analysis": {
+                    "summary_ko": "공식 분기 수치와 연차 사업 기준선을 함께 점검했습니다.",
+                    "financial_takeaways_ko": ["매출 수치 확인"],
+                    "business_takeaways_ko": [],
+                    "risks_ko": ["공급 제약 감시"],
+                    "thesis_effect": "mixed",
+                    "thesis_effect_reason_ko": "분석가 검토가 필요합니다.",
+                    "monitoring_points_ko": ["다음 10-Q 확인"],
+                },
+                "review_gate": {
+                    "facts_auto_published": True,
+                    "interpretation_auto_published": True,
+                    "thesis_change_requires_approval": True,
+                    "automatic_position_action": False,
+                },
+            }],
+        }
+        report = build_v2_reader_report(packet)
+        self.assertEqual(report["company_filings"]["company_count"], 1)
+        company = report["company_filings"]["companies"][0]
+        self.assertEqual(company["latest_financial_filing"]["form"], "10-Q")
+        self.assertTrue(company["review_gate"]["thesis_change_requires_approval"])
+        self.assertNotIn("excerpt", str(company))
+
     def test_safe_analyst_research_is_summarized_without_raw_text(self) -> None:
         report = build_v2_reader_report(
             self.intelligence(),
