@@ -508,6 +508,16 @@ jobs:
           path: .reader-public-history/reports.json
           key: private-reader-history-${{ github.run_id }}
 
+      - name: Save verified stock reader inputs
+        if: steps.brief.outcome == 'success' && vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            pipeline/pb-daily-market-brief/workspace/company_long_term_profiles
+            pipeline/pb-daily-market-brief/workspace/us_equity_candidate_screen
+          key: ${{ runner.os }}-stock-reader-inputs-v1-${{ github.run_id }}
+
       - name: Notify Telegram on success
         if: (env.BRIEF_RUN_MODE == 'publish' || env.BRIEF_RUN_MODE == 'publish_cached') && steps.preflight.outcome == 'success' && steps.brief.outcome == 'success'
         run: python send_telegram_notification.py --status success --notion-url "${{ steps.brief.outputs.notion_url }}"
@@ -630,6 +640,16 @@ jobs:
         with:
           path: .reader-public-history/reports.json
           key: private-reader-history-${{ github.run_id }}
+
+      - name: Save verified stock reader inputs
+        if: vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            pipeline/pb-daily-market-brief/workspace/company_long_term_profiles
+            pipeline/pb-daily-market-brief/workspace/us_equity_candidate_screen
+          key: ${{ runner.os }}-stock-reader-inputs-v1-${{ github.run_id }}
 
       - name: Write deployment summary
         env:

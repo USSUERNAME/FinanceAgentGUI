@@ -59,6 +59,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-telegram-refresh-v1-
 
+      - name: Restore latest verified stock reader inputs
+        if: vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            pipeline/pb-daily-market-brief/workspace/company_long_term_profiles
+            pipeline/pb-daily-market-brief/workspace/us_equity_candidate_screen
+          key: ${{ runner.os }}-stock-reader-inputs-v1-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-stock-reader-inputs-v1-
+
       - name: Collect and cluster Telegram intelligence
         id: refresh
         run: python refresh_telegram_intelligence.py
@@ -134,9 +146,37 @@ jobs:
           node scripts/build-public-report-reader.mjs \
             --input pipeline/pb-daily-market-brief/workspace/v2_reader_reports \
             --intelligence pipeline/pb-daily-market-brief/workspace/intelligence \
+            --companies pipeline/pb-daily-market-brief/workspace/company_long_term_profiles \
+            --candidate-screens pipeline/pb-daily-market-brief/workspace/us_equity_candidate_screen \
             --telegram pipeline/pb-daily-market-brief/workspace/telegram_refresh \
             --output .generated/cloudflare-report-reader \
             --previous .reader-public-history/reports.json
+
+      - name: Validate stock gate and performance observation
+        if: steps.validate.outcome == 'success' && vars.CLOUDFLARE_REPORTS_PROTECTED == 'true'
+        working-directory: .
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = '.generated/cloudflare-report-reader/reports.json';
+          const payload = JSON.parse(fs.readFileSync(path, 'utf8'));
+          if (payload.schemaVersion !== 'public_pb_reader_bundle.v1') {
+            throw new Error('Private reader bundle schema is invalid');
+          }
+          if (!Array.isArray(payload.companies) || !Array.isArray(payload.candidatePerformance)) {
+            throw new Error('Stock gate or performance observation is missing');
+          }
+          const latest = payload.companies[0] || {};
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+            '',
+            '### Stock gate observation',
+            `- Latest gate date: ${latest.reportDate || 'pending first daily run'}`,
+            `- Verified profiles: ${Number(latest.profileCount || 0)}`,
+            `- C-grade watch candidates: ${Number(latest.pendingCount || 0)}`,
+            `- Performance series: ${payload.candidatePerformance.length}`,
+            '',
+          ].join('\n'));
+          NODE
 
       - name: Deploy Telegram monitor to Cloudflare Pages
         id: deploy_private_reader
